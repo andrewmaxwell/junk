@@ -1,0 +1,28 @@
+{
+  "name": "junk",
+  "version": "1.0.0",
+  "description": "just some junk",
+  "main": "index.js",
+  "dependencies": {
+    "babel-eslint": "^10.0.1",
+    "eslint": "^5.12.1",
+    "eslint-config-prettier": "^3.6.0",
+    "eslint-plugin-prettier": "^3.0.1",
+    "live-server": "^1.2.1",
+    "prettier": "^1.16.0"
+  },
+  "scripts": {
+    "dev": "live-server",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andrewmaxwell/junk.git"
+  },
+  "author": "Andrew Maxwell",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/andrewmaxwell/junk/issues"
+  },
+  "homepage": "https://github.com/andrewmaxwell/junk#readme"
+}

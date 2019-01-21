@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<body>
+  <textarea style="width: 400px; height: 200px">{let is-small? <[number] (if "yes" "no" (lt number 100))>}
+
+(println (is-small? 50))
+
+{let add-five (+ 5)}
+(add-five 6)
+
+(let a "aaa"
+        (let a "AAA" (println a))
+        (println a))
+
+{let say-hello (fn [name] (println "Hello, " name))}
+(say-hello "Kim")
+
+(println (do (+ 1 2) (+ 3 4)))
+</textarea>
+  <pre></pre>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/ramda/0.26.1/ramda.js"></script>
+  <script type="module" src="script.js"></script>
+</body>
