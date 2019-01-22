@@ -1,15 +1,9 @@
-const React = window.React;
-const {render} = window.ReactDOM;
 const {
-  assocPath,
-  pipe,
-  uniq,
-  flatten,
-  filter,
-  path,
-  identity,
-  pluck
-} = window.R;
+  React,
+  ReactDOM,
+  R: {assocPath, pipe, uniq, flatten, filter, path, identity, pluck},
+  LZString
+} = window;
 
 const debounce = (fn, time = 1000) => {
   let timeout;
@@ -130,7 +124,7 @@ class App extends React.Component {
   load = () => {
     if (location.hash.length < 2) return this.componentDidUpdate();
     try {
-      const decompressed = window.LZString.decompressFromBase64(
+      const decompressed = LZString.decompressFromBase64(
         location.hash.slice(1)
       );
       this.setState(JSON.parse(decompressed));
@@ -142,7 +136,7 @@ class App extends React.Component {
   save = debounce(() => {
     const {gridIndex, grids} = this.state;
     const data = JSON.stringify({gridIndex, grids});
-    const compressed = (location.hash = window.LZString.compressToBase64(data));
+    const compressed = (location.hash = LZString.compressToBase64(data));
     console.log(compressed.length);
     // console.log(data);
 
@@ -158,7 +152,7 @@ class App extends React.Component {
 
     // console.log(data);
     // console.log(data.length);
-    // console.log(window.LZString.compressToBase64(data));
+    // console.log(LZString.compressToBase64(data));
   });
   render() {
     const {
@@ -345,4 +339,4 @@ class App extends React.Component {
   }
 }
 
-render(<App />, document.getElementById('root'));
+ReactDOM.render(<App />, document.getElementById('root'));
