@@ -2,14 +2,16 @@ module.exports = {
   parser: 'babel-eslint',
   parserOptions: {
     ecmaVersion: 2017,
-    sourceType: 'module'
+    sourceType: 'module',
+    ecmaFeatures: {jsx: true}
   },
   env: {browser: true, es6: true},
   extends: [
     'eslint:recommended',
-    'prettier'
+    'prettier',
+    'plugin:react/recommended'
   ],
-  plugins: ['prettier'],
+  plugins: ['prettier', 'react'],
   rules: {
     'no-console': 'off',
     'prettier/prettier': ['error', {singleQuote: true, bracketSpacing: false}],
