@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Physics Builder</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			* {font-family:sans-serif}
+			.pane {max-width: 250px; font-size: 12px}
+			.pane button {margin: 5px 0; padding: 0 3px; font-size: 12px;}
+			label {display: inline-block; width: 120px;}
+			input {width: 30px}
+		</style>
+	</head>
+	<body style="margin:0;overflow:hidden">
+		<canvas id="sim"></canvas>
+		<div style="position: absolute; top: 10px; left: 10px; font-size: 14px; -webkit-user-select: none;">
+
+			<button id="simButton" style="font-size: 16px; margin-bottom: 5px; padding: 3px 5px; font-weight: bold">Simulate</button>
+
+			<div class="pane" name="Options / Stats">
+				<div>
+					<label>Level</label>
+					<select id="levelSelector"></select>
+				</div>
+				<div id='instructions' style="margin: 5px 0; font-weight: bold"></div>
+				<div id="customHUD"></div>
+				<div title="Width x Height">
+					<label>Size</label>
+					<span id="size"></span> m<sup>2</sup>
+				</div>
+				<div title="Number of pieces.">
+					<label>Pieces</label>
+					<span id="pieces"></span>
+				</div>
+				<div title="One millionth of the sum of the squares of the areas of the pieces.">
+					<label>Cost</label>
+					$<span id="cost"></span>
+				</div>
+				<div title="Simulation taking too long and you want to start x seconds in? Put how many seconds to fast-forward into the simulation.">
+					<label>Fast-Forward</label>
+					<input type="number" min="0" id="fastForward"> s
+				</div>
+			</div>
+
+			<div class="pane" name="Instructions">
+				<strong>Move View:</strong> WASD / Arrows, scroll to zoom.<br>
+				<strong>Simulate:</strong> Space or button at top.<br>
+				<strong>Create Beam:</strong> Ctrl/Cmd + Drag. Drag ends to move.<br>
+				<strong>Create Wheel:</strong> Ctrl/Cmd + Shift + Drag. Drag center to move or edge to resize.<br>
+				<strong>Select:</strong> Click or drag over ends of beams or centers of wheels. Hold Shift to add to the selection, or Alt to remove.<br>
+				<strong>Toggle Fixed:</strong> Press F to toggle whether or not selected pieces are fixed.<br>
+				<strong>Delete:</strong> Backspace<br>
+				<strong>Undo / Redo:</strong> Browser's Back / Forward buttons.<br>
+				<strong>Save:</strong> Save the URL
+			</div>
+
+		</div>
+		<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+		<script src="//cdn.jsdelivr.net/npm/box2dweb@2.1.0-b/box2d.js"></script>
+		<script type="module" src="main.js"></script>
+	</body>
+</html>

@@ -1,0 +1,88 @@
+<body style="margin: 0"><canvas id="C"></canvas>
+<script>
+
+var props = [
+{
+	name: "alpha",
+	min: 0,
+	max: 360
+}, 
+{
+	name: "beta",
+	min: -180,
+	max: 180
+}, 
+{
+	name: "gamma",
+	min: -90,
+	max: 90
+}
+]
+
+var rad = 32
+var W, H, T, dist
+
+function reset(){
+	W = C.width = innerWidth
+	H = C.height = innerHeight
+	T = C.getContext('2d')
+	
+	T.textBaseline = "middle"
+	T.font = "32px sans-serif"
+	
+	dist = Math.min(W, H) / 2 - 2 * rad
+}
+
+addEventListener("deviceorientation", function(e){
+
+	var alphaAngle = Math.PI * (e.alpha - 90) / 180
+	var alphaX = W / 2 + dist * Math.cos(alphaAngle)
+	var alphaY = H / 2 + dist * Math.sin(alphaAngle)
+	
+	var betaX = W / 2
+	var betaY = H * (e.beta + 180) / 360
+	
+	var gammaX = W * (e.gamma + 90) / 180
+	var gammaY = H / 2
+	
+	T.clearRect(0, 0, W, H)
+	
+	T.beginPath()
+	T.moveTo(0, betaY)
+	T.lineTo(W, betaY)
+	T.moveTo(gammaX, 0)
+	T.lineTo(gammaX, H)
+	T.moveTo(W / 2 + dist, H / 2)
+	T.arc(W / 2, H / 2, dist, 0, 2 * Math.PI)
+	T.stroke()
+	
+	T.textAlign = "left"
+	
+	T.fillStyle = "green"
+	T.beginPath()
+	T.arc(gammaX, gammaY, rad, 0, 2 * Math.PI)
+	T.fill()
+	
+	T.fillStyle = "blue"
+	T.beginPath()
+	T.arc(betaX, betaY, rad, 0, 2 * Math.PI)
+	T.fill()
+	
+	T.fillStyle = "red"
+	T.beginPath()
+	T.arc(alphaX, alphaY, rad, 0, 2 * Math.PI)
+	T.fill()
+	
+	T.textAlign = "center"
+	T.fillStyle = "white"
+	T.fillText(Math.round(e.gamma), gammaX, gammaY)
+	T.fillText(Math.round(e.beta), betaX, betaY)
+	T.fillText(Math.round(e.alpha), alphaX, alphaY)
+	
+})
+
+addEventListener("orientationchange", reset)
+
+reset()
+
+</script>

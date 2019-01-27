@@ -1,0 +1,42 @@
+<!doctype html>
+<meta http-equiv="X-UA-Compatible" content="chrome=1" >
+<title>Pretty Crap</title>
+<style type="text/css">
+.ui-slider{float:left;width:300px;height:4px;position:relative;top:5px;border-radius:3px;background:#CCC;border:1px inset}
+.ui-slider a{position:absolute;left:-4px;top:-5px;z-index:2;width:8px;height:14px;background:#EEE;border-radius:2px;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.ui-slider-range{background:#6AF;top:0;height:100%;position:absolute;z-index:1}
+</style>
+<script src="jquery.js"></script><script src="jquery-ui.js"></script>
+<body style="font-family:monospace;color:white;position:relative;background:black;margin:0;overflow:hidden"><canvas>Internet Explorer? That's cute. <a href="http://www.google.com/chrome">Upgrade to a real browser.</a></canvas>
+	<div style="position:absolute;top:0;right:30px;background:rgba(30,30,30,.5);padding:10px;border-bottom-left-radius:10px;border-bottom-right-radius:10px">
+		<div style="display:none"id="s"></div>
+		<div style="cursor:pointer;clear:both"onclick="$(this).html($(this).html()[0]=='S'?'Hide Options':'Show Options').prev().fadeToggle()">Show Options</div>
+	</div>
+<script>
+
+//this is what makes it go.
+with(document.body.childNodes[a=f=r=0])W=width=innerWidth,H=height=innerHeight,T=getContext('2d');
+var	M=Math,R=M.random,p=t=20,s=40,l=1e3,d=1e4,n=.001,m=.12,u=10,v=200,b=.3,g=.03;
+setInterval(function(){
+	for(i=p;--i>0;r-=1/l){
+		if(f%d==0)T.fillStyle="rgba(0,0,0,.005)",T.fillRect(0,0,W,H)
+		if(r<=0)r=1,x=W/2,y=H/2,c=R(),w=R(),z=R(),o=R()
+		T.strokeStyle="hsla("+360*z+",100%,50%,"+b+")"
+		T.beginPath(T.fillStyle="hsla("+360*o+",100%,"+t+"%,"+g+")")
+		T.stroke(T.fill(T.arc(x+=M.cos(a+=M.sin(f++/(u+w*v))*(n+c*m)),y+=M.sin(a),r*s,0,M.PI*2)))
+	}
+},20)
+
+//make some sliders
+for(e in k={
+speed:{slide:function(b,a){p=a.value},value:p,min:0,max:400},
+size:{slide:function(b,a){s=a.value},value:s,min:1,max:500},
+length:{slide:function(b,a){l=a.value},value:l,min:100,max:5E3},
+curl:{slide:function(b,a){n=a.values[0]/1E3;m=(a.values[1]-a.values[1])/1E3},range:!0,values:[n*1E3,m*1E3],min:0,max:200},
+width:{slide:function(b,a){u=a.values[0];v=a.values[1]-a.values[0]},range:!0,values:[u,v],min:0,max:2E3},
+fade:{slide:function(b,a){d=1E4-a.value-1},value:1e4-d,min:0,max:1e4},
+outside:{slide:function(c,a){b=a.value/200},value:b*200},
+inside:{slide:function(b,a){g=a.value/1e3},value:g*1e3,min:0,max:200},
+bright:{slide:function(b,a){t=a.value},value:t}
+})$("<div>").appendTo("#s").css({clear:"both"}).append($("<label>").html(e).css({float:"left",width:60})).append($("<div>").slider(k[e]));
+</script>

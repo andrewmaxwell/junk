@@ -1,0 +1,35 @@
+<body style="margin:0"><canvas id='banner'>Um. You need a real browser for this.</canvas><script>
+
+(function(){
+var R=40,C=315,X=document.getElementById("banner"),W=X.width=2*C,H=X.height=2*R,T=X.getContext('2d'),m=[],Q,D="Andrew Maxwell",i,j,x,
+iterate=function(){
+	var u,o=[[-1,0],[0,-1],[1,0],[0,1]],i,r,c,g;
+	for (g=10;g&&Q.length;){
+		u=Q.pop()
+		if(!u.v){
+			u.v=1
+			if(u.p)T.stroke(T.moveTo(2*u.c+.5,2*u.r+.5),T.lineTo(2*u.p.c+.5,2*u.p.r+.5))
+			for(i=4;i--;)c=o[r=4*Math.random()>>0],o[r]=o[i],o[i]=c
+			for(i=4;i--;){
+				r=u.r+o[i][0]
+				c=u.c+o[i][1]
+				if (r>=0 && r<R && c>=0 && c<C && !m[r][c].v){
+					m[r][c].p=u
+					Q.push(m[r][c])
+				}
+			}
+			g--
+		}
+	}
+	if(Q.length)setTimeout(iterate,0)
+}
+T.font="93px Georgia"
+for(x=2,i=0;i<D.length;i++)T.fillText(D[i],x,H-1-[0,0,1,0,1,0,0,0,1,0,0,1,0,0][i]),x+=T.measureText(D[i]).width-[2,7,3,3,4,6,10,6,3,2,4,7,4][i]
+D=T.getImageData(0,0,W,H)
+T.clearRect(0,0,W,H)
+for(i=R;i--;)for(m[i]=[],j=C;j--;)m[i][j]={r:i,c:j,v:!D.data[8*(i*W+j)+3]&&i<R-1}
+Q=[m[R-1][0]]
+iterate()
+}())
+</script>
+

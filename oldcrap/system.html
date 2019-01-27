@@ -1,0 +1,95 @@
+<body style="margin:0;background:black"><canvas></canvas><script>
+var C=document.body.childNodes[0],
+	W=C.width=innerWidth,
+	H=C.height=innerHeight,
+	T=C.getContext('2d'),
+	_3d=(function(){
+	var camLoc, viewLoc, rotMatrix, 
+	matrixMult=function(a,b){
+		for (var res=[], c, k, r=0; r<a.length; r++){
+			for (res[r]=[], c=0; c<b[0].length; c++){
+				for (res[r][c]=k=0; k<a[0].length; k++) res[r][c]+=a[r][k]*b[k][c]
+			}
+		}
+		return res;
+	}
+	return {
+		set: function(cameraLocation, camRot, viewLocation){
+			var matx=[[1, 0, 0], [0, Math.cos(camRot[0]), -Math.sin(camRot[0])], [0, Math.sin(camRot[0]), Math.cos(camRot[0])]],
+				maty=[[Math.cos(camRot[1]), 0, Math.sin(camRot[1])], [0, 1, 0], [-Math.sin(camRot[1]), 0, Math.cos(camRot[1])]],
+				matz=[[Math.cos(camRot[2]), -Math.sin(camRot[2]), 0], [Math.sin(camRot[2]), Math.cos(camRot[2]), 0], [0, 0, 1]];
+			rotMatrix=matrixMult(matrixMult(matx, maty), matz);
+			camLoc=cameraLocation
+			viewLoc=viewLocation
+		},
+		map: function(pt){
+			var d = matrixMult(rotMatrix, [[pt[0] - camLoc[0]], [pt[1] - camLoc[1]], [pt[2] - camLoc[2]]]), m=viewLoc[2]/d[2][0];
+			return {x: m*(d[0][0]-viewLoc[0]), y: m*(d[1][0]-viewLoc[1]), z: d[2][0]};
+		}
+	}
+}())
+
+function R(n,x){return n+Math.random()*(x-n)}
+function sq(x){return x*x}
+
+T.translate(W/2, H/2)
+T.globalCompositeOperation="lighter"
+T.fillStyle="#FFF"
+var cameraDist=250, zoom=300, num=600, gravity=.05, A=[]
+for (var i=0; i<num; i++){
+	var a1=Math.random()*2*Math.PI, a2=Math.acos(2*i/num-1)
+		d=200,
+		x=d*Math.cos(a1)*Math.sin(a2),
+		y=d*Math.sin(a1)*Math.sin(a2),
+		z=d*Math.cos(a2)
+	A[i]={pos: [x,y,z], vel: [0,0,0], hue: 360*i/num}
+}
+_3d.set(
+	[0, 0, cameraDist], //camera location
+	[0, Math.PI, 0], //camera rotation
+	[0, 0, zoom] //view location
+)
+
+setInterval(function(){
+	T.clearRect(-W/2, -H/2, W, H)
+	for (var i=0; i<num; i++){
+		var a=A[i]
+		for (var j=i+1; j<num; j++){
+			var b=A[j], d=gravity/Math.max(.01, sq(a.pos[0]-b.pos[0])+sq(a.pos[1]-b.pos[1])+sq(a.pos[2]-b.pos[2])),
+				xx=(b.pos[0]-a.pos[0])*d,
+				yy=(b.pos[1]-a.pos[1])*d,
+				zz=(b.pos[2]-a.pos[2])*d
+			a.vel[0]+=xx
+			a.vel[1]+=yy
+			a.vel[2]+=zz
+			b.vel[0]-=xx
+			b.vel[1]-=yy
+			b.vel[2]-=zz
+		}
+	}
+	for (var i=0; i<num; i++){
+		var a=A[i]
+		a.pos[0]+=a.vel[0]
+		a.pos[1]+=a.vel[1]
+		a.pos[2]+=a.vel[2]
+		var m=_3d.map(A[i].pos)
+		if (m.z>0){
+			T.fillStyle="hsl("+A[i].hue+",50%,50%)";
+			T.beginPath()
+			T.arc(m.x, m.y, zoom/m.z, 0, Math.PI*2)
+			T.fill()
+		}
+	}
+})
+onmousemove=function(e){
+	var x=e.x/W*2*Math.PI
+	cameraDist=e.y/H*2*zoom
+	_3d.set(
+		[cameraDist*Math.sin(x), 0, cameraDist*Math.cos(x)], //camera location
+		[0, Math.PI-x, 0], //camera rotation
+		[0, 0, zoom] //view location
+	)
+}
+
+
+</script>

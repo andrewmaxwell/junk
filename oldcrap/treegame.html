@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Tree Grower</title>
+	<style>
+	* {font-family: Calibri, sans-serif;}
+	.ach {margin-bottom: 3px; background: #EEE; padding: 5px; color: #CCC;}
+	.points {float: right; font-size: 20px}
+	.ach p {font-size: 11px; margin: 0;}
+	.ach h3 {margin: 0;}
+	.ach.won {color: black; background: #CFC;}
+	input[type=range] {position: relative; top: 4px; left: 10px;}
+	p span {position: relative; left: 10px; font-size: 0.8em;}
+	</style>
+</head>
+<body>
+	<div style="float:left;position:relative">
+		<canvas id="C"></canvas>
+		<canvas id="D" style="position:absolute;top:0;left:0"></canvas>
+	</div>
+	<div style="float:left; width: 200px; margin-left: 5px" id="achievements"></div>
+<div style="clear:both;width:600px">
+	<h1>Plant Grower: <span id="score"></span></h1>
+	<p>Click next to any living cell, starting with the seed in the middle. Be careful, every part of the plant needs water and energy to survive and will die if it doesn't have enough. Grow too quickly and you'll run short on resources before you know it.</p>
+	<div id="controls"></div>
+</div>
+<!--<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>-->
+<script>
+
+Array.prototype.shuffle = function(){
+	for (var i = this.length - 1; i > 0; i--){
+		var j = Math.floor(Math.random() * (i + 1))
+		var temp = this[i]
+		this[i] = this[j]
+		this[j] = temp
+	}
+	return this
+}
+
+function gradient(c1, c2){
+	return function(v){
+		return "rgb(" +
+			Math.floor(c1[0] + (c2[0] - c1[0]) * v) + "," +
+			Math.floor(c1[1] + (c2[1] - c1[1]) * v) + "," +
+			Math.floor(c1[2] + (c2[2] - c1[2]) * v) + ")"
+	}
+}
+
+var cellSize = 12
+var rows = 50
+var cols = 50
+var dirtLevel = 35
+
+var exchangeSpeed = 0.05
+
+var healthyLevel = 0.5
+var dryLimit = 0.05
+var deathLimit = 20
+var resourceCost = 0.8
+var waterMult = 0.02
+var energyMult = 0.02
+
+var gravity = 10
+var raindropMult = 10
+
+// var weatherChangeAmt = 0.001
+// var weatherChangeLimit = 0.005
+// var weatherWeighting = 0.15
+
+var rateOfHydration = 0.01
+var minLight = 0.1
+
+var dayMult = 0.01
+var framesPerTime = 16
+
+var plantColor = gradient([209,194,111],[0,128,0])
+var soilColor = gradient([189,170,134],[117,78,0])
+var skyColor = gradient([128,128,128],[217,255,255])
+
+var T = C.getContext('2d')
+var U = D.getContext('2d')
+var nc = [[-1,0],[1,0],[0,-1],[0,1]]
+var debug = false
+var paused = false
+
+var W, H, map, plant, score, drops, weather, weatherChange, hydration, time, frame
+
+// var achievements = {
+// 	"Sapling": {
+// 		description: "Grow at least 5 cells above ground.",
+// 		points: 15,
+// 		condition: function(){
+// 			return plant.above >= 5
+// 		}
+// 	},
+// 	"Small Tree": {
+// 		description: "Grow at least 8 cells wide and 15 cells above ground",
+// 		points: 50,
+// 		condition: function(){
+// 			return plant.width >= 5 && plant.above >= 10
+// 		}
+// 	},
+// 	"Medium Tree": {
+// 		description: "Grow at least 12 cells wide and 20 cells above ground",
+// 		points: 100,
+// 		condition: function(){
+// 			return plant.width >= 12 && plant.above >= 20
+// 		}
+// 	}
+// }
+
+// for (var ach in achievements){
+// 	var a = achievements[ach]
+// 	a.el = $("<div class='ach'><div class='points'>+" + a.points + "</div><h3>" + ach + "</h3><p>" + a.description + "</p></div>").appendTo("#achievements")
+// }
+
+function reset(){
+	W = C.width = D.width = cellSize * cols
+	H = C.height = D.height = cellSize * rows
+	score = 0
+	map = []
+	drops = []
+	weatherChange = 0
+	weather = 0.7
+	hydration = 0.8
+	time = 0
+	frame = 0
+	for (var i = 0; i < rows; i++) map[i] = []
+
+	map[dirtLevel][cols / 2] = {
+		energy: 1, 
+		water: 1,
+		dryTime: 0,
+		r: dirtLevel, 
+		c: cols / 2
+	}
+
+	// for (var ach in achievements){
+	// 	var a = achievements[ach]
+	// 	a.won = false
+	// 	a.el.removeClass("won")
+	// }
+
+	updateGrid()
+}
+
+function updateGrid(){
+	plant = []
+	for (var r = 0; r < rows; r++){
+		for (var c = 0; c < cols; c++){
+			var o = map[r][c]
+			if (o){
+				o.neighbors = []
+				o.touchingDirt = 0
+				o.touchingAir = 0
+				for (var i = 0; i < 4; i++){
+					var rr = r + nc[i][0]
+					var cc = c + nc[i][1]
+					if (map[rr] && map[rr][cc]){ // touching plant
+						o.neighbors.push(map[rr][cc])
+					} else if (rr < dirtLevel) o.touchingAir++ // touching air
+					else o.touchingDirt++ // touching dirt
+				}
+				plant.push(o)
+			}
+		}
+	}
+}
+
+function updateVals(){
+
+	// var minC = Infinity
+	// var maxC = -Infinity
+	var minR = Infinity
+	// var healthy = 0
+	var dying = []
+
+	// weatherChange = Math.max(-weatherChangeLimit, Math.min(weatherChangeLimit, weatherChange + (Math.random() - 0.5 + (0.5 - weather) * weatherWeighting) * weatherChangeAmt))
+	// weather = Math.max(0, Math.min(1, weather + weatherChange))
+	weather = Math.max(0, Math.min(1, 0.5 + (time + 100) / 5000 * Math.cos(time / (50 + time / 80))))
+
+	hydration = Math.max(0, Math.min(1, hydration + (0.5 - weather) * rateOfHydration))
+
+	plant.shuffle()
+
+	for (var i = 0; i < plant.length; i++){
+		var o = plant[i]
+
+		if (o.r < dirtLevel && o.water > healthyLevel){
+		// 	minC = Math.min(minC, o.c)
+		// 	maxC = Math.max(maxC, o.c)
+			minR = Math.min(minR, o.r)
+		}
+
+
+		var soilDepth = (o.r - dirtLevel) / (rows - dirtLevel)
+		var usableWater = Math.min((o.touchingDirt - 1) * (hydration * (1 - soilDepth) + soilDepth) * waterMult, 1 - o.water, o.energy / resourceCost)
+		var usableEnergy = Math.min((o.touchingAir - 1) * (minLight + (1 - minLight) * weather) * energyMult, 1 - o.energy, o.water / resourceCost)
+
+		if (usableEnergy > 0){
+			o.energy += usableEnergy
+			o.water -= usableEnergy * resourceCost
+		}
+		
+		if (usableWater > 0){
+			o.water += usableWater
+			o.energy -= usableWater * resourceCost
+		}
+
+		o.neighbors.shuffle()
+		for (var j = 0; j < o.neighbors.length; j++){
+			var n = o.neighbors[j]
+
+			var energyAmount = (o.energy - n.energy) * exchangeSpeed
+			o.energy -= energyAmount
+			n.energy += energyAmount
+
+			var waterAmount = (o.water - n.water) * exchangeSpeed
+			o.water -= waterAmount
+			n.water += waterAmount
+		}
+
+		o.dryTime = o.water < dryLimit ? o.dryTime + 1 : 0
+		if (o.dryTime > deathLimit) dying.push(o)
+		// if (o.water > healthyLevel) healthy++
+	}
+
+	// plant.width = maxC - minC + 1
+	// plant.above = dirtLevel - minR
+
+	if (dying.length){
+		for (var i = 0; i < dying.length; i++){
+			map[dying[i].r][dying[i].c] = null
+		}
+		updateGrid()
+	}
+
+	// score = Math.max(score, healthy)
+	document.getElementById("score").innerHTML = "Day " + Math.floor(time * dayMult + 1) //+ ", " + score + " points"
+
+	draw()
+
+	if (plant.length){
+		// for (var ach in achievements){
+		// 	var a = achievements[ach]
+		// 	if (!a.won && a.condition()){
+		// 		score += a.points
+		// 		a.el.addClass("won")
+		// 		a.won = true
+		// 	}
+		// }
+	} else {
+		alert("You dead. Press OK to try again.")
+		reset()
+	}
+
+	time++
+
+}
+
+function draw(){
+	T.fillStyle = skyColor(weather)
+	T.fillRect(0, 0, W, dirtLevel * cellSize)
+	
+	// T.fillStyle = soilColor(hydration)
+	var dirtGradient = T.createLinearGradient(0, dirtLevel * cellSize, 0, H)
+	dirtGradient.addColorStop(0, soilColor(hydration))
+	dirtGradient.addColorStop(1, soilColor(1))
+	T.fillStyle = dirtGradient
+	T.fillRect(0, dirtLevel * cellSize, W, H - dirtLevel * cellSize)
+
+	plant.forEach(function(o){
+		T.fillStyle = plantColor(o.water)
+		T.fillRect(cellSize * o.c, cellSize * o.r, cellSize, cellSize)
+	})
+
+	T.fillStyle = "rgba(255,255,0,0.5)"
+	plant.forEach(function(o){
+		if (o.water >= healthyLevel){
+			T.fillRect(cellSize * (o.c + 0.5) - 1, cellSize * (o.r + 0.5) - 1, 2, 2)
+		}
+	})
+
+	// T.fillStyle = "red"
+	// plant.forEach(function(o){
+	// 	if (o.dryTime % 2){
+	// 		T.fillRect(cellSize * (o.c + 0.5) - 1, cellSize * (o.r + 0.5) - 1, 2, 2)
+	// 	}
+	// })
+
+	if (debug){
+
+		T.strokeStyle = "rgba(255,255,0,0.5)"
+		T.beginPath()
+		plant.forEach(function(o){
+			var x = cellSize * o.c
+			var y = cellSize * o.r
+			T.moveTo(x, y + 6.5)
+			T.lineTo(x + cellSize * o.energy, y + 6.5)
+		})
+		T.stroke()
+
+		// T.strokeStyle = "blue"
+		// T.beginPath()
+		// for (var i = 0; i < plant.length; i++){
+		// 	var x = cellSize * plant[i].c
+		// 	var y = cellSize * plant[i].r
+		// 	T.moveTo(x, y + 8)
+		// 	T.lineTo(x + cellSize * plant[i].water, y + 8)
+		// }
+		// T.stroke()
+
+	
+		var o = map[Math.floor(mouseY / cellSize)][Math.floor(mouseX / cellSize)]
+
+		T.fillStyle = "white";
+		var info = [
+			"weather: " + Math.round(weather * 100),
+			o ? "w:" + Math.round(o.water * 100) + ", e:" + Math.round(o.energy * 100): "" 
+		]
+		info.forEach(function(d, i){
+			T.fillText(d, 2, 10 * (i + 1))
+		})
+
+		for (var r = dirtLevel; r < rows; r++){
+			var soilDepth = (r - dirtLevel) / (rows - dirtLevel)
+			T.fillText(Math.round(100 * (hydration * (1 - soilDepth) + soilDepth)), 2, cellSize * r + 10)
+		}
+
+		
+	}
+}
+
+var mouseX = 0, mouseY = 0
+function loop(){
+	if (!paused) requestAnimationFrame(loop)
+	else {
+		U.fillStyle = "white"
+		U.textAlign = "center"
+		U.textBaseline = "middle"
+		U.font = "48px sans-serif"
+		U.fillText("paused", W / 2, H / 2)
+		return
+	}
+
+	U.clearRect(0,0,W,H)
+	U.lineWidth = 0.5
+
+	var c = Math.floor(mouseX / cellSize)
+	var r = Math.floor(mouseY / cellSize)
+	if (!map[r][c] && hasNeighbors(r, c)){
+		U.strokeStyle = "black"
+		U.strokeRect(c * cellSize + 0.5, r * cellSize + 0.5, cellSize, cellSize)
+		U.strokeStyle = "white"
+		U.strokeRect(c * cellSize - 0.5, r * cellSize - 0.5, cellSize, cellSize)
+	}
+
+	if (drops.length){
+		U.strokeStyle = "blue"
+		U.beginPath()
+		for (var i = 0; i < drops.length; i++){
+			var d = drops[i]
+			d.y += gravity
+
+			if (d.y > dirtLevel * cellSize){
+				drops.splice(i--, 1)
+			} else {
+				U.moveTo(d.x, d.y)
+				U.lineTo(d.x, d.y - 5)
+			}
+		}
+		U.stroke()
+	}
+
+	for (var i = 0; i < raindropMult * (0.5 - weather); i++){
+		drops.push({x: W * Math.random(), y: 0})
+	}
+
+	if (frame % framesPerTime == 0) updateVals()
+
+	frame++
+}
+
+function hasNeighbors(r, c){
+	for (var i = 0; i < 4; i++){
+		var rr = r + nc[i][0]
+		var cc = c + nc[i][1]
+		if (map[rr] && map[rr][cc] && map[rr][cc].water >= healthyLevel) return true
+	}
+	return false
+}
+
+D.onclick = D.onmousemove = function(e){
+	mouseX = e.offsetX
+	mouseY = e.offsetY
+	var c = Math.floor(mouseX / cellSize)
+	var r = Math.floor(mouseY / cellSize)
+	if (e.which == 1){
+		if (!map[r][c] && hasNeighbors(r, c)){
+			map[r][c] = {energy: 0, water: 0, dryTime: 0, c: c, r: r}
+			updateGrid()
+			draw()
+		}
+	}
+}
+
+onkeypress = function(e){
+	if (String.fromCharCode(e.which) == "d") debug = !debug
+	else if (e.which == 32){
+		paused = !paused
+		if (!paused) loop()
+		return false
+	}
+}
+
+reset()
+loop()
+
+
+// var vars = {
+// 	exchangeSpeed: {desc: "How quickly to plant cells transfer water and energy to their neighbors?", min: 0, max: 0.25},
+// 	healthyLevel: {desc: "Above what percent hydration is a cell healthy enough to build on to?", min: 0, max: 1},
+// 	dryLimit: {desc: "Below what percent hydration is a cell dying?", min: 0, max: 0.5},
+// 	deathLimit: {desc: "How many iterations does it take a dried out cell to die?", min: 0, max: 200},
+// 	resourceCost: {desc: "Collecting 1 energy requires x water and collecting 1 water requires x energy. What is x?", min: 0, max: 1},
+// 	waterMult: {desc: "Multiplier for how much water roots collect.", min: 0, max: 0.1},
+// 	energyMult: {desc: "Multiplier for how much energy leaves collect.", min: 0, max: 0.1},
+// 	rateOfHydration: {desc: "Multiplier for how quickly the dirt becomes hydrated and dehydrated", min: 0, max: 0.1},
+// 	minLight: {desc: "The weather affects how much light the plant can get. What is the minimum?", min: 0, max: 1},
+// 	framesPerTime: {desc: "How fast do things happen? Lower is faster.", min: 1, max: 30, step: 1},
+// 	rows: {desc: "How tall is the game? (restarts)", min: 25, max: 100, step: 2},
+// 	cols: {desc: "How wide is the game? (restarts)", min: 25, max: 100, step: 2},
+// 	cellSize: {desc: "How many pixels is each square? (restarts)", min: 8, max: 30, step: 1},
+// 	dirtLevel: {desc: "How many rows down is the ground? (restarts)", min: 0, max: 100}
+// }
+
+// for (var key in vars){
+// 	var v = vars[key]
+
+// 	var p = $("<p>")
+// 		.html(v.desc)
+// 		.appendTo("#controls")
+
+// 	$("<input>")
+// 		.attr({
+// 			type: "range",
+// 			min: v.min,
+// 			max: v.max,
+// 			step: v.step || (v.max - v.min) / 200
+// 		})
+// 		.data("prop", key)
+// 		.change(function(){
+// 			amt.val(window[$(this).data("prop")] = parseFloat($(this).val()))
+// 			if (/restarts/.test(v.desc)) reset()
+// 		})
+// 		.appendTo(p)
+
+// 	var amt = $("<span>")
+// 		.html(window[key])
+// 		.appendTo(p)
+
+// }
+
+</script>
+</body>
+</html>

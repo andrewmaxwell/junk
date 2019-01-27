@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html><head><title>BlockSploder</title>
+<style type="text/css">
+h3{font-size: 0.7em; margin:15px 0 3px 0}
+td {font-size: 0.9em}
+span {margin: 0 10px 0 5px}
+#opts li {float:left;margin-right:20px;}
+a{color:white}
+</style>
+</head>
+<body style="margin:0;background:#000;color:#FFF;font:bold 24px 'Gill Sans';overflow:hidden">
+	<div style="float: left; width: 600px; margin-right:30px">
+		<canvas>To play BlockSploder, get <a href="http://google.com/chrome">Chrome</a></canvas>
+		<ul style="list-style:none;margin:0;padding:0" id="opts">
+			<li id="score" style="width:150px">0 Points</li>
+			<li id="time">0:00</li>
+			<li id="ppm" style="width:150px">0 ppm</li>
+			<li><a href="javascript:rotate(false);void 0">&lt;&lt;</a> rotate <a href="javascript:rotate(true);void 0">&gt;&gt;</a></li>
+		</ul>
+	</div>
+	<div style="float:left">
+		<ul style="list-style:none; font-size: 0.8em; padding:0">
+			<li>Clear the board by clicking on groups of blocks.</li>
+			<li>The bigger the group, the more points you'll get.</li>
+			<li>Use the left and right arrows to rotate the board.</li>
+		</ul>
+	</div>
+<script type="module" src="main.js"></script></body></html>

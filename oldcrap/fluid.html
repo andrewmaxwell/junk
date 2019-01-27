@@ -1,0 +1,154 @@
+<body style="margin:0;background:black"><canvas><script>
+with(document.body.childNodes[0])W=width=innerWidth,H=height=innerHeight,T=getContext('2d')
+
+var numParticles=5000,
+	strength=20,
+	penSize=150,
+	res=5,
+	particleSpeed=.1,
+	pFriction=.3,
+	fluidFriction=.01,
+	rw=1+W/res>>0,
+	rh=1+H/res>>0
+	v=[], 
+	particles=[],
+	mouseX=0,
+	mouseY=0,
+	pmouseX=0,
+	pmouseY=0,
+	mouseDown=0,
+	showFlow=0,
+	showParticles=1,
+	showPressure=0
+
+for (var i=0; i<numParticles; i++){
+	particles[i]={x: Math.random()*W, y: Math.random()*H, xs:0, ys: 0}
+}
+for (var i=0; i<rw; i++){
+	v[i]=[]
+	for (var u=0; u<rh; u++){
+		var a=2*Math.random()*Math.PI
+		v[i][u]={xs:0, ys:0, p:0}
+	}
+}
+
+function updatePressure(){
+	for (var i=0; i<rw; i++){
+		for (var u=0; u<rh; u++){
+			var o=v[i][u]
+			o.p+=v[(i-1+rw)%rw][u].xs - v[(i+1)%rw][u].xs + v[i][(u-1+rh)%rh].ys - v[i][(u+1)%rh].ys
+			if (showPressure){
+				T.fillStyle=o.p>0? "rgb(0,52,255)": "rgb(255,221,0)"//"#03F": "#FD0"
+				T.globalAlpha=Math.max(0, Math.min(1, Math.abs(o.p)/30))
+				T.fillRect(i*res, u*res, res, res)
+			}
+		}
+	}
+	T.globalAlpha=1
+}
+function moveParticles(){
+	if (showParticles){
+		T.strokeStyle="white"
+		T.lineWidth=1
+		T.beginPath()
+		var i, vi, vu, down, right, ax, ay;
+		// var i, o, m;
+		for (var i=0; i<numParticles; i++){
+			o=particles[i]
+			if (o.x<0) o.x+=W
+			else if (o.x>W) o.x-=W
+			if (o.y<0) o.y+=H
+			else if (o.y>H) o.y-=H
+			// m=v[o.x/res>>0][o.y/res>>0]
+			vi=o.x/res>>0, 
+			vu=o.y/res>>0, 
+			down=(vu+1)%rh, 
+			right=(vi+1)%rw,
+			ax=(o.x%res)/res,
+			ay=(o.y%res)/res
+			o.xs+=((1-ax)*v[vi][vu].xs + ax*v[right][vu].xs + ay*v[vi][down].xs)*0.05
+			o.ys+=((1-ay)*v[vi][vu].ys + ax*v[right][vu].ys + ay*v[vi][down].ys)*0.05
+			// o.xs+=m.xs*particleSpeed
+			// o.ys+=m.ys*particleSpeed
+			o.x+=o.xs
+			o.y+=o.ys
+			o.xs*=1-pFriction
+			o.ys*=1-pFriction
+			T.moveTo(o.x,o.y-.5)
+			T.lineTo(o.x-o.xs, o.y-o.ys)
+		}
+		T.stroke()
+	}
+}
+function calculateFlow(){
+	if (showFlow){
+		T.strokeStyle="green"
+		T.lineWidth=.3
+		T.beginPath()
+	}
+	for (var i=0; i<rw; i++){
+		for (var u=0; u<rh; u++){
+			var o=v[i][u]
+			o.xs += (v[(i-1+rw)%rw][u].p - v[(i+1)%rw][u].p)/2;
+			o.ys += (v[i][(u-1+rh)%rh].p - v[i][(u+1)%rh].p)/2;
+			o.xs*=1-fluidFriction
+			o.ys*=1-fluidFriction
+			if (mouseDown){
+				var d=Math.sqrt(Math.pow(i*res-mouseX,2)+Math.pow(u*res-mouseY,2))
+				if (d<penSize){
+					var mod=strength/Math.max(d,4*res)
+					o.xs+=(mouseX-pmouseX)*mod
+					o.ys+=(mouseY-pmouseY)*mod
+				}
+			}
+			if (showFlow){
+				T.moveTo(i*res, u*res)
+				T.lineTo(i*res+o.xs, u*res+o.ys)
+			}
+		}
+	}
+	if (showFlow) T.stroke()
+}
+
+var draw=function(){
+	T.clearRect(0,0,W,H)
+	updatePressure()
+	moveParticles()
+	calculateFlow()
+	pmouseX=mouseX
+	pmouseY=mouseY
+	setTimeout(draw,0)
+}
+onmousemove=ontouchmove=function(e){
+	mouseX=e.pageX
+	mouseY=e.pageY
+}
+onmousedown=onmouseup=ontouchstart=ontouchend=function(e){
+	mouseDown=(e.type=="mousedown" || e.type=="touchstart")
+}
+onkeydown=function(e){
+	switch (e.keyCode){
+	case 70:
+		showFlow=!showFlow
+		break;
+	case 80:
+		showParticles=!showParticles
+		break
+	case 82:
+		showPressure=!showPressure
+		break
+	case 32:
+		var mx=mouseX/res>>0, my=mouseY/res>>0
+		for (var i=mx-10; i<mx+10; i++){
+			for (var u=my-10; u<my+10; u++){
+				if (Math.pow(mx-i, 2)+Math.pow(my-u,2)<25) v[(i+rw)%rw][(u+rh)%rh].p+=100
+			}
+		}
+		break
+	}
+}
+
+draw()
+
+Controls={instructions: "<ul style='padding:15px'><li>Drag the fluid to create currents.</li><li>Press P to toggle particles.</li><li>Press F to toggle visibility of currents.</li><li>Press R to toggle visibility of pressure waves.</li></ul>"}
+</script><script src='http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js'></script><script src='controller.js'></script>

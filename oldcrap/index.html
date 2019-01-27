@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+	<head>
+		<title>Andrew Maxwell's Website</title>
+		<style type="text/css">
+		body {background: url(classy_fabric.png); margin: 0; box-shadow: inset 0 0 50px black; font-family: Georgia, serif, serif; color: #222}
+		h1 {margin: 0}
+		a {color: #222}
+		a img {border: 0; border-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,.4)}
+		#wrapper {width: 630px; margin: 0 auto; background: url(texturetastic_gray.png); box-shadow: 0 0 50px black; padding: 50px}
+		#banner {margin: 0 0 -5px 0}
+		#content {text-align: center; padding-bottom: 30px; margin: 0 -10px}
+		#footer {text-align: right}
+		.bar {background: url(broken_noise.png); border-radius: 3px; font-size: 12px; color: white; padding: 5px 10px; margin: 0 -10px; clear: both}
+		.warning {color: #C00} 
+		.tile {width: 190px; display: inline-block; padding: 10px; text-align: center; text-decoration: none; -webkit-transition: .5s; border-radius: 5px}
+		.tile:hover {background: rgba(0,0,0,.1); box-shadow: 1px 2px 5px rgba(0,0,0,.3)}
+		.tile img {background: black}
+		.tile h4 {margin: 0}
+		.tile p {margin: 0; font-size: .7em}
+		</style>
+		<script type="text/javascript">
+
+		  var _gaq = _gaq || [];
+		  _gaq.push(['_setAccount', 'UA-32999767-1']);
+		  _gaq.push(['_trackPageview']);
+
+		  (function() {
+			var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+			ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+			var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+		  })();
+
+		</script>
+	</head>
+	<body>
+		<div id="wrapper">
+			<canvas id="banner"></canvas>
+			<div class="bar">HTML5 for fun.</div>
+			<p id='chrome'></p>
+			<div id="content"></div>
+			<div id="footer" class="bar">&copy;2012 Andrew Maxwell</div>
+		</div>
+		<script type="text/javascript" src="jquery.js"></script>
+		<script type="text/javascript">
+			var canvas=document.createElement("canvas")
+			$("#chrome").html(!canvas.getContext || !canvas.getContext('2d') || innerWidth===undefined? "<span class='warning'>These demos won't work in this browser.</span> Get <a href='http://www.google.com/chrome'>Google Chrome</a>.": /chrome/i.test(navigator.userAgent)? "It looks like you're using Chrome. I like you.": "These demos work best in <a href='http://www.google.com/chrome'>Google Chrome</a>.");
+			
+			$.each([
+				{"title":"Tootsie Rocket","image":"tootsieRocket.jpg","url":"tootsieRocket/","description":"Use the arrows, get the candy."},
+				{"title":"Draw Flow","image":"drawFlow.jpg","url":"drawFlow.html","description":"Non-wavy fluid solver."},
+				{"title":"Splitter","image":"splitter.jpg","url":"splitter.html","description":"What am I doing with my life"},
+				{"title":"Particle Simulator","image":"particles.jpg","url":"particles.html","description":"Configurable particles."},
+				{"title":"Fluid Simulator","image":"fluid.jpg","url":"fluid.html","description":"Waves and currents."},
+				{"title":"Mandelbrot","image":"mandelbrot.jpg","url":"mandelbrot.html","description":"Explore the Mandelbrot set."},
+				{"title":"Maze Generator","image":"maze.png","url":"maze.php","description":"Animated and mazey."},
+				{"title":"Snake","image":"snake.png","url":"snake.html","description":"Featuring a tough AI player."},
+				{"title":"Gravity System","image":"system.jpg","url":"system.html","description":"600 bodies gravitating in 3D."},
+				{"title":"3D Image Extruder","image":"extrude.jpg","url":"extrude.php","description":"Pixels in 3D."},
+				{"title":"Sphere","image":"sphere.png","url":"sphere.html","description":"Aka ball."},
+				{"title":"2D Raycast","image":"raycaster.jpg","url":"raycaster.html","description":"Play with reflections."},
+				{"title":"Gears","image":"gears.png","url":"gears.html","description":"Make some gears I guess."},
+				{"title":"Swirl","image":"swirl.jpg","url":"swirl.html","description":"Pretty colors!"},
+				{"title":"Conway's Game of Life","image":"conway.png","url":"conway.html","description":"In 607 bytes."},
+				{"title":"Clock","image":"clock.jpg","url":"clock.html","description":"Time telling device."},
+				{"title":"Tree","image":"tree.jpg","url":"tree.html","description":"Make more trees."},
+				{"title":"Bloxploder","image":"bloxploder.png","url":"bloxploder.php","description":"Splode some blocks"}
+			], function(i, el){
+				var a=$("<a>").attr("href", el.url).addClass("tile").appendTo("#content")
+				$("<img>").attr("src", el.image).appendTo(a)
+				$("<h4>").html(el.title).appendTo(a)
+				$("<p>").html(el.description).appendTo(a)
+			})
+			
+;(function(){
+var R=40,C=315,X=document.getElementById("banner"),W=X.width=2*C,H=X.height=2*R,T=X.getContext('2d'),m=[],Q,D="Andrew Maxwell",i,j,x,
+iterate=function(){
+	var u,o=[[-1,0],[0,-1],[1,0],[0,1]],i,r,c,g;
+	for (g=10;g&&Q.length;){
+		u=Q.pop()
+		if(!u.v){
+			u.v=1
+			if(u.p)T.stroke(T.moveTo(2*u.c+.5,2*u.r+.5),T.lineTo(2*u.p.c+.5,2*u.p.r+.5))
+			for(i=4;i--;)c=o[r=4*Math.random()>>0],o[r]=o[i],o[i]=c
+			for(i=4;i--;){
+				r=u.r+o[i][0]
+				c=u.c+o[i][1]
+				if (r>=0 && r<R && c>=0 && c<C && !m[r][c].v){
+					m[r][c].p=u
+					Q.push(m[r][c])
+				}
+			}
+			g--
+		}
+	}
+	if(Q.length)setTimeout(iterate,0)
+}
+T.font="93px Georgia"
+for(x=2,i=0;i<D.length;i++)T.fillText(D[i],x,H-1-[0,0,1,0,1,0,0,0,1,0,0,1,0,0][i]),x+=T.measureText(D[i]).width-[2,7,3,3,4,6,10,6,3,2,4,7,4][i]
+D=T.getImageData(0,0,W,H)
+T.clearRect(0,0,W,H)
+for(i=R;i--;)for(m[i]=[],j=C;j--;)m[i][j]={r:i,c:j,v:!D.data[8*(i*W+j)+3]&&i<R-1}
+Q=[m[R-1][0]]
+iterate()
+}())
+		</script>
+	</body>
+</html>

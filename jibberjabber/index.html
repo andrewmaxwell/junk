@@ -1,0 +1,27 @@
+<div ng-app="app" ng-controller="jjCtrl" style="font-family: Calibri, sans-serif">
+	<div style="float: right; width: 300px; padding: 10px 20px">
+
+		Choose one of these books <select ng-model="book" ng-options="book as book.title for book in books" ng-change="loadBook()"></select> or paste a large amount of text here.
+
+		<textarea ng-model="source" style="width: 100%; height: 100px; overflow-x: hidden"></textarea>
+		<p>
+			<input type="checkbox" ng-model="normalizeSpacing" /> Normalize Spacing
+			<br/>
+			<input type="checkbox" ng-model="removeQuotes" /> Remove Quotes and Parentheses
+			<br/>
+			<input type="checkbox" ng-model="wordsOnly" /> Remove Punctuation and Capitalization
+			<br/>
+			<input id="sub" ng-model="sub" size="2" /> character substrings
+			<br/>
+			<input id="characters" ng-model="amount" size="4" /> characters
+		</p>
+
+		<p><button ng-click="go()">Generate some Jibber Jabber</button></p>
+
+		<p>The source has {{ uniqueSubstrings | number }} unique {{ lookBehind }} character substrings each occuring {{ source.length / uniqueSubstrings | number:2 }} times on average.</p>
+	</div>
+	<div style="font: 20px Georgia, serif">{{ result }}</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.7.5/angular.min.js"></script>
+<script src="main.js"></script>
