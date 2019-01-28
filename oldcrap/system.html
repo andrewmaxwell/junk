@@ -4,7 +4,7 @@ var C=document.body.childNodes[0],
 	H=C.height=innerHeight,
 	T=C.getContext('2d'),
 	_3d=(function(){
-	var camLoc, viewLoc, rotMatrix, 
+	var camLoc, viewLoc, rotMatrix,
 	matrixMult=function(a,b){
 		for (var res=[], c, k, r=0; r<a.length; r++){
 			for (res[r]=[], c=0; c<b[0].length; c++){
@@ -50,7 +50,7 @@ _3d.set(
 	[0, 0, zoom] //view location
 )
 
-setInterval(function(){
+const loop = function(){
 	T.clearRect(-W/2, -H/2, W, H)
 	for (var i=0; i<num; i++){
 		var a=A[i]
@@ -80,7 +80,9 @@ setInterval(function(){
 			T.fill()
 		}
 	}
-})
+	requestAnimationFrame(loop);
+};
+
 onmousemove=function(e){
 	var x=e.x/W*2*Math.PI
 	cameraDist=e.y/H*2*zoom
@@ -90,6 +92,8 @@ onmousemove=function(e){
 		[0, 0, zoom] //view location
 	)
 }
+
+loop();
 
 
 </script>

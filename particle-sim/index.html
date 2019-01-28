@@ -4,10 +4,7 @@
 		<title>Particle Simulator</title>
 		<style>
 			body {margin:0;background:black;color:white;font:12px monospace;overflow:hidden;line-height:10px;text-shadow:1px 1px 0 black;-webkit-user-select: none;user-select:none}
-			.ui-slider{float:left;height:5px;position:relative;top:3px;border-radius:3px;background:#333;pointer-events:auto;margin:0 5px}
-			.ui-slider a{position:absolute;left:-4px;top:-3px;z-index:2;width:8px;height:10px;background:#555;border-radius:2px;box-shadow:0 1px 3px black}
-			label{width:70px;float:left}
-			a{color:#AAF;pointer-events:auto}
+			a,input{color:#AAF;pointer-events:auto}
 			#controlContainer {position:absolute;bottom:0;right:0;margin:5px;pointer-events:none}
 			#controls a.right {float: right; padding:0 0 5px 10px}
 			#statsCanvas {position: absolute; right: 0}
@@ -24,12 +21,9 @@
 				<canvas id="timerCanvas" height="250"></canvas>
 				<a href="javascript:$('#controls,#show').toggle()" class='right'>Hide</a>
 				<a href="javascript:void 0" id="reset" class='right'>Reset Particles</a>
+				<table style="clear:both"></table>
 			</div>
 		</div>
 	</body>
-	<script src="jquery.js"></script>
-	<script src="jquery-ui.js"></script>
-	<script src="statCanvas.js"></script>
-	<script src="particleSimulator.js"></script>
-	<script src="particleScripts.js"></script>
+	<script type="module" src="particleScripts.js"></script>
 </html>
