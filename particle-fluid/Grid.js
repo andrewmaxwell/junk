@@ -1,8 +1,8 @@
-export class Grid {
-  constructor(size, width, height) {
-    this.rows = Math.ceil(height / size);
-    this.cols = Math.ceil(width / size);
-    this.size = size;
+export default class {
+  constructor(rad, width, height) {
+    this.rows = Math.ceil(height / rad);
+    this.cols = Math.ceil(width / rad);
+    this.rad = rad;
     this.grid = [];
 
     const {rows, cols, grid} = this;
@@ -25,24 +25,19 @@ export class Grid {
       }
     }
   }
-  add(item) {
-    const {grid, cols, size} = this;
-    var col = Math.floor(item.x / size);
-    var row = Math.floor(item.y / size);
-    var vic = grid[row * cols + col].vicinity;
-    for (var i = 0; i < vic.length; i++) {
-      vic[i].items.push(item);
+  add(x, y, i) {
+    const {grid, cols, rad} = this;
+    var cell = grid[Math.floor(y / rad) * cols + Math.floor(x / rad)];
+    if (!cell) throw new Error(`Bad coords: ${x}, ${y}`);
+    for (var j = 0; j < cell.vicinity.length; j++) {
+      cell.vicinity[j].items.push(i);
     }
-    return grid[row * cols + col].items;
+    return cell.items;
   }
   clear() {
     const {grid} = this;
     for (var i = 0; i < grid.length; i++) {
       grid[i].items.length = 0;
     }
-  }
-  getNeighbors(x, y) {
-    const {grid, cols, size} = this;
-    return grid[Math.floor(y / size) * cols + Math.floor(x / size)].items;
   }
 }
