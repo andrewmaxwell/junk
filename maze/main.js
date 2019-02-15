@@ -1,6 +1,6 @@
 'use strict';
 
-import 'https://code.jquery.com/jquery-3.3.1.slim.min.js';
+import 'https://code.jquery.com/jquery-3.3.1.min.js';
 import {Controls} from '../common/Controls.js';
 const {$} = window;
 

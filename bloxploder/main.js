@@ -1,4 +1,4 @@
-import 'https://code.jquery.com/jquery-3.3.1.slim.min.js';
+import 'https://code.jquery.com/jquery-3.3.1.min.js';
 const {$} = window;
 
 for (

@@ -5,7 +5,7 @@ module.exports = {
     sourceType: 'module',
     ecmaFeatures: {jsx: true}
   },
-  env: {browser: true, es6: true},
+  env: {browser: true, es6: true, node: true},
   extends: [
     'eslint:recommended',
     'prettier',

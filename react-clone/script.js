@@ -1,6 +1,3 @@
-'use strict';
-console.clear();
-
 import {makeStore} from './makeStore.js';
 import {makeRenderer} from './makeRenderer.js';
 
