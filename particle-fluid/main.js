@@ -69,7 +69,7 @@ var interact = () => {
       nd[count] = dist;
       count++;
 
-      if (dist < rad * 0.5) {
+      if (n < i && dist < rad * 0.5) {
         T.moveTo(xc[i], yc[i]);
         T.lineTo(xc[n], yc[n]);
       }
@@ -98,7 +98,7 @@ var loop = () => {
   grid.clear();
 
   T.clearRect(0, 0, width, height);
-  T.lineWidth = 0.25;
+  T.lineWidth = 0.5;
   T.beginPath();
   var {gravity, speed} = params;
   for (var i = 0; i < NUM; i++) {
