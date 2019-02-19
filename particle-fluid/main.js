@@ -38,40 +38,6 @@ var reset = () => {
   }
 };
 
-var moveParticles = () => {
-  var {gravity, speed} = params;
-  for (var i = 0; i < NUM; i++) {
-    var xVel = xc[i] - xp[i];
-    var yVel = yc[i] - yp[i] + gravity * speed;
-
-    xp[i] = xc[i];
-    yp[i] = yc[i];
-
-    // T.moveTo(xc[i], yc[i]);
-    xc[i] += xVel;
-    yc[i] += yVel;
-
-    if (xc[i] < 0) {
-      xc[i] = 0;
-      xp[i] = -1;
-    } else if (xc[i] > width - 1) {
-      xc[i] = width - 1;
-      xp[i] = width;
-    }
-    if (yc[i] < 0) {
-      yc[i] = 0;
-      yp[i] = -1;
-    } else if (yc[i] > height - 1) {
-      yc[i] = height - 1;
-      yp[i] = height;
-    }
-
-    // T.lineTo(xc[i] + 1, yc[i]);
-
-    vic[i] = grid.add(xc[i], yc[i], i);
-  }
-};
-
 var ni = new Int16Array(NUM); // neighbor index
 var gr = new Float32Array(NUM); // neighbor gradient
 var nx = new Float32Array(NUM); // neighbor dx
@@ -134,7 +100,37 @@ var loop = () => {
   T.clearRect(0, 0, width, height);
   T.lineWidth = 0.25;
   T.beginPath();
-  moveParticles();
+  var {gravity, speed} = params;
+  for (var i = 0; i < NUM; i++) {
+    var xVel = xc[i] - xp[i];
+    var yVel = yc[i] - yp[i] + gravity * speed;
+
+    xp[i] = xc[i];
+    yp[i] = yc[i];
+
+    // T.moveTo(xc[i], yc[i]);
+    xc[i] += xVel;
+    yc[i] += yVel;
+
+    if (xc[i] < 0) {
+      xc[i] = 0;
+      xp[i] = -1;
+    } else if (xc[i] > width - 1) {
+      xc[i] = width - 1;
+      xp[i] = width;
+    }
+    if (yc[i] < 0) {
+      yc[i] = 0;
+      yp[i] = -1;
+    } else if (yc[i] > height - 1) {
+      yc[i] = height - 1;
+      yp[i] = height;
+    }
+
+    // T.lineTo(xc[i] + 1, yc[i]);
+
+    vic[i] = grid.add(xc[i], yc[i], i);
+  }
 
   interact();
 
@@ -161,3 +157,13 @@ gui.add(params, 'stiffness', 0, 1000);
 gui.add(params, 'stiffnessNear', 0, 1000);
 gui.add(params, 'speed', 0, 0.01);
 gui.add(params, 'gravity', 0, 50);
+
+window.onmousemove = e => {
+  if (!e.which) return;
+  for (var i = 0; i < NUM; i++) {
+    if (Math.hypot(xc[i] - e.offsetX, yc[i] - e.offsetY) < 50) {
+      xp[i] -= 0.1 * e.movementX;
+      yp[i] -= 0.1 * e.movementY;
+    }
+  }
+};
