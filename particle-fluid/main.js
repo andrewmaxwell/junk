@@ -3,9 +3,9 @@
 import Grid from './Grid.js';
 
 var canvas = document.querySelector('canvas');
-var T = canvas.getContext('2d', {alpha: false});
+var T = canvas.getContext('2d');
 
-var NUM = 4000;
+var NUM = 8192;
 
 var params = {
   rad: 16,
@@ -13,7 +13,7 @@ var params = {
   stiffness: 100,
   stiffnessNear: 316,
   speed: 0.001,
-  gravity: 35
+  gravity: 0
 };
 
 var width, height, xc, yc, xp, yp, vic, grid;
@@ -22,6 +22,10 @@ window.onresize = () => {
   width = canvas.width = innerWidth;
   height = canvas.height = innerHeight;
   grid = new Grid(params.rad, width, height);
+  // T.lineWidth = 0.5;
+  T.fillStyle = T.strokeStyle = 'white';
+  T.lineWidth = 2;
+  T.lineCap = 'round';
 };
 
 var reset = () => {
@@ -33,7 +37,7 @@ var reset = () => {
   vic = []; // vicinity cache
 
   for (var i = 0; i < NUM; i++) {
-    xc[i] = xp[i] = width * (0.2 + 0.3 * Math.random());
+    xc[i] = xp[i] = width * Math.random();
     yc[i] = yp[i] = height * Math.random();
   }
 };
@@ -69,10 +73,10 @@ var interact = () => {
       nd[count] = dist;
       count++;
 
-      if (n < i && dist < rad * 0.5) {
-        T.moveTo(xc[i], yc[i]);
-        T.lineTo(xc[n], yc[n]);
-      }
+      // if (n < i && dist < rad * 0.5) {
+      //   T.moveTo(xc[i], yc[i]);
+      //   T.lineTo(xc[n], yc[n]);
+      // }
     }
 
     var pressure =
@@ -94,23 +98,24 @@ var interact = () => {
 var rates = new Array(30).fill(0);
 var frame = 0;
 var loop = () => {
+  requestAnimationFrame(loop);
   var start = performance.now();
   grid.clear();
 
   T.clearRect(0, 0, width, height);
-  T.lineWidth = 0.5;
   T.beginPath();
+
   var {gravity, speed} = params;
   for (var i = 0; i < NUM; i++) {
     var xVel = xc[i] - xp[i];
     var yVel = yc[i] - yp[i] + gravity * speed;
-
     xp[i] = xc[i];
     yp[i] = yc[i];
 
-    // T.moveTo(xc[i], yc[i]);
+    T.moveTo(xc[i], yc[i]);
     xc[i] += xVel;
     yc[i] += yVel;
+    T.lineTo(xc[i], yc[i]);
 
     if (xc[i] < 0) {
       xc[i] = 0;
@@ -127,14 +132,13 @@ var loop = () => {
       yp[i] = height;
     }
 
-    // T.lineTo(xc[i] + 1, yc[i]);
-
     vic[i] = grid.add(xc[i], yc[i], i);
   }
 
+  T.stroke();
+
   interact();
 
-  T.stroke();
   if (frame > rates.length)
     T.fillText(
       Math.round(rates.reduce((s, v) => s + v, 0) / rates.length),
@@ -144,7 +148,6 @@ var loop = () => {
 
   rates[frame % rates.length] = performance.now() - start;
   frame++;
-  requestAnimationFrame(loop);
 };
 
 reset();
