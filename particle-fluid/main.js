@@ -22,7 +22,6 @@ window.onresize = () => {
   width = canvas.width = innerWidth;
   height = canvas.height = innerHeight;
   grid = new Grid(params.rad, width, height);
-  // T.lineWidth = 0.5;
   T.fillStyle = T.strokeStyle = 'white';
   T.lineWidth = 2;
   T.lineCap = 'round';

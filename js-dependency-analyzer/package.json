@@ -1,0 +1,32 @@
+{
+  "name": "js-dependency-analyzer",
+  "version": "0.0.1",
+  "description": "",
+  "main": "src/main.js",
+  "scripts": {
+    "test": "mocha -w -r babel-register 'src/**/*.test.js'",
+    "start": "babel-node src/main.js",
+    "optimize": "babel-node src/optimize.js"
+  },
+  "dependencies": {
+    "babel-core": "^6.26.3",
+    "babel-plugin-transform-class-properties": "^6.24.1",
+    "babel-plugin-transform-object-rest-spread": "^6.26.0",
+    "babel-plugin-transform-react-jsx": "^6.24.1"
+  },
+  "devDependencies": {
+    "babel-cli": "^6.26.0",
+    "babel-preset-env": "^1.7.0",
+    "babel-preset-stage-2": "^6.24.1",
+    "chai": "^4.2.0",
+    "mocha": "^5.2.0"
+  },
+  "babel": {
+    "presets": [
+      "env",
+      "stage-2"
+    ]
+  },
+  "author": "Andrew Maxwell",
+  "license": "ISC"
+}

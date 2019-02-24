@@ -5,19 +5,21 @@ module.exports = {
     sourceType: 'module',
     ecmaFeatures: {jsx: true}
   },
-  env: {browser: true, es6: true, node: true},
+  env: {browser: true, es6: true, node: true, mocha: true},
   extends: [
     'eslint:recommended',
     'prettier',
-    'plugin:react/recommended'
+    'plugin:react/recommended',
+    'plugin:sonarjs/recommended',
   ],
-  plugins: ['prettier', 'react'],
+  plugins: ['prettier', 'react', 'sonarjs'],
   rules: {
     'no-console': 'off',
     'prettier/prettier': ['error', {singleQuote: true, bracketSpacing: false}],
     'dot-notation': 'error',
     'quote-props': ['error', 'as-needed'],
     'arrow-body-style': ['error', 'as-needed'],
-    'object-shorthand': 'error'
+    'object-shorthand': 'error',
+    'sonarjs/cognitive-complexity': 'off'
   }
 };
