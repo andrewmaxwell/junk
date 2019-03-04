@@ -16,11 +16,9 @@ const colors = [
   [0, 100, 255]
 ];
 
-function randomLine(width) {
-  return new Array(width).fill(0).map(() => Math.random());
-}
+const randomLine = width => new Array(width).fill(0).map(() => Math.random());
 
-function getLine(rule, prev) {
+const getLine = (rule, prev) => {
   var res = [];
   var width = prev.length;
   for (var i = 0; i < width; i++) {
@@ -31,9 +29,9 @@ function getLine(rule, prev) {
     res[i] = Math.floor(rule / Math.pow(base, exp)) % base;
   }
   return res;
-}
+};
 
-function isInteresting(rule, width, height) {
+const isInteresting = (rule, width, height) => {
   var prev = randomLine(width);
   var seen = {};
   for (var y = 0; y < height; y++) {
@@ -48,18 +46,18 @@ function isInteresting(rule, width, height) {
     prev = line;
   }
   return true;
-}
+};
 
-function getGrid(rule, width, height) {
+const getGrid = (rule, width, height) => {
   var prev = randomLine(width);
   var res = [];
   for (var y = 0; y < height; y++) {
     prev = res[y] = getLine(rule, prev);
   }
   return res;
-}
+};
 
-function getCanvas(rule, width, height, isLooping) {
+const getCanvas = (rule, width, height, isLooping) => {
   var grid = getGrid(rule, width, height);
   var canvas = document.createElement('canvas');
   var T = canvas.getContext('2d', {alpha: false, antialias: false});
@@ -73,11 +71,10 @@ function getCanvas(rule, width, height, isLooping) {
     prev = grid[0];
   };
   canvas.ondblclick = () => {
-    // window.open(getCanvas(rule, 1600, 900).toDataURL());
-    window.open('http://run.plnkr.co/plunks/ujI0XcpvTOqaJUr6fjxa/#' + rule);
+    window.open('#' + rule);
   };
 
-  function drawLine(line, y) {
+  const drawLine = (line, y) => {
     for (var i = 0; i < line.length; i++) {
       var color = colors[line[i]];
       D[4 * i] = color[0];
@@ -86,28 +83,28 @@ function getCanvas(rule, width, height, isLooping) {
       D[4 * i + 3] = 255;
     }
     T.putImageData(imageData, 0, y);
-  }
+  };
 
   for (var i = 0; i < grid.length; i++) {
     drawLine(grid[i], i);
   }
   var prev = grid[grid.length - 1];
 
-  function loop() {
+  const loop = () => {
     requestAnimationFrame(loop);
     T.drawImage(canvas, 0, -1);
 
     var line = getLine(rule, prev);
     drawLine(line, height - 1);
     prev = line;
-  }
+  };
 
   if (isLooping) loop();
 
   return canvas;
-}
+};
 
-function init() {
+const init = () => {
   console.log('Hash exists', location.hash);
   if (location.hash) {
     var rule = parseFloat(location.hash.slice(1));
@@ -128,5 +125,5 @@ function init() {
     }
     console.log('Threw away', Math.round(((i - j) / i) * 100), '%');
   }
-}
+};
 init();

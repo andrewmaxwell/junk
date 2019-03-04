@@ -5,30 +5,29 @@ import Grid from './Grid.js';
 var canvas = document.querySelector('canvas');
 var T = canvas.getContext('2d');
 
-var NUM = 8192;
+var NUM = 2 ** 12;
 
 var params = {
-  rad: 16,
-  restDensity: 0.5,
-  stiffness: 100,
-  stiffnessNear: 316,
+  rad: 50,
+  restDensity: 0.2,
+  stiffness: 300,
+  stiffnessNear: 700,
   speed: 0.001,
-  gravity: 0
+  gravity: 50
 };
 
-var width, height, xc, yc, xp, yp, vic, grid;
-
-window.onresize = () => {
-  width = canvas.width = innerWidth;
-  height = canvas.height = innerHeight;
-  grid = new Grid(params.rad, width, height);
-  T.fillStyle = T.strokeStyle = 'white';
-  T.lineWidth = 2;
-  T.lineCap = 'round';
-};
+var width,
+  height,
+  xc,
+  yc,
+  xp,
+  yp,
+  vic,
+  grid,
+  grav = {x: 0, y: 1};
 
 var reset = () => {
-  window.onresize();
+  handlers.resize();
   xc = new Float32Array(NUM); // x coords
   yc = new Float32Array(NUM); // y coords
   xp = new Float32Array(NUM); // x prev
@@ -106,8 +105,8 @@ var loop = () => {
 
   var {gravity, speed} = params;
   for (var i = 0; i < NUM; i++) {
-    var xVel = xc[i] - xp[i];
-    var yVel = yc[i] - yp[i] + gravity * speed;
+    var xVel = xc[i] - xp[i] + gravity * speed * grav.x;
+    var yVel = yc[i] - yp[i] + gravity * speed * grav.y;
     xp[i] = xc[i];
     yp[i] = yc[i];
 
@@ -149,9 +148,6 @@ var loop = () => {
   frame++;
 };
 
-reset();
-loop();
-
 var gui = new window.dat.GUI();
 gui.add(params, 'rad', 5, 100).onChange(window.onresize);
 gui.add(params, 'restDensity', 0, 1);
@@ -159,13 +155,40 @@ gui.add(params, 'stiffness', 0, 1000);
 gui.add(params, 'stiffnessNear', 0, 1000);
 gui.add(params, 'speed', 0, 0.01);
 gui.add(params, 'gravity', 0, 50);
+gui.close();
 
-window.onmousemove = e => {
-  if (!e.which) return;
-  for (var i = 0; i < NUM; i++) {
-    if (Math.hypot(xc[i] - e.offsetX, yc[i] - e.offsetY) < 50) {
-      xp[i] -= 0.1 * e.movementX;
-      yp[i] -= 0.1 * e.movementY;
+const handlers = {
+  resize: () => {
+    width = canvas.width = innerWidth;
+    height = canvas.height = innerHeight;
+    grid = new Grid(params.rad, width, height);
+    T.fillStyle = T.strokeStyle = 'white';
+    T.lineWidth = 2;
+    T.lineCap = 'round';
+  },
+  mousemove: e => {
+    if (!e.which) return;
+    for (var i = 0; i < NUM; i++) {
+      if (Math.hypot(xc[i] - e.offsetX, yc[i] - e.offsetY) < 150) {
+        xp[i] -= 0.1 * e.movementX;
+        yp[i] -= 0.1 * e.movementY;
+      }
     }
+  },
+  deviceorientation: e => {
+    e.preventDefault();
+    grav.x = e.gamma / 90;
+    grav.y = e.beta / 90;
   }
+  // devicemotion: e => {
+  //   for (var i = 0; i < NUM; i++) {
+  //     xp[i] -= e.acceleration.x;
+  //     yp[i] += e.acceleration.y;
+  //   }
+  // }
 };
+
+for (var e in handlers) window.addEventListener(e, handlers[e]);
+
+reset();
+loop();

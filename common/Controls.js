@@ -7,8 +7,8 @@ export const Controls = ({instructions}) => {
     w = 250,
     D = $('<div>')
       .css({width: w})
-      .appendTo(C)
-      .hide();
+      .appendTo(C);
+
   $(
     "<a href='javascript:void 0' style='color:white;float:right;text-decoration:none'>Instructions &amp; Controls</a>"
   )

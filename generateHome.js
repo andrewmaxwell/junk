@@ -1,11 +1,34 @@
 const fs = require('fs');
 const {resolve} = require('path');
+const {pipe, filter, map, join, both, sort} = require('ramda');
 
-const dirs = fs
-  .readdirSync('.')
-  .filter(file => fs.existsSync(resolve(__dirname, file + '/index.html')))
-  .map(file => `<a href="${file}/">${file.split('-').join(' ')}</a>`)
-  .join('<br/>');
+const fileExists = filename => filePath =>
+  fs.existsSync(resolve(__dirname, filePath + '/' + filename));
+
+const dirs = pipe(
+  filter(both(fileExists('README.md'), fileExists('index.html'))),
+  map(filePath => {
+    const [title, year, desc = ''] = fs
+      .readFileSync(filePath + '/README.md')
+      .toString()
+      .trim()
+      .split(' - ');
+    return {
+      filePath,
+      title,
+      year: Number(year),
+      desc
+    };
+  }),
+  sort((a, b) => b.year - a.year),
+  map(
+    p =>
+      `<div><a href="${p.filePath}/" title="${p.desc}">${p.title}</a> ${
+        p.year
+      }</div>`
+  ),
+  join('\n')
+)(fs.readdirSync('.'));
 
 fs.writeFileSync(
   'index.html',
@@ -14,6 +37,7 @@ fs.writeFileSync(
   <head>
     <meta charset="UTF-8">
     <title>Junk</title>
+    <style>* {font-family: sans-serif} .desc {color: #CCC}</style>
   </head>
   <body>
     ${dirs}

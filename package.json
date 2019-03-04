@@ -11,7 +11,8 @@
     "eslint-plugin-react": "^7.12.4",
     "eslint-plugin-sonarjs": "^0.3.0",
     "live-server": "^1.2.1",
-    "prettier": "^1.16.4"
+    "prettier": "^1.16.4",
+    "ramda": "^0.26.1"
   },
   "scripts": {
     "dev": "live-server --ignore=.git",
