@@ -1,18 +1,21 @@
 <!DOCTYPE html>
-<body>
-  <textarea style="width: 400px; height: 200px">pipe(
-  path(['components', 'value']),
-  map(
-    pipe(
-      path(['pnls', 'value']),
-      map(path(['id', 'value']))
-    )
-  ),
-  unnest,
-  reject(isNil)
-)
-  </textarea>
-  <pre></pre>
-  <script src="//cdnjs.cloudflare.com/ajax/libs/ramda/0.25.0/ramda.min.js"></script>
+<body style="font-family: sans-serif">
+  <div style="float:left;padding-right:20px" id="opts"></div>
+  <div style="float:left">
+    <textarea style="width: 400px; height: 200px">pipe(
+    path(['components', 'value']),
+    map(
+      pipe(
+        path(['pnls', 'value']),
+        map(path(['id', 'value']))
+      )
+    ),
+    unnest,
+    reject(isNil)
+  )
+    </textarea>
+    <pre></pre>
+  </div>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/ramda/0.26.1/ramda.min.js"></script>
   <script type="module" src="script.js"></script>
 </body>

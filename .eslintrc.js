@@ -12,7 +12,7 @@ module.exports = {
     'plugin:react/recommended',
     'plugin:sonarjs/recommended',
   ],
-  plugins: ['prettier', 'react', 'sonarjs'],
+  plugins: ['prettier', 'react', 'sonarjs', 'html'],
   rules: {
     'no-console': 'off',
     'prettier/prettier': ['error', {singleQuote: true, bracketSpacing: false}],

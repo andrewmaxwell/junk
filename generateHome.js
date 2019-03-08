@@ -20,7 +20,7 @@ const dirs = pipe(
       desc
     };
   }),
-  sort((a, b) => b.year - a.year),
+  sort((a, b) => b.year - a.year || (a.title < b.title ? -1 : 1)),
   map(
     p =>
       `<div><a href="${p.filePath}/" title="${p.desc}">${p.title}</a> ${

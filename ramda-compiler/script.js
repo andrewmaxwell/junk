@@ -36,7 +36,16 @@ const {
   lensPath,
   isEmpty,
   prepend,
-  slice
+  slice,
+  allPass,
+  eqBy,
+  toPairs,
+  filter,
+  pluck,
+  keys,
+  join,
+  propSatisfies,
+  drop
 } = window.R;
 
 const tokenTypes = [
@@ -168,19 +177,25 @@ const unreject = treeMap(
 );
 
 const unfilter = treeMap(
-  when(pathEq(['func', 'value'], 'filter'), ({children: [func, parent]}) => ({
-    type: 'functionCall',
-    func: {type: 'property', parent, value: 'filter'},
-    children: [func]
-  }))
+  when(
+    propEq('func', {type: 'id', value: 'filter'}),
+    ({children: [func, parent]}) => ({
+      type: 'functionCall',
+      func: {type: 'property', parent, value: 'filter'},
+      children: [func]
+    })
+  )
 );
 
 const unmap = treeMap(
-  when(pathEq(['func', 'value'], 'map'), ({children: [func, parent]}) => ({
-    type: 'functionCall',
-    func: {type: 'property', parent, value: 'map'},
-    children: [func]
-  }))
+  when(
+    propEq('func', {type: 'id', value: 'map'}),
+    ({children: [func, parent]}) => ({
+      type: 'functionCall',
+      func: {type: 'property', parent, value: 'map'},
+      children: [func]
+    })
+  )
 );
 
 const unpluck = treeMap(
@@ -266,6 +281,75 @@ const ununnest = treeMap(
   }))
 );
 
+const [uninc, undec] = [['inc', '+'], ['dec', '-']].map(([id, op]) =>
+  treeMap(
+    when(
+      equals({type: 'id', value: id}),
+      always({
+        type: 'functionDef',
+        args: ['x'],
+        children: [
+          {
+            type: op,
+            children: [{type: 'id', value: 'x'}, {type: 'number', value: '1'}]
+          }
+        ]
+      })
+    )
+  )
+);
+
+const mathOps = {
+  add: '+',
+  subtract: '-',
+  multiply: '*',
+  divide: '/',
+  gt: '>',
+  gte: '>=',
+  lt: '<',
+  lte: '<=',
+  modulo: '%'
+};
+const unMathOp = treeMap(
+  when(
+    both(propEq('type', 'id'), propSatisfies(prop(__, mathOps), 'value')),
+    ({value}) => ({
+      type: 'functionDef',
+      args: ['a', 'b'],
+      children: [
+        {
+          type: mathOps[value],
+          children: [{type: 'id', value: 'a'}, {type: 'id', value: 'b'}]
+        }
+      ]
+    })
+  )
+);
+
+const unconverge = treeMap(
+  when(
+    pathEq(['func', 'value'], 'converge'),
+    ({children: [func, arr, data]}) => {
+      const def = {
+        type: 'functionDef',
+        args: ['v'],
+        children: [
+          {
+            type: 'functionCall',
+            func,
+            children: arr.children.map(func => ({
+              type: 'functionCall',
+              func,
+              children: [{type: 'id', value: 'v'}]
+            }))
+          }
+        ]
+      };
+      return data ? {type: 'functionCall', func: def, children: [data]} : def;
+    }
+  )
+);
+
 const negate = converge(call, [
   pipe(
     prop('type'),
@@ -296,14 +380,52 @@ const simplifyNot = treeMap(
   )
 );
 
-const toAST = pipe(
-  tokenize,
-  reject(propEq('type', 'space')),
-  nest('(', ')'),
-  nest('[', ']'),
-  makeArrays,
-  makeFunctions,
-  head,
+const treeReplace = (from, to, data) =>
+  treeMap(when(equals(from), always(to)), data);
+
+const treeMap2 = curry((func, data) =>
+  pipe(
+    when(is(Object), map(treeMap2(func))),
+    func
+  )(data)
+);
+
+const simplifyIIFE = treeMap2(
+  when(
+    allPass([
+      propEq('type', 'functionCall'),
+      pathEq(['func', 'type'], 'functionDef')
+      // converge(eqBy(length), [prop('children'), path(['func', 'args'])])
+    ]),
+    ({func, children}) => {
+      if (children.length >= func.args.length) {
+        return func.args.reduce(
+          (res, value, i) =>
+            treeReplace({type: 'id', value}, simplifyIIFE(children[i]), res),
+          func.children[0]
+        );
+      } else {
+        return {
+          type: 'functionDef',
+          args: drop(children.length, func.args),
+          children: [
+            children.reduce(
+              (res, value, i) =>
+                treeReplace(
+                  {type: 'id', value: func.args[i]},
+                  simplifyIIFE(value),
+                  res
+                ),
+              func.children[0]
+            )
+          ]
+        };
+      }
+    }
+  )
+);
+
+const transforms = {
   unpipe,
   unmap,
   unreject,
@@ -312,18 +434,61 @@ const toAST = pipe(
   unIsNil,
   ununnest,
   unpluck,
+  uninc,
+  undec,
+  unMathOp,
+  unconverge,
+  simplifyIIFE,
+  // simplifyIIFE2: simplifyIIFE,
   simplifyNot
-);
+};
+
+const toAST = (activeTransforms, str) =>
+  pipe(
+    tokenize,
+    reject(propEq('type', 'space')),
+    nest('(', ')'),
+    nest('[', ']'),
+    makeArrays,
+    makeFunctions,
+    head, // todo?
+    ...activeTransforms
+  )(str);
 
 const input = document.querySelector('textarea');
-input.value = `pipe(
-  filter(path(['entitlements', 'PGM_SPECIALIST'])),
-  pluck('_id')
-)`;
-input.onkeyup = () => {
-  const res = toAST(input.value);
+// input.value = `pipe(
+//   filter(path(['entitlements', 'PGM_SPECIALIST'])),
+//   pluck('_id')
+// )`;
+// input.value = `converge(add, [inc, add(5)])`;
+// input.value = `when(gt(10), subtract(5))`;
+if (localStorage.ramdaInput) input.value = localStorage.ramdaInput;
+
+window.compile = input.onkeyup = () => {
+  localStorage.ramdaInput = input.value;
+  const activeTransforms = pipe(
+    toPairs,
+    filter(p => document.querySelector('#' + p[0]).checked),
+    pluck(1)
+  )(transforms);
+  const res = toAST(activeTransforms, input.value);
   console.log(res);
   document.querySelector('pre').innerHTML =
     toJS(res) + '\n\n' + JSON.stringify(res, null, 2);
 };
-input.onkeyup();
+
+document.querySelector('#opts').innerHTML = pipe(
+  keys,
+  map(
+    key =>
+      `<label>
+        <input type="checkbox" id="${key}" onClick="compile()" checked/> ${key}
+      </label>`
+  ),
+  join('<br/>')
+)(transforms);
+
+window.compile();
+input.focus();
+
+// w => gt(10, w) ? ((a, b) => a - b)(5)(w) : w

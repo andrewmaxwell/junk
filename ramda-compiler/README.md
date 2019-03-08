@@ -1,1 +1,1 @@
-Ramda Transpiler - 2018
+Ramda Compiler - 2018

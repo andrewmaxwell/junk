@@ -1,1 +1,1 @@
-Fluid Simulator - 2017
+Navier-Stokes Fluid Simulator - 2017
