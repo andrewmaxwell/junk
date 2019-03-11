@@ -3,7 +3,8 @@
 const {fromPairs, curry} = window.R;
 
 const precendence = {
-  functionDef: 2,
+  functionDef: 1,
+  ternary: 2,
   functionCall: 3,
   '+': 4,
   '-': 4,
@@ -12,7 +13,8 @@ const precendence = {
   '%': 5,
   '||': 6,
   '&&': 7,
-  property: 8
+  '!': 8,
+  property: 10
 };
 const indent = str => str.replace(/\n/g, '\n  ');
 const joinChildren = curry((op, el) =>
@@ -20,6 +22,7 @@ const joinChildren = curry((op, el) =>
 );
 
 const toJSMappings = {
+  program: joinChildren('\n\n'),
   functionDef: el =>
     (el.args.length === 1 ? el.args.join(', ') : `(${el.args.join(', ')})`) +
     ' => ' +
@@ -36,13 +39,22 @@ const toJSMappings = {
   string: el => `'${el.value}'`,
   id: el => el.value,
   number: el => el.value,
-  property: el => toJS(el.parent, el) + '.' + el.value,
-  object: () => `{}`,
+  boolean: el => el.value,
+  property: el =>
+    toJS(el.parent, el) +
+    (typeof el.value === 'string'
+      ? '.' + el.value
+      : el.value.type === 'string'
+      ? '.' + el.value.value
+      : `[${toJS(el.value, el)}]`),
+  object: el => `{${joinChildren(', ', el)}}`,
   '!': el => '!' + toJS(el.children[0], el),
   ...fromPairs(
     [
       '||',
       '&&',
+      '==',
+      '!=',
       '===',
       '!==',
       '+',
@@ -55,11 +67,23 @@ const toJSMappings = {
       '<=',
       '%'
     ].map(o => [o, joinChildren(` ${o} `)])
-  )
+  ),
+  ternary: el =>
+    toJS(el.children[0], el) +
+    ' ? ' +
+    toJS(el.children[1], el) +
+    ' : ' +
+    toJS(el.children[2], el),
+  spread: el => `...${toJS(el.value, el)}`,
+  pair: el =>
+    `${
+      el.key.type === 'string' ? el.key.value : `[${toJS(el.key, el)}]`
+    }: ${toJS(el.value, el)}`,
+  comment: el => `//${el.value}`
 };
 
 export const toJS = (el, parent) => {
-  if (!el || !el.type) return '/*' + JSON.stringify(el) + '*/';
+  if (!el || !toJSMappings[el.type]) return '/*' + JSON.stringify(el) + '*/';
   const syntax = toJSMappings[el.type](el);
   return parent &&
     parent.type !== el.type &&
