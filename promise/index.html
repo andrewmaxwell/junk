@@ -1,0 +1,45 @@
+<body><script>
+console.clear();
+
+// function MyPromise(func) {
+//   let thens = [];
+//   func(val => thens.forEach(f => f(val)));
+//   this.then = nextFunc =>
+// new MyPromise(resolve => {
+//   thens.push(input => {
+//     var out = nextFunc(input);
+//     return out && out.then ? out.then(resolve) : resolve(out);
+//   });
+// });
+// }
+
+class MyPromise {
+  constructor(func) {
+    this.thens = [];
+    func(val => this.thens.forEach(f => f(val)));
+  }
+  then(nextFunc) {
+    return new MyPromise(resolve => {
+      this.thens.push(input => {
+        var out = nextFunc(input);
+        return out && out.then ? out.then(resolve) : resolve(out);
+      });
+    });
+  }
+}
+
+const delay = msg =>
+  new MyPromise(res => {
+    setTimeout(() => res(msg), 1000);
+  });
+
+const prom = delay('You did it!').then(val => {
+  console.log(val);
+  return delay('Yay!');
+});
+prom.then(val => console.log(val));
+prom
+  .then(val => console.log(val.toUpperCase()) || 'done')
+  .then(m => console.log(m));
+</script>
+</body>

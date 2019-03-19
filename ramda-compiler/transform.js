@@ -45,29 +45,6 @@ when(gt(10), subtract(5))
 //   when(is(Object), map(treeMap(func)), func(data))
 // );
 
-const unpipe = treeMap(
-  when(
-    both(propEq('type', 'functionCall'), pathEq(['func', 'value'], 'pipe')),
-    el => ({
-      type: 'functionDef',
-      args: ['p'],
-      children: [
-        el.children.reduce(
-          (res, el) =>
-            el.children
-              ? assoc(
-                  'children',
-                  el.children.filter(c => c.type !== ',').concat(res),
-                  el
-                )
-              : {type: 'functionCall', func: el, children: [res]},
-          {type: 'id', value: 'p'}
-        )
-      ]
-    })
-  )
-);
-
 const ramdaFuncs = {
   // (k, d) => d[k]
   prop: {
@@ -582,6 +559,23 @@ const ramdaFuncs = {
         children: [{type: 'id', value: 'b'}]
       }
     ]
+  },
+
+  // (e, a) => a.concat(e)
+  append: {
+    type: 'functionDef',
+    args: ['e', 'a'],
+    children: [
+      {
+        type: 'functionCall',
+        func: {
+          type: 'property',
+          parent: {type: 'id', value: 'a'},
+          value: 'concat'
+        },
+        children: [{type: 'id', value: 'e'}]
+      }
+    ]
   }
 
   // over,
@@ -607,6 +601,29 @@ const ramdaFuncs = {
   // propSatisfies,
   // drop
 };
+
+const unpipe = treeMap(
+  when(
+    both(propEq('type', 'functionCall'), pathEq(['func', 'value'], 'pipe')),
+    el => ({
+      type: 'functionDef',
+      args: ['p'],
+      children: [
+        el.children.reduce(
+          (res, el) =>
+            el.children
+              ? assoc(
+                  'children',
+                  el.children.filter(c => c.type !== ',').concat(res),
+                  el
+                )
+              : {type: 'functionCall', func: el, children: [res]},
+          {type: 'id', value: 'p'}
+        )
+      ]
+    })
+  )
+);
 
 const unpather = el =>
   el.children[0].children.reduce(
@@ -636,6 +653,33 @@ const unpath = treeMap(
     )
   )
 );
+
+// (a, v, d) => {...(d || {}), [a[0]]: {...(d[a[0]] || {}), [a[1]]: v}}
+// assocPath([], 5) // d => 5
+// assocPath(['things'], 6) // d => {...d, things: 6}
+// assocPath(['ab', 'cd', 'ef'], '123') // d => {...d, ab: {...d.ab, cd: {...d.ab.cd, ef: v}}}
+// const unassocPath = treeMap(
+//   pathEq(['func', 'value'], 'assocPath'),
+//   ({children: [arr, value, data]}) => {
+//     let ob = {type: 'id', value: 'v'};
+//     // for (var i = arr.length - 1; i >= 0; i--) {
+//     //   ob = {
+//     //     type: 'object',
+//     //     children: [{
+//     //       type: 'spread',
+//     //       value: {
+//     //         type:
+//     //       }
+//     //     }]
+//     //   }
+//     // }
+//     return {
+//       type: 'functionDef',
+//       args: ['a', 'v', 'd'],
+//       children: [ob]
+//     };
+//   }
+// );
 
 // (con, arr, data) => con(arr[0](data), ...)
 const unconverge = treeMap(
