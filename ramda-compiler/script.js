@@ -1,9 +1,11 @@
 'use strict';
 console.clear();
 
+import {tokenize} from './tokenize.js';
 import {toJS} from './toJS.js';
 import {parse} from './parser.js';
 import {transform} from './transform.js';
+const {pipe} = window.R;
 
 /*
 
@@ -22,11 +24,16 @@ window.compile = input.onkeyup = () => {
   if (!input.value) return;
   localStorage.ramdaInput = input.value;
   try {
-    const res = transform(parse(input.value));
+    const res = pipe(
+      tokenize,
+      parse,
+      transform
+    )(input.value);
     document.querySelector('pre').innerHTML =
       toJS(res) + '\n\n' + JSON.stringify(res, null, 2);
   } catch (e) {
-    document.querySelector('pre').innerHTML = e;
+    document.querySelector('pre').innerHTML = e.stack;
+    throw e;
   }
 };
 

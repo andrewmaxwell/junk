@@ -41,10 +41,6 @@ when(gt(10), subtract(5))
 
 */
 
-// const treeMap = curry((func, data) =>
-//   when(is(Object), map(treeMap(func)), func(data))
-// );
-
 const ramdaFuncs = {
   // (k, d) => d[k]
   prop: {
@@ -578,8 +574,12 @@ const ramdaFuncs = {
     ]
   }
 
-  // over,
-  // concat,
+  // arr => ({get: path(arr), set: assocPath(arr)})
+  // lensPath: {}
+
+  // (lens, func, data) => lens.set(func(lens.get(data)), data)
+  // over: {}
+
   // curry,
   // pathEq,
   // reduce,

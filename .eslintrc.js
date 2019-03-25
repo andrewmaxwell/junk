@@ -12,14 +12,14 @@ module.exports = {
     'plugin:react/recommended',
     'plugin:sonarjs/recommended',
   ],
-  plugins: ['prettier', 'react', 'sonarjs', 'html'],
+  plugins: ['html', 'prettier', 'react', 'sonarjs'],
   rules: {
     'no-console': 'off',
-    'prettier/prettier': ['error', {singleQuote: true, bracketSpacing: false}],
-    'dot-notation': 'error',
-    'quote-props': ['error', 'as-needed'],
-    'arrow-body-style': ['error', 'as-needed'],
-    'object-shorthand': 'error',
+    'prettier/prettier': ['warn', {singleQuote: true, bracketSpacing: false}],
+    'dot-notation': 'warn',
+    'quote-props': ['warn', 'as-needed'],
+    'arrow-body-style': ['warn', 'as-needed'],
+    'object-shorthand': 'warn',
     'sonarjs/cognitive-complexity': 'off'
   }
 };

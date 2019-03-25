@@ -79,10 +79,12 @@ const toJSMappings = {
     `${
       el.key.type === 'string' ? el.key.value : `[${toJS(el.key, el)}]`
     }: ${toJS(el.value, el)}`,
-  comment: el => `//${el.value}`
+  comment: el => `//${el.value}`,
+  argList: el => `(${joinChildren(', ', el)})`
 };
 
 export const toJS = (el, parent) => {
+  if (Array.isArray(el)) return el.map(e => toJS(e, parent)).join('~~~');
   if (!el || !toJSMappings[el.type]) return '/*' + JSON.stringify(el) + '*/';
   const syntax = toJSMappings[el.type](el);
   return parent &&

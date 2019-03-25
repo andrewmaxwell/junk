@@ -8,7 +8,6 @@ const {
   prop,
   when,
   ifElse,
-  always,
   over,
   concat,
   last,
@@ -18,35 +17,17 @@ const {
   append,
   __,
   lensPath,
-  isEmpty,
-  prepend,
   slice,
-  head
+  head,
+  allPass,
+  pathEq,
+  length,
+  nth,
+  both,
+  contains,
+  equals,
+  lensIndex
 } = window.R;
-
-const tokenTypes = [
-  {type: 'comment', regex: /^\/\/(.+)/},
-  {type: 'space', regex: /^\s+/},
-  {type: 'id', regex: /^[a-z]\w*/gi},
-  {type: 'string', regex: /^'([^']*)'/},
-  {type: 'number', regex: /^(\d+)/},
-  {type: '(', regex: /^\(/},
-  {type: ')', regex: /^\)/},
-  {type: '[', regex: /^\[/},
-  {type: ']', regex: /^\]/},
-  {type: ',', regex: /^,/}
-];
-
-const tokenize = ifElse(isEmpty, always([]), str => {
-  var {type, regex} = tokenTypes.find(t => t.regex.test(str)) || {};
-  if (!type) throw new Error(`No matching token for "${str}"`);
-  var m = str.match(regex);
-  return pipe(
-    slice(m[0].length, Infinity),
-    tokenize,
-    prepend({type, value: m[1] || m[0]})
-  )(str);
-});
 
 const nest = (start, end) =>
   treeMap(
@@ -70,19 +51,18 @@ const nest = (start, end) =>
     )
   );
 
-const makeFunctions = treeMap(
+const parseFunctionCalls = treeMap(
   when(
     is(Array),
     reduce(
       (res, el) =>
-        res.length && el.type === '(' && last(res).type === 'id'
+        res.length &&
+        el.type === 'argList' &&
+        ['id', 'property'].includes(last(res).type)
           ? init(res).concat({
               type: 'functionCall',
               func: last(res),
-              children: pipe(
-                prop('children'),
-                reject(propEq('type', ','))
-              )(el)
+              children: el.children
             })
           : res.concat(el),
       []
@@ -90,23 +70,109 @@ const makeFunctions = treeMap(
   )
 );
 
-const makeArrays = treeMap(
+const parseList = (tokenType, type) =>
+  treeMap(
+    when(
+      propEq('type', tokenType),
+      pipe(
+        prop('children'),
+        reject(propEq('type', ',')),
+        assoc('children', __, {type})
+      )
+    )
+  );
+
+const parseProperties = treeMap(
   when(
-    propEq('type', '['),
-    pipe(
-      prop('children'),
-      reject(propEq('type', ',')),
-      assoc('children', __, {type: 'array'})
+    is(Array),
+    reduce(
+      (res, el) =>
+        res.length > 1 && last(res).type === '.'
+          ? slice(0, -2, res).concat({
+              type: 'property',
+              parent: nth(-2, res),
+              value: el.value
+            })
+          : res.concat(el),
+      []
     )
   )
 );
 
+const parseIndexes = treeMap(
+  when(
+    is(Array),
+    reduce(
+      (res, el) =>
+        res.length && el.type === 'array' && last(res).type === 'id'
+          ? init(res).concat({
+              type: 'property',
+              parent: last(res),
+              value: el.children[0]
+            })
+          : res.concat(el),
+      []
+    )
+  )
+);
+
+const parseFunctionDefs = treeMap(
+  when(
+    allPass([is(Array), length, pathEq([1, 'type'], '=>')]),
+    ([args, , ...children]) => [
+      {
+        type: 'functionDef',
+        args: args.children ? args.children.map(o => o.value) : [args.value],
+        children
+      }
+    ]
+  )
+);
+
+const parseNot = treeMap(
+  when(
+    both(is(Array), contains({type: '!', value: '!'})),
+    reduce(
+      (res, el) =>
+        res.length && last(res).type === '!'
+          ? init(res).concat({type: '!', children: [el]})
+          : res.concat(el),
+      []
+    )
+  )
+);
+
+const parseInfix = type =>
+  treeMap(
+    when(
+      both(is(Array), contains({type, value: type})),
+      pipe(
+        reduce(
+          (res, el) =>
+            equals(el, {type, value: type})
+              ? append([], res)
+              : over(lensIndex(res.length - 1), append(el), res),
+          [[]]
+        ),
+        children => [{type, children}]
+      )
+    )
+  );
+
 export const parse = pipe(
-  tokenize,
   reject(propEq('type', 'space')),
   nest('(', ')'),
   nest('[', ']'),
-  makeArrays,
-  makeFunctions,
+  nest('{', '}'),
+  parseProperties,
+  parseIndexes,
+  parseList('[', 'array'),
+  parseList('(', 'argList'),
+  parseFunctionCalls,
+  parseFunctionDefs,
+  parseNot,
+  parseInfix('||'),
+  parseInfix('==='),
+  parseInfix('+'),
   ifElse(c => c.length > 1, children => ({type: 'program', children}), head)
 );
