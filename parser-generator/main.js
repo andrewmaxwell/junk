@@ -1,88 +1,59 @@
 import {tokenize} from '../ramda-compiler/tokenize.js';
-const {reject, propEq, tap, pipe} = window.R;
+import {generateParser} from './generateParser.js';
+const {reject, propEq, tap, pipe, append} = window.R;
 
-const match = (defs, type, tokens, stack = []) =>
-  defs[type]
-    ? {type, ...defs[type](defs, tokens, stack.concat(type))}
-    : tokens.length && type === tokens[0].type
-    ? tokens[0]
-    : {error: `Expected ${type}`, stack};
+const parse = generateParser({
+  main: 'statement+ EOF',
+  statement: 'declaration|exprStatement|returnStatement',
+  declaration: 'declarationType id = expr ;',
+  declarationType: 'var|let|const',
+  dottable: 'object|array|parenthetical|property|index|functionCall|id|string',
+  expr: 'functionDef|infixGroup|assignment|dottable|number|boolean',
+  exprStatement: 'expr ;',
+  returnStatement: 'return expr ;',
 
-const seq = (arr, min = 1, max = 1) => (defs, tokens, stack) => {
-  const children = [];
-  let tokenIndex = 0;
-  for (let j = 0; j < max && j < tokens.length; j++) {
-    for (let i = 0; i < tokens.length && i < arr.length; i++) {
-      const child = match(defs, arr[i], tokens.slice(tokenIndex), stack);
-      if (child.error) {
-        if (j >= min) break;
-        else return child;
-      }
-      children.push(child);
-      tokenIndex += child.length || 1;
-    }
-  }
-  return {children, length: tokenIndex};
-};
+  functionDef: 'args => exprOrBlock',
+  args: 'id|argList',
+  argList: '( commaIdList? )',
+  commaIdList: 'id commaId*',
+  commaId: ', id',
 
-const or = arr => (defs, tokens, stack) => {
-  const errors = [];
-  for (let i = 0; tokens.length && i < arr.length; i++) {
-    if (stack.includes(arr[i])) continue;
-    const m = match(defs, arr[i], tokens, stack);
-    if (m.error) errors.push(m.error);
-    else return m;
-  }
-  return {error: errors};
-};
+  exprOrBlock: 'expr|block',
+  block: '{ statement+ }',
 
-const defs = {
-  infixOp: or(['+', '-', '*', '/', '<', '<=', '>', '>=']),
-  // assignmentOp: or(['=', '+=', '-=', '*=', '/=', '&=', '|=']),
-  declarationType: or(['var', 'let', 'const']),
-  expr: or([
-    'functionDef',
-    'infixGroup',
-    'assignment',
-    'array',
-    'functionCall',
+  infixGroup: 'expr infixOpExpr+',
+  infixOpExpr: 'infixOp expr',
+  infixOp: '+|-|*|/|<|<=|>|>=|===|==',
 
-    'id',
-    'number',
-    'string',
-    'boolean'
-  ]),
-  statement: or(['declaration', 'expr']), // if, for, while, try
+  assignment: 'id assignmentOp expr',
+  assignmentOp: '=|+=|-=|*=|/=',
 
-  // functionCall: seq(['expr', '(', 'commaExprList', ')']),
+  array: '[ commaExprList? ]',
+  commaExprList: 'expr commaExpr*',
+  commaExpr: ', expr',
 
-  infixOpList: seq(['infixOp', 'expr'], 1, Infinity),
-  infixGroup: seq(['expr', 'infixOpList']),
+  object: '{ keyValPairList? }',
+  keyValPairList: 'keyVal commaKeyVal*',
+  keyVal: 'id : expr',
+  commaKeyVal: ', keyVal',
 
-  array: seq(['[', ']']),
-
-  anyNumCommaId: seq([',', 'id'], 0, Infinity),
-  commaIdList: seq(['id', 'anyNumCommaId'], 0, 1),
-  argList: seq(['(', 'commaIdList', ')']),
-  args: or(['id', 'argList']),
-
-  functionDef: seq(['args', '=>', 'expr']),
-  assignment: seq(['id', 'assignmentOp', 'expr']),
-  declaration: seq(['declarationType', 'id', '=', 'expr']),
-
-  program: seq(['statement', ';'], 1, Infinity)
-};
+  parenthetical: '( expr )',
+  functionCall: 'dottable ( commaExprList? )',
+  property: 'dottable . id',
+  index: 'dottable [ expr ]'
+});
 
 const textarea = document.querySelector('textarea');
-textarea.oninput = window.parse = () => {
+textarea.oninput = () => {
   document.querySelector('pre').innerHTML = pipe(
     tap(v => (localStorage.parseInput = v)),
     tokenize,
     reject(propEq('type', 'space')),
-    tap(d => console.log('tokens', d)),
-    t => match(defs, 'program', t),
+    append({type: 'EOF', value: 'EOF'}),
+    // tap(d => console.log('tokens', d)),
+    parse,
     d => JSON.stringify(d, null, 2)
   )(textarea.value);
 };
 textarea.value = localStorage.parseInput;
-window.parse();
+textarea.oninput();

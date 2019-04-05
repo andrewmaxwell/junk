@@ -1,11 +1,16 @@
 const {ifElse, isEmpty, always, pipe, slice, prepend} = window.R;
 
+// const esc = string => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const tokenTypes = [
   {type: 'comment', regex: /^\/\/(.+)/},
   {type: 'number', regex: /^\d+/},
   {type: 'space', regex: /^\s+/},
   {type: 'boolean', regex: /^true|false/},
-  ...'const var let function if else for while try catch class do ( ) [ ] { } , => ... . === == = !== != ! || |= | && &= & += ++ + -= -- - **= ** *= * /= / ^= ^ : ; >= > <= <'.split(
+  ...'const var let function if else for while try catch class do return break continue'
+    .split(' ')
+    .map(type => ({type, regex: new RegExp(`^${type}\\b`)})),
+  ...'( ) [ ] { } , => ... . === == = !== != ! || |= | && &= & += ++ + -= -- - **= ** *= * /= / ^= ^ : ; >= > <= <'.split(
     ' '
   ),
   {type: 'id', regex: /^[a-z]\w*/gi},
