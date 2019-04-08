@@ -16,7 +16,7 @@
     "ramda": "^0.26.1"
   },
   "scripts": {
-    "dev": "live-server --ignore=.git",
+    "dev": "npm run gen && live-server --ignore=.git/**",
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "eslint --ext .html,.js . --fix",
     "gen": "node generateHome"
