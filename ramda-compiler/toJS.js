@@ -3,7 +3,6 @@
 const {fromPairs, curry} = window.R;
 
 const precendence = {
-  functionDef: 1,
   ternary: 2,
   functionCall: 3,
   '+': 4,

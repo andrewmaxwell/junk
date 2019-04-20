@@ -1,7 +1,7 @@
 'use strict';
-console.clear();
 
 import {treeMap} from './utils.js';
+import {parse} from './parser.js';
 
 const {
   pipe,
@@ -26,7 +26,6 @@ const {
   isEmpty,
   allPass,
   propSatisfies,
-  drop,
   values
 } = window.R;
 
@@ -41,566 +40,237 @@ when(gt(10), subtract(5))
 
 */
 
-const ramdaFuncs = {
-  // (k, d) => d[k]
-  prop: {
-    type: 'functionDef',
-    args: ['k', 'd'],
-    children: [
-      {
-        type: 'property',
-        parent: {type: 'id', value: 'd'},
-        value: {type: 'id', value: 'k'}
-      }
-    ]
-  },
-
-  // (f, d) => d.xxx(v => !f(v))
-  ...map(
-    value => ({
-      type: 'functionDef',
-      args: ['f', 'd'],
-      children: [
-        {
-          type: 'functionCall',
-          func: {
-            type: 'property',
-            parent: {type: 'id', value: 'd'},
-            value
-          },
-          children: [
-            {
-              type: 'functionDef',
-              args: ['r'],
-              children: [
-                {
-                  type: '!',
-                  children: [
-                    {
-                      type: 'functionCall',
-                      func: {type: 'id', value: 'f'},
-                      children: [{type: 'id', value: 'r'}]
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    }),
-    {
-      reject: 'filter',
-      none: 'every'
-    }
-  ),
-
-  // (f, d) => d.xxx(f)
-  ...map(
-    value => ({
-      type: 'functionDef',
-      args: ['f', 'd'],
-      children: [
-        {
-          type: 'functionCall',
-          func: {
-            type: 'property',
-            parent: {type: 'id', value: 'd'},
-            value
-          },
-          children: [{type: 'id', value: 'f'}]
-        }
-      ]
-    }),
-    {
-      filter: 'filter',
-      map: 'map',
-      any: 'some',
-      all: 'every'
-    }
-  ),
-
-  // (p, d) => d.map(u => u[p])
-  pluck: {
-    type: 'functionDef',
-    args: ['p', 'd'],
-    children: [
-      {
-        type: 'functionCall',
-        func: {
-          type: 'property',
-          parent: {type: 'id', value: 'd'},
-          value: 'map'
-        },
-        children: [
-          {
-            type: 'functionDef',
-            args: ['u'],
-            children: [
-              {
-                type: 'property',
-                parent: {type: 'id', value: 'u'},
-                value: {type: 'id', value: 'p'}
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
-
-  // n => n === null || n === undefined
-  isNil: {
-    type: 'functionDef',
-    args: ['n'],
-    children: [
-      {
-        type: '||',
-        children: [
-          {
-            type: '===',
-            children: [{type: 'id', value: 'n'}, {type: 'id', value: 'null'}]
-          },
-          {
-            type: '===',
-            children: [
-              {type: 'id', value: 'n'},
-              {type: 'id', value: 'undefined'}
-            ]
-          }
-        ]
-      }
-    ]
-  },
-
-  // a => a.flat()
-  unnest: {
-    type: 'functionDef',
-    args: ['u'],
-    children: [
-      {
-        type: 'functionCall',
-        func: {
-          type: 'property',
-          parent: {type: 'id', value: 'u'},
-          value: 'flat'
-        },
-        children: []
-      }
-    ]
-  },
-
-  // x => x + 1
-  ...map(
-    type => ({
-      type: 'functionDef',
-      args: ['x'],
-      children: [
-        {
-          type,
-          children: [{type: 'id', value: 'x'}, {type: 'number', value: '1'}]
-        }
-      ]
-    }),
-    {inc: '+', dec: '-'}
-  ),
-
-  // (p, f, w) => p(w) ? f(w) : w;
-  when: {
-    type: 'functionDef',
-    args: ['p', 'f', 'w'],
-    children: [
-      {
-        type: 'ternary',
-        children: [
-          {
-            type: 'functionCall',
-            func: {type: 'id', value: 'p'},
-            children: [{type: 'id', value: 'w'}]
-          },
-          {
-            type: 'functionCall',
-            func: {type: 'id', value: 'f'},
-            children: [{type: 'id', value: 'w'}]
-          },
-          {type: 'id', value: 'w'}
-        ]
-      }
-    ]
-  },
-
-  // (p, f, w) => p(w) ? w : f(w);
-  unless: {
-    type: 'functionDef',
-    args: ['p', 'f', 'w'],
-    children: [
-      {
-        type: 'ternary',
-        children: [
-          {
-            type: 'functionCall',
-            func: {type: 'id', value: 'p'},
-            children: [{type: 'id', value: 'w'}]
-          },
-          {type: 'id', value: 'w'},
-          {
-            type: 'functionCall',
-            func: {type: 'id', value: 'f'},
-            children: [{type: 'id', value: 'w'}]
-          }
-        ]
-      }
-    ]
-  },
-
-  // (p, t, e, d) => p(d) ? t(d) : e(d)
-  ifElse: {
-    type: 'functionDef',
-    args: ['p', 't', 'e', 'd'],
-    children: [
-      {
-        type: 'ternary',
-        children: [
-          {
-            type: 'functionCall',
-            func: {type: 'id', value: 'p'},
-            children: [{type: 'id', value: 'd'}]
-          },
-          {
-            type: 'functionCall',
-            func: {type: 'id', value: 't'},
-            children: [{type: 'id', value: 'd'}]
-          },
-          {
-            type: 'functionCall',
-            func: {type: 'id', value: 'e'},
-            children: [{type: 'id', value: 'd'}]
-          }
-        ]
-      }
-    ]
-  },
-
-  ...map(
-    type => ({
-      type: 'functionDef',
-      args: ['a', 'b'],
-      children: [
-        {type, children: [{type: 'id', value: 'a'}, {type: 'id', value: 'b'}]}
-      ]
-    }),
-    {
-      add: '+',
-      subtract: '-',
-      multiply: '*',
-      divide: '/',
-      gt: '>',
-      gte: '>=',
-      lt: '<',
-      lte: '<=',
-      modulo: '%',
-      or: '||',
-      and: '&&'
-    }
-  ),
-
-  // n => !n
-  not: {
-    type: 'functionDef',
-    args: ['n'],
-    children: [
-      {
-        type: '!',
-        children: [{type: 'id', value: 'n'}]
-      }
-    ]
-  },
-
-  ...map(
-    value => ({
-      type: 'functionDef',
-      args: [],
-      children: [{type: 'boolean', value}]
-    }),
-    {T: true, F: false}
-  ),
-
-  // (a, d) => a
-  always: {
-    type: 'functionDef',
-    args: ['a', 'd'],
-    children: [{type: 'id', value: 'a'}]
-  },
-
-  // a => a
-  identity: {
-    type: 'functionDef',
-    args: ['a'],
-    children: [{type: 'id', value: 'a'}]
-  },
-
-  // (k, v, d) => ({...d, k: v})
-  assoc: {
-    type: 'functionDef',
-    args: ['k', 'v', 'd'],
-    children: [
-      {
-        type: 'object',
-        children: [
-          {
-            type: 'spread',
-            value: {type: 'id', value: 'd'}
-          },
-          {
-            type: 'pair',
-            key: {type: 'id', value: 'k'},
-            value: {type: 'id', value: 'v'}
-          }
-        ]
-      }
-    ]
-  },
-
-  // (k, v, d) => equals(d[k], v)
-  propEq: {
-    type: 'functionDef',
-    args: ['k', 'v', 'd'],
-    children: [
-      {
-        // type: 'functionCall',
-        // func: {type: 'id', value: 'equals'},
-        type: '==',
-        children: [
-          {
-            type: 'property',
-            parent: {type: 'id', value: 'd'},
-            value: {type: 'id', value: 'k'}
-          },
-          {type: 'id', value: 'v'}
-        ]
-      }
-    ]
-  },
-
-  // a => a[0]
-  head: {
-    type: 'functionDef',
-    args: ['a'],
-    children: [
-      {
-        type: 'property',
-        parent: {type: 'id', value: 'a'},
-        value: {type: 'number', value: 0}
-      }
-    ]
-  },
-  // a => a[a.length - 1]
-  last: {
-    type: 'functionDef',
-    args: ['a'],
-    children: [
-      {
-        type: 'property',
-        parent: {type: 'id', value: 'a'},
-        value: {
-          type: '-',
-          children: [
-            {
-              type: 'property',
-              parent: {type: 'id', value: 'a'},
-              value: 'length'
-            },
-            {
-              type: 'number',
-              value: 1
-            }
-          ]
-        }
-      }
-    ]
-  },
-  // a => a.slice(0, -1)
-  init: {
-    type: 'functionDef',
-    args: ['a'],
-    children: [
-      {
-        type: 'functionCall',
-        func: {
-          type: 'property',
-          parent: {type: 'id', value: 'a'},
-          value: 'slice'
-        },
-        children: [{type: 'number', value: 0}, {type: 'number', value: -1}]
-      }
-    ]
-  },
-  // a => a.slice(1)
-  tail: {
-    type: 'functionDef',
-    args: ['a'],
-    children: [
-      {
-        type: 'functionCall',
-        func: {
-          type: 'property',
-          parent: {type: 'id', value: 'a'},
-          value: 'slice'
-        },
-        children: [{type: 'number', value: 1}]
-      }
-    ]
-  },
-  // a => a.slice(n)
-  drop: {
-    type: 'functionDef',
-    args: ['n', 'a'],
-    children: [
-      {
-        type: 'functionCall',
-        func: {
-          type: 'property',
-          parent: {type: 'id', value: 'a'},
-          value: 'slice'
-        },
-        children: [{type: 'id', value: 'n'}]
-      }
-    ]
-  },
-
-  // (f, g, d) => f(d) && g(d)
-  ...map(
-    type => ({
-      type: 'functionDef',
-      args: ['f', 'g', 'd'],
-      children: [
-        {
-          type,
-          children: [
-            {
-              type: 'functionCall',
-              func: {type: 'id', value: 'f'},
-              children: [{type: 'id', value: 'd'}]
-            },
-            {
-              type: 'functionCall',
-              func: {type: 'id', value: 'g'},
-              children: [{type: 'id', value: 'd'}]
-            }
-          ]
-        }
-      ]
-    }),
-    {both: '&&', either: '||'}
-  ),
-
-  // (t, d) => d != null && d.constructor == t
-  is: {
-    type: 'functionDef',
-    args: ['t', 'd'],
-    children: [
-      {
-        type: '&&',
-        children: [
-          {
-            type: '!=',
-            children: [{type: 'id', value: 'd'}, {type: 'id', value: 'null'}]
-          },
-          {
-            type: '===',
-            children: [
-              {
-                type: 'property',
-                parent: {type: 'id', value: 'd'},
-                value: 'constructor'
-              },
-              {type: 'id', value: 't'}
-            ]
-          }
-        ]
-      }
-    ]
-  },
-
-  // (f, d) => !f(d)
-  complement: {
-    type: 'functionDef',
-    args: ['f', 'd'],
-    children: [
-      {
-        type: '!',
-        children: [
-          {
-            type: 'functionCall',
-            func: {type: 'id', value: 'f'},
-            children: [{type: 'id', value: 'd'}]
-          }
-        ]
-      }
-    ]
-  },
-
-  // (a, b) => a.concat(b)
-  concat: {
-    type: 'functionDef',
-    args: ['a', 'b'],
-    children: [
-      {
-        type: 'functionCall',
-        func: {
-          type: 'property',
-          parent: {type: 'id', value: 'a'},
-          value: 'concat'
-        },
-        children: [{type: 'id', value: 'b'}]
-      }
-    ]
-  },
-
-  // (e, a) => a.concat(e)
-  append: {
-    type: 'functionDef',
-    args: ['e', 'a'],
-    children: [
-      {
-        type: 'functionCall',
-        func: {
-          type: 'property',
-          parent: {type: 'id', value: 'a'},
-          value: 'concat'
-        },
-        children: [{type: 'id', value: 'e'}]
-      }
-    ]
-  }
-
-  // arr => ({get: path(arr), set: assocPath(arr)})
-  // lensPath: {}
-
-  // (lens, func, data) => lens.set(func(lens.get(data)), data)
-  // over: {}
-
-  // curry,
-  // pathEq,
-  // reduce,
-  // equals,
-  // append,
-  // length,
-  // __,
-  // call,
-  // defaultTo,
-  // of,
-  // lensPath,
-  // isEmpty,
-  // prepend,
-  // slice,
-  // allPass,
-  // toPairs,
-  // keys,
-  // join,
-  // propSatisfies,
-  // drop
-};
+const ramdaFuncs = map(parse, {
+  add: '(a, b) => a + b',
+  // addIndex
+  // adjust
+  all: '(f, d) => d.every(f)',
+  allPass: '(a, d) => a.every(f => f(d))',
+  always: '(a, d) => a',
+  and: '(a, b) => a && b',
+  any: '(f, d) => d.some(f)',
+  anyPass: '(a, d) => a.some(f => f(d))',
+  append: '(e, a) => a.concat(e)',
+  // apply: ('(a, f) => f(...a)')
+  applyTo: '(v, f) => f(v)',
+  // ascend
+  assoc: '(k, v, d) => ({...d, [k]: v})',
+  // assocPath,
+  both: '(f, g, d) => f(d) && g(d)',
+  call: '(f, v) => f(v)',
+  chain: '(f, d) => d.flatMap(f)',
+  clamp: '(a, b, n) => Math.max(a, Math.min(b, n))',
+  // clone
+  // comparator
+  complement: '(f, d) => !f(d)',
+  // compose
+  // composeWith
+  concat: '(a, b) => a.concat(b)',
+  // cond
+  // countBy
+  // curry
+  dec: 'x => x - 1',
+  defaultTo: '(d, v) => v === null || v === undefined ? d : v',
+  // descend
+  // difference: ('(a, b) => [...new Set(a)].filter(v => !b.includes(v))'),
+  // differenceWith: ('(f, a, b) => [...new Set(a.map(f))].filter(v => !b.includes(f(v))'),
+  // dissoc
+  // dissocPath
+  divide: '(a, b) => a / b',
+  drop: '(n, a) => a.slice(n)',
+  dropLast: '(n, a) => a.slice(0, -n)',
+  // dropLastWhile
+  // dropRepeats
+  // dropRepeatsWith
+  // dropWhile
+  either: '(f, g, d) => f(d) || g(d)',
+  // empty
+  // endsWith
+  // eqBy
+  // eqProps
+  // equals
+  // evolve
+  F: '() => false',
+  filter: '(f, d) => d.filter(f)',
+  find: '(f, d) => f.find(f)',
+  findIndex: '(f, d) => f.findIndex(f)',
+  // findLast
+  // findLastIndex
+  // flatten
+  // flip
+  forEach: '(f, d) => d.forEach(f)', // not quite accurate, shouldn't skip empty
+  forEachObjIndexed: '(f, d) => d.forEach(f)',
+  // fromPairs
+  // groupBy
+  // groupWith
+  gt: '(a, b) => a > b',
+  gte: '(a, b) => a >= b',
+  has: '(p, o) => o.hasOwnProperty(p)',
+  // hasPath
+  head: 'a => a[0]',
+  identical: '(a, b) => a === b',
+  identity: 'a => a',
+  ifElse: '(p, t, e, d) => p(d) ? t(d) : e(d)',
+  inc: 'x => x + 1',
+  includes: '(v, d) => d.includes(v)', // should be by equal
+  // indexBy
+  indexOf: '(v, a) => a.indexOf(v)',
+  init: 'a => a.slice(0, -1)',
+  // innerJoin
+  // insert
+  // insertAll
+  // intersection
+  // intersperse
+  // into
+  // invert
+  // invertObj
+  // invoker
+  is: '(t, d) => d != null && d.constructor == t',
+  // isEmpty
+  isNil: 'n => n === null || n === undefined',
+  join: '(j, d) => d.join(j)',
+  // juxt
+  keys: 'Object.keys',
+  // keysIn
+  last: 'a => a[a.length - 1]',
+  // lastIndexOf
+  length: 'a => a.length',
+  // lens
+  // lensIndex
+  // lensPath
+  // lensProp
+  // lift
+  lt: '(a, b) => a < b',
+  lte: '(a, b) => a <= b',
+  map: '(f, d) => d.map(f)',
+  // mapAccum
+  // mapAccumRight
+  // mapObjIndexed
+  match: '(r, s) => s.match(r)',
+  mathMod: '(m, p) => ((m % p) + p) % p',
+  max: 'Math.max',
+  maxBy: '(f, a, b) => f(a) > f(b) ? a : b',
+  // mean
+  // median
+  // memoizeWith
+  // mergeAll
+  // mergeDeepLeft
+  // mergeDeepRight
+  // mergeDeepWith
+  // mergeDeepWithKey
+  mergeLeft: '(a, b) => Object.assign({}, a, b)',
+  mergeRight: '(a, b) => Object.assign({}, b, a)',
+  // mergeWith
+  // mergeWithKey
+  min: 'Math.min',
+  minBy: '(f, a, b) => f(a) < f(b) ? a : b',
+  modulo: '(a, b) => a % b',
+  // move
+  multiply: '(a, b) => a * b',
+  // negate: ('a => -a'), // doesn't support unary - or negative numbers yet
+  none: '(f, d) => d.every(v => !f(v))',
+  not: 'n => !n',
+  nth: '(i, d) => d[i < 0 ? d.length + i : i]',
+  // nthArg
+  // objOf: ('(p, v) => ({[p]: v})'),
+  of: 'v => [v]',
+  // omit
+  // once
+  or: '(a, b) => a || b',
+  // over
+  pair: '(a, b) => [a, b]',
+  // pathEq
+  // pathOr
+  // pathSatisfies
+  // pick
+  // pickAll
+  // pickBy
+  // pipeWith
+  pluck: '(p, d) => d.map(u => u[p])',
+  prepend: '(v, d) => [v].concat(d)',
+  product: 'a => a.reduce((r, x) => r * x, 1)',
+  // project: '(a, d) => d.map(props(a))',
+  prop: '(k, d) => d[k]',
+  propEq: '(k, v, d) => equals(d[k], v)',
+  propIs: '(t, p, d) => d[p] != null && d[p].constructor == t',
+  propOr: '(e, p, d) => d[p] === undefined ? e : d[p]',
+  props: '(a, d) => a.map(v => d[v])',
+  propSatisfies: '(f, p, d) => f(d[p])',
+  // range: '(f, t) => Array(t - f).fill().map((v, i) => f + i)',
+  reduce: '(f, a, d) => d.reduce(f, a)',
+  // reduceBy
+  // reduced
+  // reduceRight
+  // reduceWhile
+  reject: '(f, d) => d.filter(v => !f(v))',
+  // remove
+  // repeat: '(e, n) => Array(n).fill(e)',
+  // replace
+  // reverse: 'a => a.slice().reverse()',
+  // scan
+  // sequence
+  // set
+  slice: '(n, m, a) => a.slice(n, m)',
+  // sort: '(c, a) => a.slice().sort(c)',
+  // sortBy
+  // sortWith
+  split: '(s, d) => d.split(s)',
+  // splitAt
+  // splitEvery
+  // splitWhen
+  startsWith: '(s, d) => d.startsWith(s)',
+  subtract: '(a, b) => a - b',
+  sum: 'd => d.reduce((a, b) => a + b, 0)',
+  // symmetricDifference
+  // symmetricDifferenceWith
+  T: '() => true',
+  tail: 'a => a.slice(1)',
+  take: '(n, a) => a.slice(0, n)',
+  takeLast: '(n, a) => a.slice(-n)',
+  // takeLastWhile
+  // takeWhile
+  // tap
+  // test
+  then: '(f, p) => p.then(f)',
+  // thunkify
+  // times
+  toLower: 's => s.toLowerCase()',
+  toPairs: 'Object.entries',
+  // toPairsIn
+  // toString
+  toUpper: 's => s.toUpperCase()',
+  // transduce
+  // transpose
+  // traverse
+  trim: 's => s.trim()',
+  // tryCatch
+  // type
+  // unapply
+  // unary
+  // uncurryN
+  // unfold
+  // union
+  // unionWith
+  // uniq
+  // uniqBy
+  // uniqWith
+  unless: '(p, f, w) => p(w) ? w : f(w)',
+  unnest: 'a => a.flat()',
+  // until
+  // update
+  // useWith
+  values: 'Object.values',
+  // valuesIn
+  // view
+  when: '(p, f, w) => p(w) ? f(w) : w'
+  // where
+  // whereEq
+  // without
+  // xprod
+  // zip
+  // zipObj
+  // zipWith
+});
 
 const unpipe = treeMap(
   when(
@@ -653,33 +323,6 @@ const unpath = treeMap(
     )
   )
 );
-
-// (a, v, d) => {...(d || {}), [a[0]]: {...(d[a[0]] || {}), [a[1]]: v}}
-// assocPath([], 5) // d => 5
-// assocPath(['things'], 6) // d => {...d, things: 6}
-// assocPath(['ab', 'cd', 'ef'], '123') // d => {...d, ab: {...d.ab, cd: {...d.ab.cd, ef: v}}}
-// const unassocPath = treeMap(
-//   pathEq(['func', 'value'], 'assocPath'),
-//   ({children: [arr, value, data]}) => {
-//     let ob = {type: 'id', value: 'v'};
-//     // for (var i = arr.length - 1; i >= 0; i--) {
-//     //   ob = {
-//     //     type: 'object',
-//     //     children: [{
-//     //       type: 'spread',
-//     //       value: {
-//     //         type:
-//     //       }
-//     //     }]
-//     //   }
-//     // }
-//     return {
-//       type: 'functionDef',
-//       args: ['a', 'v', 'd'],
-//       children: [ob]
-//     };
-//   }
-// );
 
 // (con, arr, data) => con(arr[0](data), ...)
 const unconverge = treeMap(
@@ -755,11 +398,15 @@ const simplifyIIFE = treeMap(
       ({func, children}) =>
         simplifyIIFE({
           type: 'functionDef',
-          args: drop(children.length, func.args),
+          args: func.args.filter(
+            (arg, i) => !children[i] || children[i].value === '__'
+          ),
           children: [
             children.reduce(
               (res, value, i) =>
-                treeReplace({type: 'id', value: func.args[i]}, value, res),
+                propEq('value', '__', value)
+                  ? res
+                  : treeReplace({type: 'id', value: func.args[i]}, value, res),
               func.children[0]
             )
           ]

@@ -1,4 +1,5 @@
 import {treeMap} from './utils.js';
+import {tokenize} from './tokenize.js';
 const {
   pipe,
   reject,
@@ -15,7 +16,6 @@ const {
   is,
   reduce,
   append,
-  __,
   lensPath,
   slice,
   head,
@@ -26,7 +26,11 @@ const {
   both,
   contains,
   equals,
-  lensIndex
+  lensIndex,
+  tap,
+  includes,
+  map,
+  propSatisfies
 } = window.R;
 
 const nest = (start, end) =>
@@ -64,7 +68,7 @@ const parseFunctionCalls = treeMap(
               func: last(res),
               children: el.children
             })
-          : res.concat(el),
+          : append(el, res),
       []
     )
   )
@@ -76,8 +80,20 @@ const parseList = (tokenType, type) =>
       propEq('type', tokenType),
       pipe(
         prop('children'),
-        reject(propEq('type', ',')),
-        assoc('children', __, {type})
+        when(
+          includes({type: ',', value: ','}),
+          pipe(
+            reduce(
+              (res, el) =>
+                el.type === ','
+                  ? append([], res)
+                  : over(lensIndex(-1), append(el), res),
+              [[]]
+            ),
+            map(when(propEq('length', 1), head))
+          )
+        ),
+        children => ({type, children})
       )
     )
   );
@@ -93,7 +109,7 @@ const parseProperties = treeMap(
               parent: nth(-2, res),
               value: el.value
             })
-          : res.concat(el),
+          : append(el, res),
       []
     )
   )
@@ -104,13 +120,13 @@ const parseIndexes = treeMap(
     is(Array),
     reduce(
       (res, el) =>
-        res.length && el.type === 'array' && last(res).type === 'id'
+        res.length && el.type === '[' && last(res).type === 'id'
           ? init(res).concat({
               type: 'property',
               parent: last(res),
               value: el.children[0]
             })
-          : res.concat(el),
+          : append(el, res),
       []
     )
   )
@@ -136,7 +152,7 @@ const parseNot = treeMap(
       (res, el) =>
         res.length && last(res).type === '!'
           ? init(res).concat({type: '!', children: [el]})
-          : res.concat(el),
+          : append(el, res),
       []
     )
   )
@@ -151,7 +167,7 @@ const parseInfix = type =>
           (res, el) =>
             equals(el, {type, value: type})
               ? append([], res)
-              : over(lensIndex(res.length - 1), append(el), res),
+              : over(lensIndex(-1), append(el), res),
           [[]]
         ),
         children => [{type, children}]
@@ -159,20 +175,105 @@ const parseInfix = type =>
     )
   );
 
-export const parse = pipe(
-  reject(propEq('type', 'space')),
-  nest('(', ')'),
-  nest('[', ']'),
-  nest('{', '}'),
-  parseProperties,
-  parseIndexes,
-  parseList('[', 'array'),
-  parseList('(', 'argList'),
-  parseFunctionCalls,
-  parseFunctionDefs,
-  parseNot,
-  parseInfix('||'),
-  parseInfix('==='),
-  parseInfix('+'),
-  ifElse(c => c.length > 1, children => ({type: 'program', children}), head)
+/*
+
+  a ? b ? c : d : e
+  [a, [b, c, d], e]
+
+  a ? b : c ? d : e
+  [a, b, [c, d, e]]
+
+  */
+
+const parseTernaries = treeMap(
+  when(
+    both(is(Array), includes({type: '?', value: '?'})),
+    pipe(
+      reduce(
+        (res, el) =>
+          el.type === '?' || el.type === ':'
+            ? append([], res)
+            : over(lensIndex(-1), append(el), res),
+        [[]]
+      ),
+      children => [{type: 'ternary', children}]
+    )
+  )
 );
+
+const parseSimplePairs = treeMap(
+  when(
+    allPass([is(Array), pathEq([0, 'type'], 'id'), pathEq([1, 'type'], ':')]),
+    ([{value}, , ...children]) => ({
+      type: 'pair',
+      key: {type: 'string', value},
+      value: children
+    })
+  )
+);
+
+const parseDynamicProps = treeMap(
+  when(
+    allPass([
+      is(Array),
+      pathEq([0, 'type'], 'array'),
+      pathEq([1, 'type'], ':')
+    ]),
+    ([key, , ...children]) => ({
+      type: 'pair',
+      key: key.children[0],
+      value: children
+    })
+  )
+);
+
+const parseSpreads = treeMap(
+  when(
+    allPass([
+      is(Array),
+      propSatisfies(equals(2), 'length'),
+      pathEq([0, 'type'], '...')
+    ]),
+    ([, value]) => ({type: 'spread', value})
+  )
+);
+
+export const parse = (input, debug) =>
+  pipe(
+    tokenize,
+    reject(propEq('type', 'space')),
+    // tap(d => console.log('tokenized', input, d)),
+    nest('(', ')'),
+    nest('[', ']'),
+    nest('{', '}'),
+    parseIndexes,
+    parseList('[', 'array'),
+    parseList('(', 'argList'),
+    parseList('{', 'object'),
+    parseSimplePairs,
+    parseDynamicProps,
+    parseFunctionDefs,
+    parseTernaries,
+    parseInfix('||'),
+    parseInfix('&&'),
+    parseInfix('==='),
+    parseInfix('=='),
+    parseInfix('!=='),
+    parseInfix('!='),
+    parseInfix('>'),
+    parseInfix('>='),
+    parseInfix('<'),
+    parseInfix('<='),
+    parseInfix('+'),
+    parseInfix('-'),
+    parseInfix('*'),
+    parseInfix('/'),
+    parseInfix('%'),
+    parseInfix('**'),
+    parseProperties,
+    parseFunctionCalls,
+    parseNot,
+    parseSpreads,
+    ifElse(c => c.length > 1, children => ({type: 'program', children}), head),
+    tap(output => debug && console.log('parsed', input, output))
+  )(input);

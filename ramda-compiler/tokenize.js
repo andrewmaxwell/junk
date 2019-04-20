@@ -6,16 +6,16 @@ const tokenTypes = [
   {type: 'comment', regex: /^\/\/(.+)/},
   {type: 'number', regex: /^\d+/},
   {type: 'space', regex: /^\s+/},
-  {type: 'boolean', regex: /^true|false/},
+  {type: 'boolean', regex: /^(true|false)/},
   ...'const var let function if else for while try catch class do return break continue'
     .split(' ')
     .map(type => ({type, regex: new RegExp(`^${type}\\b`)})),
-  ...'( ) [ ] { } , => ... . === == = !== != ! || |= | && &= & += ++ + -= -- - **= ** *= * /= / ^= ^ : ; >= > <= <'.split(
+  ...'( ) [ ] { } , => ... . === == = !== != ! || |= | && &= & += ++ + -= -- - **= ** *= * /= / ^= ^ : ; >= > <= < ? %'.split(
     ' '
   ),
-  {type: 'id', regex: /^[a-z]\w*/gi},
   {type: 'string', regex: /^'([^']*)'/},
-  {type: 'string', regex: /^"([^"]*)"/}
+  {type: 'string', regex: /^"([^"]*)"/},
+  {type: 'id', regex: /^([a-z$_][a-z0-9$_]*)/gi}
 ];
 
 export const tokenize = ifElse(isEmpty, always([]), str => {

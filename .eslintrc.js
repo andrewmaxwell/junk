@@ -20,6 +20,7 @@ module.exports = {
     'quote-props': ['warn', 'as-needed'],
     'arrow-body-style': ['warn', 'as-needed'],
     'object-shorthand': 'warn',
-    'sonarjs/cognitive-complexity': 'off'
+    'sonarjs/cognitive-complexity': 'off',
+    'react/prop-types': 'off'
   }
 };
