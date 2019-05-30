@@ -2,12 +2,12 @@
 console.clear();
 
 // construct an array of the 27 groups that must contain unique numbers
-var groups = [];
-for (var i = 0; i < 9; i++) {
-  var r = [],
+const groups = [];
+for (let i = 0; i < 9; i++) {
+  const r = [],
     c = [],
     g = [];
-  for (var j = 0; j < 9; j++) {
+  for (let j = 0; j < 9; j++) {
     r[j] = i * 9 + j;
     c[j] = i + j * 9;
     g[j] =
@@ -17,11 +17,11 @@ for (var i = 0; i < 9; i++) {
 }
 
 // return if a configuration is valid. 0s are wildcards and so are counted as valid anywhere.
-var isValid = b => {
-  for (var i = 0; i < groups.length; i++) {
-    var seen = [];
-    for (var j = 0; j < 9; j++) {
-      var n = b[groups[i][j]];
+const isValid = b => {
+  for (let i = 0; i < groups.length; i++) {
+    const seen = [];
+    for (let j = 0; j < 9; j++) {
+      const n = b[groups[i][j]];
       if (n && seen[n]) return false; // is any number besides 0 duplicated?
       seen[n] = true;
     }
@@ -29,15 +29,15 @@ var isValid = b => {
   return true;
 };
 
-var solve = start => {
-  var queue = [start];
+let solve = start => {
+  const queue = [start];
   while (queue.length) {
-    var current = queue.pop(); // depth first
-    var index = current.indexOf(0);
+    const current = queue.pop(); // depth first
+    const index = current.indexOf(0);
     if (index === -1) return current; // if there are no more zeros, we're done here
-    for (var i = 9; i > 0; i--) {
+    for (let i = 9; i > 0; i--) {
       // try 1-9 in that zero
-      var next = current.slice();
+      const next = current.slice();
       next[index] = i;
       if (isValid(next)) queue.push(next); // queue up the valid ones
     }
@@ -45,24 +45,24 @@ var solve = start => {
 };
 
 // Recursive but much slower version:
-// var solve = current => {
+// let solve = current => {
 //   if (!isValid(current)) return;
-//   var index = current.indexOf(0);
+//   let index = current.indexOf(0);
 //   if (index === -1) return current; // if there are no more zeros, we're done here
-//   for (var i = 9; i > 0; i--) { // try 1-9 in that zero
-//     var next = current.slice();
+//   for (let i = 9; i > 0; i--) { // try 1-9 in that zero
+//     let next = current.slice();
 //     next[index] = i;
-//     var solution = solve(next);
+//     let solution = solve(next);
 //     if (solution) return solution;
 //   }
 // };
 
 // UI setup
-var input = document.querySelector('textarea');
+const input = document.querySelector('textarea');
 const onInput = () => {
-  var nums = input.value.match(/\d/g).map(Number);
+  const nums = input.value.match(/\d/g).map(Number);
   if (nums.length !== 81) return;
-  var solution = solve(nums);
+  const solution = solve(nums);
   document.querySelector('code').innerHTML = solution
     ? new Array(9)
         .fill()
