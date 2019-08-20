@@ -22,5 +22,9 @@ module.exports = {
     'object-shorthand': 'warn',
     'sonarjs/cognitive-complexity': 'off',
     'react/prop-types': 'off'
-  }
+  },
+  globals: Object.keys(require('ramda')).reduce((acc, key) => {
+    acc[key] = 'readonly'
+    return acc;
+  }, {})
 };

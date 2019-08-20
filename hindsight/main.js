@@ -1,19 +1,4 @@
-const {
-  reduce,
-  addIndex,
-  mergeLeft,
-  when,
-  ifElse,
-  pipe,
-  gt,
-  subtract,
-  lt,
-  propSatisfies,
-  converge,
-  prop,
-  assoc,
-  identity
-} = window.R;
+Object.assign(window, window.R);
 
 const hindsight = arr =>
   arr.reduce(
@@ -24,39 +9,18 @@ const hindsight = arr =>
     {buy: 0, sell: 0, pb: 0}
   );
 
-const hindsight2 = addIndex(reduce)(
-  (res, val, i) =>
+const hindsightRamda = pipe(
+  addIndex(chain)((v, i, arr) =>
     pipe(
-      when(propSatisfies(gt(val), 'sellV'), mergeLeft({sell: i, sellV: val})),
-      ifElse(
-        converge(gt, [
-          pipe(
-            prop('pBuyV'),
-            subtract(val)
-          ),
-          converge(subtract, [prop('sellV'), prop('buyV')])
-        ]),
-        pipe(
-          mergeLeft({sell: i, sellV: val}),
-          converge(assoc('buy'), [prop('pBuy'), identity]),
-          converge(assoc('buyV'), [prop('pBuyV'), identity])
-        ),
-        when(propSatisfies(lt(val), 'pBuyV'), mergeLeft({pBuy: i, pBuyV: val}))
-      )
-    )(res),
-  {
-    buy: 0,
-    sell: 0,
-    pBuy: 0,
-    buyV: Infinity,
-    sellV: -Infinity,
-    pBuyV: Infinity
-  }
+      drop(i),
+      addIndex(map)((w, j) => [i, j + i, w - v])
+    )(arr)
+  ),
+  reduce(maxBy(last), [0, 0, 0]),
+  zipObj(['buy', 'sell'])
 );
 
-// console.log(hindsight([500, 100, 5, 8, 9, 10, 2]));
-
-[hindsight, hindsight2].forEach((func, i) => {
+[hindsight, hindsightRamda].forEach((func, i) => {
   [
     [[500, 100, 5, 8, 9, 10, 2], [2, 5]],
     [[5, 3, 8, 2, 7, 5, 3, 9, 6, 0], [3, 7]],
@@ -67,9 +31,9 @@ const hindsight2 = addIndex(reduce)(
   ].forEach(([arr, exp]) => {
     const actual = func(arr);
     console.log(
-      [actual.buy, actual.sell].toString() !== exp.toString()
-        ? `Func ${i}: Expected ${exp}, got: ${JSON.stringify(actual)}`
-        : `Func ${i}: Good: ${exp}`
+      equals([actual.buy, actual.sell], exp)
+        ? `Func ${i}: Good: ${toString(exp)}`
+        : `Func ${i}: Expected ${toString(exp)}, got: ${toString(actual)}`
     );
   });
 });
