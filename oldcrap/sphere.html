@@ -1,65 +1,110 @@
 <body style="background:black;margin:0"><canvas></canvas>
 <script>
-var _3d=(function(){
-	var camLoc, viewLoc, rotMatrix, 
-	matrixMult=function(a,b){
-		for (var res=[], c, k, r=0; r<a.length; r++){
-			for (res[r]=[], c=0; c<b[0].length; c++){
-				for (res[r][c]=k=0; k<a[0].length; k++) res[r][c]+=a[r][k]*b[k][c]
-			}
-		}
-		return res;
-	}
-	return {
-		set: function(cameraLocation, camRot, viewLocation){
-			var matx=[[1, 0, 0], [0, Math.cos(camRot[0]), -Math.sin(camRot[0])], [0, Math.sin(camRot[0]), Math.cos(camRot[0])]],
-				maty=[[Math.cos(camRot[1]), 0, Math.sin(camRot[1])], [0, 1, 0], [-Math.sin(camRot[1]), 0, Math.cos(camRot[1])]],
-				matz=[[Math.cos(camRot[2]), -Math.sin(camRot[2]), 0], [Math.sin(camRot[2]), Math.cos(camRot[2]), 0], [0, 0, 1]];
-			rotMatrix=matrixMult(matrixMult(matx, maty), matz);
-			camLoc=cameraLocation
-			viewLoc=viewLocation
-		},
-		map: function(pt){
-			var d = matrixMult(rotMatrix, [[pt[0] - camLoc[0]], [pt[1] - camLoc[1]], [pt[2] - camLoc[2]]]), m=viewLoc[2]/d[2][0];
-			return {x: m*(d[0][0]-viewLoc[0]), y: m*(d[1][0]-viewLoc[1]), z: d[2][0]};
-		}
-	}
-}()),
-angX=Math.PI/2, angZ=Math.PI/2, zoom=300, dist=zoom/20, cameraHeight=0, C=document.body.childNodes[0], W=C.width=innerWidth, H=C.height=innerHeight, T=C.getContext('2d');
-T.translate(W/2, H/2)
-T.fillStyle="white"
+var _3d = (function() {
+    var camLoc,
+      viewLoc,
+      rotMatrix,
+      matrixMult = function(a, b) {
+        for (var res = [], c, k, r = 0; r < a.length; r++) {
+          for (res[r] = [], c = 0; c < b[0].length; c++) {
+            for (res[r][c] = k = 0; k < a[0].length; k++)
+              res[r][c] += a[r][k] * b[k][c];
+          }
+        }
+        return res;
+      };
+    return {
+      set(cameraLocation, camRot, viewLocation) {
+        var matx = [
+            [1, 0, 0],
+            [0, Math.cos(camRot[0]), -Math.sin(camRot[0])],
+            [0, Math.sin(camRot[0]), Math.cos(camRot[0])]
+          ],
+          maty = [
+            [Math.cos(camRot[1]), 0, Math.sin(camRot[1])],
+            [0, 1, 0],
+            [-Math.sin(camRot[1]), 0, Math.cos(camRot[1])]
+          ],
+          matz = [
+            [Math.cos(camRot[2]), -Math.sin(camRot[2]), 0],
+            [Math.sin(camRot[2]), Math.cos(camRot[2]), 0],
+            [0, 0, 1]
+          ];
+        rotMatrix = matrixMult(matrixMult(matx, maty), matz);
+        camLoc = cameraLocation;
+        viewLoc = viewLocation;
+      },
+      map(pt) {
+        var d = matrixMult(rotMatrix, [
+            [pt[0] - camLoc[0]],
+            [pt[1] - camLoc[1]],
+            [pt[2] - camLoc[2]]
+          ]),
+          m = viewLoc[2] / d[2][0];
+        return {
+          x: m * (d[0][0] - viewLoc[0]),
+          y: m * (d[1][0] - viewLoc[1]),
+          z: d[2][0]
+        };
+      }
+    };
+  })(),
+  angX = Math.PI / 2,
+  angZ = Math.PI / 2,
+  zoom = 300,
+  dist = zoom / 20,
+  cameraHeight = 0,
+  C = document.body.childNodes[0],
+  W = (C.width = innerWidth),
+  H = (C.height = innerHeight),
+  T = C.getContext('2d');
+T.translate(W / 2, H / 2);
+T.fillStyle = 'white';
 
-var rad=10, frame=0, num=4000
+var rad = 10,
+  frame = 0,
+  num = 4000;
 
 _3d.set(
-	[dist*Math.cos(angX)*Math.sin(angZ), dist*Math.sin(angX)*Math.sin(angZ), dist*Math.cos(angZ)], //camera location
-	[Math.PI-angZ, 0, 3*Math.PI/2-angX], //camera rotation
-	[0, 0, zoom] //view location
-)
+  [
+    dist * Math.cos(angX) * Math.sin(angZ),
+    dist * Math.sin(angX) * Math.sin(angZ),
+    dist * Math.cos(angZ)
+  ], //camera location
+  [Math.PI - angZ, 0, (3 * Math.PI) / 2 - angX], //camera rotation
+  [0, 0, zoom] //view location
+);
 
-onmousemove=function(e){
-	angZ=e.pageY/H*2*Math.PI
-	dist=zoom*(.7-e.pageX/W)
-	_3d.set(
-		[dist*Math.cos(angX)*Math.sin(angZ), dist*Math.sin(angX)*Math.sin(angZ), dist*Math.cos(angZ)], //camera location
-		[Math.PI-angZ, 0, 3*Math.PI/2-angX], //camera rotation
-		[0, 0, zoom] //view location
-	)
-}
+onmousemove = function(e) {
+  angZ = (e.pageY / H) * 2 * Math.PI;
+  dist = zoom * (0.7 - e.pageX / W);
+  _3d.set(
+    [
+      dist * Math.cos(angX) * Math.sin(angZ),
+      dist * Math.sin(angX) * Math.sin(angZ),
+      dist * Math.cos(angZ)
+    ], //camera location
+    [Math.PI - angZ, 0, (3 * Math.PI) / 2 - angX], //camera rotation
+    [0, 0, zoom] //view location
+  );
+};
 
-setInterval(function(){
-	T.clearRect(-W/2, -H/2, W, H)
-	for (var i=0; i<num; i++){
-		var phi=i/num*frame/10,
-			theta=Math.acos(2*i/num-1),
-			m=_3d.map([rad*Math.sin(theta)*Math.cos(phi), rad*Math.sin(theta)*Math.sin(phi), rad*Math.cos(theta)])
-		if (m.z>0){
-			T.beginPath()
-			T.arc(m.x, m.y, zoom/m.z/40, 0, Math.PI*2)
-			T.fill()
-		}
-	}
-	frame++
-},10)
-		
+setInterval(function() {
+  T.clearRect(-W / 2, -H / 2, W, H);
+  for (var i = 0; i < num; i++) {
+    var phi = ((i / num) * frame) / 10,
+      theta = Math.acos((2 * i) / num - 1),
+      m = _3d.map([
+        rad * Math.sin(theta) * Math.cos(phi),
+        rad * Math.sin(theta) * Math.sin(phi),
+        rad * Math.cos(theta)
+      ]);
+    if (m.z > 0) {
+      T.beginPath();
+      T.arc(m.x, m.y, zoom / m.z / 40, 0, Math.PI * 2);
+      T.fill();
+    }
+  }
+  frame++;
+}, 10);
 </script>

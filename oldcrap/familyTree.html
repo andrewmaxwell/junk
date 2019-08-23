@@ -39,139 +39,169 @@
 </script>
 <script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
 <script>
-
 // Simple JavaScript Templating
 // John Resig - http://ejohn.org/ - MIT Licensed
-;(function(){
+(function() {
   var cache = {};
- 
-  this.tmpl = function tmpl(str, data){
-    var fn = !/\W/.test(str) ? cache[str] = cache[str] || tmpl(document.getElementById(str).innerHTML) : 
-      new Function("obj",
-        "var p=[],print=function(){p.push.apply(p,arguments);};p.push('" + 
-          str
-          .replace(/[\r\t\n]/g, " ")
-          .split("<%").join("\t")
-          .replace(/((^|%>)[^\t]*)'/g, "$1\r")
-          .replace(/\t=(.*?)%>/g, "',$1,'")
-          .split("\t").join("');")
-          .split("%>").join("p.push('")
-          .split("\r").join("\\'")
-      + "');return p.join('');");
 
-    return data ? fn( data ) : fn;
+  this.tmpl = function tmpl(str, data) {
+    var fn = !/\W/.test(str)
+      ? (cache[str] =
+          cache[str] || tmpl(document.getElementById(str).innerHTML))
+      : new Function(
+          'obj',
+          "var p=[],print=function(){p.push.apply(p,arguments);};p.push('" +
+            str
+              .replace(/[\r\t\n]/g, ' ')
+              .split('<%')
+              .join('\t')
+              .replace(/((^|%>)[^\t]*)'/g, '$1\r')
+              .replace(/\t=(.*?)%>/g, "',$1,'")
+              .split('\t')
+              .join("');")
+              .split('%>')
+              .join("p.push('")
+              .split('\r')
+              .join("\\'") +
+            "');return p.join('');"
+        );
+
+    return data ? fn(data) : fn;
   };
 })();
 
-function nameInfo(obj){
-	return obj.name + (obj.born || obj.died ? " <span class=\"dates\">" + (obj.born || "???") + (obj.died ? '-' + obj.died: "") + "</span>" : "")
+function nameInfo(obj) {
+  return (
+    obj.name +
+    (obj.born || obj.died
+      ? ' <span class="dates">' +
+        (obj.born || '???') +
+        (obj.died ? '-' + obj.died : '') +
+        '</span>'
+      : '')
+  );
 }
-function titleInfo(obj){
-	return ('#' + obj.id + "\n" + (obj.notes ? ': ' + obj.notes : "")).replace(/"/g, "&#39;")
-}
-
-var rootID = 304
-var depth = 50
-var generations = 1
-var names = []
-var index
-
-
-function processTree(person, depth){
-	if (person.children.length && depth){
-		
-		person.spouses = []
-		person.children.forEach(function(ch){
-			if (ch.father == person){
-				if (person.spouses.indexOf(ch.mother) == -1) person.spouses.push(ch.mother)
-			} else if (ch.mother == person){
-				if (person.spouses.indexOf(ch.father) == -1) person.spouses.push(ch.father)
-			}
-			processTree(ch, depth - 1)
-		})
-	}
-}
-function numGenerations(person){
-	return person.children.reduce(function(max, ch){
-		return Math.max(max, numGenerations(ch))
-	}, 0) + 1
+function titleInfo(obj) {
+  return ('#' + obj.id + '\n' + (obj.notes ? ': ' + obj.notes : '')).replace(
+    /"/g,
+    '&#39;'
+  );
 }
 
-function load(){
-	$.getJSON("//spreadsheets.google.com/feeds/list/1wmRUrHdDfCYjGQnbQyGk46gRjiuqDjt92Z3WjHbCXZk/od6/public/values?alt=json-in-script&callback=?", function(feedData){
+var rootID = 304;
+var depth = 50;
+var generations = 1;
+var names = [];
+var index;
 
-		var people = []
-		index = {}
-
-		feedData.feed.entry.forEach(function(row){
-			if (row.gsx$idunique.$t){
-				people.push({
-					id: row.gsx$idunique.$t,
-					father: row.gsx$fatherid.$t,
-					mother: row.gsx$motherid.$t,
-					name: row.gsx$name.$t,
-					born: row.gsx$born.$t,
-					died: row.gsx$died.$t,
-					notes: row.gsx$notes.$t
-				})
-			}
-		})
-
-		people.sort(function(a,b){
-			return a.born && b.born ? a.born - b.born
-				: a.born ? -1
-				: b.born ? 1
-				: 0
-		}).forEach(function(person){
-			person.children = []
-			index[person.id] = person
-		})
-
-		people.forEach(function(person){
-			if (person.father){
-				person.father = index[person.father]
-				person.father.children.push(person)
-			}
-			if (person.mother){
-				person.mother = index[person.mother]
-				person.mother.children.push(person)
-			}
-		})
-
-		root = index[rootID]
-		processTree(root, depth)
-		display()
-	})
+function processTree(person, depth) {
+  if (person.children.length && depth) {
+    person.spouses = [];
+    person.children.forEach(function(ch) {
+      if (ch.father == person) {
+        if (person.spouses.indexOf(ch.mother) == -1)
+          person.spouses.push(ch.mother);
+      } else if (ch.mother == person) {
+        if (person.spouses.indexOf(ch.father) == -1)
+          person.spouses.push(ch.father);
+      }
+      processTree(ch, depth - 1);
+    });
+  }
+}
+function numGenerations(person) {
+  return (
+    person.children.reduce(function(max, ch) {
+      return Math.max(max, numGenerations(ch));
+    }, 0) + 1
+  );
 }
 
-function display(){
-	var thisRoot = index[location.hash.substring(1)] || root 
-	$("#result").html(tmpl("person", thisRoot))
-	generations = numGenerations(thisRoot)
-	names = $(".nameContainer")
-	$(window).trigger("resize")
+function load() {
+  $.getJSON(
+    '//spreadsheets.google.com/feeds/list/1wmRUrHdDfCYjGQnbQyGk46gRjiuqDjt92Z3WjHbCXZk/od6/public/values?alt=json-in-script&callback=?',
+    function(feedData) {
+      var people = [];
+      index = {};
+
+      feedData.feed.entry.forEach(function(row) {
+        if (row.gsx$idunique.$t) {
+          people.push({
+            id: row.gsx$idunique.$t,
+            father: row.gsx$fatherid.$t,
+            mother: row.gsx$motherid.$t,
+            name: row.gsx$name.$t,
+            born: row.gsx$born.$t,
+            died: row.gsx$died.$t,
+            notes: row.gsx$notes.$t
+          });
+        }
+      });
+
+      people
+        .sort(function(a, b) {
+          return a.born && b.born
+            ? a.born - b.born
+            : a.born
+            ? -1
+            : b.born
+            ? 1
+            : 0;
+        })
+        .forEach(function(person) {
+          person.children = [];
+          index[person.id] = person;
+        });
+
+      people.forEach(function(person) {
+        if (person.father) {
+          person.father = index[person.father];
+          person.father.children.push(person);
+        }
+        if (person.mother) {
+          person.mother = index[person.mother];
+          person.mother.children.push(person);
+        }
+      });
+
+      root = index[rootID];
+      processTree(root, depth);
+      display();
+    }
+  );
 }
 
-$(window).on("resize scroll", function(){
-	var w = Math.max(100, innerWidth / generations - 15)
-	var scrollTop = $(this).scrollTop()
-	
-	names.each(function(){
-		var p = $(this)
-		p.css({
-			top: Math.max(0, 
-				Math.min(
-					p.parent().height() - p.height(), 
-					scrollTop - p.parent().position().top
-				)
-			),
-			width: w
-		})
-	})
+function display() {
+  var thisRoot = index[location.hash.substring(1)] || root;
+  $('#result').html(tmpl('person', thisRoot));
+  generations = numGenerations(thisRoot);
+  names = $('.nameContainer');
+  $(window).trigger('resize');
+}
 
-	$("body").css("width", generations * (w + 15))
-}).on("hashchange", display).focus(load)
+$(window)
+  .on('resize scroll', function() {
+    var w = Math.max(100, innerWidth / generations - 15);
+    var scrollTop = $(this).scrollTop();
 
-load()
+    names.each(function() {
+      var p = $(this);
+      p.css({
+        top: Math.max(
+          0,
+          Math.min(
+            p.parent().height() - p.height(),
+            scrollTop - p.parent().position().top
+          )
+        ),
+        width: w
+      });
+    });
 
+    $('body').css('width', generations * (w + 15));
+  })
+  .on('hashchange', display)
+  .focus(load);
+
+load();
 </script>

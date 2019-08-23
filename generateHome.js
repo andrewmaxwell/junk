@@ -23,9 +23,7 @@ const dirs = pipe(
   sort((a, b) => b.year - a.year || (a.title < b.title ? -1 : 1)),
   map(
     p =>
-      `<div><a href="${p.filePath}/" title="${p.desc}">${p.title}</a> ${
-        p.year
-      }</div>`
+      `<div><a href="${p.filePath}/" title="${p.desc}">${p.title}</a> ${p.year}</div>`
   ),
   join('\n')
 )(fs.readdirSync('.'));

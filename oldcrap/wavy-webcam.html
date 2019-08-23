@@ -3,57 +3,110 @@
 <canvas id="C" style="height:100%"></canvas>
 <script src="dat.gui.min.js"></script>
 <script>
-var W=C.width=640, 
-	H=C.height=480, 
-	T=C.getContext('2d'),
-	D=T.createImageData(W,H)
+var W = (C.width = 640),
+  H = (C.height = 480),
+  T = C.getContext('2d'),
+  D = T.createImageData(W, H);
 
-var frame=0, frames=[], speed=2, reverse=false
+var frame = 0,
+  frames = [],
+  speed = 2,
+  reverse = false;
 
-function loop(){
-	webkitRequestAnimationFrame(loop, video)
-	T.drawImage(video,0,0)
-	frames[frame%H]=T.getImageData(0,0,W,H)
-	for (var f, y=0; y<H; y+=speed){
-		if (f=frames[(frame-(reverse? H-y: y)/speed+H)%H]){
-			for (var i=0; i<W*4*speed; i++) D.data[4*y*W+i]=f.data[4*y*W+i]
-		}
-	}
-	T.putImageData(D,0,0)
-	frame++
+function loop() {
+  webkitRequestAnimationFrame(loop, video);
+  T.drawImage(video, 0, 0);
+  frames[frame % H] = T.getImageData(0, 0, W, H);
+  for (var f, y = 0; y < H; y += speed) {
+    if ((f = frames[(frame - (reverse ? H - y : y) / speed + H) % H])) {
+      for (var i = 0; i < W * 4 * speed; i++)
+        D.data[4 * y * W + i] = f.data[4 * y * W + i];
+    }
+  }
+  T.putImageData(D, 0, 0);
+  frame++;
 }
 
-navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
-navigator.getUserMedia({video: true}, function(stream) {
-  video.src = window.URL.createObjectURL(stream);
-  loop()
-}, function(){alert("ABORT!!")});
+navigator.getUserMedia =
+  navigator.getUserMedia ||
+  navigator.webkitGetUserMedia ||
+  navigator.mozGetUserMedia ||
+  navigator.msGetUserMedia;
+navigator.getUserMedia(
+  {video: true},
+  function(stream) {
+    video.src = window.URL.createObjectURL(stream);
+    loop();
+  },
+  function() {
+    alert('ABORT!!');
+  }
+);
 
-
-var grayscale=0, 
-	sepia=0, 
-	saturation=100, 
-	hueShift=0,
-	invert=0,
-	brightness=0,
-	contrast=100,
-	blur=0
-function filter(){
-	C.style['-webkit-filter']="grayscale("+grayscale+"%) sepia("+sepia+"%) saturate("+saturation+"%) hue-rotate("+hueShift+"deg) invert("+invert+"%) brightness("+brightness+"%) contrast("+contrast+"%) blur("+blur+"px)"
+var grayscale = 0,
+  sepia = 0,
+  saturation = 100,
+  hueShift = 0,
+  invert = 0,
+  brightness = 0,
+  contrast = 100,
+  blur = 0;
+function filter() {
+  C.style['-webkit-filter'] =
+    'grayscale(' +
+    grayscale +
+    '%) sepia(' +
+    sepia +
+    '%) saturate(' +
+    saturation +
+    '%) hue-rotate(' +
+    hueShift +
+    'deg) invert(' +
+    invert +
+    '%) brightness(' +
+    brightness +
+    '%) contrast(' +
+    contrast +
+    '%) blur(' +
+    blur +
+    'px)';
 }
 
-var gui=new dat.GUI()
-gui.add(this, "speed", 1, 10).step(1)
-gui.add(this, "reverse")
-gui.add(this, "grayscale", 0, 100).step(1).onChange(filter)
-gui.add(this, "sepia", 0, 100).step(1).onChange(filter)
-gui.add(this, "saturation", 0, 1000).step(1).onChange(filter)
-gui.add(this, "hueShift", 0, 360).step(1).onChange(filter)
-gui.add(this, "invert", 0, 100).step(1).onChange(filter)
-gui.add(this, "brightness", -100, 100).step(1).onChange(filter)
-gui.add(this, "contrast", 0, 1000).step(1).onChange(filter)
-gui.add(this, "blur", 0, 50).step(1).onChange(filter)
+var gui = new dat.GUI();
+gui.add(this, 'speed', 1, 10).step(1);
+gui.add(this, 'reverse');
+gui
+  .add(this, 'grayscale', 0, 100)
+  .step(1)
+  .onChange(filter);
+gui
+  .add(this, 'sepia', 0, 100)
+  .step(1)
+  .onChange(filter);
+gui
+  .add(this, 'saturation', 0, 1000)
+  .step(1)
+  .onChange(filter);
+gui
+  .add(this, 'hueShift', 0, 360)
+  .step(1)
+  .onChange(filter);
+gui
+  .add(this, 'invert', 0, 100)
+  .step(1)
+  .onChange(filter);
+gui
+  .add(this, 'brightness', -100, 100)
+  .step(1)
+  .onChange(filter);
+gui
+  .add(this, 'contrast', 0, 1000)
+  .step(1)
+  .onChange(filter);
+gui
+  .add(this, 'blur', 0, 50)
+  .step(1)
+  .onChange(filter);
 
 // filter()
-
 </script>

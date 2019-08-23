@@ -8,328 +8,321 @@
 </head>
 <body style="margin:0; background: black; overflow: hidden"><canvas id="C"></canvas>
 <script>
-
-if (screen.lockOrientation){
-	screen.lockOrientation("portrait-primary")
+if (screen.lockOrientation) {
+  screen.lockOrientation('portrait-primary');
 }
 
-var W, H
-var T = C.getContext('2d')
-var numParticles = 1000
-var spacing = 24
-var gravityY = 0.1
-var gravityX = 0
-var gravityMult = 0.1
-var repelDist = 2/3
-var friction = 0.05
-var interaction = 0.03
-var dragRadius = 16
-var dragForce = 0.2
+var W, H;
+var T = C.getContext('2d');
+var numParticles = 1000;
+var spacing = 24;
+var gravityY = 0.1;
+var gravityX = 0;
+var gravityMult = 0.1;
+var repelDist = 2 / 3;
+var friction = 0.05;
+var interaction = 0.03;
+var dragRadius = 16;
+var dragForce = 0.2;
 
-var grid, rows, cols // grid vars
-var xCoord, yCoord, xVel, yVel, vicinity // particle vars
+var grid, rows, cols; // grid vars
+var xCoord, yCoord, xVel, yVel, vicinity; // particle vars
 
-var colors = ["#0000FF", "#FFFF00"]
-var numColors = 2
+var colors = ['#0000FF', '#FFFF00'];
+var numColors = 2;
 
-resetGrid = function(){
+resetGrid = function() {
+  W = C.width = innerWidth;
+  H = C.height = innerHeight;
 
-	W = C.width = innerWidth
-	H = C.height = innerHeight
-	
-	// init grid arrays
-	rows = Math.ceil(H / spacing)
-	cols = Math.ceil(W / spacing)
-	grid = []
-	for (var i = 0; i < rows; i++){
-		grid[i] = []
-		for (var j = 0; j < cols; j++){
-			grid[i][j] = {
-				particles: [],
-				vicinity: []
-			}
-		}
-	}
-	
-	// each cell keeps a list of the 9 cells (including itselt) in its vicinity
-	for (var i = 0; i < rows; i++){
-		for (var j = 0; j < cols; j++){
-			for (var r = Math.max(0, i - 1); r <= Math.min(rows - 1, i + 1); r++){
-				for (var c = Math.max(0, j - 1); c <= Math.min(cols - 1, j + 1); c++){
-					grid[i][j].vicinity.push(grid[r][c])
-				}
-			}
-		}
-	}
+  // init grid arrays
+  rows = Math.ceil(H / spacing);
+  cols = Math.ceil(W / spacing);
+  grid = [];
+  for (var i = 0; i < rows; i++) {
+    grid[i] = [];
+    for (var j = 0; j < cols; j++) {
+      grid[i][j] = {
+        particles: [],
+        vicinity: []
+      };
+    }
+  }
 
+  // each cell keeps a list of the 9 cells (including itselt) in its vicinity
+  for (var i = 0; i < rows; i++) {
+    for (var j = 0; j < cols; j++) {
+      for (var r = Math.max(0, i - 1); r <= Math.min(rows - 1, i + 1); r++) {
+        for (var c = Math.max(0, j - 1); c <= Math.min(cols - 1, j + 1); c++) {
+          grid[i][j].vicinity.push(grid[r][c]);
+        }
+      }
+    }
+  }
+};
+
+function reset() {
+  resetGrid();
+
+  // init particle arrays
+  xCoord = new Float32Array(numParticles);
+  yCoord = new Float32Array(numParticles);
+  xPrev = new Float32Array(numParticles);
+  yPrev = new Float32Array(numParticles);
+  xVel = new Float32Array(numParticles);
+  yVel = new Float32Array(numParticles);
+  vicinity = new Array(numParticles);
+
+  for (var i = 0; i < numParticles; i++) {
+    xCoord[i] = xPrev[i] = Math.random() * W;
+    yCoord[i] = yPrev[i] = Math.random() * H;
+  }
 }
 
-function reset(){
+function moveParticle(particleIndex) {
+  //T.moveTo(xCoord[particleIndex], yCoord[particleIndex])
 
-	resetGrid()
+  xVel[particleIndex] += gravityX;
+  yVel[particleIndex] += gravityY;
 
-	// init particle arrays
-	xCoord = new Float32Array(numParticles)
-	yCoord = new Float32Array(numParticles)
-	xPrev = new Float32Array(numParticles)
-	yPrev = new Float32Array(numParticles)
-	xVel = new Float32Array(numParticles)
-	yVel = new Float32Array(numParticles)
-	vicinity = new Array(numParticles)
-	
-	for (var i = 0; i < numParticles; i++){
-		xCoord[i] = xPrev[i] = Math.random() * W
-		yCoord[i] = yPrev[i] = Math.random() * H
-	}
-	
+  xCoord[particleIndex] += xVel[particleIndex];
+  yCoord[particleIndex] += yVel[particleIndex];
+
+  // bounce off walls
+  if (xCoord[particleIndex] < 0) {
+    xCoord[particleIndex] = 0;
+    xVel[particleIndex] *= -1;
+  } else if (xCoord[particleIndex] > W - 1) {
+    xCoord[particleIndex] = W - 1;
+    xVel[particleIndex] *= -1;
+  }
+  if (yCoord[particleIndex] < 0) {
+    yCoord[particleIndex] = 0;
+    yVel[particleIndex] *= -1;
+  } else if (yCoord[particleIndex] > H - 1) {
+    yCoord[particleIndex] = H - 1;
+    yVel[particleIndex] *= -1;
+  }
+
+  //T.lineTo(xCoord[particleIndex], yCoord[particleIndex])
+
+  // add to grid cells
+  var cell =
+    grid[Math.floor(yCoord[particleIndex] / spacing)][
+      Math.floor(xCoord[particleIndex] / spacing)
+    ];
+  cell.particles.push(particleIndex);
+  vicinity[particleIndex] = cell.vicinity;
 }
 
-function moveParticle(particleIndex){
-	//T.moveTo(xCoord[particleIndex], yCoord[particleIndex])
+function interact(particleIndex) {
+  // for each cell in the particle's vicinity
+  for (var c = 0; c < vicinity[particleIndex].length; c++) {
+    // for each particle in the cell
+    for (var o = 0; o < vicinity[particleIndex][c].particles.length; o++) {
+      // j is the index of the nearby particle
+      var j = vicinity[particleIndex][c].particles[o];
 
-	xVel[particleIndex] += gravityX
-	yVel[particleIndex] += gravityY
+      // we only want to compare each pair once, so only check particles whose index is smaller
+      if (particleIndex < j) {
+        var dx = xCoord[j] - xCoord[particleIndex];
+        var dy = yCoord[j] - yCoord[particleIndex];
+        var dist = Math.max(0.05, (dx * dx + dy * dy) / (spacing * spacing));
 
-	xCoord[particleIndex] += xVel[particleIndex]
-	yCoord[particleIndex] += yVel[particleIndex]
-	
-	// bounce off walls
-	if (xCoord[particleIndex] < 0){
-		xCoord[particleIndex] = 0
-		xVel[particleIndex] *= -1
-	} else if (xCoord[particleIndex] > W - 1){
-		xCoord[particleIndex] = W - 1
-		xVel[particleIndex] *= -1
-	}
-	if (yCoord[particleIndex] < 0){
-		yCoord[particleIndex] = 0
-		yVel[particleIndex] *= -1
-	} else if (yCoord[particleIndex] > H - 1){
-		yCoord[particleIndex] = H - 1
-		yVel[particleIndex] *= -1
-	}
+        if (dist < 1) {
+          var influence = friction * (1 - dist);
+          var attraction =
+            interaction *
+            (1 -
+              (particleIndex % numColors == j % numColors ? repelDist : 1) /
+                dist);
+          var accX =
+            influence * (xVel[j] - xVel[particleIndex]) + dx * attraction;
+          var accY =
+            influence * (yVel[j] - yVel[particleIndex]) + dy * attraction;
 
-	//T.lineTo(xCoord[particleIndex], yCoord[particleIndex])
-
-	// add to grid cells
-	var cell = grid[Math.floor(yCoord[particleIndex] / spacing)][Math.floor(xCoord[particleIndex] / spacing)]
-	cell.particles.push(particleIndex)
-	vicinity[particleIndex] = cell.vicinity
+          xVel[particleIndex] += accX;
+          yVel[particleIndex] += accY;
+          xVel[j] -= accX;
+          yVel[j] -= accY;
+        }
+      }
+    }
+  }
 }
 
-function interact(particleIndex){
-	// for each cell in the particle's vicinity
-	for (var c = 0; c < vicinity[particleIndex].length; c++){
-	
-		// for each particle in the cell
-		for (var o = 0; o < vicinity[particleIndex][c].particles.length; o++){
-		
-			// j is the index of the nearby particle
-			var j = vicinity[particleIndex][c].particles[o]
-			
-			// we only want to compare each pair once, so only check particles whose index is smaller
-			if (particleIndex < j){
-			
-				var dx = xCoord[j] - xCoord[particleIndex]
-				var dy = yCoord[j] - yCoord[particleIndex]
-				var dist = Math.max(0.05, (dx * dx + dy * dy) / (spacing * spacing))
-				
-				if (dist < 1){
-					
-					var influence = friction * (1 - dist)
-					var attraction = interaction * (1 - (particleIndex % numColors == j % numColors ? repelDist : 1) / dist)
-					var accX = influence * (xVel[j] - xVel[particleIndex]) + dx * attraction
-					var accY = influence * (yVel[j] - yVel[particleIndex]) + dy * attraction
-						
-					xVel[particleIndex] += accX
-					yVel[particleIndex] += accY
-					xVel[j] -= accX
-					yVel[j] -= accY
-					
-				}
-			}
-		}
-	}
+function iterate() {
+  for (var i = 0; i < rows; i++) {
+    for (var j = 0; j < cols; j++) {
+      grid[i][j].particles.length = 0;
+    }
+  }
+
+  for (var i = 0; i < numParticles; i++) {
+    moveParticle(i);
+  }
+
+  for (var i = 0; i < numParticles; i++) {
+    interact(i);
+  }
 }
 
- function iterate(){
+function draw() {
+  T.clearRect(0, 0, W, H);
 
-	for (var i = 0; i < rows; i++){
-		for (var j = 0; j < cols; j++){
-			grid[i][j].particles.length = 0
-		}
-	}
-	
-	for (var i = 0; i < numParticles; i++){
-		moveParticle(i)
-	}
+  for (var c = 0; c < numColors; c++) {
+    T.strokeStyle = colors[c];
+    T.beginPath();
+    for (var i = c; i < numParticles; i += numColors) {
+      T.moveTo(xPrev[i], yPrev[i]);
+      T.lineTo(xCoord[i], yCoord[i]);
 
-	for (var i = 0; i < numParticles; i++){
-		interact(i)
-	}
-	
+      xPrev[i] = xCoord[i];
+      yPrev[i] = yCoord[i];
+    }
+    T.stroke();
+  }
 }
 
-function draw(){
+function manipulateParticles(x, y, func) {
+  var cellRad = Math.ceil(dragRadius / spacing);
+  var xCell = Math.floor(x / spacing);
+  var yCell = Math.floor(y / spacing);
 
-	T.clearRect(0, 0, W, H)
+  for (
+    var r = Math.max(0, yCell - cellRad);
+    r <= Math.min(rows - 1, yCell + cellRad);
+    r++
+  ) {
+    for (
+      var c = Math.max(0, xCell - cellRad);
+      c <= Math.min(cols - 1, xCell + cellRad);
+      c++
+    ) {
+      for (var i = 0; i < grid[r][c].particles.length; i++) {
+        var particleIndex = grid[r][c].particles[i];
 
-	for (var c = 0; c < numColors; c++){
-		T.strokeStyle = colors[c]
-		T.beginPath()
-		for (var i = c; i < numParticles; i += numColors){
-
-			T.moveTo(xPrev[i], yPrev[i])
-			T.lineTo(xCoord[i], yCoord[i])
-
-			xPrev[i] = xCoord[i]
-			yPrev[i] = yCoord[i]
-		}
-		T.stroke()
-	}
-
+        var dx = x - xCoord[particleIndex];
+        var dy = y - yCoord[particleIndex];
+        var dist =
+          Math.sqrt(dx * dx + dy * dy) / (spacing * spacing) / dragRadius;
+        if (dist < 1) {
+          func(particleIndex, dist);
+        }
+      }
+    }
+  }
 }
 
-function manipulateParticles(x, y, func){
-	var cellRad = Math.ceil(dragRadius / spacing)
-	var xCell = Math.floor(x / spacing)
-	var yCell = Math.floor(y / spacing)
-	
-	for (var r = Math.max(0, yCell - cellRad); r <= Math.min(rows - 1, yCell + cellRad); r++){
-		for (var c = Math.max(0, xCell - cellRad); c <= Math.min(cols - 1, xCell + cellRad); c++){
-			for (var i = 0; i < grid[r][c].particles.length; i++){
-				var particleIndex = grid[r][c].particles[i]
-				
-				var dx = x - xCoord[particleIndex]
-				var dy = y - yCoord[particleIndex]
-				var dist = Math.sqrt(dx * dx + dy * dy) / (spacing * spacing) / dragRadius
-				if (dist < 1){
-					func(particleIndex, dist)
-				}
-			}
-		}
-	}
+function drag(fromX, fromY, toX, toY) {
+  manipulateParticles(toX, toY, function(particleIndex, dist) {
+    xVel[particleIndex] += (toX - fromX) * dragForce;
+    yVel[particleIndex] += (toY - fromY) * dragForce;
+  });
 }
 
-function drag(fromX, fromY, toX, toY){
-	manipulateParticles(toX, toY, function(particleIndex, dist){
-		xVel[particleIndex] += (toX - fromX) * dragForce
-		yVel[particleIndex] += (toY - fromY) * dragForce
-	})
+function shake(x, y) {
+  for (var i = 0; i < numParticles; i++) {
+    xVel[i] -= x;
+    yVel[i] -= y;
+  }
 }
 
-function shake(x, y){
-	for (var i = 0; i < numParticles; i++){
-		xVel[i] -= x
-		yVel[i] -= y
-	}
+function rotate(amount) {
+  var h = H;
+  var w = W;
+
+  for (var i = 0; i < numParticles; i++) {
+    var x = xCoord[i];
+    var y = yCoord[i];
+    var xs = xVel[i];
+    var ys = yVel[i];
+
+    if (amount == 90) {
+      // rotate phone clockwise, screen rotates counter-clockwise
+      xCoord[i] = y;
+      yCoord[i] = w - x;
+      xVel[i] = ys;
+      yVel[i] = -xs;
+    } else if (amount == -90) {
+      // rotate phone counter-clockwise, screen rotates clockwise
+      xCoord[i] = h - y;
+      yCoord[i] = x;
+      xVel[i] = -ys;
+      yVel[i] = xs;
+    }
+  }
 }
-
-function rotate(amount){
-
-	var h = H
-	var w = W
-
-	for (var i = 0; i < numParticles; i++){
-
-		var x = xCoord[i]
-		var y = yCoord[i]
-		var xs = xVel[i]
-		var ys = yVel[i]
-
-		if (amount == 90){ // rotate phone clockwise, screen rotates counter-clockwise
-			xCoord[i] = y
-			yCoord[i] = w - x
-			xVel[i] = ys
-			yVel[i] = -xs
-		} else if (amount == -90){ // rotate phone counter-clockwise, screen rotates clockwise
-			xCoord[i] = h - y
-			yCoord[i] = x
-			xVel[i] = -ys
-			yVel[i] = xs
-		}
-
-	}
-
-}
-
-
 
 var prevMouseX,
-	prevMouseY,
-	prevOrientation = window.orientation,
-	touches = {},
-	handlers = {
-		mousemove: function(e){
-			if (e.which == 1 && prevMouseX !== undefined){
-				drag(prevMouseX, prevMouseY, e.pageX, e.pageY)
-			}
-			prevMouseX = e.pageX
-			prevMouseY = e.pageY
-		},
-		resize: resetGrid,
-		touchstart: function(e){
-			e.preventDefault()
+  prevMouseY,
+  prevOrientation = window.orientation,
+  touches = {},
+  handlers = {
+    mousemove(e) {
+      if (e.which == 1 && prevMouseX !== undefined) {
+        drag(prevMouseX, prevMouseY, e.pageX, e.pageY);
+      }
+      prevMouseX = e.pageX;
+      prevMouseY = e.pageY;
+    },
+    resize: resetGrid,
+    touchstart(e) {
+      e.preventDefault();
 
-			for (var i = 0; i < e.changedTouches.length; i++){
-				var touch = e.changedTouches[i]
-				touches[touch.identifier] = touch
-			}
-		},	
-		touchmove: function(e){
-			e.preventDefault()
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        var touch = e.changedTouches[i];
+        touches[touch.identifier] = touch;
+      }
+    },
+    touchmove(e) {
+      e.preventDefault();
 
-			for (var i = 0; i < e.changedTouches.length; i++){
-				var touch = e.changedTouches[i]
-				var prevTouch = touches[touch.identifier]
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        var touch = e.changedTouches[i];
+        var prevTouch = touches[touch.identifier];
 
-				drag(prevTouch.pageX, prevTouch.pageY, touch.pageX, touch.pageY)
+        drag(prevTouch.pageX, prevTouch.pageY, touch.pageX, touch.pageY);
 
-				touches[touch.identifier] = touch
-			}
-		},
-		deviceorientation: function(e){
-			e.preventDefault()
+        touches[touch.identifier] = touch;
+      }
+    },
+    deviceorientation(e) {
+      e.preventDefault();
 
-			// 90 is counterclockwise
-			// -90 is clockwise
+      // 90 is counterclockwise
+      // -90 is clockwise
 
-			var gamma = e.gamma / 90 * gravityMult
-			var beta = e.beta / 90 * gravityMult
-			var o =  window.orientation / 90
-			
-			gravityX = o ? beta * o : gamma
-			gravityY = o ? gamma * -o: beta
+      var gamma = (e.gamma / 90) * gravityMult;
+      var beta = (e.beta / 90) * gravityMult;
+      var o = window.orientation / 90;
 
-		},
-		devicemotion: function(e){
+      gravityX = o ? beta * o : gamma;
+      gravityY = o ? gamma * -o : beta;
+    },
+    devicemotion(e) {
+      var o = window.orientation / 90;
+      var accX = o ? -e.acceleration.y * o : e.acceleration.x;
+      var accY = o ? -e.acceleration.x * o : -e.acceleration.y;
 
-			var o =  window.orientation / 90			
-			var accX = o ? -e.acceleration.y * o : e.acceleration.x
-			var accY = o ? -e.acceleration.x * o : -e.acceleration.y
+      shake(accX, accY);
+    },
+    orientationchange(e) {
+      rotate(orientation - prevOrientation);
+      prevOrientation = window.orientation;
+    }
+  };
 
-			shake(accX, accY)
-		},
-		orientationchange: function(e){
-
-			rotate(orientation - prevOrientation)
-			prevOrientation =  window.orientation
-
-		}
-	}
-	
-for (var type in handlers){
-	addEventListener(type, handlers[type], false)
+for (var type in handlers) {
+  addEventListener(type, handlers[type], false);
 }
 
+reset();
 
-reset()
-
-function loop(){
-	requestAnimationFrame(loop)
-	iterate()
-	draw()
+function loop() {
+  requestAnimationFrame(loop);
+  iterate();
+  draw();
 }
-loop()
-
+loop();
 </script>

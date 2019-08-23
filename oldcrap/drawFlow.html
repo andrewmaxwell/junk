@@ -1,202 +1,229 @@
 <body style="margin:0;background:black"><script>
+'use strict';
 
-"use strict";
+var requestAnimFrame =
+  window.requestAnimationFrame ||
+  window.mozRequestAnimationFrame ||
+  window.webkitRequestAnimationFrame ||
+  window.msRequestAnimationFrame;
 
-var requestAnimFrame = (window.requestAnimationFrame || window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame || window.msRequestAnimationFrame)
+var FlowSimulator = function(params) {
+  var scale = 10,
+    aging = 0.01,
+    numParticles = 20000,
+    pushRadius = 10,
+    pushStrength = 1,
+    vectorColor = 'hsl(220,50%,50%)',
+    flowColor = 'hsla(220,50%,50%,0.02)',
+    drawing = true;
 
-var FlowSimulator=function(params){
-	var scale=10,
-		aging=0.01,
-		numParticles=20000,
-		pushRadius=10,
-		pushStrength=1,
-		vectorColor="hsl(220,50%,50%)",
-		
-		flowColor="hsla(220,50%,50%,0.02)",
-		drawing=true
+  var canvas = document.createElement('canvas'),
+    context = canvas.getContext('2d'),
+    pProps = 3,
+    cells,
+    rows,
+    cols,
+    particles;
 
-	var canvas=document.createElement("canvas"), 
-		context=canvas.getContext('2d'),
-		pProps=3, cells, rows, cols, particles
+  function resize() {
+    canvas.width = params.width;
+    canvas.height = params.height;
 
-	function resize(){
-		canvas.width=params.width
-		canvas.height=params.height
-		
-		cols=Math.ceil(params.width/scale)
-		rows=Math.ceil(params.height/scale)
-		
-		cells=cells || []
-		for (var i=0; i<rows; i++){
-			cells[i]=cells[i] || []
-			for (var j=0; j<cols; j++){
-				var angle=2*Math.random()*Math.PI, p=0
-				cells[i][j]=cells[i][j] || {xs: p*Math.cos(angle), ys: p*Math.sin(angle), p: 0}
-			}
-		}
-		for (var i=0; i<rows; i++){
-			for (var j=0; j<cols; j++){
-				var c=cells[i][j]
-				c.up=cells[(i-1+rows)%rows][j]
-				c.down=cells[(i+1)%rows][j]
-				c.left=cells[i][(j-1+cols)%cols]
-				c.right=cells[i][(j+1)%cols]
-			}
-		}
-		
-		context.globalCompositeOperation="lighter"
-		window.ctx=context
-	}
-	function reset(){
-		cells=[]
-		resize()
-		particles=new Float32Array(numParticles*pProps)
-		for (var i=0; i<particles.length; i+=pProps){
-			particles[i]=Math.random()*params.width
-			particles[i+1]=Math.random()*params.height
-			particles[i+2]=Math.random()
-		}
-	}
+    cols = Math.ceil(params.width / scale);
+    rows = Math.ceil(params.height / scale);
 
-	function iterateFlow(){
-		var i, j, c;
-		for (i=0; i<rows; i++){
-			for (j=0; j<cols; j++){
-				c=cells[i][j]
-				c.xs+=c.left.p-c.right.p
-				c.ys+=c.up.p-c.down.p
-			}
-		}
-		for (i=0; i<rows; i++){
-			for (j=0; j<cols; j++){
-				c=cells[i][j]
-				c.p=(c.left.xs - c.right.xs + c.up.ys - c.down.ys)/4
-			}
-		}
-	}
+    cells = cells || [];
+    for (var i = 0; i < rows; i++) {
+      cells[i] = cells[i] || [];
+      for (var j = 0; j < cols; j++) {
+        var angle = 2 * Math.random() * Math.PI,
+          p = 0;
+        cells[i][j] = cells[i][j] || {
+          xs: p * Math.cos(angle),
+          ys: p * Math.sin(angle),
+          p: 0
+        };
+      }
+    }
+    for (var i = 0; i < rows; i++) {
+      for (var j = 0; j < cols; j++) {
+        var c = cells[i][j];
+        c.up = cells[(i - 1 + rows) % rows][j];
+        c.down = cells[(i + 1) % rows][j];
+        c.left = cells[i][(j - 1 + cols) % cols];
+        c.right = cells[i][(j + 1) % cols];
+      }
+    }
 
-	function moveAndDrawParticles(){
-		var i, p, px, py, dx, dy, c
-		context.strokeStyle=flowColor
-		context.beginPath()
-		for (i=0; i<particles.length; i+=pProps){
-		
-			particles[i]=(particles[i]%params.width+params.width)%params.width
-			particles[i+1]=(particles[i+1]%params.height+params.height)%params.height
-			
-			px=particles[i]/scale
-			py=particles[i+1]/scale
-			dx=px-Math.floor(px)
-			dy=py-Math.floor(py)
-			c=cells[Math.floor(py)][Math.floor(px)]
-			
-			context.moveTo(particles[i], particles[i+1])
-			context.lineTo(
-				particles[i]+=c.xs*(1-dx)*(1-dy)+c.right.xs*dx*(1-dy)+c.down.xs*(1-dx)*dy+c.down.right.xs*dx*dy,
-				particles[i+1]+=c.ys*(1-dx)*(1-dy)+c.right.ys*dx*(1-dy)+c.down.ys*(1-dx)*dy+c.down.right.ys*dx*dy
-			)
-			
-			particles[i+2]+=aging
-			if (particles[i+2]>1){
-				particles[i]=Math.random()*params.width
-				particles[i+1]=Math.random()*params.height
-				particles[i+2]=0
-			}
-		}
-		context.stroke()
-	}
-	
-	function drawVectors(){
-		context.clearRect(0,0,params.width,params.height)
-		context.strokeStyle=vectorColor
-		context.beginPath()
-		for (var i=0; i<rows; i++){
-			for (var j=0; j<cols; j++){
-				context.moveTo(j*scale, i*scale)
-				context.lineTo(j*scale+cells[i][j].xs, i*scale+cells[i][j].ys)
-			}
-		}
-		context.stroke()
-	}
-	
-	function loop(){
-		requestAnimFrame(loop, canvas)
-		
-		if (drawing) drawVectors()
-		else moveAndDrawParticles()
-		
-		iterateFlow()
-	}
+    context.globalCompositeOperation = 'lighter';
+    window.ctx = context;
+  }
+  function reset() {
+    cells = [];
+    resize();
+    particles = new Float32Array(numParticles * pProps);
+    for (var i = 0; i < particles.length; i += pProps) {
+      particles[i] = Math.random() * params.width;
+      particles[i + 1] = Math.random() * params.height;
+      particles[i + 2] = Math.random();
+    }
+  }
 
-	reset()
-	loop()
-	
-	return {
-		canvas: canvas,
-		reset: reset,
-		resize: resize,
-		mouseDown: function(){
-			drawing=true
-		},
-		mouseUp: function(){
-			context.clearRect(0,0,params.width,params.height)
-			drawing=false
-		},
-		drag: function(toX, toY, fromX, fromY){
-			var row=Math.floor(toY/scale),
-				col=Math.floor(toX/scale),
-				xs=(toX-fromX)/pushRadius,
-				ys=(toY-fromY)/pushRadius,
-				i, j, c, d
-				
-			for (i=row-pushRadius; i<row+pushRadius; i++){
-				for (j=col-pushRadius; j<col+pushRadius; j++){
-					c=cells[(i+rows)%rows][(j+cols)%cols]
-					d=1-Math.sqrt((i-row)*(i-row)+(j-col)*(j-col))/pushRadius
-					if (d>0){
-						c.xs+=xs*d
-						c.ys+=ys*d
-					}
-				}
-			}
-		},
-		mouseMove: function(x, y){
-			flowColor="hsla("+(x/params.width*360)+",50%,50%,0.02)"
-		}
-	}
-}
+  function iterateFlow() {
+    var i, j, c;
+    for (i = 0; i < rows; i++) {
+      for (j = 0; j < cols; j++) {
+        c = cells[i][j];
+        c.xs += c.left.p - c.right.p;
+        c.ys += c.up.p - c.down.p;
+      }
+    }
+    for (i = 0; i < rows; i++) {
+      for (j = 0; j < cols; j++) {
+        c = cells[i][j];
+        c.p = (c.left.xs - c.right.xs + c.up.ys - c.down.ys) / 4;
+      }
+    }
+  }
 
-var settings={
-	width: innerWidth,
-	height: innerHeight
-}
-var game=FlowSimulator(settings)
-document.body.appendChild(game.canvas)
+  function moveAndDrawParticles() {
+    var i, p, px, py, dx, dy, c;
+    context.strokeStyle = flowColor;
+    context.beginPath();
+    for (i = 0; i < particles.length; i += pProps) {
+      particles[i] =
+        ((particles[i] % params.width) + params.width) % params.width;
+      particles[i + 1] =
+        ((particles[i + 1] % params.height) + params.height) % params.height;
 
-var down=0, px=0, py=0
-window.onmousedown=window.onmouseup=function(e){
-	down=e.type=="mousedown"
-	if (down) game.mouseDown()
-	else game.mouseUp()
-}
-window.onmousemove=function(e){
-	var x=e.offsetX, 
-		y=e.offsetY,
-		w=innerWidth,
-		h=innerHeight
-	if (down){
-		game.drag(x, y, px, py)
-		// game.drag(w-x, y, w-px, py)
-		// game.drag(x, h-y, px, h-py)
-		// game.drag(w-x, h-y, w-px, h-py)
-	} else game.mouseMove(x, y)
-	px=x
-	py=y
-}
-window.onresize=function(){
-	settings.width=innerWidth
-	settings.height=innerHeight
-	game.resize()
-}
-	
+      px = particles[i] / scale;
+      py = particles[i + 1] / scale;
+      dx = px - Math.floor(px);
+      dy = py - Math.floor(py);
+      c = cells[Math.floor(py)][Math.floor(px)];
+
+      context.moveTo(particles[i], particles[i + 1]);
+      context.lineTo(
+        (particles[i] +=
+          c.xs * (1 - dx) * (1 - dy) +
+          c.right.xs * dx * (1 - dy) +
+          c.down.xs * (1 - dx) * dy +
+          c.down.right.xs * dx * dy),
+        (particles[i + 1] +=
+          c.ys * (1 - dx) * (1 - dy) +
+          c.right.ys * dx * (1 - dy) +
+          c.down.ys * (1 - dx) * dy +
+          c.down.right.ys * dx * dy)
+      );
+
+      particles[i + 2] += aging;
+      if (particles[i + 2] > 1) {
+        particles[i] = Math.random() * params.width;
+        particles[i + 1] = Math.random() * params.height;
+        particles[i + 2] = 0;
+      }
+    }
+    context.stroke();
+  }
+
+  function drawVectors() {
+    context.clearRect(0, 0, params.width, params.height);
+    context.strokeStyle = vectorColor;
+    context.beginPath();
+    for (var i = 0; i < rows; i++) {
+      for (var j = 0; j < cols; j++) {
+        context.moveTo(j * scale, i * scale);
+        context.lineTo(j * scale + cells[i][j].xs, i * scale + cells[i][j].ys);
+      }
+    }
+    context.stroke();
+  }
+
+  function loop() {
+    requestAnimFrame(loop, canvas);
+
+    if (drawing) drawVectors();
+    else moveAndDrawParticles();
+
+    iterateFlow();
+  }
+
+  reset();
+  loop();
+
+  return {
+    canvas,
+    reset,
+    resize,
+    mouseDown() {
+      drawing = true;
+    },
+    mouseUp() {
+      context.clearRect(0, 0, params.width, params.height);
+      drawing = false;
+    },
+    drag(toX, toY, fromX, fromY) {
+      var row = Math.floor(toY / scale),
+        col = Math.floor(toX / scale),
+        xs = (toX - fromX) / pushRadius,
+        ys = (toY - fromY) / pushRadius,
+        i,
+        j,
+        c,
+        d;
+
+      for (i = row - pushRadius; i < row + pushRadius; i++) {
+        for (j = col - pushRadius; j < col + pushRadius; j++) {
+          c = cells[(i + rows) % rows][(j + cols) % cols];
+          d =
+            1 -
+            Math.sqrt((i - row) * (i - row) + (j - col) * (j - col)) /
+              pushRadius;
+          if (d > 0) {
+            c.xs += xs * d;
+            c.ys += ys * d;
+          }
+        }
+      }
+    },
+    mouseMove(x, y) {
+      flowColor = 'hsla(' + (x / params.width) * 360 + ',50%,50%,0.02)';
+    }
+  };
+};
+
+var settings = {
+  width: innerWidth,
+  height: innerHeight
+};
+var game = FlowSimulator(settings);
+document.body.appendChild(game.canvas);
+
+var down = 0,
+  px = 0,
+  py = 0;
+window.onmousedown = window.onmouseup = function(e) {
+  down = e.type == 'mousedown';
+  if (down) game.mouseDown();
+  else game.mouseUp();
+};
+window.onmousemove = function(e) {
+  var x = e.offsetX,
+    y = e.offsetY,
+    w = innerWidth,
+    h = innerHeight;
+  if (down) {
+    game.drag(x, y, px, py);
+    // game.drag(w-x, y, w-px, py)
+    // game.drag(x, h-y, px, h-py)
+    // game.drag(w-x, h-y, w-px, h-py)
+  } else game.mouseMove(x, y);
+  px = x;
+  py = y;
+};
+window.onresize = function() {
+  settings.width = innerWidth;
+  settings.height = innerHeight;
+  game.resize();
+};
 </script>

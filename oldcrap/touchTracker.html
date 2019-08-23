@@ -1,50 +1,57 @@
 <body style="margin:0; background:black"><canvas id="C"></canvas><script>
+W = C.width = innerWidth;
+H = C.height = innerHeight;
+T = C.getContext('2d');
 
-W = C.width = innerWidth
-H = C.height = innerHeight
-T = C.getContext('2d')
+T.lineWidth = 16;
+T.lineCap = 'round';
+T.fillStyle = 'rgba(0,0,0,0.02)';
+T.globalAlpha = 0.5;
 
-T.lineWidth = 16
-T.lineCap = "round"
-T.fillStyle = "rgba(0,0,0,0.02)"
-T.globalAlpha = 0.5
+var touches = {};
+var colors = [
+  'red',
+  'yellow',
+  'lime',
+  'cyan',
+  'blue',
+  'magenta',
+  'white',
+  'green',
+  'orange',
+  'gray',
+  'tan'
+];
 
-var touches = {}
-var colors = ["red", "yellow", "lime", "cyan", "blue", "magenta", "white", "green", "orange", "gray", "tan"]
+ontouchstart = function(e) {
+  e.preventDefault();
 
-ontouchstart = function(e){
-	e.preventDefault()
+  for (var i = 0; i < e.changedTouches.length; i++) {
+    var touch = e.changedTouches[i];
+    touches[touch.identifier] = touch;
+  }
+};
 
-	for (var i = 0; i < e.changedTouches.length; i++){
-		var touch = e.changedTouches[i]
-		touches[touch.identifier] = touch
-	}
+ontouchmove = function(e) {
+  e.preventDefault();
+
+  for (var i = 0; i < e.changedTouches.length; i++) {
+    var touch = e.changedTouches[i];
+    var prevTouch = touches[touch.identifier];
+
+    T.strokeStyle = colors[touch.identifier];
+    T.beginPath();
+    T.moveTo(prevTouch.pageX, prevTouch.pageY);
+    T.lineTo(touch.pageX, touch.pageY);
+    T.stroke();
+
+    touches[touch.identifier] = touch;
+  }
+};
+
+function loop() {
+  requestAnimationFrame(loop);
+  T.fillRect(0, 0, W, H);
 }
-
-ontouchmove = function(e){
-	e.preventDefault()
-
-	
-	for (var i = 0; i < e.changedTouches.length; i++){
-		var touch = e.changedTouches[i]
-		var prevTouch = touches[touch.identifier]
-
-		T.strokeStyle = colors[touch.identifier]
-		T.beginPath()
-		T.moveTo(prevTouch.pageX, prevTouch.pageY)
-		T.lineTo(touch.pageX, touch.pageY)
-		T.stroke()
-
-		touches[touch.identifier] = touch
-	}
-	
-}
-
-function loop(){
-	requestAnimationFrame(loop)
-	T.fillRect(0, 0, W, H)
-}
-loop()
-
-
+loop();
 </script>

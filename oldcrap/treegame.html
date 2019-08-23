@@ -26,64 +26,78 @@
 </div>
 <!--<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>-->
 <script>
+Array.prototype.shuffle = function() {
+  for (var i = this.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var temp = this[i];
+    this[i] = this[j];
+    this[j] = temp;
+  }
+  return this;
+};
 
-Array.prototype.shuffle = function(){
-	for (var i = this.length - 1; i > 0; i--){
-		var j = Math.floor(Math.random() * (i + 1))
-		var temp = this[i]
-		this[i] = this[j]
-		this[j] = temp
-	}
-	return this
+function gradient(c1, c2) {
+  return function(v) {
+    return (
+      'rgb(' +
+      Math.floor(c1[0] + (c2[0] - c1[0]) * v) +
+      ',' +
+      Math.floor(c1[1] + (c2[1] - c1[1]) * v) +
+      ',' +
+      Math.floor(c1[2] + (c2[2] - c1[2]) * v) +
+      ')'
+    );
+  };
 }
 
-function gradient(c1, c2){
-	return function(v){
-		return "rgb(" +
-			Math.floor(c1[0] + (c2[0] - c1[0]) * v) + "," +
-			Math.floor(c1[1] + (c2[1] - c1[1]) * v) + "," +
-			Math.floor(c1[2] + (c2[2] - c1[2]) * v) + ")"
-	}
-}
+var cellSize = 12;
+var rows = 50;
+var cols = 50;
+var dirtLevel = 35;
 
-var cellSize = 12
-var rows = 50
-var cols = 50
-var dirtLevel = 35
+var exchangeSpeed = 0.05;
 
-var exchangeSpeed = 0.05
+var healthyLevel = 0.5;
+var dryLimit = 0.05;
+var deathLimit = 20;
+var resourceCost = 0.8;
+var waterMult = 0.02;
+var energyMult = 0.02;
 
-var healthyLevel = 0.5
-var dryLimit = 0.05
-var deathLimit = 20
-var resourceCost = 0.8
-var waterMult = 0.02
-var energyMult = 0.02
-
-var gravity = 10
-var raindropMult = 10
+var gravity = 10;
+var raindropMult = 10;
 
 // var weatherChangeAmt = 0.001
 // var weatherChangeLimit = 0.005
 // var weatherWeighting = 0.15
 
-var rateOfHydration = 0.01
-var minLight = 0.1
+var rateOfHydration = 0.01;
+var minLight = 0.1;
 
-var dayMult = 0.01
-var framesPerTime = 16
+var dayMult = 0.01;
+var framesPerTime = 16;
 
-var plantColor = gradient([209,194,111],[0,128,0])
-var soilColor = gradient([189,170,134],[117,78,0])
-var skyColor = gradient([128,128,128],[217,255,255])
+var plantColor = gradient([209, 194, 111], [0, 128, 0]);
+var soilColor = gradient([189, 170, 134], [117, 78, 0]);
+var skyColor = gradient([128, 128, 128], [217, 255, 255]);
 
-var T = C.getContext('2d')
-var U = D.getContext('2d')
-var nc = [[-1,0],[1,0],[0,-1],[0,1]]
-var debug = false
-var paused = false
+var T = C.getContext('2d');
+var U = D.getContext('2d');
+var nc = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+var debug = false;
+var paused = false;
 
-var W, H, map, plant, score, drops, weather, weatherChange, hydration, time, frame
+var W,
+  H,
+  map,
+  plant,
+  score,
+  drops,
+  weather,
+  weatherChange,
+  hydration,
+  time,
+  frame;
 
 // var achievements = {
 // 	"Sapling": {
@@ -114,308 +128,327 @@ var W, H, map, plant, score, drops, weather, weatherChange, hydration, time, fra
 // 	a.el = $("<div class='ach'><div class='points'>+" + a.points + "</div><h3>" + ach + "</h3><p>" + a.description + "</p></div>").appendTo("#achievements")
 // }
 
-function reset(){
-	W = C.width = D.width = cellSize * cols
-	H = C.height = D.height = cellSize * rows
-	score = 0
-	map = []
-	drops = []
-	weatherChange = 0
-	weather = 0.7
-	hydration = 0.8
-	time = 0
-	frame = 0
-	for (var i = 0; i < rows; i++) map[i] = []
+function reset() {
+  W = C.width = D.width = cellSize * cols;
+  H = C.height = D.height = cellSize * rows;
+  score = 0;
+  map = [];
+  drops = [];
+  weatherChange = 0;
+  weather = 0.7;
+  hydration = 0.8;
+  time = 0;
+  frame = 0;
+  for (var i = 0; i < rows; i++) map[i] = [];
 
-	map[dirtLevel][cols / 2] = {
-		energy: 1, 
-		water: 1,
-		dryTime: 0,
-		r: dirtLevel, 
-		c: cols / 2
-	}
+  map[dirtLevel][cols / 2] = {
+    energy: 1,
+    water: 1,
+    dryTime: 0,
+    r: dirtLevel,
+    c: cols / 2
+  };
 
-	// for (var ach in achievements){
-	// 	var a = achievements[ach]
-	// 	a.won = false
-	// 	a.el.removeClass("won")
-	// }
+  // for (var ach in achievements){
+  // 	var a = achievements[ach]
+  // 	a.won = false
+  // 	a.el.removeClass("won")
+  // }
 
-	updateGrid()
+  updateGrid();
 }
 
-function updateGrid(){
-	plant = []
-	for (var r = 0; r < rows; r++){
-		for (var c = 0; c < cols; c++){
-			var o = map[r][c]
-			if (o){
-				o.neighbors = []
-				o.touchingDirt = 0
-				o.touchingAir = 0
-				for (var i = 0; i < 4; i++){
-					var rr = r + nc[i][0]
-					var cc = c + nc[i][1]
-					if (map[rr] && map[rr][cc]){ // touching plant
-						o.neighbors.push(map[rr][cc])
-					} else if (rr < dirtLevel) o.touchingAir++ // touching air
-					else o.touchingDirt++ // touching dirt
-				}
-				plant.push(o)
-			}
-		}
-	}
+function updateGrid() {
+  plant = [];
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var o = map[r][c];
+      if (o) {
+        o.neighbors = [];
+        o.touchingDirt = 0;
+        o.touchingAir = 0;
+        for (var i = 0; i < 4; i++) {
+          var rr = r + nc[i][0];
+          var cc = c + nc[i][1];
+          if (map[rr] && map[rr][cc]) {
+            // touching plant
+            o.neighbors.push(map[rr][cc]);
+          } else if (rr < dirtLevel) o.touchingAir++;
+          // touching air
+          else o.touchingDirt++; // touching dirt
+        }
+        plant.push(o);
+      }
+    }
+  }
 }
 
-function updateVals(){
+function updateVals() {
+  // var minC = Infinity
+  // var maxC = -Infinity
+  var minR = Infinity;
+  // var healthy = 0
+  var dying = [];
 
-	// var minC = Infinity
-	// var maxC = -Infinity
-	var minR = Infinity
-	// var healthy = 0
-	var dying = []
+  // weatherChange = Math.max(-weatherChangeLimit, Math.min(weatherChangeLimit, weatherChange + (Math.random() - 0.5 + (0.5 - weather) * weatherWeighting) * weatherChangeAmt))
+  // weather = Math.max(0, Math.min(1, weather + weatherChange))
+  weather = Math.max(
+    0,
+    Math.min(1, 0.5 + ((time + 100) / 5000) * Math.cos(time / (50 + time / 80)))
+  );
 
-	// weatherChange = Math.max(-weatherChangeLimit, Math.min(weatherChangeLimit, weatherChange + (Math.random() - 0.5 + (0.5 - weather) * weatherWeighting) * weatherChangeAmt))
-	// weather = Math.max(0, Math.min(1, weather + weatherChange))
-	weather = Math.max(0, Math.min(1, 0.5 + (time + 100) / 5000 * Math.cos(time / (50 + time / 80))))
+  hydration = Math.max(
+    0,
+    Math.min(1, hydration + (0.5 - weather) * rateOfHydration)
+  );
 
-	hydration = Math.max(0, Math.min(1, hydration + (0.5 - weather) * rateOfHydration))
+  plant.shuffle();
 
-	plant.shuffle()
+  for (var i = 0; i < plant.length; i++) {
+    var o = plant[i];
 
-	for (var i = 0; i < plant.length; i++){
-		var o = plant[i]
+    if (o.r < dirtLevel && o.water > healthyLevel) {
+      // 	minC = Math.min(minC, o.c)
+      // 	maxC = Math.max(maxC, o.c)
+      minR = Math.min(minR, o.r);
+    }
 
-		if (o.r < dirtLevel && o.water > healthyLevel){
-		// 	minC = Math.min(minC, o.c)
-		// 	maxC = Math.max(maxC, o.c)
-			minR = Math.min(minR, o.r)
-		}
+    var soilDepth = (o.r - dirtLevel) / (rows - dirtLevel);
+    var usableWater = Math.min(
+      (o.touchingDirt - 1) *
+        (hydration * (1 - soilDepth) + soilDepth) *
+        waterMult,
+      1 - o.water,
+      o.energy / resourceCost
+    );
+    var usableEnergy = Math.min(
+      (o.touchingAir - 1) * (minLight + (1 - minLight) * weather) * energyMult,
+      1 - o.energy,
+      o.water / resourceCost
+    );
 
+    if (usableEnergy > 0) {
+      o.energy += usableEnergy;
+      o.water -= usableEnergy * resourceCost;
+    }
 
-		var soilDepth = (o.r - dirtLevel) / (rows - dirtLevel)
-		var usableWater = Math.min((o.touchingDirt - 1) * (hydration * (1 - soilDepth) + soilDepth) * waterMult, 1 - o.water, o.energy / resourceCost)
-		var usableEnergy = Math.min((o.touchingAir - 1) * (minLight + (1 - minLight) * weather) * energyMult, 1 - o.energy, o.water / resourceCost)
+    if (usableWater > 0) {
+      o.water += usableWater;
+      o.energy -= usableWater * resourceCost;
+    }
 
-		if (usableEnergy > 0){
-			o.energy += usableEnergy
-			o.water -= usableEnergy * resourceCost
-		}
-		
-		if (usableWater > 0){
-			o.water += usableWater
-			o.energy -= usableWater * resourceCost
-		}
+    o.neighbors.shuffle();
+    for (var j = 0; j < o.neighbors.length; j++) {
+      var n = o.neighbors[j];
 
-		o.neighbors.shuffle()
-		for (var j = 0; j < o.neighbors.length; j++){
-			var n = o.neighbors[j]
+      var energyAmount = (o.energy - n.energy) * exchangeSpeed;
+      o.energy -= energyAmount;
+      n.energy += energyAmount;
 
-			var energyAmount = (o.energy - n.energy) * exchangeSpeed
-			o.energy -= energyAmount
-			n.energy += energyAmount
+      var waterAmount = (o.water - n.water) * exchangeSpeed;
+      o.water -= waterAmount;
+      n.water += waterAmount;
+    }
 
-			var waterAmount = (o.water - n.water) * exchangeSpeed
-			o.water -= waterAmount
-			n.water += waterAmount
-		}
+    o.dryTime = o.water < dryLimit ? o.dryTime + 1 : 0;
+    if (o.dryTime > deathLimit) dying.push(o);
+    // if (o.water > healthyLevel) healthy++
+  }
 
-		o.dryTime = o.water < dryLimit ? o.dryTime + 1 : 0
-		if (o.dryTime > deathLimit) dying.push(o)
-		// if (o.water > healthyLevel) healthy++
-	}
+  // plant.width = maxC - minC + 1
+  // plant.above = dirtLevel - minR
 
-	// plant.width = maxC - minC + 1
-	// plant.above = dirtLevel - minR
+  if (dying.length) {
+    for (var i = 0; i < dying.length; i++) {
+      map[dying[i].r][dying[i].c] = null;
+    }
+    updateGrid();
+  }
 
-	if (dying.length){
-		for (var i = 0; i < dying.length; i++){
-			map[dying[i].r][dying[i].c] = null
-		}
-		updateGrid()
-	}
+  // score = Math.max(score, healthy)
+  document.getElementById('score').innerHTML =
+    'Day ' + Math.floor(time * dayMult + 1); //+ ", " + score + " points"
 
-	// score = Math.max(score, healthy)
-	document.getElementById("score").innerHTML = "Day " + Math.floor(time * dayMult + 1) //+ ", " + score + " points"
+  draw();
 
-	draw()
+  if (plant.length) {
+    // for (var ach in achievements){
+    // 	var a = achievements[ach]
+    // 	if (!a.won && a.condition()){
+    // 		score += a.points
+    // 		a.el.addClass("won")
+    // 		a.won = true
+    // 	}
+    // }
+  } else {
+    alert('You dead. Press OK to try again.');
+    reset();
+  }
 
-	if (plant.length){
-		// for (var ach in achievements){
-		// 	var a = achievements[ach]
-		// 	if (!a.won && a.condition()){
-		// 		score += a.points
-		// 		a.el.addClass("won")
-		// 		a.won = true
-		// 	}
-		// }
-	} else {
-		alert("You dead. Press OK to try again.")
-		reset()
-	}
-
-	time++
-
+  time++;
 }
 
-function draw(){
-	T.fillStyle = skyColor(weather)
-	T.fillRect(0, 0, W, dirtLevel * cellSize)
-	
-	// T.fillStyle = soilColor(hydration)
-	var dirtGradient = T.createLinearGradient(0, dirtLevel * cellSize, 0, H)
-	dirtGradient.addColorStop(0, soilColor(hydration))
-	dirtGradient.addColorStop(1, soilColor(1))
-	T.fillStyle = dirtGradient
-	T.fillRect(0, dirtLevel * cellSize, W, H - dirtLevel * cellSize)
+function draw() {
+  T.fillStyle = skyColor(weather);
+  T.fillRect(0, 0, W, dirtLevel * cellSize);
 
-	plant.forEach(function(o){
-		T.fillStyle = plantColor(o.water)
-		T.fillRect(cellSize * o.c, cellSize * o.r, cellSize, cellSize)
-	})
+  // T.fillStyle = soilColor(hydration)
+  var dirtGradient = T.createLinearGradient(0, dirtLevel * cellSize, 0, H);
+  dirtGradient.addColorStop(0, soilColor(hydration));
+  dirtGradient.addColorStop(1, soilColor(1));
+  T.fillStyle = dirtGradient;
+  T.fillRect(0, dirtLevel * cellSize, W, H - dirtLevel * cellSize);
 
-	T.fillStyle = "rgba(255,255,0,0.5)"
-	plant.forEach(function(o){
-		if (o.water >= healthyLevel){
-			T.fillRect(cellSize * (o.c + 0.5) - 1, cellSize * (o.r + 0.5) - 1, 2, 2)
-		}
-	})
+  plant.forEach(function(o) {
+    T.fillStyle = plantColor(o.water);
+    T.fillRect(cellSize * o.c, cellSize * o.r, cellSize, cellSize);
+  });
 
-	// T.fillStyle = "red"
-	// plant.forEach(function(o){
-	// 	if (o.dryTime % 2){
-	// 		T.fillRect(cellSize * (o.c + 0.5) - 1, cellSize * (o.r + 0.5) - 1, 2, 2)
-	// 	}
-	// })
+  T.fillStyle = 'rgba(255,255,0,0.5)';
+  plant.forEach(function(o) {
+    if (o.water >= healthyLevel) {
+      T.fillRect(cellSize * (o.c + 0.5) - 1, cellSize * (o.r + 0.5) - 1, 2, 2);
+    }
+  });
 
-	if (debug){
+  // T.fillStyle = "red"
+  // plant.forEach(function(o){
+  // 	if (o.dryTime % 2){
+  // 		T.fillRect(cellSize * (o.c + 0.5) - 1, cellSize * (o.r + 0.5) - 1, 2, 2)
+  // 	}
+  // })
 
-		T.strokeStyle = "rgba(255,255,0,0.5)"
-		T.beginPath()
-		plant.forEach(function(o){
-			var x = cellSize * o.c
-			var y = cellSize * o.r
-			T.moveTo(x, y + 6.5)
-			T.lineTo(x + cellSize * o.energy, y + 6.5)
-		})
-		T.stroke()
+  if (debug) {
+    T.strokeStyle = 'rgba(255,255,0,0.5)';
+    T.beginPath();
+    plant.forEach(function(o) {
+      var x = cellSize * o.c;
+      var y = cellSize * o.r;
+      T.moveTo(x, y + 6.5);
+      T.lineTo(x + cellSize * o.energy, y + 6.5);
+    });
+    T.stroke();
 
-		// T.strokeStyle = "blue"
-		// T.beginPath()
-		// for (var i = 0; i < plant.length; i++){
-		// 	var x = cellSize * plant[i].c
-		// 	var y = cellSize * plant[i].r
-		// 	T.moveTo(x, y + 8)
-		// 	T.lineTo(x + cellSize * plant[i].water, y + 8)
-		// }
-		// T.stroke()
+    // T.strokeStyle = "blue"
+    // T.beginPath()
+    // for (var i = 0; i < plant.length; i++){
+    // 	var x = cellSize * plant[i].c
+    // 	var y = cellSize * plant[i].r
+    // 	T.moveTo(x, y + 8)
+    // 	T.lineTo(x + cellSize * plant[i].water, y + 8)
+    // }
+    // T.stroke()
 
-	
-		var o = map[Math.floor(mouseY / cellSize)][Math.floor(mouseX / cellSize)]
+    var o = map[Math.floor(mouseY / cellSize)][Math.floor(mouseX / cellSize)];
 
-		T.fillStyle = "white";
-		var info = [
-			"weather: " + Math.round(weather * 100),
-			o ? "w:" + Math.round(o.water * 100) + ", e:" + Math.round(o.energy * 100): "" 
-		]
-		info.forEach(function(d, i){
-			T.fillText(d, 2, 10 * (i + 1))
-		})
+    T.fillStyle = 'white';
+    var info = [
+      'weather: ' + Math.round(weather * 100),
+      o
+        ? 'w:' + Math.round(o.water * 100) + ', e:' + Math.round(o.energy * 100)
+        : ''
+    ];
+    info.forEach(function(d, i) {
+      T.fillText(d, 2, 10 * (i + 1));
+    });
 
-		for (var r = dirtLevel; r < rows; r++){
-			var soilDepth = (r - dirtLevel) / (rows - dirtLevel)
-			T.fillText(Math.round(100 * (hydration * (1 - soilDepth) + soilDepth)), 2, cellSize * r + 10)
-		}
-
-		
-	}
+    for (var r = dirtLevel; r < rows; r++) {
+      var soilDepth = (r - dirtLevel) / (rows - dirtLevel);
+      T.fillText(
+        Math.round(100 * (hydration * (1 - soilDepth) + soilDepth)),
+        2,
+        cellSize * r + 10
+      );
+    }
+  }
 }
 
-var mouseX = 0, mouseY = 0
-function loop(){
-	if (!paused) requestAnimationFrame(loop)
-	else {
-		U.fillStyle = "white"
-		U.textAlign = "center"
-		U.textBaseline = "middle"
-		U.font = "48px sans-serif"
-		U.fillText("paused", W / 2, H / 2)
-		return
-	}
+var mouseX = 0,
+  mouseY = 0;
+function loop() {
+  if (!paused) requestAnimationFrame(loop);
+  else {
+    U.fillStyle = 'white';
+    U.textAlign = 'center';
+    U.textBaseline = 'middle';
+    U.font = '48px sans-serif';
+    U.fillText('paused', W / 2, H / 2);
+    return;
+  }
 
-	U.clearRect(0,0,W,H)
-	U.lineWidth = 0.5
+  U.clearRect(0, 0, W, H);
+  U.lineWidth = 0.5;
 
-	var c = Math.floor(mouseX / cellSize)
-	var r = Math.floor(mouseY / cellSize)
-	if (!map[r][c] && hasNeighbors(r, c)){
-		U.strokeStyle = "black"
-		U.strokeRect(c * cellSize + 0.5, r * cellSize + 0.5, cellSize, cellSize)
-		U.strokeStyle = "white"
-		U.strokeRect(c * cellSize - 0.5, r * cellSize - 0.5, cellSize, cellSize)
-	}
+  var c = Math.floor(mouseX / cellSize);
+  var r = Math.floor(mouseY / cellSize);
+  if (!map[r][c] && hasNeighbors(r, c)) {
+    U.strokeStyle = 'black';
+    U.strokeRect(c * cellSize + 0.5, r * cellSize + 0.5, cellSize, cellSize);
+    U.strokeStyle = 'white';
+    U.strokeRect(c * cellSize - 0.5, r * cellSize - 0.5, cellSize, cellSize);
+  }
 
-	if (drops.length){
-		U.strokeStyle = "blue"
-		U.beginPath()
-		for (var i = 0; i < drops.length; i++){
-			var d = drops[i]
-			d.y += gravity
+  if (drops.length) {
+    U.strokeStyle = 'blue';
+    U.beginPath();
+    for (var i = 0; i < drops.length; i++) {
+      var d = drops[i];
+      d.y += gravity;
 
-			if (d.y > dirtLevel * cellSize){
-				drops.splice(i--, 1)
-			} else {
-				U.moveTo(d.x, d.y)
-				U.lineTo(d.x, d.y - 5)
-			}
-		}
-		U.stroke()
-	}
+      if (d.y > dirtLevel * cellSize) {
+        drops.splice(i--, 1);
+      } else {
+        U.moveTo(d.x, d.y);
+        U.lineTo(d.x, d.y - 5);
+      }
+    }
+    U.stroke();
+  }
 
-	for (var i = 0; i < raindropMult * (0.5 - weather); i++){
-		drops.push({x: W * Math.random(), y: 0})
-	}
+  for (var i = 0; i < raindropMult * (0.5 - weather); i++) {
+    drops.push({x: W * Math.random(), y: 0});
+  }
 
-	if (frame % framesPerTime == 0) updateVals()
+  if (frame % framesPerTime == 0) updateVals();
 
-	frame++
+  frame++;
 }
 
-function hasNeighbors(r, c){
-	for (var i = 0; i < 4; i++){
-		var rr = r + nc[i][0]
-		var cc = c + nc[i][1]
-		if (map[rr] && map[rr][cc] && map[rr][cc].water >= healthyLevel) return true
-	}
-	return false
+function hasNeighbors(r, c) {
+  for (var i = 0; i < 4; i++) {
+    var rr = r + nc[i][0];
+    var cc = c + nc[i][1];
+    if (map[rr] && map[rr][cc] && map[rr][cc].water >= healthyLevel)
+      return true;
+  }
+  return false;
 }
 
-D.onclick = D.onmousemove = function(e){
-	mouseX = e.offsetX
-	mouseY = e.offsetY
-	var c = Math.floor(mouseX / cellSize)
-	var r = Math.floor(mouseY / cellSize)
-	if (e.which == 1){
-		if (!map[r][c] && hasNeighbors(r, c)){
-			map[r][c] = {energy: 0, water: 0, dryTime: 0, c: c, r: r}
-			updateGrid()
-			draw()
-		}
-	}
-}
+D.onclick = D.onmousemove = function(e) {
+  mouseX = e.offsetX;
+  mouseY = e.offsetY;
+  var c = Math.floor(mouseX / cellSize);
+  var r = Math.floor(mouseY / cellSize);
+  if (e.which == 1) {
+    if (!map[r][c] && hasNeighbors(r, c)) {
+      map[r][c] = {energy: 0, water: 0, dryTime: 0, c, r};
+      updateGrid();
+      draw();
+    }
+  }
+};
 
-onkeypress = function(e){
-	if (String.fromCharCode(e.which) == "d") debug = !debug
-	else if (e.which == 32){
-		paused = !paused
-		if (!paused) loop()
-		return false
-	}
-}
+onkeypress = function(e) {
+  if (String.fromCharCode(e.which) == 'd') debug = !debug;
+  else if (e.which == 32) {
+    paused = !paused;
+    if (!paused) loop();
+    return false;
+  }
+};
 
-reset()
-loop()
-
+reset();
+loop();
 
 // var vars = {
 // 	exchangeSpeed: {desc: "How quickly to plant cells transfer water and energy to their neighbors?", min: 0, max: 0.25},
@@ -460,7 +493,6 @@ loop()
 // 		.appendTo(p)
 
 // }
-
 </script>
 </body>
 </html>
