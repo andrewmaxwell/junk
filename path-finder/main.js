@@ -1,8 +1,8 @@
 import {noise} from '../sheep/utils.js';
 
-const cols = 64;
-const rows = 32;
-const size = 25;
+const cols = 100;
+const rows = 50;
+const size = 16;
 
 const canvas = document.querySelector('canvas');
 
@@ -136,8 +136,8 @@ const draw = () => {
           T.translate(g.x, g.y);
           T.rotate(Math.atan2(dy, dx));
           T.moveTo(0.5, 0);
-          T.lineTo(0, -0.1);
-          T.lineTo(0, 0.1);
+          T.lineTo(0, -0.15);
+          T.lineTo(0, 0.15);
           T.restore();
         }
       }
@@ -199,6 +199,7 @@ $(canvas).on('click mousemove', ({which, offsetX, offsetY}) => {
   if (which !== 1) return;
   const x = Math.floor(offsetX / size);
   const y = Math.floor(offsetY / size);
+  if (grid[y][x].type === selectedType) return;
   grid[y][x].type = selectedType;
   localStorage.grid = JSON.stringify(
     grid.map(r => r.map(c => types.indexOf(c.type)))
