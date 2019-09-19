@@ -1,5 +1,5 @@
 const {
-  Matter: {Engine, World, Bodies, Body, Composite},
+  Matter: {Engine, World, Bodies, Body, Composite, Vertices},
   dat: {GUI}
 } = window;
 
@@ -9,10 +9,14 @@ let width, height, engine;
 
 const params = {rows: 12, cutRate: 1, cutSize: 2 / 3, gravity: 1};
 
-const options = {frictionStatic: 1};
+const options = {friction: 0.9, frictionStatic: 1};
 
 const reset = () => {
-  engine = window.engine = Engine.create();
+  engine = window.engine = Engine.create({
+    positionIterations: 12,
+    velocityIterations: 8,
+    constraintIterations: 4
+  });
   engine.world.gravity.y = params.gravity;
   width = canvas.width = window.innerWidth;
   height = canvas.height = window.innerHeight;
@@ -59,12 +63,14 @@ const cutLoop = () => {
   const box = w.bodies[1 + Math.floor(Math.random() * (w.bodies.length - 1))];
   const v = box.vertices.map(({x, y}) => ({x, y}));
   const index = Math.floor(Math.random() * v.length);
-  Body.setVertices(box, [
+  const newVertices = [
     ...v.slice(0, index),
     interpolate(v[index], v[(index - 1 + v.length) % v.length]),
     interpolate(v[index], v[(index + 1) % v.length]),
     ...v.slice(index + 1)
-  ]);
+  ];
+  Body.setVertices(box, newVertices);
+  Body.setPosition(box, Vertices.centre(newVertices));
   setTimeout(cutLoop, 1000 / params.cutRate);
 };
 
