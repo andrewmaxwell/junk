@@ -7,9 +7,9 @@ const canvas = document.querySelector('canvas');
 const T = canvas.getContext('2d');
 let width, height, engine;
 
-const params = {rows: 12, cutRate: 1, cutSize: 2 / 3, gravity: 1};
+const params = {rows: 12, cutRate: 1, cutSize: 2 / 3, gravity: 0.5};
 
-const options = {friction: 0.9, frictionStatic: 1};
+const options = {friction: 0.9, frictionStatic: 1, slop: 0};
 
 const reset = () => {
   engine = window.engine = Engine.create({
@@ -30,8 +30,8 @@ const reset = () => {
   const size = height / rows;
   for (let i = 0; i < rows; i++) {
     for (let j = 0; j < i; j++) {
-      const x = size * (i / 2 - j) + width / 2;
-      const y = height + size * (i - rows - 0.5);
+      const x = size * (i / 2 - j - 1) * 1.2 + width / 2;
+      const y = height - size * (rows - i - 0.5);
       boxes.push(Bodies.rectangle(x, y, size, size, options));
     }
   }
