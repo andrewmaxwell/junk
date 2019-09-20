@@ -34,7 +34,7 @@ const reset = () => {
   height = canvas.height = window.innerHeight;
   paused = false;
   const {rows, spacing} = params;
-  size = Math.min(width, height) / (rows + 1);
+  size = Math.min(width / spacing, height) / (rows + 1);
   const boxes = [
     Bodies.rectangle(width / 2, height, width, size, {
       ...options,
@@ -57,7 +57,7 @@ const reset = () => {
 const render = () => {
   T.clearRect(0, 0, width, height);
   T.beginPath();
-  Composite.allBodies(engine.world).forEach(({vertices}) => {
+  engine.world.bodies.forEach(({vertices}) => {
     T.moveTo(vertices[0].x, vertices[0].y);
     vertices.forEach(({x, y}) => T.lineTo(x, y));
     T.lineTo(vertices[0].x, vertices[0].y);
@@ -101,6 +101,7 @@ const indexOfMinAngle = v => {
 };
 
 const filterPoints = v => {
+  if (v.length < 4) return v;
   const filtered = v.filter((p, i) => {
     const next = v[(i + 1) % v.length];
     return Math.hypot(next.x - p.x, next.y - p.y) > size / 8;
@@ -130,13 +131,11 @@ const cutCorner = box => {
   );
   if (params.keepCuts) {
     const pieceVertices = [v1, v[index], v2];
-    Composite.add(
-      engine.world,
-      Body.create({
-        position: Vertices.centre(pieceVertices),
-        vertices: pieceVertices
-      })
-    );
+    const piece = Body.create({
+      position: Vertices.centre(pieceVertices),
+      vertices: pieceVertices
+    });
+    if (piece.area > 16) Composite.add(engine.world, piece);
   }
   cuts++;
 };
@@ -190,10 +189,12 @@ window.addEventListener('click', ({pageX: x, pageY: y}) => {
   render();
 });
 window.addEventListener('keypress', e => {
-  if (e.key !== 'm') return;
-  const body = Bodies.circle(-width, 0, size * 2, {density: 1});
-  Body.setVelocity(body, {x: 40 + Math.random() * 50, y: 0});
-  Composite.add(engine.world, body);
+  if (e.key === 'r') reset();
+  if (e.key === 'm') {
+    const body = Bodies.circle(-width, 0, size * 2, {density: 1});
+    Body.setVelocity(body, {x: 40 + Math.random() * 50, y: 0});
+    Composite.add(engine.world, body);
+  }
 });
 
 reset();
