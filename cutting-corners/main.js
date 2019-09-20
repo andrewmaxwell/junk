@@ -171,6 +171,16 @@ gui.add(options, 'frictionStatic', 0, 10).onChange(setOptions);
 gui.add(params, 'keepCuts');
 gui.add(
   {
+    'Management!': () => {
+      const body = Bodies.circle(-width, 0, size * 2, {density: 1});
+      Body.setVelocity(body, {x: 60, y: 0});
+      Composite.add(engine.world, body);
+    }
+  },
+  'Management!'
+);
+gui.add(
+  {
     'pause/resume': () => {
       paused = !paused;
       loop();
