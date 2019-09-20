@@ -11,7 +11,8 @@ let width,
   paused,
   lastAdded = 0,
   size,
-  numBoxes;
+  numBoxes,
+  cuts;
 const params = {
   rows: 12,
   spacing: 1.5,
@@ -49,6 +50,7 @@ const reset = () => {
   }
   World.add(engine.world, boxes);
   numBoxes = boxes.length - 1;
+  cuts = 0;
   render();
 };
 
@@ -63,6 +65,10 @@ const render = () => {
   T.fillStyle = '#EEE';
   T.fill();
   T.stroke();
+
+  T.fillStyle = 'black';
+  T.font = '18px sans-serif';
+  T.fillText(`Cuts: ${cuts}`, 5, height - 5);
 };
 
 const interpolate = (a, b, s = params.cutSize) => ({
@@ -132,6 +138,7 @@ const cutCorner = box => {
       })
     );
   }
+  cuts++;
 };
 
 const loop = () => {
