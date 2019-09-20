@@ -7,9 +7,9 @@ const canvas = document.querySelector('canvas');
 const T = canvas.getContext('2d');
 let width, height, engine;
 
-const params = {rows: 12, cutRate: 1, cutSize: 2 / 3, gravity: 0.5};
+const params = {rows: 12, spacing: 1.5, cutRate: 1, cutSize: 2 / 3, gravity: 1};
 
-const options = {friction: 0.9, frictionStatic: 1, slop: 0};
+const options = {friction: 1, frictionStatic: 5, slop: 0};
 
 const reset = () => {
   engine = window.engine = Engine.create({
@@ -20,18 +20,18 @@ const reset = () => {
   engine.world.gravity.y = params.gravity;
   width = canvas.width = window.innerWidth;
   height = canvas.height = window.innerHeight;
-  const {rows} = params;
+  const {rows, spacing} = params;
+  const size = Math.min(width, height) / rows;
   const boxes = [
-    Bodies.rectangle(width / 2, height + 10, width, 60, {
+    Bodies.rectangle(width / 2, height, width, size, {
       ...options,
       isStatic: true
     })
   ];
-  const size = height / rows;
   for (let i = 0; i < rows; i++) {
     for (let j = 0; j < i; j++) {
-      const x = size * (i / 2 - j - 1) * 1.2 + width / 2;
-      const y = height - size * (rows - i - 0.5);
+      const x = size * (i / 2 - j - 0.5) * spacing + width / 2;
+      const y = height - size * (rows - i);
       boxes.push(Bodies.rectangle(x, y, size, size, options));
     }
   }
@@ -69,20 +69,32 @@ const cutLoop = () => {
     interpolate(v[index], v[(index + 1) % v.length]),
     ...v.slice(index + 1)
   ];
-  Body.setVertices(box, newVertices);
-  Body.setPosition(box, Vertices.centre(newVertices));
+  Composite.remove(w, box);
+  Composite.add(
+    w,
+    Body.create({
+      position: Vertices.centre(newVertices),
+      vertices: newVertices
+    })
+  );
   setTimeout(cutLoop, 1000 / params.cutRate);
 };
 
-var gui = new GUI();
+const setOptions = () =>
+  Composite.allBodies(engine.world).forEach(b => Body.set(b, options));
+
+const gui = new GUI();
 gui
   .add(params, 'rows', 1, 50)
   .step(1)
   .onChange(reset);
-gui.add(params, 'cutRate', 1, 100);
+gui.add(params, 'spacing', 1, 2).onChange(reset);
+gui.add(params, 'cutRate', 1, 10);
 gui.add(params, 'cutSize', 0, 0.99);
 gui.add(params, 'gravity', 0, 10).onChange(v => (engine.world.gravity.y = v));
-gui.add({reset}, 'reset');
+gui.add(options, 'friction', 0, 1).onChange(setOptions);
+gui.add(options, 'frictionStatic', 0, 10).onChange(setOptions);
+gui.add({'reset simulation': reset}, 'reset simulation');
 
 window.addEventListener('resize', reset);
 
