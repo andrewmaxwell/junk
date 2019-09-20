@@ -7,8 +7,9 @@ const canvas = document.querySelector('canvas');
 const T = canvas.getContext('2d');
 let width, height, engine;
 
+let paused = false,
+  lastAdded = 0;
 const params = {rows: 12, spacing: 1.5, cutRate: 1, cutSize: 2 / 3, gravity: 1};
-
 const options = {friction: 1, frictionStatic: 5, slop: 0};
 
 const reset = () => {
@@ -38,8 +39,13 @@ const reset = () => {
   World.add(engine.world, boxes);
 };
 
-const renderLoop = () => {
-  requestAnimationFrame(renderLoop);
+const interpolate = (a, b, s = params.cutSize) => ({
+  x: a.x * (1 - s) + b.x * s,
+  y: a.y * (1 - s) + b.y * s
+});
+
+const loop = () => {
+  if (!paused) requestAnimationFrame(loop);
   T.clearRect(0, 0, width, height);
   T.beginPath();
   Composite.allBodies(engine.world).forEach(({vertices}) => {
@@ -51,33 +57,29 @@ const renderLoop = () => {
   T.fill();
   T.stroke();
   Engine.update(engine);
-};
 
-const interpolate = (a, b, s = params.cutSize) => ({
-  x: a.x * (1 - s) + b.x * s,
-  y: a.y * (1 - s) + b.y * s
-});
-
-const cutLoop = () => {
-  const w = engine.world;
-  const box = w.bodies[1 + Math.floor(Math.random() * (w.bodies.length - 1))];
-  const v = box.vertices.map(({x, y}) => ({x, y}));
-  const index = Math.floor(Math.random() * v.length);
-  const newVertices = [
-    ...v.slice(0, index),
-    interpolate(v[index], v[(index - 1 + v.length) % v.length]),
-    interpolate(v[index], v[(index + 1) % v.length]),
-    ...v.slice(index + 1)
-  ];
-  Composite.remove(w, box);
-  Composite.add(
-    w,
-    Body.create({
-      position: Vertices.centre(newVertices),
-      vertices: newVertices
-    })
-  );
-  setTimeout(cutLoop, 1000 / params.cutRate);
+  const now = Date.now();
+  if (now - lastAdded > 1000 / params.cutRate) {
+    lastAdded = now;
+    const w = engine.world;
+    const box = w.bodies[1 + Math.floor(Math.random() * (w.bodies.length - 1))];
+    const v = box.vertices.map(({x, y}) => ({x, y}));
+    const index = Math.floor(Math.random() * v.length);
+    const newVertices = [
+      ...v.slice(0, index),
+      interpolate(v[index], v[(index - 1 + v.length) % v.length]),
+      interpolate(v[index], v[(index + 1) % v.length]),
+      ...v.slice(index + 1)
+    ];
+    Composite.remove(w, box);
+    Composite.add(
+      w,
+      Body.create({
+        position: Vertices.centre(newVertices),
+        vertices: newVertices
+      })
+    );
+  }
 };
 
 const setOptions = () =>
@@ -89,15 +91,23 @@ gui
   .step(1)
   .onChange(reset);
 gui.add(params, 'spacing', 1, 2).onChange(reset);
-gui.add(params, 'cutRate', 1, 10);
+gui.add(params, 'cutRate', 0, 10);
 gui.add(params, 'cutSize', 0, 0.99);
 gui.add(params, 'gravity', 0, 10).onChange(v => (engine.world.gravity.y = v));
 gui.add(options, 'friction', 0, 1).onChange(setOptions);
 gui.add(options, 'frictionStatic', 0, 10).onChange(setOptions);
+gui.add(
+  {
+    'pause/resume': () => {
+      paused = !paused;
+      loop();
+    }
+  },
+  'pause/resume'
+);
 gui.add({'reset simulation': reset}, 'reset simulation');
 
 window.addEventListener('resize', reset);
 
 reset();
-renderLoop();
-cutLoop();
+loop();
