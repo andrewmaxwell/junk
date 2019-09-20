@@ -171,16 +171,6 @@ gui.add(options, 'frictionStatic', 0, 10).onChange(setOptions);
 gui.add(params, 'keepCuts');
 gui.add(
   {
-    'Management!': () => {
-      const body = Bodies.circle(-width, 0, size * 2, {density: 1});
-      Body.setVelocity(body, {x: 60, y: 0});
-      Composite.add(engine.world, body);
-    }
-  },
-  'Management!'
-);
-gui.add(
-  {
     'pause/resume': () => {
       paused = !paused;
       loop();
@@ -198,6 +188,12 @@ window.addEventListener('click', ({pageX: x, pageY: y}) => {
   if (!box) return;
   cutCorner(box);
   render();
+});
+window.addEventListener('keypress', e => {
+  if (e.key !== 'm') return;
+  const body = Bodies.circle(-width, 0, size * 2, {density: 1});
+  Body.setVelocity(body, {x: 40 + Math.random() * 50, y: 0});
+  Composite.add(engine.world, body);
 });
 
 reset();
