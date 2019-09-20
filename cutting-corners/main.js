@@ -10,8 +10,16 @@ let width,
   engine,
   paused,
   lastAdded = 0,
-  size;
-const params = {rows: 12, spacing: 1.5, cutRate: 1, cutSize: 0.3, gravity: 1};
+  size,
+  numBoxes;
+const params = {
+  rows: 12,
+  spacing: 1.5,
+  cutRate: 1,
+  cutSize: 0.3,
+  gravity: 1,
+  keepCuts: true
+};
 const options = {friction: 1, frictionStatic: 5};
 
 const reset = () => {
@@ -40,6 +48,7 @@ const reset = () => {
     }
   }
   World.add(engine.world, boxes);
+  numBoxes = boxes.length - 1;
   render();
 };
 
@@ -85,21 +94,24 @@ const indexOfMinAngle = v => {
   return index;
 };
 
-const filterPoints = v =>
-  v.length > 3
-    ? v.filter((p, i) => {
-        const next = v[(i + 1) % v.length];
-        return Math.hypot(next.x - p.x, next.y - p.y) > size / 8;
-      })
-    : v;
+const filterPoints = v => {
+  const filtered = v.filter((p, i) => {
+    const next = v[(i + 1) % v.length];
+    return Math.hypot(next.x - p.x, next.y - p.y) > size / 8;
+  });
+  return filtered.length > 2 ? filtered : v;
+};
 
 const cutCorner = box => {
   const v = box.vertices.map(({x, y}) => ({x, y}));
+  if (v.length < 4) return;
   const index = indexOfMinAngle(v);
+  const v1 = interpolate(v[index], v[(index - 1 + v.length) % v.length]);
+  const v2 = interpolate(v[index], v[(index + 1) % v.length]);
   const newVertices = filterPoints([
     ...v.slice(0, index),
-    interpolate(v[index], v[(index - 1 + v.length) % v.length]),
-    interpolate(v[index], v[(index + 1) % v.length]),
+    v1,
+    v2,
     ...v.slice(index + 1)
   ]);
   Composite.remove(engine.world, box);
@@ -110,6 +122,16 @@ const cutCorner = box => {
       vertices: newVertices
     })
   );
+  if (params.keepCuts) {
+    const pieceVertices = [v1, v[index], v2];
+    Composite.add(
+      engine.world,
+      Body.create({
+        position: Vertices.centre(pieceVertices),
+        vertices: pieceVertices
+      })
+    );
+  }
 };
 
 const loop = () => {
@@ -120,10 +142,7 @@ const loop = () => {
   const now = Date.now();
   if (now - lastAdded > 1000 / params.cutRate) {
     lastAdded = now;
-    const box =
-      engine.world.bodies[
-        1 + Math.floor(Math.random() * (engine.world.bodies.length - 1))
-      ];
+    const box = engine.world.bodies[1 + Math.floor(Math.random() * numBoxes)];
     cutCorner(box);
   }
 };
@@ -142,6 +161,7 @@ gui.add(params, 'cutSize', 0, 0.99);
 gui.add(params, 'gravity', 0, 10).onChange(v => (engine.world.gravity.y = v));
 gui.add(options, 'friction', 0, 1).onChange(setOptions);
 gui.add(options, 'frictionStatic', 0, 10).onChange(setOptions);
+gui.add(params, 'keepCuts');
 gui.add(
   {
     'pause/resume': () => {
