@@ -1,5 +1,5 @@
 const {
-  Matter: {Engine, World, Bodies, Body, Composite, Vertices},
+  Matter: {Engine, World, Bodies, Body, Composite, Vertices, MouseConstraint},
   dat: {GUI}
 } = window;
 
@@ -20,7 +20,12 @@ const params = {
   gravity: 1,
   keepCuts: true
 };
-const options = {friction: 1, frictionStatic: 5};
+const options = {
+  friction: 1,
+  frictionStatic: 5,
+  frictionAir: 0,
+  restitution: 0.5
+};
 
 const reset = () => {
   engine = window.engine = Engine.create({
@@ -48,6 +53,7 @@ const reset = () => {
     }
   }
   World.add(engine.world, boxes);
+  World.add(engine.world, MouseConstraint.create(engine, {element: canvas}));
   cuts = 0;
   render();
 };
@@ -123,6 +129,7 @@ const cutCorner = box => {
   Composite.add(
     engine.world,
     Body.create({
+      ...options,
       position: Vertices.centre(newVertices),
       vertices: newVertices
     })
@@ -130,6 +137,7 @@ const cutCorner = box => {
   if (params.keepCuts) {
     const pieceVertices = [v1, v[index], v2];
     const piece = Body.create({
+      ...options,
       position: Vertices.centre(pieceVertices),
       vertices: pieceVertices
     });
@@ -158,22 +166,31 @@ const setOptions = () =>
   Composite.allBodies(engine.world).forEach(b => Body.set(b, options));
 
 const gui = new GUI();
-gui
-  .add(params, 'rows', 1, 25)
+const f1 = gui.addFolder('Initial Settings');
+f1.add(params, 'rows', 1, 25)
   .step(1)
   .onChange(reset);
-gui.add(params, 'spacing', 1, 2).onChange(reset);
-gui.add(params, 'cutRate', 0, 10);
-gui.add(params, 'cutSize', 0, 0.99);
-gui.add(params, 'gravity', 0, 10).onChange(v => (engine.world.gravity.y = v));
-gui.add(options, 'friction', 0, 1).onChange(setOptions);
-gui.add(options, 'frictionStatic', 0, 10).onChange(setOptions);
-gui.add(params, 'keepCuts');
+f1.add(params, 'spacing', 1, 2).onChange(reset);
+f1.open();
+
+const f2 = gui.addFolder('Cutting Settiings');
+f2.add(params, 'cutRate', 0, 10);
+f2.add(params, 'cutSize', 0, 0.99);
+f2.add(params, 'keepCuts');
+f2.open();
+
+const f3 = gui.addFolder('Simulator Settings');
+f3.add(params, 'gravity', 0, 10).onChange(v => (engine.world.gravity.y = v));
+f3.add(options, 'friction', 0, 1).onChange(setOptions);
+f3.add(options, 'frictionStatic', 0, 10).onChange(setOptions);
+f3.add(options, 'restitution', 0, 1).onChange(setOptions);
+f3.open();
+
 gui.add(
   {
     'pause/resume': () => {
       paused = !paused;
-      loop();
+      if (!paused) loop();
     }
   },
   'pause/resume'
@@ -181,7 +198,7 @@ gui.add(
 gui.add({'reset simulation': reset}, 'reset simulation');
 
 window.addEventListener('resize', reset);
-window.addEventListener('click', ({pageX: x, pageY: y}) => {
+window.addEventListener('mousedown', ({pageX: x, pageY: y}) => {
   const box = engine.world.bodies.find(b =>
     Vertices.contains(b.vertices, {x, y})
   );
@@ -192,7 +209,10 @@ window.addEventListener('click', ({pageX: x, pageY: y}) => {
 window.addEventListener('keypress', e => {
   if (e.key === 'r') reset();
   if (e.key === 'm') {
-    const body = Bodies.circle(-width, 0, size * 2, {density: 1});
+    const body = Bodies.circle(-width, 0, size * 2, {
+      density: 1,
+      restitution: 1
+    });
     Body.setVelocity(body, {x: 40 + Math.random() * 50, y: 0});
     Composite.add(engine.world, body);
   }
