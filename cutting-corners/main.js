@@ -11,10 +11,9 @@ let width,
   paused,
   lastAdded = 0,
   size,
-  numBoxes,
   cuts;
 const params = {
-  rows: 12,
+  rows: 8,
   spacing: 1.5,
   cutRate: 1,
   cutSize: 0.3,
@@ -49,7 +48,6 @@ const reset = () => {
     }
   }
   World.add(engine.world, boxes);
-  numBoxes = boxes.length - 1;
   cuts = 0;
   render();
 };
@@ -135,7 +133,7 @@ const cutCorner = box => {
       position: Vertices.centre(pieceVertices),
       vertices: pieceVertices
     });
-    if (piece.area > 16) Composite.add(engine.world, piece);
+    Composite.add(engine.world, piece);
   }
   cuts++;
 };
@@ -148,7 +146,10 @@ const loop = () => {
   const now = Date.now();
   if (now - lastAdded > 1000 / params.cutRate) {
     lastAdded = now;
-    const box = engine.world.bodies[1 + Math.floor(Math.random() * numBoxes)];
+    const boxes = engine.world.bodies.filter(
+      (b, i) => i && b.vertices.length > 3
+    );
+    const box = boxes[Math.floor(Math.random() * boxes.length)];
     cutCorner(box);
   }
 };
