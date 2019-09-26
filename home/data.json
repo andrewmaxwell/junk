@@ -1,0 +1,218 @@
+[
+  {
+    "filePath": "cutting-corners",
+    "title": "Cutting Corners",
+    "year": 2019,
+    "desc": ""
+  },
+  {
+    "filePath": "particle-fluid",
+    "title": "Fluid Particle Simulator",
+    "year": 2019,
+    "desc": ""
+  },
+  {
+    "filePath": "klisp",
+    "title": "Klisp Compiler",
+    "year": 2019,
+    "desc": "A compiler written in Ramda"
+  },
+  {
+    "filePath": "path-finder",
+    "title": "Path Finder",
+    "year": 2019,
+    "desc": ""
+  },
+  {
+    "filePath": "ramda-compiler",
+    "title": "Ramda Compiler",
+    "year": 2019,
+    "desc": ""
+  },
+  {
+    "filePath": "sudoku-solver",
+    "title": "Sudoku Solver",
+    "year": 2019,
+    "desc": ""
+  },
+  {
+    "filePath": "waveform",
+    "title": "Waveform Visualizer",
+    "year": 2019,
+    "desc": ""
+  },
+  {
+    "filePath": "space-filler",
+    "title": "Artsy Space Filler",
+    "year": 2018,
+    "desc": ""
+  },
+  {
+    "filePath": "react-clone",
+    "title": "Functional UI Micro Framework",
+    "year": 2018,
+    "desc": ""
+  },
+  {
+    "filePath": "mandelbrot-webgl",
+    "title": "Mandelbrot WebGL",
+    "year": 2018,
+    "desc": ""
+  },
+  {
+    "filePath": "pumpkin-slasher",
+    "title": "Pumpkin Slasher Game",
+    "year": 2018,
+    "desc": ""
+  },
+  {
+    "filePath": "pixel-editor",
+    "title": "React Pixel Graphic Editor",
+    "year": 2018,
+    "desc": ""
+  },
+  {
+    "filePath": "raymarch-2d",
+    "title": "2D Raymarcher",
+    "year": 2017,
+    "desc": ""
+  },
+  {
+    "filePath": "raytracer",
+    "title": "3D Raytracer with Workers",
+    "year": 2017,
+    "desc": ""
+  },
+  {
+    "filePath": "double-pendulum",
+    "title": "Double Pendulum Visualization",
+    "year": 2017,
+    "desc": ""
+  },
+  {
+    "filePath": "fluid",
+    "title": "Navier-Stokes Fluid Simulator",
+    "year": 2017,
+    "desc": ""
+  },
+  {
+    "filePath": "sheep",
+    "title": "Sheep Simulator",
+    "year": 2017,
+    "desc": ""
+  },
+  {
+    "filePath": "cellular-automata",
+    "title": "Three Color Cellular Automata Generator",
+    "year": 2017,
+    "desc": ""
+  },
+  {
+    "filePath": "wireworld",
+    "title": "Wireworld Prime Calculator",
+    "year": 2017,
+    "desc": "I didn't invent this, I just implemented it."
+  },
+  {
+    "filePath": "office-optimizer",
+    "title": "Workspace Optimizer",
+    "year": 2017,
+    "desc": ""
+  },
+  {
+    "filePath": "tsp-simulated-annealing",
+    "title": "TSP Simulated Annealing",
+    "year": 2016,
+    "desc": ""
+  },
+  {
+    "filePath": "stl-tsp",
+    "title": "Traveling Salesman",
+    "year": 2016,
+    "desc": ""
+  },
+  {
+    "filePath": "builder",
+    "title": "Physics Builder",
+    "year": 2015,
+    "desc": "Create and simulate contraptions"
+  },
+  {
+    "filePath": "particle-sim",
+    "title": "Cohesive Particle Simulator",
+    "year": 2014,
+    "desc": ""
+  },
+  {
+    "filePath": "mandelbrot",
+    "title": "Mandelbrot",
+    "year": 2014,
+    "desc": ""
+  },
+  {
+    "filePath": "raytracer-2d",
+    "title": "2D Raytracer",
+    "year": 2013,
+    "desc": ""
+  },
+  {
+    "filePath": "jibberjabber",
+    "title": "Jibberjabber Generator",
+    "year": 2013,
+    "desc": ""
+  },
+  {
+    "filePath": "maze",
+    "title": "Maze Generator",
+    "year": 2013,
+    "desc": ""
+  },
+  {
+    "filePath": "snake",
+    "title": "Snake AI",
+    "year": 2013,
+    "desc": ""
+  },
+  {
+    "filePath": "tootsie-rocket",
+    "title": "Tootsie Rocket",
+    "year": 2013,
+    "desc": ""
+  },
+  {
+    "filePath": "micro-conway",
+    "title": "Micro Conway's Game of Life",
+    "year": 2012,
+    "desc": ""
+  },
+  {
+    "filePath": "clock",
+    "title": "Simple Clock",
+    "year": 2012,
+    "desc": ""
+  },
+  {
+    "filePath": "splitter",
+    "title": "Splitter",
+    "year": 2012,
+    "desc": ""
+  },
+  {
+    "filePath": "gears",
+    "title": "Gears",
+    "year": 2011,
+    "desc": ""
+  },
+  {
+    "filePath": "bloxploder",
+    "title": "Bloxploder",
+    "year": 2010,
+    "desc": "A game I made for fun."
+  },
+  {
+    "filePath": "tree",
+    "title": "Growing Tree",
+    "year": 2010,
+    "desc": ""
+  }
+]
