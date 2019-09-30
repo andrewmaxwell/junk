@@ -1,5 +1,3 @@
-const {ifElse, isEmpty, always, pipe, slice, prepend} = window.R;
-
 // const esc = string => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const tokenTypes = [

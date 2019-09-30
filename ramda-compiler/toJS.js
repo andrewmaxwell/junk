@@ -1,10 +1,6 @@
-'use strict';
-
-const {fromPairs, curry} = window.R;
-
 const precendence = {
+  functionDef: 1,
   ternary: 2,
-  functionCall: 3,
   '+': 4,
   '-': 4,
   '*': 5,
@@ -13,6 +9,7 @@ const precendence = {
   '||': 6,
   '&&': 7,
   '!': 8,
+  functionCall: 9,
   property: 10
 };
 const indent = str => str.replace(/\n/g, '\n  ');
@@ -88,7 +85,7 @@ export const toJS = (el, parent) => {
   const syntax = toJSMappings[el.type](el);
   return parent &&
     parent.type !== el.type &&
-    precendence[parent.type] >= precendence[el.type]
+    precendence[parent.type] > precendence[el.type]
     ? '(' + syntax + ')'
     : syntax;
 };

@@ -1,37 +1,5 @@
 import {treeMap} from './utils.js';
 import {tokenize} from './tokenize.js';
-const {
-  pipe,
-  reject,
-  propEq,
-  path,
-  assoc,
-  prop,
-  when,
-  ifElse,
-  over,
-  concat,
-  last,
-  init,
-  is,
-  reduce,
-  append,
-  lensPath,
-  slice,
-  head,
-  allPass,
-  pathEq,
-  length,
-  nth,
-  both,
-  contains,
-  equals,
-  lensIndex,
-  tap,
-  includes,
-  map,
-  propSatisfies
-} = window.R;
 
 const nest = (start, end) =>
   treeMap(
@@ -58,18 +26,24 @@ const nest = (start, end) =>
 const parseFunctionCalls = treeMap(
   when(
     is(Array),
-    reduce(
-      (res, el) =>
-        res.length &&
-        el.type === 'argList' &&
-        ['id', 'property'].includes(last(res).type)
-          ? init(res).concat({
-              type: 'functionCall',
-              func: last(res),
-              children: el.children
-            })
-          : append(el, res),
-      []
+    pipe(
+      reduce(
+        (res, el) =>
+          res.length &&
+          el.type === 'argList' &&
+          ['id', 'property'].includes(last(res).type)
+            ? [
+                ...init(res),
+                {
+                  type: 'functionCall',
+                  func: last(res),
+                  children: el.children
+                }
+              ]
+            : [...res, el],
+        []
+      ),
+      unnest
     )
   )
 );
@@ -86,7 +60,7 @@ const parseList = (tokenType, type) =>
             reduce(
               (res, el) =>
                 el.type === ','
-                  ? append([], res)
+                  ? [...res, []]
                   : over(lensIndex(-1), append(el), res),
               [[]]
             ),
@@ -104,12 +78,15 @@ const parseProperties = treeMap(
     reduce(
       (res, el) =>
         res.length > 1 && last(res).type === '.'
-          ? slice(0, -2, res).concat({
-              type: 'property',
-              parent: nth(-2, res),
-              value: el.value
-            })
-          : append(el, res),
+          ? [
+              ...slice(0, -2, res),
+              {
+                type: 'property',
+                parent: nth(-2, res),
+                value: el.value
+              }
+            ]
+          : [...res, el],
       []
     )
   )
@@ -121,12 +98,15 @@ const parseIndexes = treeMap(
     reduce(
       (res, el) =>
         res.length && el.type === '[' && last(res).type === 'id'
-          ? init(res).concat({
-              type: 'property',
-              parent: last(res),
-              value: el.children[0]
-            })
-          : append(el, res),
+          ? [
+              ...init(res),
+              {
+                type: 'property',
+                parent: last(res),
+                value: el.children[0]
+              }
+            ]
+          : [...res, el],
       []
     )
   )
@@ -147,12 +127,12 @@ const parseFunctionDefs = treeMap(
 
 const parseNot = treeMap(
   when(
-    both(is(Array), contains({type: '!', value: '!'})),
+    both(is(Array), includes({type: '!', value: '!'})),
     reduce(
       (res, el) =>
         res.length && last(res).type === '!'
-          ? init(res).concat({type: '!', children: [el]})
-          : append(el, res),
+          ? [...init(res), {type: '!', children: [el]}]
+          : [...res, el],
       []
     )
   )
@@ -161,12 +141,12 @@ const parseNot = treeMap(
 const parseInfix = type =>
   treeMap(
     when(
-      both(is(Array), contains({type, value: type})),
+      both(is(Array), includes({type, value: type})),
       pipe(
         reduce(
           (res, el) =>
             equals(el, {type, value: type})
-              ? append([], res)
+              ? [...res, []]
               : over(lensIndex(-1), append(el), res),
           [[]]
         ),
@@ -192,7 +172,7 @@ const parseTernaries = treeMap(
       reduce(
         (res, el) =>
           el.type === '?' || el.type === ':'
-            ? append([], res)
+            ? [...res, []]
             : over(lensIndex(-1), append(el), res),
         [[]]
       ),
@@ -204,11 +184,13 @@ const parseTernaries = treeMap(
 const parseSimplePairs = treeMap(
   when(
     allPass([is(Array), pathEq([0, 'type'], 'id'), pathEq([1, 'type'], ':')]),
-    ([{value}, , ...children]) => ({
-      type: 'pair',
-      key: {type: 'string', value},
-      value: children
-    })
+    ([{value}, , ...children]) => [
+      {
+        type: 'pair',
+        key: {type: 'string', value},
+        value: children
+      }
+    ]
   )
 );
 
@@ -229,12 +211,14 @@ const parseDynamicProps = treeMap(
 
 const parseSpreads = treeMap(
   when(
-    allPass([
-      is(Array),
-      propSatisfies(equals(2), 'length'),
-      pathEq([0, 'type'], '...')
-    ]),
-    ([, value]) => ({type: 'spread', value})
+    is(Array),
+    reduce(
+      (res, el) =>
+        res.length && last(res).type === '...'
+          ? [...init(res), {type: 'spread', value: el}]
+          : [...res, el],
+      []
+    )
   )
 );
 

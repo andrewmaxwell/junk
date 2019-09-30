@@ -1,9 +1,6 @@
-'use strict';
-
 import {toJS} from './toJS.js';
 import {parse} from './parser.js';
 import {transform} from './transform.js';
-const {pipe, tap} = window.R;
 
 /*
 

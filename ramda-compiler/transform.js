@@ -1,33 +1,5 @@
-'use strict';
-
 import {treeMap} from './utils.js';
 import {parse} from './parser.js';
-
-const {
-  pipe,
-  propEq,
-  path,
-  assoc,
-  map,
-  prop,
-  when,
-  both,
-  ifElse,
-  always,
-  identity,
-  pathEq,
-  equals,
-  length,
-  __,
-  converge,
-  call,
-  defaultTo,
-  of,
-  isEmpty,
-  allPass,
-  propSatisfies,
-  values
-} = window.R;
 
 /*
 
@@ -51,7 +23,7 @@ const ramdaFuncs = map(parse, {
   any: '(f, d) => d.some(f)',
   anyPass: '(a, d) => a.some(f => f(d))',
   append: '(e, a) => a.concat(e)',
-  // apply: ('(a, f) => f(...a)')
+  apply: '(a, f) => f(...a)',
   applyTo: '(v, f) => f(v)',
   // ascend
   assoc: '(k, v, d) => ({...d, [k]: v})',
@@ -88,7 +60,7 @@ const ramdaFuncs = map(parse, {
   // endsWith
   // eqBy
   // eqProps
-  // equals
+  equals: `(a, b) => a === b`, // not quite accurate
   // evolve
   F: '() => false',
   filter: '(f, d) => d.filter(f)',
@@ -113,7 +85,7 @@ const ramdaFuncs = map(parse, {
   ifElse: '(p, t, e, d) => p(d) ? t(d) : e(d)',
   inc: 'x => x + 1',
   includes: '(v, d) => d.includes(v)', // should be by equal
-  // indexBy
+  indexBy: '(p, a) => a.reduce((r, v) => ({...r, [p(v)]: v}), {})',
   indexOf: '(v, a) => a.indexOf(v)',
   init: 'a => a.slice(0, -1)',
   // innerJoin
@@ -126,7 +98,7 @@ const ramdaFuncs = map(parse, {
   // invertObj
   // invoker
   is: '(t, d) => d != null && d.constructor == t',
-  // isEmpty
+  isEmpty: 'a => !Object.keys(a).length',
   isNil: 'n => n === null || n === undefined',
   join: '(j, d) => d.join(j)',
   // juxt
@@ -295,9 +267,37 @@ const unpipe = treeMap(
   )
 );
 
+const unassocPather = (arr, val, parent) =>
+  arr.length
+    ? {
+        type: 'object',
+        children: [
+          {type: 'spread', value: parent},
+          {
+            type: 'pair',
+            key: arr[0],
+            value: unassocPather(arr.slice(1), val, {
+              type: 'property',
+              parent,
+              value: arr[0]
+            })
+          }
+        ]
+      }
+    : val;
+
+// assocPath(a, v) ->  u => {...u, a0: {...u.a0, a1: {...u.a0.a1, a2: v}}}
+const unassocPath = treeMap(
+  when(pathEq(['func', 'value'], 'assocPath'), ({children: [arr, val]}) => ({
+    type: 'functionDef',
+    args: ['u'],
+    children: [unassocPather(arr.children, val, {type: 'id', value: 'u'})]
+  }))
+);
+
 const unpather = el =>
   el.children[0].children.reduce(
-    (res, {value}) => ({
+    (res, value) => ({
       type: 'property',
       parent: {
         type: '||',
@@ -310,18 +310,11 @@ const unpather = el =>
 
 // (a, d) => ((d || {}).a0 || {}).a1 ...
 const unpath = treeMap(
-  when(
-    pathEq(['func', 'value'], 'path'),
-    ifElse(
-      pipe(
-        prop('children'),
-        length,
-        equals(2)
-      ),
-      unpather,
-      el => ({type: 'functionDef', args: ['a'], children: [unpather(el)]})
-    )
-  )
+  when(pathEq(['func', 'value'], 'path'), el => ({
+    type: 'functionDef',
+    args: ['a'],
+    children: [unpather(el)]
+  }))
 );
 
 // (con, arr, data) => con(arr[0](data), ...)
@@ -419,6 +412,7 @@ const simplifyIIFE = treeMap(
 const transforms = {
   unpipe,
   unpath,
+  unassocPath,
   unconverge,
   unramda: treeMap(
     when(
