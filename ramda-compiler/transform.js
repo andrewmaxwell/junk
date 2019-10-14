@@ -27,7 +27,6 @@ const ramdaFuncs = map(parse, {
   applyTo: '(v, f) => f(v)',
   // ascend
   assoc: '(k, v, d) => ({...d, [k]: v})',
-  // assocPath,
   both: '(f, g, d) => f(d) && g(d)',
   call: '(f, v) => f(v)',
   chain: '(f, d) => d.flatMap(f)',
