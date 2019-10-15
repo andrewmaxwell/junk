@@ -3,14 +3,23 @@ export class Renderer {
     this.width = canvas.width;
     this.height = canvas.height;
     this.ctx = canvas.getContext('2d');
+    this.ctx.strokeStyle = 'white';
+    this.img = document.querySelector('img');
   }
-  draw(player, walls, distances, params) {
+  draw({player, walls}, distances, params) {
     const {ctx, width, height} = this;
     ctx.clearRect(0, 0, width, height);
-    this.drawTopDownDistances(player, distances);
     this.drawFirstPerson(distances, params);
-    this.drawWalls(walls);
-    this.drawPlayer(player);
+    if (params.showMap) {
+      ctx.save();
+      ctx.translate(width / 2, height / 2);
+      ctx.rotate(Math.PI * 1.5 - player.angle);
+      ctx.translate(-player.x, -player.y);
+      this.drawTopDownDistances(player, distances);
+      this.drawWalls(walls);
+      this.drawPlayer(player);
+      ctx.restore();
+    }
   }
   drawWalls(walls) {
     const {ctx} = this;
@@ -44,14 +53,27 @@ export class Renderer {
     ctx.stroke();
   }
   drawFirstPerson(distances, params) {
-    const {ctx, width, height} = this;
-    ctx.fillStyle = 'black';
+    const {ctx, width, height, img} = this;
+    const w = 1 / distances.length;
+    ctx.fillStyle = 'white';
     ctx.save();
     ctx.scale(width, height);
     distances.forEach(({dist}, i) => {
       const h = params.wallHeight / dist;
-      ctx.globalAlpha = Math.min(1, params.wallDarkness / Math.sqrt(dist));
-      ctx.fillRect(i / distances.length, 0.5 - h, 1 / distances.length, h * 2);
+      ctx.globalAlpha = 1 - Math.min(1, Math.sqrt(dist / params.renderDist));
+      ctx.fillRect(i * w, 0.5 - h, w, h * 2);
+      // ctx.drawImage(
+      //   img,
+      //   i * w * width, // sx
+      //   (0.5 - h) * height, // sy
+      //   w * width, // sw
+      //   h * 2 * height, // sh
+
+      //   i * w, // dx
+      //   0.5 - h, // dy
+      //   w, // dw
+      //   h * 2 // dh
+      // );
     });
     ctx.restore();
   }
