@@ -6,7 +6,7 @@ export class Renderer {
     this.ctx.strokeStyle = 'white';
     this.img = document.querySelector('img');
   }
-  draw({player, walls}, distances, params) {
+  draw({player, things}, distances, params) {
     const {ctx, width, height} = this;
     ctx.clearRect(0, 0, width, height);
     this.drawFirstPerson(distances, params);
@@ -16,18 +16,23 @@ export class Renderer {
       ctx.rotate(Math.PI * 1.5 - player.angle);
       ctx.translate(-player.x, -player.y);
       this.drawTopDownDistances(player, distances);
-      this.drawWalls(walls);
+      this.drawThings(things);
       this.drawPlayer(player);
       ctx.restore();
     }
   }
-  drawWalls(walls) {
+  drawThings(things) {
     const {ctx} = this;
     ctx.globalAlpha = 0.5;
     ctx.beginPath();
-    walls.forEach(({x1, y1, x2, y2}) => {
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
+    things.forEach(({x1, y1, x2, y2, x, y, radius}) => {
+      if (radius) {
+        ctx.moveTo(x + radius, y);
+        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+      } else {
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+      }
     });
     ctx.stroke();
   }
