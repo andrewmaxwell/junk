@@ -11,7 +11,6 @@ const params = {
   detail: 100,
   viewingAngle: Math.PI / 3,
   wallHeight: 20,
-  wallBrightness: 3,
   moveSpeed: 3,
   turnSpeed: 0.07,
   renderDist: width / 2,
@@ -35,7 +34,6 @@ const gui = new window.dat.GUI();
 gui.add(params, 'detail', 10, width);
 gui.add(params, 'viewingAngle', 0, 2 * Math.PI);
 gui.add(params, 'wallHeight', 5, 100);
-gui.add(params, 'wallBrightness', 1, 10);
 gui.add(params, 'moveSpeed', 0.5, 10);
 gui.add(params, 'turnSpeed', 0.01, 0.2);
 gui.add(params, 'renderDist', 10, width);
