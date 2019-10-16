@@ -14,7 +14,8 @@ const params = {
   moveSpeed: 3,
   turnSpeed: 0.07,
   renderDist: width / 2,
-  showMap: true
+  showMap: true,
+  walkThroughWalls: false
 };
 
 const reset = () => world.reset(width, height);
@@ -37,6 +38,7 @@ gui.add(params, 'wallHeight', 5, 100);
 gui.add(params, 'moveSpeed', 0.5, 10);
 gui.add(params, 'turnSpeed', 0.01, 0.2);
 gui.add(params, 'renderDist', 10, width);
+gui.add(params, 'walkThroughWalls');
 gui.add(params, 'showMap');
 gui.add({reset}, 'reset');
 

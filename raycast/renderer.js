@@ -4,7 +4,7 @@ export class Renderer {
     this.height = canvas.height;
     this.ctx = canvas.getContext('2d');
     this.ctx.strokeStyle = 'white';
-    this.img = document.querySelector('img');
+    // this.img = document.querySelector('img');
   }
   draw({player, things}, distances, params) {
     const {ctx, width, height} = this;
@@ -58,7 +58,7 @@ export class Renderer {
     ctx.stroke();
   }
   drawFirstPerson(distances, params) {
-    const {ctx, width, height, img} = this;
+    const {ctx, width, height} = this;
     const w = 1 / distances.length;
     ctx.fillStyle = 'white';
     ctx.save();
@@ -68,7 +68,7 @@ export class Renderer {
       ctx.globalAlpha = 1 - Math.min(1, Math.sqrt(dist / params.renderDist));
       ctx.fillRect(i * w, 0.5 - h, w, h * 2);
       // ctx.drawImage(
-      //   img,
+      //   this.img,
       //   i * w * width, // sx
       //   (0.5 - h) * height, // sy
       //   w * width, // sw

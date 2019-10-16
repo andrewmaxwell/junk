@@ -86,11 +86,13 @@ export class World {
       x: wallMargin,
       y: wallMargin,
       angle: Math.PI / 4,
-      move: (speed, things) => {
+      move: (speed, things, {walkThroughWalls}) => {
         const {player} = this;
         const nx = player.x + speed * Math.cos(player.angle);
         const ny = player.y + speed * Math.sin(player.angle);
-        const dist = distToAnything(player.x, player.y, nx, ny, things);
+        const dist = walkThroughWalls
+          ? Infinity
+          : distToAnything(player.x, player.y, nx, ny, things);
         if (dist === Infinity) {
           player.x = nx;
           player.y = ny;
@@ -103,8 +105,8 @@ export class World {
   }
   iterate(pressing, params) {
     const {player, things} = this;
-    if (pressing.ArrowUp) player.move(params.moveSpeed, things);
-    if (pressing.ArrowDown) player.move(-params.moveSpeed, things);
+    if (pressing.ArrowUp) player.move(params.moveSpeed, things, params);
+    if (pressing.ArrowDown) player.move(-params.moveSpeed, things, params);
     if (pressing.ArrowLeft) player.turn(-params.turnSpeed);
     if (pressing.ArrowRight) player.turn(params.turnSpeed);
   }

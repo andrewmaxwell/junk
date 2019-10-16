@@ -6,6 +6,12 @@
     "desc": ""
   },
   {
+    "filePath": "raycast",
+    "title": "First-Person Raycaster",
+    "year": 2019,
+    "desc": ""
+  },
+  {
     "filePath": "particle-fluid",
     "title": "Fluid Particle Simulator",
     "year": 2019,
