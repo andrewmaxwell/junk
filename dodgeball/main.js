@@ -28,7 +28,7 @@ const you = {
 };
 const playerIndex = {[you.id]: you};
 
-const socket = new WebSocket('ws://everyone-is-it.herokuapp.com/');
+const socket = new WebSocket('wss://everyone-is-it.herokuapp.com/');
 let heartbeat;
 const send = (data = you) => {
   socket.send(JSON.stringify(data));
