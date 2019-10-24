@@ -2,8 +2,13 @@
   "name": "junk",
   "version": "1.0.0",
   "description": "just some junk",
-  "main": "index.js",
   "dependencies": {
+    "bufferutil": "4.0.1",
+    "express": "^4.17.1",
+    "utf-8-validate": "5.0.2",
+    "ws": "7.2.0"
+  },
+  "devDependencies": {
     "babel-eslint": "^10.0.3",
     "eslint": "^6.5.0",
     "eslint-config-prettier": "^6.3.0",
@@ -20,7 +25,8 @@
     "dev": "npm i && npm run gen && live-server --ignore=./.git/**",
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "eslint --ext .html,.js . --fix",
-    "gen": "node generateHome"
+    "gen": "node generateHome",
+    "start": "node server"
   },
   "repository": {
     "type": "git",
@@ -31,5 +37,8 @@
   "bugs": {
     "url": "https://github.com/andrewmaxwell/junk/issues"
   },
-  "homepage": "https://github.com/andrewmaxwell/junk#readme"
+  "homepage": "https://github.com/andrewmaxwell/junk#readme",
+  "engines": {
+    "node": "10.x"
+  }
 }
