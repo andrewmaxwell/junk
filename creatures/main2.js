@@ -1,63 +1,41 @@
+import {Renderer} from './Renderer.js';
+
 const {
-  Body,
-  Engine,
-  Render,
-  Constraint,
-  MouseConstraint,
-  Mouse,
-  World,
   Bodies,
-  Events
+  Body,
+  Composite,
+  Constraint,
+  Engine,
+  Events,
+  World
 } = window.Matter;
 
-const width = 1400;
-const height = 600;
+const width = window.innerWidth;
+const height = window.innerHeight;
 
 // const maxChildren = 4;
 const minLength = 30;
 const maxLength = 300;
 const boardWidth = 10;
 
-const roundLength = 10_000;
-const popSize = 1;
+const complexity = 2;
+const roundLength = 30_000;
+const popSize = 30;
+const numWinners = 4;
 const mutationRate = 0.05;
+const muscleSpeed = 0.001;
 
-let creatures = [];
+let creatures = [],
+  roundStart;
 
+const renderer = new Renderer(document.querySelector('#C'), width, height);
 const engine = (window.engine = Engine.create());
 
-const render = (window.render = Render.create({
-  element: document.body,
-  engine,
-  options: {width, height}
-}));
-
-Render.run(render);
-Engine.run(engine);
-
-const mouse = Mouse.create(render.canvas),
-  mouseConstraint = MouseConstraint.create(engine, {
-    mouse,
-    constraint: {angularStiffness: 0, render: {visible: false}}
-  });
-World.add(engine.world, mouseConstraint);
-render.mouse = mouse;
-
-Events.on(engine, 'beforeUpdate', () => setMuscles(engine));
-Events.on(render, 'beforeRender', () => {
-  const maxX =
-    Math.max(...engine.world.bodies.map(m => m.position.x)) + maxLength;
-  Render.lookAt(render, {
-    min: {x: maxX - width, y: 0},
-    max: {x: maxX, y: height}
-  });
-});
-
 const bodyOptions = {collisionFilter: {group: -1}};
-const constraintOptions = {render: {lineWidth: 0.25}};
+const constraintOptions = {render: {lineWidth: 0.25, anchors: false}};
 const getLength = ob => minLength + (maxLength - minLength) * ob.pieceLength;
 
-const generateRandom = (depth = 2) => ({
+const generateRandom = (depth = complexity) => ({
   pieceLength: Math.random(),
   attachPt: Math.random(),
   offset: Math.random(),
@@ -68,9 +46,9 @@ const generateRandom = (depth = 2) => ({
     .map(() => generateRandom(depth - 1))
 });
 
-const create = (world, ob, parent) => {
+const create = (world, ob, parent, depth = 0) => {
   ob._body = Bodies.rectangle(
-    width / 2 - Math.random() * 100,
+    depth,
     height / 2,
     boardWidth,
     getLength(ob),
@@ -98,7 +76,7 @@ const create = (world, ob, parent) => {
     });
     World.add(world, [ob._joint, ob._muscle]);
   }
-  ob.children.forEach(ch => create(world, ch, ob));
+  ob.children.forEach(ch => create(world, ch, ob, depth + 1));
   World.add(world, ob._body);
 };
 
@@ -115,17 +93,15 @@ const setMuscles = engine => {
       getLength(m) +
       getLength(m._parent) * Math.max(m.attachPt, 1 - m.attachPt);
     const minLenPad = minLen + (maxLen - minLen) * 0.01;
-    const rangePad = (maxLen - minLen) * 0.95;
-    // const range = m.range * (maxLen - minLen);
+    const rangePad = m.range * (maxLen - minLen) * 0.95;
     m._muscle.length =
       minLenPad +
+      m.min * (maxLen - rangePad - minLenPad) +
       rangePad *
-        // m.min * (maxLen - range) +
-        // range *
-        (Math.sin(m.offset * Math.PI * 2 + now / 1000) * 0.5 + 0.5);
+        (Math.sin(m.offset * Math.PI * 2 + now * muscleSpeed) * 0.5 + 0.5);
   });
 
-  // if (now > roundLength) nextRound();
+  if (now > roundStart + roundLength) nextRound();
 };
 
 const combine = (a, b) =>
@@ -138,9 +114,7 @@ const combine = (a, b) =>
       }, {})
     : Math.random() < mutationRate
     ? Math.random()
-    : Math.random() < 0.5
-    ? a
-    : b;
+    : a + Math.random() * (b - a);
 
 const generateChild = parents => {
   if (parents.length < 2) return parents[0];
@@ -154,8 +128,8 @@ const generateChild = parents => {
 
 const reset = winners => {
   Engine.clear(engine);
-  engine.world.bodies.length = 0;
-  engine.world.constraints.length = 0;
+  World.clear(engine.world);
+  roundStart = engine.timing.timestamp;
 
   World.add(
     engine.world,
@@ -177,7 +151,10 @@ const reset = winners => {
     }
   }
 
-  creatures.forEach(c => create(engine.world, c));
+  creatures.forEach((c, i) => {
+    c.index = i;
+    create(engine.world, c);
+  });
 
   setMuscles(engine);
   Engine.update(engine);
@@ -190,8 +167,12 @@ const reset = winners => {
 const nextRound = () => {
   const winners = creatures
     .sort((a, b) => b._body.position.x - a._body.position.x)
-    .slice(0, 4);
-  console.log('winners', winners);
+    .slice(0, numWinners);
+  console.log(
+    'winners',
+    winners,
+    winners.map(w => Math.round(w._body.position.x))
+  );
 
   reset(winners);
 };
@@ -199,3 +180,11 @@ const nextRound = () => {
 reset();
 
 window.onkeypress = nextRound;
+
+Engine.run(engine);
+
+Events.on(engine, 'beforeUpdate', () => {
+  setMuscles(engine);
+  creatures.sort((a, b) => a._body.position.x - b._body.position.x);
+  renderer.render(creatures, engine.world.bodies, maxLength, numWinners);
+});

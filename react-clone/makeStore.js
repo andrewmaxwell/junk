@@ -10,4 +10,5 @@ export const makeStore = ({reducer, onchange}) => {
   };
 
   dispatch('init');
+  return dispatch;
 };

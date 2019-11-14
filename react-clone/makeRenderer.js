@@ -1,9 +1,6 @@
 import 'https://code.jquery.com/jquery-3.3.1.min.js';
 
-const {
-  $,
-  R: {eqProps}
-} = window;
+const {$} = window;
 
 const keys = ['attr', 'css', 'text', 'val'];
 const events = ['click', 'keyup'];
@@ -15,7 +12,7 @@ const reconcile = (prevDefs, defs, parent, dispatch) => {
     const prev = prevDefs[i];
     const makeNew = !prev || prev.tag !== def.tag;
     const el = (def.$el = makeNew
-      ? $(document.createElement(def.tag))
+      ? $(document.createElement(def.tag || 'div'))
       : prev.$el);
     const p = makeNew ? {} : prev;
     keys.forEach(key => {
