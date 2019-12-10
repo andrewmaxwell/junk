@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+    <style>
+      .sqlExpr input, .sqlExpr select {display: inline; font-size: 12px; padding: 6px 3px; height: auto}
+      .sqlExpr input {max-width: 75px}
+      .sqlExpr select {max-width: 120px}
+      .indentExpr {display: block; padding: 0 0 0 24px}
+      .sqlExpr .dropdown-menu>li {display: inline-block}
+      .sqlExpr .dropdown-menu>li>a {padding: 5px 10px; display: inline}
+    </style>
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.6.3/angular.min.js"></script>
+    <script type="module" src="main.js"></script>
+  </head>
+
+  <body ng-app="app" style="padding: 20px; background: #EEE">
+    <sql-editor></sql-editor>
+  </body>
+
+</html>

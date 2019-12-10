@@ -96,6 +96,12 @@
     "desc": ""
   },
   {
+    "filePath": "expression-builder",
+    "title": "Expression Builder",
+    "year": 2017,
+    "desc": ""
+  },
+  {
     "filePath": "fluid",
     "title": "Navier-Stokes Fluid Simulator",
     "year": 2017,
