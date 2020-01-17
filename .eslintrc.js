@@ -24,6 +24,7 @@ module.exports = {
     'react/prop-types': 'off',
     'no-use-before-define': 'warn'
   },
+  settings: {react: {version: 'detect'}}
   // globals: Object.keys(require('ramda')).reduce((acc, key) => {
   //   acc[key] = 'readonly'
   //   return acc;

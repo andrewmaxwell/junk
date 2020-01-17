@@ -1,6 +1,6 @@
 const fs = require('fs');
 const {resolve} = require('path');
-Object.assign(global, require('ramda'));
+const {pipe, filter, both, map, sort} = require('ramda');
 
 const fileExists = filename => filePath =>
   fs.existsSync(resolve(__dirname, filePath + '/' + filename));

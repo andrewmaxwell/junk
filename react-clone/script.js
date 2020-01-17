@@ -1,23 +1,7 @@
 import {makeStore} from './makeStore.js';
 import {makeRenderer} from './makeRenderer.js';
 
-const {
-  assoc,
-  over,
-  lensProp,
-  append,
-  pipe,
-  always,
-  identity,
-  assocPath,
-  converge,
-  lensPath,
-  not,
-  propOr,
-  __,
-  prop,
-  remove
-} = window.R;
+Object.assign(window, window.R);
 
 const reducer = propOr(always(identity), __, {
   init: () =>
