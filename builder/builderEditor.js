@@ -52,7 +52,12 @@ export function BuilderEditor() {
 
     var minDist = Infinity;
     var jointCoord = false;
-    var pairs = [[e1.a, e2.a], [e1.a, e2.b], [e1.b, e2.a], [e1.b, e2.b]];
+    var pairs = [
+      [e1.a, e2.a],
+      [e1.a, e2.b],
+      [e1.b, e2.a],
+      [e1.b, e2.b]
+    ];
     for (var i = 0; i < pairs.length; i++) {
       var p = pairs[i];
       var sqDist = dist2(p[0].x - p[1].x, p[0].y - p[1].y);

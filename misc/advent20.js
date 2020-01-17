@@ -132,7 +132,12 @@ WJ..#.#.#...#.#...#.#...#.....#.#.#..WA                                         
 
 const get = (x, y) => input[y] && input[y][x];
 const isLetter = x => /\w/.test(x);
-const dirs = [{x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}, {x: 0, y: -1}];
+const dirs = [
+  {x: 1, y: 0},
+  {x: 0, y: 1},
+  {x: -1, y: 0},
+  {x: 0, y: -1}
+];
 
 const portals = [];
 const nodes = [];

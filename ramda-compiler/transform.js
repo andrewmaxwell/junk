@@ -357,24 +357,13 @@ const negate = converge(call, [
       '<': assoc('type', '>='),
       '<=': assoc('type', '>')
     }),
-    defaultTo(
-      pipe(
-        of,
-        assoc('children', __, {type: '!'})
-      )
-    )
+    defaultTo(pipe(of, assoc('children', __, {type: '!'})))
   ),
   identity
 ]);
 
 const simplifyNot = treeMap(
-  when(
-    propEq('type', '!'),
-    pipe(
-      path(['children', 0]),
-      negate
-    )
-  )
+  when(propEq('type', '!'), pipe(path(['children', 0]), negate))
 );
 
 const treeReplace = (from, to, data) =>

@@ -15,10 +15,7 @@ export const reducer = propOr(always(identity), __, {
     append,
     over(lensProp('tasks'))
   ),
-  newPerson: pipe(
-    append,
-    over(lensProp('people'))
-  ),
+  newPerson: pipe(append, over(lensProp('people'))),
   iterate: () => state =>
     pipe(
       over(

@@ -8,7 +8,12 @@ var C = document.body.childNodes[0],
   d = D.data,
   p,
   st = 0,
-  colors = [[0, 0, 0], [0, 64, 255], [255, 255, 255], [255, 200, 0]],
+  colors = [
+    [0, 0, 0],
+    [0, 64, 255],
+    [255, 255, 255],
+    [255, 200, 0]
+  ],
   L = colors.length * 64,
   col = colorRange(colors, L),
   draw = function() {

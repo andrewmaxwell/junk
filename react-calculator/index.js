@@ -73,19 +73,9 @@ const reducers = {
           mergeLeft({newNumber: false, display: 0})
         )
       ),
-      over(
-        lensProp('display'),
-        pipe(
-          multiply(10),
-          add(Number(val))
-        )
-      )
+      over(lensProp('display'), pipe(multiply(10), add(Number(val))))
     ),
-  pressOperator: op =>
-    pipe(
-      evaluate,
-      mergeLeft({op, newNumber: true})
-    )
+  pressOperator: op => pipe(evaluate, mergeLeft({op, newNumber: true}))
 };
 
 const defaultState = {display: 0, prev: 0};

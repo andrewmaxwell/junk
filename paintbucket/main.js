@@ -11,7 +11,12 @@ const colors = [
   [128, 128, 128, 255], // gray
   [255, 255, 255, 255] // white
 ];
-const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+const dirs = [
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [0, -1]
+];
 
 const rand = max => Math.floor(Math.random() * max);
 

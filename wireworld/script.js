@@ -8,7 +8,11 @@ var WIRE = 1,
   TAIL = 2,
   HEAD = 3;
 // var symbols = {' ': BLANK, '#': WIRE, '~': TAIL, '@': HEAD};
-var colors = [[200, 117, 0], [255, 255, 255], [0, 128, 255]];
+var colors = [
+  [200, 117, 0],
+  [255, 255, 255],
+  [0, 128, 255]
+];
 
 var makeRenderer = (canvas, width, height, scale = 1) => {
   canvas.width = width;

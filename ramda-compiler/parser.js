@@ -258,6 +258,10 @@ export const parse = (input, debug) =>
     parseFunctionCalls,
     parseNot,
     parseSpreads,
-    ifElse(c => c.length > 1, children => ({type: 'program', children}), head),
+    ifElse(
+      c => c.length > 1,
+      children => ({type: 'program', children}),
+      head
+    ),
     tap(output => debug && console.log('parsed', input, output))
   )(input);

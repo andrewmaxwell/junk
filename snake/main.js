@@ -20,7 +20,15 @@ var C = document.body.childNodes[0],
   foodFrequency = 0.1,
   reset = function() {
     pause = 0;
-    you = {dir: RIGHT, body: [[3, 3], [2, 3], [1, 3]], color: '#00CC36'};
+    you = {
+      dir: RIGHT,
+      body: [
+        [3, 3],
+        [2, 3],
+        [1, 3]
+      ],
+      color: '#00CC36'
+    };
     var x = W / size - 4,
       y = H / size - 4;
     A = [
@@ -28,7 +36,11 @@ var C = document.body.childNodes[0],
       {
         type: AI,
         dir: LEFT,
-        body: [[x, y], [x + 1, y], [x + 2, y]],
+        body: [
+          [x, y],
+          [x + 1, y],
+          [x + 2, y]
+        ],
         color: 'red',
         total: 0,
         times: 0
@@ -73,7 +85,12 @@ var C = document.body.childNodes[0],
         }
         return Q.splice(u, 1)[0];
       },
-      o = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+      o = [
+        [0, -1],
+        [0, 1],
+        [-1, 0],
+        [1, 0]
+      ];
 
     return function(s) {
       var sr = s.body[0][1],

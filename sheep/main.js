@@ -27,7 +27,10 @@ const gameParams = {
 const barGraphParams = {
   width: 800,
   height: 300,
-  cols: [{prop: 'age', color: 'gray'}, {prop: 'energy', color: 'green'}]
+  cols: [
+    {prop: 'age', color: 'gray'},
+    {prop: 'energy', color: 'green'}
+  ]
 };
 
 var speed = 1;

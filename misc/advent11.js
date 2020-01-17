@@ -6,7 +6,12 @@ const output = [];
 const comp = new Computer(program, v => output.push(v));
 
 const size = 100;
-const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+const dirs = [
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [0, -1]
+];
 const grid = [...Array(size)].map(() => Array(size).fill(0));
 
 let dirIndex = 3;

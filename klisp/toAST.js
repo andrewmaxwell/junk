@@ -104,11 +104,10 @@ const sanitizeNames = treeMap(
 const makeArrays = treeMap(
   when(
     propEq('type', '['),
-    pipe(
-      prop('children'),
-      reject(propEq('type', ',')),
-      children => ({type: 'array', children})
-    )
+    pipe(prop('children'), reject(propEq('type', ',')), children => ({
+      type: 'array',
+      children
+    }))
   )
 );
 
@@ -124,10 +123,7 @@ const shortHandFunc = treeMap(
 
 const functions = treeMap(
   when(
-    pipe(
-      prop('type'),
-      contains(__, ['(', '{'])
-    ),
+    pipe(prop('type'), contains(__, ['(', '{'])),
     ({type, children: [func, ...children]}) => ({
       type: type === '{' ? 'greedyFunctionCall' : 'functionCall',
       func,

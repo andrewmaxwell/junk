@@ -17,9 +17,12 @@ while (queue.length) {
   const curr = queue.splice(Math.floor(Math.random() * queue.length), 1)[0];
 
   // gets its neighbor cells (up, down, left, right)
-  const neighbors = [[0, 1], [1, 0], [0, -1], [-1, 0]].map(
-    ([x, y]) => grid[curr.y + y] && grid[curr.y + y][curr.x + x]
-  );
+  const neighbors = [
+    [0, 1],
+    [1, 0],
+    [0, -1],
+    [-1, 0]
+  ].map(([x, y]) => grid[curr.y + y] && grid[curr.y + y][curr.x + x]);
 
   // if curr isn't open and it's touching only one edge or open neighbor
   if (!curr.open && neighbors.filter(c => !c || c.open).length === 1) {

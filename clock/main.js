@@ -6,7 +6,12 @@ const T = canvas.getContext('2d');
 
 T.textAlign = 'center';
 
-const z = [[30, 7, 190], [26, 24, 230], [20, 60, 260], [14, 60, 280]];
+const z = [
+  [30, 7, 190],
+  [26, 24, 230],
+  [20, 60, 260],
+  [14, 60, 280]
+];
 const y = 'Sun Mon Tues Wednes Thurs Fri Satur'.split(' ');
 
 const loop = () => {

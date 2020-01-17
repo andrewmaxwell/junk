@@ -50,7 +50,15 @@ var makeMaze = function(opts) {
           T.stroke();
         }
         for (
-          var o = [[-1, 0], [0, -1], [1, 0], [0, 1]], i = 0, n, k;
+          var o = [
+              [-1, 0],
+              [0, -1],
+              [1, 0],
+              [0, 1]
+            ],
+            i = 0,
+            n,
+            k;
           i < 4;
           i++
         ) {

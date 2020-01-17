@@ -6,7 +6,11 @@ for (let i = 0; i < size; i++) {
   grid2[i] = new Array(size).fill(0);
 }
 
-[[0, 1], [0, 0, 0, 1], [1, 1, 0, 0, 1, 1, 1]].forEach((r, i) => {
+[
+  [0, 1],
+  [0, 0, 0, 1],
+  [1, 1, 0, 0, 1, 1, 1]
+].forEach((r, i) => {
   r.forEach((c, j) => {
     grid1[size / 2 + i][size / 2 + j] = c;
   });

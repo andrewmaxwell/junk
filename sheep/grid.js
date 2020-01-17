@@ -1,6 +1,11 @@
 import {randomIndex, shuffle} from './utils.js';
 
-const DIRECTIONS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+const DIRECTIONS = [
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [0, -1]
+];
 // const DIRECTIONS = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
 
 export class Grid {
