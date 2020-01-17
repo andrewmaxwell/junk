@@ -12,5 +12,8 @@ const dispatch = makeStore({
 });
 
 window.addEventListener('keypress', e => {
-  if (e.code === 'Space') dispatch('iterate');
+  if (e.code === 'KeyZ') {
+    e.preventDefault();
+    dispatch('iterate');
+  }
 });

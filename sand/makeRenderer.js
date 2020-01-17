@@ -1,0 +1,33 @@
+export const makeRenderer = (canvas, width, height, toColor) => {
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', {alpha: false, antialias: false});
+
+  const imageData = ctx.createImageData(width, height);
+  const buf = new ArrayBuffer(imageData.data.length);
+  const buf8 = new Uint8ClampedArray(buf);
+  const data = new Uint32Array(buf);
+
+  return vals => {
+    for (let i = 0; i < vals.length; i++) {
+      data[i] = toColor(vals[i]);
+    }
+    imageData.data.set(buf8);
+    ctx.putImageData(imageData, 0, 0);
+  };
+};
+
+export const makeGradient = (colors, colorSteps = 256) => {
+  const gradient = [];
+  for (let i = 0; i < colorSteps; i++) {
+    const cIndex = (i / colorSteps) * (colors.length - 1);
+    const c1 = colors[Math.floor(cIndex)];
+    const c2 = colors[Math.ceil(cIndex)];
+    const m = cIndex % 1;
+    const r = c1[0] * (1 - m) + c2[0] * m;
+    const g = c1[1] * (1 - m) + c2[1] * m;
+    const b = c1[2] * (1 - m) + c2[2] * m;
+    gradient[i] = (255 << 24) | (b << 16) | (g << 8) | r;
+  }
+  return v => gradient[Math.floor(v * colorSteps)];
+};

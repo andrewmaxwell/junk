@@ -6,8 +6,7 @@ export class SimulatedAnnealingSolver {
      - getCost: a function that takes a state and returns a number
      - generateNeighbor: a function that takes a state and returns a new state
     */
-
-    Object.keys(opts).forEach(key => (this[key] = opts[key]));
+    Object.assign(this, opts);
   }
   init(initialState) {
     this.temperature = this.initialTemperature;

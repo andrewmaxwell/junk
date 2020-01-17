@@ -2,7 +2,8 @@ import {columns, initialState} from './constants.js';
 import {fromLocationHash} from './utils.js';
 
 export const reducer = propOr(always(identity), __, {
-  init: always(fromLocationHash || always(initialState)),
+  init: () => () => fromLocationHash() || initialState,
+  reset: always(always(initialState)),
   assign: ({pid, tid}) => state =>
     over(
       lensProp('tasks'),
@@ -10,7 +11,7 @@ export const reducer = propOr(always(identity), __, {
       state
     ),
   newTask: pipe(
-    mergeLeft({type: 'analyze'}),
+    mergeLeft({column: 'analyze'}),
     append,
     over(lensProp('tasks'))
   ),
@@ -26,7 +27,7 @@ export const reducer = propOr(always(identity), __, {
           pipe(
             when(prop('assignedTo'), t => {
               const skillLevel = state.people.find(p => p.id === t.assignedTo)[
-                t.type
+                t.column
               ];
               return over(
                 lensProp('progress'),
@@ -38,7 +39,10 @@ export const reducer = propOr(always(identity), __, {
               propSatisfies(gte(__, 0.99), 'progress'),
               pipe(
                 omit(['progress', 'assignedTo']),
-                over(lensProp('type'), t => columns[columns.indexOf(t) + 1])
+                over(lensProp('column'), t => {
+                  const index = columns.indexOf(t);
+                  return columns[index + 1];
+                })
               )
             )
           )

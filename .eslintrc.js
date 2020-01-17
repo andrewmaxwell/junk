@@ -21,10 +21,11 @@ module.exports = {
     'arrow-body-style': ['warn', 'as-needed'],
     'object-shorthand': 'warn',
     'sonarjs/cognitive-complexity': 'off',
-    'react/prop-types': 'off'
+    'react/prop-types': 'off',
+    'no-use-before-define': 'warn'
   },
-  globals: Object.keys(require('ramda')).reduce((acc, key) => {
-    acc[key] = 'readonly'
-    return acc;
-  }, {})
+  // globals: Object.keys(require('ramda')).reduce((acc, key) => {
+  //   acc[key] = 'readonly'
+  //   return acc;
+  // }, {})
 };

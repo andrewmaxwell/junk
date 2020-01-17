@@ -6,6 +6,6 @@ export const fromLocationHash = () => {
   try {
     return JSON.parse(atob(location.hash.slice(1)));
   } catch (e) {
-    return 0;
+    return;
   }
 };
