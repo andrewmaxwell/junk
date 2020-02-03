@@ -20,7 +20,10 @@ export const makeRenderer = (canvas, width, height, toColor) => {
 export const makeGradient = (colors, colorSteps = 256) => {
   const gradient = [];
   for (let i = 0; i < colorSteps; i++) {
-    const cIndex = (i / colorSteps) * (colors.length - 1);
+    const cIndex = Math.max(
+      0,
+      Math.min(gradient.length - 1, (i / colorSteps) * (colors.length - 1))
+    );
     const c1 = colors[Math.floor(cIndex)];
     const c2 = colors[Math.ceil(cIndex)];
     const m = cIndex % 1;
