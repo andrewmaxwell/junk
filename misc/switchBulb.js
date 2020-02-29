@@ -1,49 +1,63 @@
 const dirs = [
-  {x: 1, y: 0},
-  {x: 1, y: 1},
-  {x: 0, y: 1},
-  {x: -1, y: 1},
-  {x: -1, y: 0},
-  {x: -1, y: -1},
-  {x: 0, y: -1},
-  {x: 1, y: -1}
+  {c: 1, r: 0},
+  {c: 1, r: 1},
+  {c: 0, r: 1},
+  {c: -1, r: 1},
+  {c: -1, r: 0},
+  {c: -1, r: -1},
+  {c: 0, r: -1},
+  {c: 1, r: -1}
 ];
 
-const getNext = ({x, y}, dir, grid) => {
-  for (let i = 0; i < 100; i++) {
-    x += dir.x;
-    y += dir.y;
-    if (grid[y]) {
-      if (grid[y][x] === 'B') return {x, y};
+const getNext = ({r, c}, dir, grid) => {
+  while (true) {
+    r += dir.r;
+    c += dir.c;
+    if (grid[r] && grid[r][c]) {
+      if (grid[r][c].val === 'B') return grid[r][c];
     } else return;
   }
 };
 
-const switchTheBulb = grid => {
-  grid = grid.split('\n');
-  const coords = [];
-  grid.forEach((r, y) =>
-    r.split('').forEach((c, x) => {
-      if (c === 'B') coords.push({x, y});
-    })
-  );
+const getSolution = (len, visited) => {
+  const last = visited[visited.length - 1];
+  for (const n of last.neighbors) {
+    if (!visited.includes(n)) {
+      const next = [...visited, n];
+      if (next.length === len) return next.map(e => [e.r, e.c]);
 
-  coords.forEach(c => {
+      const res = getSolution(len, next);
+      if (res) return res;
+    }
+  }
+  return false;
+};
+
+const switchTheBulb = grid => {
+  const bulbs = [];
+  grid = grid
+    .replace(/[^\n.B]/g, '')
+    .trim()
+    .split('\n')
+    .map((row, r) =>
+      row.split('').map((val, c) => {
+        const o = {r, c, val};
+        if (val === 'B') bulbs.push(o);
+        return o;
+      })
+    );
+
+  bulbs.forEach(c => {
     c.neighbors = [];
     dirs.forEach(d => {
       const n = getNext(c, d, grid);
-      if (n) c.neighbors.push(coords.find(c => c.x === n.x && c.y === n.y));
+      if (n) c.neighbors.push(n);
     });
   });
 
-  const q = [[coords[0]]];
-  for (let i = 0; i < q.length; i++) {
-    if (q[i].length === coords.length)
-      return q[i].map(({x, y}) => [y - 1, x - 1]);
-    const last = q[i][q[i].length - 1];
-    for (const n of last.neighbors) {
-      if (n && !q[i].includes(n)) q.push([...q[i], n]);
-    }
+  for (let i = 0; i < bulbs.length; i++) {
+    const s = getSolution(bulbs.length, [bulbs[i]]);
+    if (s) return s;
   }
   return false;
 };
