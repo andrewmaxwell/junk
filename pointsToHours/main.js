@@ -66,7 +66,7 @@ const draw = () => {
     ctx.stroke();
 
     ctx.save();
-    ctx.translate(width - 200, height - 200 + personIndex * 25);
+    ctx.translate(13, 150 + personIndex * 25);
     ctx.fillRect(0, 0, 20, 20);
     ctx.fillStyle = 'white';
     ctx.fillText(name, 30, 4);
