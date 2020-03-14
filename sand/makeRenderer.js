@@ -17,6 +17,8 @@ export const makeRenderer = (canvas, width, height, toColor) => {
   };
 };
 
+export const color = (r, g, b) => (255 << 24) | (b << 16) | (g << 8) | r;
+
 export const makeGradient = (colors, colorSteps = 256) => {
   const gradient = [];
   for (let i = 0; i < colorSteps; i++) {
@@ -27,10 +29,11 @@ export const makeGradient = (colors, colorSteps = 256) => {
     const c1 = colors[Math.floor(cIndex)];
     const c2 = colors[Math.ceil(cIndex)];
     const m = cIndex % 1;
-    const r = c1[0] * (1 - m) + c2[0] * m;
-    const g = c1[1] * (1 - m) + c2[1] * m;
-    const b = c1[2] * (1 - m) + c2[2] * m;
-    gradient[i] = (255 << 24) | (b << 16) | (g << 8) | r;
+    gradient[i] = color(
+      c1[0] * (1 - m) + c2[0] * m,
+      c1[1] * (1 - m) + c2[1] * m,
+      c1[2] * (1 - m) + c2[2] * m
+    );
   }
   return v => gradient[Math.floor(v * colorSteps)];
 };
