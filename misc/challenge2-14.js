@@ -138,7 +138,7 @@
 //   if (count % 1e6 === 0) console.log(total / count);
 // }
 
-const split = n => {
+const split = (n) => {
   const result = [];
   for (let i = n + 1; i <= 5; i++) result.push(i);
   return result;
@@ -146,7 +146,7 @@ const split = n => {
 
 const lookup = {5: 0};
 
-const solve = curr => {
+const solve = (curr) => {
   if (curr in lookup) return lookup[curr];
 
   let result = curr.length === 1 ? 1 : 0;

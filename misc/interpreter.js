@@ -4,15 +4,15 @@ const tokenTypes = [
   {regex: /^\s+/, ignore: true},
   {regex: /^,/, ignore: true},
   {regex: /^:/, ignore: true},
-  {regex: /^-?\d+/, transform: Number}
+  {regex: /^-?\d+/, transform: Number},
 ];
 
-const tokenize = line => {
+const tokenize = (line) => {
   const result = [];
   while (line.length) {
-    const tokenType = tokenTypes.find(t => t.regex.test(line));
+    const tokenType = tokenTypes.find((t) => t.regex.test(line));
     if (!tokenType) throw new Error(`Unknown token: ${line}`);
-    const {regex, transform = x => x, ignore} = tokenType;
+    const {regex, transform = (x) => x, ignore} = tokenType;
     const match = line.match(regex);
     if (!ignore) result.push(transform(match[1] || match[0]));
     line = line.slice(match[0].length);
@@ -24,8 +24,8 @@ class Computer {
   constructor(input) {
     this.instructions = input
       .split('\n')
-      .map(line => line.replace(/;.*/, '').trim())
-      .filter(i => i)
+      .map((line) => line.replace(/;.*/, '').trim())
+      .filter((i) => i)
       .map(tokenize);
     this.inst = 0;
     this.stack = [];
@@ -72,7 +72,7 @@ class Computer {
     this.registers[target] = (this.registers[target] / this.val(value)) | 0;
   }
   jmp(label) {
-    this.inst = this.instructions.findIndex(l => l[0] === label);
+    this.inst = this.instructions.findIndex((l) => l[0] === label);
   }
   cmp(x, y) {
     this.cmpVals = {x: this.val(x), y: this.val(y)};
@@ -103,14 +103,14 @@ class Computer {
     this.inst = this.stack.pop();
   }
   msg(...args) {
-    this.output = args.map(v => this.val(v)).join('');
+    this.output = args.map((v) => this.val(v)).join('');
   }
   end() {
     this.done = true;
   }
 }
 
-const assemblerInterpreter = input => new Computer(input).run();
+const assemblerInterpreter = (input) => new Computer(input).run();
 
 const program = `mov   a, 2            ; value1
 mov   b, 10           ; value2

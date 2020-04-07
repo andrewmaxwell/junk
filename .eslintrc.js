@@ -22,7 +22,8 @@ module.exports = {
     'object-shorthand': 'warn',
     'sonarjs/cognitive-complexity': 'off',
     'react/prop-types': 'off',
-    'no-use-before-define': 'warn'
+    'no-use-before-define': 'warn',
+    'react/display-name': 'off'
   },
   settings: {react: {version: 'detect'}}
   // globals: Object.keys(require('ramda')).reduce((acc, key) => {

@@ -2,10 +2,10 @@ const ops = {
   '+': {precedence: 1, func: (a, b) => a + b},
   '-': {precedence: 2, func: (a, b) => (a || 0) - b},
   '*': {precedence: 3, func: (a, b) => a * b},
-  '/': {precedence: 4, func: (a, b) => a / b}
+  '/': {precedence: 4, func: (a, b) => a / b},
 };
 
-const calc = expr => {
+const calc = (expr) => {
   expr = expr.replace(/\s/g, '');
   if (!isNaN(expr)) return Number(expr);
   let parenDepth = 0;
@@ -34,7 +34,7 @@ const calc = expr => {
 `6 + -(4)   // 2
 6 + -( -4) // 10`
   .split('\n')
-  .map(line => {
+  .map((line) => {
     const [expr, expected] = line.split(/\s*\/\/\s*/);
     return [expr, Number(expected)];
   })
@@ -50,7 +50,7 @@ const calc = expr => {
     ['2 / (2 + 3) * 4.33 - -6', 7.732],
     ['12*-1', -12],
     ['12* 123/-(-5 + 2)', 492],
-    ['(1 - 2) + -(-(-(-4)))', 3]
+    ['(1 - 2) + -(-(-(-4)))', 3],
   ])
   .forEach(([expr, expected]) => {
     const actual = calc(expr);

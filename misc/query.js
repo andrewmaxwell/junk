@@ -1,13 +1,13 @@
 const groupBy = ([func, ...rest], arr) => {
   if (!func) return arr;
   const groups = {};
-  arr.forEach(r => {
+  arr.forEach((r) => {
     const key = func(r);
     (groups[key] = groups[key] || []).push(r);
   });
   return Object.entries(groups).map(([key, rows]) => [
     isNaN(key) ? key : Number(key),
-    groupBy(rest, rows)
+    groupBy(rest, rows),
   ]);
 };
 
@@ -17,7 +17,7 @@ class Query {
     this.filters = [];
     this.groupFuncs = [];
     this.groupFilters = [];
-    this.selectFunc = a => a;
+    this.selectFunc = (a) => a;
   }
   select(func) {
     if (this.selectUsed) throw new Error('Duplicate SELECT');
@@ -43,7 +43,7 @@ class Query {
     return this;
   }
   where(...funcs) {
-    this.filters.push(el => funcs.some(f => f(el)));
+    this.filters.push((el) => funcs.some((f) => f(el)));
     return this;
   }
   groupBy(...funcs) {
@@ -54,7 +54,7 @@ class Query {
     return this;
   }
   having(...funcs) {
-    this.groupFilters.push(el => funcs.some(f => f(el)));
+    this.groupFilters.push((el) => funcs.some((f) => f(el)));
     return this;
   }
   orderBy(func) {
@@ -65,9 +65,9 @@ class Query {
     return this;
   }
   execute() {
-    let result = this.data.filter(d => this.filters.every(f => f(d)));
+    let result = this.data.filter((d) => this.filters.every((f) => f(d)));
     result = groupBy(this.groupFuncs, result)
-      .filter(g => this.groupFilters.every(f => f(g)))
+      .filter((g) => this.groupFilters.every((f) => f(g)))
       .map(this.selectFunc);
     if (this.orderByFunc) result.sort(this.orderByFunc);
     return result;
@@ -106,7 +106,7 @@ var query = () => new Query();
     {name: 'Anna', profession: 'scientific', age: 20, maritalStatus: 'married'},
     {name: 'Rose', profession: 'scientific', age: 50, maritalStatus: 'married'},
     {name: 'Anna', profession: 'scientific', age: 20, maritalStatus: 'single'},
-    {name: 'Anna', profession: 'politician', age: 50, maritalStatus: 'married'}
+    {name: 'Anna', profession: 'politician', age: 50, maritalStatus: 'married'},
   ];
   function profession(person) {
     return person.profession;
@@ -140,23 +140,23 @@ var query = () => new Query();
   var teachers = [
     {
       teacherId: '1',
-      teacherName: 'Peter'
+      teacherName: 'Peter',
     },
     {
       teacherId: '2',
-      teacherName: 'Anna'
-    }
+      teacherName: 'Anna',
+    },
   ];
 
   var students = [
     {
       studentName: 'Michael',
-      tutor: '1'
+      tutor: '1',
     },
     {
       studentName: 'Rose',
-      tutor: '2'
-    }
+      tutor: '2',
+    },
   ];
 
   function teacherJoin(join) {
@@ -168,30 +168,9 @@ var query = () => new Query();
   }
 
   const tests = [
-    [
-      numbers,
-      () =>
-        query()
-          .select()
-          .from(numbers)
-          .execute()
-    ],
-    [
-      numbers,
-      () =>
-        query()
-          .from(numbers)
-          .select()
-          .execute()
-    ],
-    [
-      persons,
-      () =>
-        query()
-          .select()
-          .from(persons)
-          .execute()
-    ],
+    [numbers, () => query().select().from(numbers).execute()],
+    [numbers, () => query().from(numbers).select().execute()],
+    [persons, () => query().select().from(persons).execute()],
     [
       [
         'teacher',
@@ -200,34 +179,20 @@ var query = () => new Query();
         'scientific',
         'scientific',
         'scientific',
-        'politician'
+        'politician',
       ],
-      () =>
-        query()
-          .select(profession)
-          .from(persons)
-          .execute()
+      () => query().select(profession).from(persons).execute(),
     ],
     [
       ['teacher', 'teacher', 'teacher'],
-      () =>
-        query()
-          .select(profession)
-          .from(persons)
-          .where(isTeacher)
-          .execute()
+      () => query().select(profession).from(persons).where(isTeacher).execute(),
     ],
     [
       [
         ['odd', [1, 3, 5, 7, 9]],
-        ['even', [2, 4, 6, 8]]
+        ['even', [2, 4, 6, 8]],
       ],
-      () =>
-        query()
-          .select()
-          .from(numbers2)
-          .groupBy(parity)
-          .execute()
+      () => query().select().from(numbers2).groupBy(parity).execute(),
     ],
     [
       [
@@ -235,59 +200,45 @@ var query = () => new Query();
           'odd',
           [
             ['divisible', [1, 9]],
-            ['prime', [3, 5, 7]]
-          ]
+            ['prime', [3, 5, 7]],
+          ],
         ],
         [
           'even',
           [
             ['prime', [2]],
-            ['divisible', [4, 6, 8]]
-          ]
-        ]
+            ['divisible', [4, 6, 8]],
+          ],
+        ],
       ],
-      () =>
-        query()
-          .select()
-          .from(numbers2)
-          .groupBy(parity, prime)
-          .execute()
+      () => query().select().from(numbers2).groupBy(parity, prime).execute(),
     ],
     [
       [['odd', [1, 3, 5, 7, 9]]],
       () =>
-        query()
-          .select()
-          .from(numbers2)
-          .groupBy(parity)
-          .having(odd)
-          .execute()
+        query().select().from(numbers2).groupBy(parity).having(odd).execute(),
     ],
     [
       [9, 8, 7, 6, 5, 4, 3, 2, 1],
       () =>
-        query()
-          .select()
-          .from(numbers2)
-          .orderBy(descendentCompare)
-          .execute()
+        query().select().from(numbers2).orderBy(descendentCompare).execute(),
     ],
     [
       [
         {studentName: 'Michael', teacherName: 'Peter'},
-        {studentName: 'Rose', teacherName: 'Anna'}
+        {studentName: 'Rose', teacherName: 'Anna'},
       ],
       () =>
         query()
           .select(student)
           .from(teachers, students)
           .where(teacherJoin)
-          .execute()
+          .execute(),
     ],
     [
       [
         {value: 2, frequency: 2},
-        {value: 6, frequency: 2}
+        {value: 6, frequency: 2},
       ],
       () => {
         var numbers = [1, 2, 1, 3, 5, 6, 1, 2, 5, 6];
@@ -314,13 +265,13 @@ var query = () => new Query();
           .having(greatThan1)
           .having(isPair)
           .execute();
-      }
-    ]
+      },
+    ],
   ];
 
   const {equals} = require('ramda');
   const {inspect} = require('util');
-  const toStr = o => inspect(o, {depth: null, colors: true});
+  const toStr = (o) => inspect(o, {depth: null, colors: true});
   tests.forEach(([expected, func], i) => {
     const actual = func();
     if (!equals(actual, expected)) {

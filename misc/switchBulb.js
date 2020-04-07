@@ -6,7 +6,7 @@ const dirs = [
   {c: -1, r: 0},
   {c: -1, r: -1},
   {c: 0, r: -1},
-  {c: 1, r: -1}
+  {c: 1, r: -1},
 ];
 
 const getNext = ({r, c}, dir, grid) => {
@@ -24,7 +24,7 @@ const getSolution = (len, visited) => {
   for (const n of last.neighbors) {
     if (!visited.includes(n)) {
       const next = [...visited, n];
-      if (next.length === len) return next.map(e => [e.r, e.c]);
+      if (next.length === len) return next.map((e) => [e.r, e.c]);
 
       const res = getSolution(len, next);
       if (res) return res;
@@ -33,7 +33,7 @@ const getSolution = (len, visited) => {
   return false;
 };
 
-const switchTheBulb = grid => {
+const switchTheBulb = (grid) => {
   const bulbs = [];
   grid = grid
     .replace(/[^\n.B]/g, '')
@@ -47,9 +47,9 @@ const switchTheBulb = grid => {
       })
     );
 
-  bulbs.forEach(c => {
+  bulbs.forEach((c) => {
     c.neighbors = [];
-    dirs.forEach(d => {
+    dirs.forEach((d) => {
       const n = getNext(c, d, grid);
       if (n) c.neighbors.push(n);
     });
@@ -66,7 +66,7 @@ const tests = [
   [
     [
       [1, 3],
-      [5, 3]
+      [5, 3],
     ],
     `+--------+
 |........|
@@ -77,13 +77,13 @@ const tests = [
 |...B....|
 |........|
 |........|
-+--------+`
++--------+`,
   ],
   [
     [
       [1, 3],
       [3, 5],
-      [5, 3]
+      [5, 3],
     ],
     `+--------+
 |........|
@@ -94,7 +94,7 @@ const tests = [
 |...B....|
 |........|
 |........|
-+--------+`
++--------+`,
   ],
   [
     [
@@ -102,7 +102,7 @@ const tests = [
       [5, 3],
       [7, 5],
       [7, 1],
-      [2, 1]
+      [2, 1],
     ],
     `+--------+
 |........|
@@ -113,7 +113,7 @@ const tests = [
 |...B....|
 |........|
 |.B...B..|
-+--------+`
++--------+`,
   ],
   [
     [
@@ -122,7 +122,7 @@ const tests = [
       [7, 5],
       [7, 1],
       [2, 1],
-      [5, 4]
+      [5, 4],
     ],
     `+--------+
 |........|
@@ -133,8 +133,8 @@ const tests = [
 |...BB...|
 |........|
 |.B...B..|
-+--------+`
-  ]
++--------+`,
+  ],
 ];
 
 tests.forEach(([expected, input]) => {
