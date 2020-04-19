@@ -1,1 +1,1 @@
-Mandelbrot - 2014
+Mandelbrot - 2014 - Mandelbrot explorer without WebGL.

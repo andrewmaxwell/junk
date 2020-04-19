@@ -1,1 +1,1 @@
-Simple Clock - 2012
+Simple Clock - 2012 - It's a clock.

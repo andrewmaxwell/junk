@@ -1,1 +1,1 @@
-Cutting Corners - 2019
+Cutting Corners - 2019 - An illustration of what happens when you slowly start to cut corners. Originally described and requested by Kieran Brown.

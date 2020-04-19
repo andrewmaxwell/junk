@@ -1,1 +1,1 @@
-2D Raytracer - 2013
+2D Raytracer - 2013 - Drag to draw mirrors, click to calculate lighting.

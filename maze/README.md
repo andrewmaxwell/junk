@@ -1,1 +1,1 @@
-Maze Generator - 2013
+Maze Generator - 2013 - Generates mazes using a depth-first space filling algorithm.

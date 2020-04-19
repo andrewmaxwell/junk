@@ -4,12 +4,47 @@
     <meta charset="UTF-8">
     <title>Junk made by Andrew</title>
     <style>
-      * {font-family: sans-serif} 
-      .container {width: 300px; height: 200px; display: inline-block; margin: 5px}
-      img {max-width: 100%; max-height: 100%; display: block}
+body { font-family: sans-serif; background: #EEE}
+img { width: 100%; border-radius: 3px; }
+a:hover {background: #DDD}
+.desc {color: #888; font-size: 0.8em}
+
+.container {
+  display: flex;
+  flex-flow: column wrap;
+  align-content: space-between;
+  height: 10000px;
+  width: 75%;
+  margin: 40px auto;
+}
+
+.item {
+  text-decoration: none; 
+  color: black;
+  width: 24%;
+  position: relative;
+  margin-bottom: 2%;
+  border-radius: 3px;
+  box-sizing: border-box;
+  padding: 10px;
+  background: #FFF;
+  box-shadow: 2px 2px 4px rgba(0,0,0,0.2)
+}
+
+.item:nth-of-type(4n+1) { order: 1; }
+.item:nth-of-type(4n+2) { order: 2; }
+.item:nth-of-type(4n+3) { order: 3; }
+.item:nth-of-type(4n)   { order: 4; }
+.break {
+  flex-basis: 100%;
+  width: 0;
+  margin: 0;
+  padding: 0;
+}
     </style>
   </head>
   <body>
+    <div class="container"></div>
     <script type="module" src="home/main.js"></script>
   </body>
 </html>

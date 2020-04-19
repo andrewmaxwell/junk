@@ -1,1 +1,1 @@
-Double Pendulum Visualization - 2017
+Double Pendulum Visualization - 2017 - Each pixel represents a different double-pendulum, each starting a similar position to its neighbors. Redness indicates how far the end is from the anchor, green is y coordinate, and blue is the x coordinate.

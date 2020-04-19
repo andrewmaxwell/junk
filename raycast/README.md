@@ -1,1 +1,1 @@
-First-Person Raycaster - 2019
+First-Person Raycaster - 2019 - A very simple render that looks 3D but is actually just thin rectangles with different heights and shades drawn across the screen. Use arrows to move.

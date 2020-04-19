@@ -1,1 +1,1 @@
-Jibberjabber Generator - 2013
+Jibberjabber Generator - 2013 - Generates text similar to the input.

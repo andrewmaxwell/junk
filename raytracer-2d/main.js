@@ -1,15 +1,12 @@
-import 'https://code.jquery.com/jquery-3.3.1.min.js';
-import {Controls} from '../common/Controls.js';
-
 var opts = {random: 0, circle: 0};
 
-var pointInRect = function(x, y, x1, y1, x2, y2) {
+var pointInRect = function (x, y, x1, y1, x2, y2) {
     return (
       Math.abs(x - (x1 + x2) / 2) * 2 < Math.abs(x1 - x2) &&
       Math.abs(y - (y1 + y2) / 2) * 2 < Math.abs(y1 - y2)
     );
   },
-  reflect = function(s, maxLength, edges) {
+  reflect = function (s, maxLength, edges) {
     var x1 = s.x,
       y1 = s.y,
       x2 = x1 + maxLength * s.xs,
@@ -43,13 +40,13 @@ var pointInRect = function(x, y, x1, y1, x2, y2) {
     }
     return closest;
   },
-  sqDist = function(x, y) {
+  sqDist = function (x, y) {
     return x * x + y * y;
   },
-  dist = function(x, y) {
+  dist = function (x, y) {
     return Math.sqrt(x * x + y * y);
   },
-  drawEdges = function(context, edges) {
+  drawEdges = function (context, edges) {
     context.lineWidth = 2;
     context.strokeStyle = 'white';
     context.beginPath();
@@ -59,7 +56,7 @@ var pointInRect = function(x, y, x1, y1, x2, y2) {
     }
     context.stroke();
   },
-  makeBeams = function(
+  makeBeams = function (
     context,
     x,
     y,
@@ -92,25 +89,25 @@ var pointInRect = function(x, y, x1, y1, x2, y2) {
       }
     }
   },
-  makeEdge = function(p1, p2) {
+  makeEdge = function (p1, p2) {
     var len = dist(p1.x - p2.x, p1.y - p2.y);
     return {
       p1,
       p2,
       xs: (p2.x - p1.x) / len,
-      ys: (p2.y - p1.y) / len
+      ys: (p2.y - p1.y) / len,
     };
   },
-  circle = function(x, y, rad) {
+  circle = function (x, y, rad) {
     var n = 300,
       last = {
         x: x + rad * Math.cos(0),
-        y: y + rad * Math.sin(0)
+        y: y + rad * Math.sin(0),
       };
     for (var i = 1; i < n; i++) {
       var next = {
         x: x + rad * Math.cos(((2 * Math.PI) / n) * (i + 1)),
-        y: y + rad * Math.sin(((2 * Math.PI) / n) * (i + 1))
+        y: y + rad * Math.sin(((2 * Math.PI) / n) * (i + 1)),
       };
       edges.push(makeEdge(last, next));
       last = next;
@@ -140,7 +137,7 @@ if (opts.circle) {
   drawEdges(T, edges);
 }
 
-onmousemove = function(e) {
+onmousemove = function (e) {
   if (down) {
     clearTimeout(timeout);
     T.clearRect(0, 0, W, H);
@@ -150,14 +147,14 @@ onmousemove = function(e) {
     down = now;
   }
 };
-C.onmousedown = function(e) {
+C.onmousedown = function (e) {
   down = 1;
   clearTimeout(timeout);
   start = 0;
   T.clearRect(0, 0, W, H);
   drawEdges(T, edges);
   T.lineWidth = 0.04;
-  var draw = function() {
+  var draw = function () {
     makeBeams(
       T,
       e.x,
@@ -174,11 +171,6 @@ C.onmousedown = function(e) {
   };
   timeout = setTimeout(draw, 100);
 };
-onmouseup = function() {
+onmouseup = function () {
   down = 0;
 };
-
-Controls({
-  instructions:
-    "<ul style='padding:15px'><li>Draw lines to create mirrors.</li><li>Click to place light source.</li></ul>"
-});

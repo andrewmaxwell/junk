@@ -1,1 +1,1 @@
-2D Raymarcher - 2017
+2D Raymarcher - 2017 - A simple raymarcher in a dynamic scene.

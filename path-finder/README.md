@@ -1,1 +1,1 @@
-Path Finder - 2019
+Path Finder - 2019 - An interactive illustration of a variant of Dijkstra's algorithm. The arrows point toward the shortest path to get the gold. 
