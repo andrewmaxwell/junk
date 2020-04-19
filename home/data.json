@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "isometric",
+    "title": "Isometric",
+    "year": 2020,
+    "desc": "Experiment in making an isomorphic renderer."
+  },
+  {
     "filePath": "cutting-corners",
     "title": "Cutting Corners",
     "year": 2019,
