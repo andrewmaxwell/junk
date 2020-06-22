@@ -1,4 +1,4 @@
-import {transform} from 'babel-core';
+import {transform} from '@babel/core';
 import {nodesWhere, deepWithout, logJSON} from './utils.js';
 import fs from 'fs';
 import Path from 'path';
@@ -71,7 +71,7 @@ const builtIns = [
   'undefined',
   'window',
   'process',
-  'escape'
+  'escape',
 ].reduce((res, el) => ({...res, [el]: true}), {});
 
 const isDeclaredIn = (name, astNode) =>
@@ -81,7 +81,7 @@ const isDeclaredIn = (name, astNode) =>
     astNode
   ).length > 0;
 
-const getBlockDeps = astNode =>
+const getBlockDeps = (astNode) =>
   [
     ...nodesWhere(
       (val, path) =>
@@ -89,10 +89,10 @@ const getBlockDeps = astNode =>
         val.type === 'Identifier' &&
         !EXCLUDED_PATH_ENDINGS.test(path.join(',')),
       astNode
-    ).map(o => o.name),
-    ...nodesWhere(val => val && val.computed && val.property, astNode).map(
-      o => o.property.name
-    )
+    ).map((o) => o.name),
+    ...nodesWhere((val) => val && val.computed && val.property, astNode).map(
+      (o) => o.property.name
+    ),
   ]
     .filter(
       (val, i, arr) =>
@@ -100,13 +100,13 @@ const getBlockDeps = astNode =>
     )
     .sort();
 
-const getDeclarations = astNode =>
+const getDeclarations = (astNode) =>
   nodesWhere(
     (val, path) => val && DECLARATION_PATH.test(path.join(',')),
     astNode
   ).sort();
 
-const getImportedFileNames = astNode =>
+const getImportedFileNames = (astNode) =>
   nodesWhere(
     (val, path) =>
       val && /^\.(.+)\.js$/.test(val) && IMPORT_PATH.test(path.join(',')),
@@ -115,8 +115,8 @@ const getImportedFileNames = astNode =>
 
 const normalize = (from, to) => Path.normalize(Path.dirname(from) + '/' + to);
 
-const getFiles = entryPoints => {
-  const queue = entryPoints.map(p => Path.resolve(p));
+const getFiles = (entryPoints) => {
+  const queue = entryPoints.map((p) => Path.resolve(p));
   const result = [];
 
   for (let i = 0; i < queue.length; i++) {
@@ -126,19 +126,21 @@ const getFiles = entryPoints => {
     const ast = transform(code, {
       babelrc: false,
       plugins: [
-        'transform-react-jsx',
-        'transform-object-rest-spread',
-        'transform-class-properties'
+        '@babel/plugin-transform-react-jsx',
+        // 'transform-object-rest-spread',
+        // 'transform-class-properties',
       ],
-      code: false
-    }).ast.program.body.map(item =>
-      deepWithout(['loc'], {...item, code: code.slice(item.start, item.end)})
-    );
+      code: false,
+    });
+    console.log(ast);
+    // .ast.program.body.map((item) =>
+    //   deepWithout(['loc'], {...item, code: code.slice(item.start, item.end)})
+    // );
 
     queue.push(
       ...getImportedFileNames(ast)
-        .map(p => normalize(fileName, p))
-        .filter(val => !queue.includes(val))
+        .map((p) => normalize(fileName, p))
+        .filter((val) => !queue.includes(val))
     );
 
     result[i] = {fileName, ast};
@@ -148,29 +150,29 @@ const getFiles = entryPoints => {
 
 const toId = (fileName, imported) => imported + ':' + fileName;
 
-export const GetDeps = entryPoints => {
+export const GetDeps = (entryPoints) => {
   const deps = getFiles(entryPoints).reduce((res, {fileName, ast}) => {
     const importMapping = {};
 
     let idCounter = 0;
-    ast.forEach(astNode => {
+    ast.forEach((astNode) => {
       const declarations = getDeclarations(astNode);
       if (declarations[0] === '_extends') return;
 
-      declarations.forEach(id => {
+      declarations.forEach((id) => {
         importMapping[id] = toId(fileName, id);
       });
 
       const data = {
         code: astNode.code,
-        dependencies: getBlockDeps(astNode).map(dep => {
+        dependencies: getBlockDeps(astNode).map((dep) => {
           if (!importMapping[dep]) {
             logJSON(astNode);
             throw new Error('No mapping found for ' + dep);
           }
           return {id: importMapping[dep], as: dep};
         }),
-        dependants: []
+        dependants: [],
       };
 
       // logJSON('\n********\n\nastNode', astNode, data.dependencies);
@@ -180,7 +182,7 @@ export const GetDeps = entryPoints => {
           ? normalize(fileName, astNode.source.value)
           : astNode.source.value;
 
-        astNode.specifiers.forEach(sp => {
+        astNode.specifiers.forEach((sp) => {
           importMapping[sp.local ? sp.local.name : sp.imported.name] = toId(
             impFileName,
             sp.imported ? sp.imported.name : 'default'
@@ -197,22 +199,22 @@ export const GetDeps = entryPoints => {
         ] = data;
       }
 
-      declarations.forEach(id => {
+      declarations.forEach((id) => {
         res[toId(fileName, id)] = data;
       });
     });
     return res;
   }, {});
 
-  Object.keys(deps).forEach(id => {
-    deps[id].dependencies.forEach(dep => {
+  Object.keys(deps).forEach((id) => {
+    deps[id].dependencies.forEach((dep) => {
       if (deps[dep.id]) {
         deps[dep.id].dependants.push(id);
       }
     });
   });
 
-  Object.keys(deps).forEach(id => {
+  Object.keys(deps).forEach((id) => {
     if (!deps[id].dependants.length && !id.startsWith('expr')) {
       console.log(id, 'has no dependants!');
     }
