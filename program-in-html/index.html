@@ -1,0 +1,264 @@
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+<style>
+  textarea {width: 100%; height: 400px}
+  pre {max-height: 400px; overflow: auto; font-size: 0.8em}
+  h2 {margin: 50px 0 10px 0}
+</style>
+<link rel="stylesheet"
+      href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/default.min.css">
+<body>
+  <div class="container-fluid">
+    <h1>I can program in HTML</h1>
+    <p>All source is editable and transpiles in real time.</p>
+    <div id="examples"></div>
+  </div>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js"></script>
+  <script>
+    window.hljs.initHighlightingOnLoad();
+  </script>
+  <script type="text/html" id="Add">
+    <add>
+      <number value="42" />
+      <number value="58" />
+    </add>
+  </script>
+  <script type="text/html" id="Range">
+    <range>
+      <number value="0" />
+      <number value="10" />
+    </range>
+  </script>
+  <script type="text/html" id="Array, Map, and Lambda">
+    <map>
+      <array>
+        <number value="43" />
+        <number value="7" />
+        <number value="7932" />
+      </array>
+      <lambda>
+        <multiply>
+          <argument index="0" />
+          <number value="3" />
+        </multiply>
+      </lambda>
+    </map>
+  </script>
+  <script type="text/html" id="Fizz Buzz">
+    <join>
+      <map>
+        <range>
+          <number value="1" />
+          <number value="101" />
+        </range>
+        <lambda>
+          <or>
+            <add>
+              <ifElse>
+                <modulo>
+                  <argument index="0" />
+                  <number value="3" />
+                </modulo>
+                <string value="" />
+                <string value="Fizz" />
+              </ifElse>
+              <ifElse>
+                <modulo>
+                  <argument index="0" />
+                  <number value="5" />
+                </modulo>
+                <string value="" />
+                <string value="Buzz" />
+              </ifElse>
+            </add>
+            <argument index="0" />
+          </or>
+        </lambda>
+      </map>
+      <string value="\n" />
+    </join>
+  </script>
+  <script type="text/html" id="Prime Number Generator">
+    <join>
+      <reduce>
+        <range>
+          <number value="2" />
+          <number value="1000" />
+        </range>
+        <lambda name="r">
+          <ifElse>
+            <every>
+              <argument lambda="r" index="0" />
+              <lambda name="e">
+                <modulo>
+                  <argument lambda="r" index="1" />
+                  <argument lambda="e" index="0" />
+                </modulo>
+              </lambla>
+            </every>
+            <concat>
+              <argument lambda="r" index="0" />
+              <argument lambda="r" index="1" />
+            </concat>
+            <argument lambda="r" index="0" />
+          </ifElse>
+        </lambda>
+        <array />
+      </reduce>
+      <string value=" " />
+    </join>
+  </script>
+  <script type="text/html" id="Formatted Calendar Maker">
+    <define name="months">
+      <array>
+        <string value="January" />
+        <string value="February" />
+        <string value="March" />
+        <string value="April" />
+        <string value="May" />
+        <string value="June" />
+        <string value="July" />
+        <string value="August" />
+        <string value="September" />
+        <string value="October" />
+        <string value="November" />
+        <string value="December" />
+      </array>
+    </define>
+    
+    <define name="calendar">
+      <lambda name="c">
+        <define name="topLine">
+          <add>
+            <argument lambda="c" index="0" />
+            <string value=" " />
+            <property>
+              <reference name="months" />
+              <subtract>
+                <argument lambda="c" index="1" />
+                <number value="1" />
+              </subtract>
+            </property>
+          </add>
+        </define>
+        <define name="date">
+          <date>
+            <argument lambda="c" index="0" />
+            <subtract>
+              <argument lambda="c" index="1" />
+              <number value="1" />
+            </subtract>
+          </date>
+        </define>
+        <define name="numDays">
+          <Math.round>
+            <divide>
+              <subtract>
+                <date>
+                  <argument lambda="c" index="0" />
+                  <argument lambda="c" index="1" />
+                </date>
+                <reference name="date" />
+              </subtract>
+              <number value="86400000" />
+            </divide>
+          </Math.round>
+        </define>
+        <add>
+          <repeat>
+            <string value=" "/>
+            <Math.floor>
+              <divide>
+                <subtract>
+                  <number value="27" />
+                  <property name="length">
+                    <reference name="topLine" />
+                  </property>
+                </subtract>
+                <number value="2" />
+              </divide>
+            </Math.floor>
+          </repeat>
+          <reference name="topLine" />
+          <string value="\nSUN MON TUE WED THU FRI SAT\n" />
+          <repeat>
+            <string value=" " />
+            <multiply>
+              <getDay>
+                <reference name="date" />
+              </getDay>
+              <number value="4" />
+            </multiply>
+          </repeat>
+          <join>
+            <map>
+              <range>
+                <number value="1" />
+                <add>
+                  <reference name="numDays" />
+                  <number value="1" />
+                </add>
+              </range>
+              <lambda name="m">
+                <add>
+                  <string value=" " />
+                  <argument lambda="m" index="0" />
+                  <ifElse>
+                    <equals>
+                      <argument lambda="m" index="0" />
+                      <reference name="numDays" />
+                    </equals>
+                    <string value="" />
+                    <ifElse>
+                      <modulo>
+                        <add>
+                          <argument lambda="m" index="0" />
+                          <getDay>
+                            <reference name="date" />
+                          </getDay>
+                        </add>
+                        <number value="7" />
+                      </modulo>
+                      <repeat>
+                        <string value=" " />
+                        <subtract>
+                          <number value="3" />
+                          <property name="length">
+                            <String>
+                              <argument lambda="m" index="0" />
+                            </String>
+                          </property>
+                        </subtract>
+                      </repeat>
+                      <string value="\n" />
+                    </ifElse>
+                  </ifElse>
+                </add>
+              </lambda>
+            </map>
+            <string value="" />
+          </join>
+    
+        </add>
+      </lambda>
+    </define>
+    
+    <join>
+      <map>
+        <range>
+          <number value="1" />
+          <number value="13" />
+        </range>
+        <lambda>
+          <calendar>
+            <getFullYear>
+              <date />
+            </getFullYear/>
+            <argument index="0" />
+          </calendar>
+        </lambda>
+      </map>
+      <string value="\n\n" />
+    </join>
+  </script>
+  <script type="module" src="main.js"></script>
+</body>
