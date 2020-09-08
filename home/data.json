@@ -1,9 +1,21 @@
 [
   {
+    "filePath": "carcassonne",
+    "title": "Carcassonne Simulator",
+    "year": 2020,
+    "desc": "Builds a valid Carcassonne map"
+  },
+  {
     "filePath": "isometric",
     "title": "Isometric",
     "year": 2020,
     "desc": "Experiment in making an isomorphic renderer."
+  },
+  {
+    "filePath": "lasertank",
+    "title": "LaserTank",
+    "year": 2020,
+    "desc": "A clone of a game I played when I was a kid."
   },
   {
     "filePath": "program-in-html",

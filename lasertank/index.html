@@ -1,0 +1,18 @@
+<style>
+  #buttons canvas {margin: 4px; cursor: pointer}
+  .selected {outline: 4px solid lime}
+</style>
+<body style="background:#111;color:white;font-family:sans-serif">
+  <canvas style="display:block; background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABWElEQVRYR9VXiQ3DIAyEzRiN0dislYMoxvgDIiWNVClpeM7n85nEnMMnbF05hNB+sADcc1f7n46vY+M+ALopBeADGEspFwOlJIMHLgIp6r5USuV6gPXhnu7zPICc88VASklggc9hiwZHOGvCZkjRwB7lXYx1PgSmpVgE0POFGRhzO+sGV4WvtN4GgNa1ncM5Tp6xOm5kCFhWfQCXDVdCPpL1UQTAeg6x6DTA9V35ibLBehsA8APdue6gHa8RmxHxzcQjyi66WSf2/MNmtMIH35zeCEDv3yd1z/FlMDDmEDcsmm++OeEt+RJnAGhOJud8x6gEJ3wIQHMqOcfVI3oHHFUtnyeWrHilrCgg39zxADMcSj3U28YywrDHIxE+DsBHoTdCrizZU/HZd4EF2m7vh1Zsb0BFRyH/MwDfpxeNmJ43zFOxTOEegBtTYOefk6hiRJai6ft7AHwB384YkLrdzVUAAAAASUVORK5CYII=)"></canvas>
+  <div id="editor" style="display: none">
+    <div id="buttons"></div>
+    <button id="clearButton">Clear</button>
+    <button id="doneButton">Done</button>
+  </div>
+  <button id="prevButton">Previous Level</button>
+  <button id="nextButton">Next Level</button>
+  <button id="editButton">Edit</button>
+  <p>Use WASD to move the tank, space to shoot, R to reset. Get to the flag to win.</p>
+  <img src="graphics.png" style="display:none"/>
+  <script type="module" src="main.js"></script>
+</body>

@@ -12,7 +12,7 @@ const types = [
   {name: 'brush', color: '#785a00', cost: 10},
   {name: 'stoneWall', color: '#9c9c9c', cost: 100},
   {name: 'obsidianWall', color: '#363636', cost: 1000},
-  {name: 'gold', color: '#ffe100', cost: 1}
+  {name: 'gold', color: '#ffe100', cost: 1},
 ];
 const typeIndex = types.reduce(
   (res, t) => Object.assign(res, {[t.name]: t}),
@@ -26,7 +26,7 @@ const dirs = [
   [1, 1],
   [-1, -1],
   [1, -1],
-  [-1, 1]
+  [-1, 1],
 ];
 let grid,
   selectedType = typeIndex.obsidianWall,
@@ -45,7 +45,7 @@ const init = () => {
         type: pgrid
           ? types[pgrid[i][j]]
           : types[Math.floor(3 * noise(j / 5, i / 5 + offset) ** 1.5)],
-        neighbors: []
+        neighbors: [],
       };
     }
   }
@@ -160,7 +160,7 @@ $('#controls')
       )
       .join(' ')
   )
-  .on('input', 'input', function() {
+  .on('input', 'input', function () {
     const type = $(this).data('type');
     const value = $(this).val();
     if (typeIndex[type] && !isNaN(value)) {
@@ -168,7 +168,7 @@ $('#controls')
       draw();
     }
   })
-  .on('click', 'label', function() {
+  .on('click', 'label', function () {
     const t = typeIndex[$(this).data('type')];
     if (t) {
       selectedType = t;
@@ -177,13 +177,13 @@ $('#controls')
     }
   })
   .append(
-    $('<button>Reset</button>').on('click', function() {
+    $('<button>Reset</button>').on('click', function () {
       localStorage.grid = null;
       init();
     })
   )
   .append(
-    $('<button>Clear</button>').on('click', function() {
+    $('<button>Clear</button>').on('click', function () {
       for (let i = 0; i < rows; i++) {
         for (let j = 0; j < cols; j++) {
           grid[i][j].type = typeIndex.grass;
@@ -202,12 +202,12 @@ $(canvas).on('click mousemove', ({which, offsetX, offsetY}) => {
   if (grid[y][x].type === selectedType) return;
   grid[y][x].type = selectedType;
   localStorage.grid = JSON.stringify(
-    grid.map(r => r.map(c => types.indexOf(c.type)))
+    grid.map((r) => r.map((c) => types.indexOf(c.type)))
   );
   draw();
 });
 
-$(window).on('keydown keyup', e => {
+$(window).on('keydown keyup', (e) => {
   if (e.key === 's') {
     showHeatMap = e.type === 'keydown';
     draw();

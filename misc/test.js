@@ -12,8 +12,8 @@ exports.Test = {
   assertEquals: (actual, expected, description) => {
     if (description) console.log(description);
     if (equals(actual, expected)) pass();
-    else fail(`Expected ${toString(expected)}, got ${toString(actual)}`);
-    // else fail(`Expected\n${expected}\nGot\n${actual}\n`);
+    // else fail(`Expected ${toString(expected)}, got ${toString(actual)}`);
+    else fail(`Expected\n${expected}\nGot\n${actual}\n`);
   },
   expectError: (func) => {
     try {
