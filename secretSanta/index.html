@@ -1,5 +1,16 @@
-<style>* {font: 32px monospace}</style>
+<style>
+  * {font-family: sans-serif}
+  a, textarea {display: block}
+</style>
 <body>
-  <pre id="output" />
+  <p>Enter names and exclusions.</p>
+  <textarea id="input" style="height: 300px; width: 300px">
+Bob - Tina, Jim
+Jim - Bea
+Ralph - Tina
+Tina - Bob, Ralph
+Bea - Jim
+  </textarea>
+  <div id="output" />
   <script type="module" src="main.js"></script>
 </body>
