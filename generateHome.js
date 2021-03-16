@@ -1,6 +1,6 @@
-import fs from 'fs';
-import {resolve} from 'path';
-import {pipe, map, filter, both, sort} from 'ramda';
+const {pipe, map, filter, both, sort} = require('ramda');
+const fs = require('fs');
+const {resolve} = require('path');
 
 const fileExists = (filename) => (filePath) =>
   fs.existsSync(resolve(__dirname, filePath + '/' + filename));

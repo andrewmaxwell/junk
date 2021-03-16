@@ -17,7 +17,7 @@ for (let i = 0; i < 9; i++) {
 }
 
 // return if a configuration is valid. 0s are wildcards and so are counted as valid anywhere.
-const isValid = b => {
+const isValid = (b) => {
   for (let i = 0; i < groups.length; i++) {
     const seen = [];
     for (let j = 0; j < 9; j++) {
@@ -29,7 +29,7 @@ const isValid = b => {
   return true;
 };
 
-let solve = start => {
+const solve = (start) => {
   const queue = [start];
   while (queue.length) {
     const current = queue.pop();

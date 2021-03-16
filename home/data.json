@@ -3,7 +3,7 @@
     "filePath": "carcassonne",
     "title": "Carcassonne Simulator",
     "year": 2020,
-    "desc": "Builds a valid Carcassonne map"
+    "desc": "Builds a valid Carcassonne map."
   },
   {
     "filePath": "isometric",

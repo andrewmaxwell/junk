@@ -8,7 +8,7 @@ export const makeRenderer = (canvas, width, height, toColor) => {
   const buf8 = new Uint8ClampedArray(buf);
   const data = new Uint32Array(buf);
 
-  return vals => {
+  return (vals) => {
     for (let i = 0; i < vals.length; i++) {
       data[i] = toColor(vals[i]);
     }
@@ -17,7 +17,7 @@ export const makeRenderer = (canvas, width, height, toColor) => {
   };
 };
 
-export const color = (r, g, b) => (255 << 24) | (b << 16) | (g << 8) | r;
+export const color = (r, g, b, a = 255) => (a << 24) | (b << 16) | (g << 8) | r;
 
 export const makeGradient = (colors, colorSteps = 256) => {
   const gradient = [];
@@ -35,5 +35,5 @@ export const makeGradient = (colors, colorSteps = 256) => {
       c1[2] * (1 - m) + c2[2] * m
     );
   }
-  return v => gradient[Math.floor(v * colorSteps)];
+  return (v) => gradient[Math.floor(v * colorSteps)];
 };

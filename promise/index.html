@@ -16,11 +16,11 @@ console.clear();
 class MyPromise {
   constructor(func) {
     this.thens = [];
-    func(val => this.thens.forEach(f => f(val)));
+    func((val) => this.thens.forEach((f) => f(val)));
   }
   then(nextFunc) {
-    return new MyPromise(resolve => {
-      this.thens.push(input => {
+    return new MyPromise((resolve) => {
+      this.thens.push((input) => {
         var out = nextFunc(input);
         return out && out.then ? out.then(resolve) : resolve(out);
       });
@@ -28,18 +28,18 @@ class MyPromise {
   }
 }
 
-const delay = msg =>
-  new MyPromise(res => {
+const delay = (msg) =>
+  new MyPromise((res) => {
     setTimeout(() => res(msg), 1000);
   });
 
-const prom = delay('You did it!').then(val => {
+const prom = delay('You did it!').then((val) => {
   console.log(val);
   return delay('Yay!');
 });
-prom.then(val => console.log(val));
+prom.then((val) => console.log(val));
 prom
-  .then(val => console.log(val.toUpperCase()) || 'done')
-  .then(m => console.log(m));
+  .then((val) => console.log(val.toUpperCase()) || 'done')
+  .then((m) => console.log(m));
 </script>
 </body>
