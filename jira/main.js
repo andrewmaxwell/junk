@@ -13,6 +13,16 @@ const {Papa, Chart} = window;
 //   });
 // };
 
+const colors = {
+  0.5: [255, 255, 0], // yellow
+  1: [0, 255, 0], // green
+  2: [0, 255, 255], // cyan
+  3: [0, 0, 255], // blue
+  4: [255, 0, 255], // magenta
+  5: [255, 0, 0], // red
+  8: [255, 128, 0], // orange
+};
+
 const groupBy = (func, arr) => {
   const res = {};
   for (const t of arr) {
@@ -31,7 +41,7 @@ const bezier = (coords, numPoints = 32) => {
       xc[j] = coords[j].x;
       yc[j] = coords[j].y;
     }
-    const p = i / numPoints;
+    const p = (i + 1) / (numPoints + 1);
     for (let j = 1; j < coords.length; j++) {
       for (let k = 0; k < coords.length - j; k++) {
         xc[k] = xc[k] * (1 - p) + xc[k + 1] * p;
@@ -43,29 +53,23 @@ const bezier = (coords, numPoints = 32) => {
   return result;
 };
 
-const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
-const getStats = (arr) => {
-  const m = mean(arr);
-  return {mean: m, stdDev: Math.sqrt(mean(arr.map((v) => (v - m) ** 2)))};
-};
+// const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+// const getStats = (arr) => {
+//   const m = mean(arr);
+//   return {mean: m, stdDev: Math.sqrt(mean(arr.map((v) => (v - m) ** 2)))};
+// };
 
-const makeChart = (label, data) => {
+const makeChart = (label, datasets) => {
   const canvas = document.createElement('canvas');
-  canvas.width = 600;
-  canvas.height = 100;
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
   document.body.append(canvas);
 
   new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: {
-      datasets: [
-        {type: 'bubble', data},
-        {type: 'line', data: bezier(data)},
-      ],
-    },
+    data: {datasets},
     options: {
       scales: {xAxes: [{type: 'time', time: {tooltipFormat: 'll'}}]},
-      legend: {display: false},
       title: {text: label, display: true, fontSize: 20},
       animation: {duration: 0},
 
@@ -110,19 +114,33 @@ const go = async () => {
   //   )
   // );
 
-  for (const [points, items] of Object.entries(
-    groupBy((t) => t.estimate, workOverTime)
-  ).sort(([a], [b]) => Number(a) - Number(b))) {
-    if (items.length < 10) continue;
-    const vals = items
-      .map((e) => ({...e, y: Number(e.days), r: 5}))
-      .filter(({y}) => isFinite(y));
-    const {mean, stdDev} = getStats(vals.map((p) => p.y));
+  makeChart(
+    'Time to Complete Stories',
+    Object.entries(groupBy((t) => t.estimate, workOverTime))
+      .filter(([, arr]) => arr.length > 5)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .flatMap(([points, items]) => {
+        const vals = items
+          .map((e) => ({...e, y: Number(e.days), r: 5}))
+          .filter(({y}) => y < 50);
+        // const {mean, stdDev} = getStats(vals.map((p) => p.y));
 
-    makeChart(
-      `Days to complete a ${points}-pointer`,
-      vals.filter(({y}) => y > mean - stdDev * 2 && y < mean + stdDev * 2)
-    );
-  }
+        return [
+          {
+            label: `${points} point`,
+            type: 'bubble',
+            data: vals,
+            backgroundColor: `rgba(${colors[points]},0.25)`,
+          },
+          {
+            label: `${points} point Bezier`,
+            type: 'line',
+            data: bezier(vals),
+            fill: false,
+            borderColor: `rgb(${colors[points]})`,
+          },
+        ];
+      })
+  );
 };
 go();
