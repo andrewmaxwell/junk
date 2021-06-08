@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "bezier",
+    "title": "Bezier Screensaver",
+    "year": 2021,
+    "desc": "Kinda fun to watch, took about an hour to make."
+  },
+  {
     "filePath": "carcassonne",
     "title": "Carcassonne Simulator",
     "year": 2020,
