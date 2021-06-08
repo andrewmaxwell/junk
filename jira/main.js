@@ -1,16 +1,33 @@
 const {Papa, Chart} = window;
 
-// const rollingAvg = (data, duration) => {
-//   let amt = 0;
-//   let index = 0;
-//   return data.map((el) => {
-//     while (el.x - data[index].x > duration) {
-//       amt -= data[index].y;
-//       index++;
-//     }
-//     amt += el.y;
-//     return {...el, _y: el.y, y: Math.round(amt * 100) / 100};
-//   });
+// const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+// const getStats = (arr) => {
+//   const m = mean(arr);
+//   return {mean: m, stdDev: Math.sqrt(mean(arr.map((v) => (v - m) ** 2))), arr};
+// };
+
+// const rollingStats = (data, duration, numPts = 256) => {
+//   const result = [];
+//   const minX = data[0].x;
+//   let maxX = data[data.length - 1].x;
+//   let minIndex = 0;
+//   let maxIndex = 0;
+//   let prev;
+//   for (let i = 0; i < numPts; i++) {
+//     const x = minX + (i / numPts) * (maxX - minX);
+//     while (data[minIndex]?.x < x - duration && minIndex < data.length)
+//       minIndex++;
+//     while (data[maxIndex]?.x < x && maxIndex < data.length) maxIndex++;
+//     // console.log('>>>', data.slice(minIndex, maxIndex));
+//     const {mean, stdDev} = getStats(
+//       data.slice(minIndex, maxIndex).map(({y}) => y)
+//     );
+//     result.push(
+//       isNaN(mean) && prev ? {...prev, x} : (prev = {x, y: mean, r: stdDev})
+//     );
+//   }
+//   console.log(result);
+//   return result;
 // };
 
 const colors = {
@@ -53,11 +70,13 @@ const bezier = (coords, numPoints = 32) => {
   return result;
 };
 
-// const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
-// const getStats = (arr) => {
-//   const m = mean(arr);
-//   return {mean: m, stdDev: Math.sqrt(mean(arr.map((v) => (v - m) ** 2)))};
-// };
+const changeOverTime = (arr, duration) => {
+  let minIndex = 0;
+  return arr.map((e) => {
+    while (arr[minIndex + 1]?.x < e.x - duration) minIndex++;
+    return {...e, y: e.y - arr[minIndex].y};
+  });
+};
 
 const makeChart = (label, datasets) => {
   const canvas = document.createElement('canvas');
@@ -88,7 +107,7 @@ const go = async () => {
   const {data} = Papa.parse(csv, {header: true});
 
   const workOverTime = data
-    .filter(({estimate, assignees}) => Number(estimate) && assignees)
+    .filter(({estimate}) => Number(estimate))
     .map((e) => {
       const {assignees, days, epic, estimate, finished, key, summary} = e;
       return {
@@ -104,18 +123,8 @@ const go = async () => {
     })
     .sort((a, b) => a.x - b.x);
 
-  // const numSprints = 3;
-  // makeChart(
-  //   'line',
-  //   '8 Week Average Velocity',
-  //   rollingAvg(
-  //     workOverTime.map((e) => ({...e, y: Number(e.estimate) / numSprints})),
-  //     numSprints * 14 * 24 * 3600 * 1000
-  //   )
-  // );
-
   makeChart(
-    'Time to Complete Stories',
+    'Days to Complete Stories',
     Object.entries(groupBy((t) => t.estimate, workOverTime))
       .filter(([, arr]) => arr.length > 5)
       .sort(([a], [b]) => Number(a) - Number(b))
@@ -123,7 +132,6 @@ const go = async () => {
         const vals = items
           .map((e) => ({...e, y: Number(e.days), r: 5}))
           .filter(({y}) => y < 50);
-        // const {mean, stdDev} = getStats(vals.map((p) => p.y));
 
         return [
           {
@@ -133,14 +141,74 @@ const go = async () => {
             backgroundColor: `rgba(${colors[points]},0.25)`,
           },
           {
-            label: `${points} point Bezier`,
+            label: `${points} point bezier`,
             type: 'line',
-            data: bezier(vals),
+            data: bezier(vals).map((el) => ({
+              ...el,
+              label: points + ' points',
+            })),
             fill: false,
-            borderColor: `rgb(${colors[points]})`,
+            borderColor: `rgba(${colors[points]},0.5)`,
           },
+          // {
+          //   label: `${points} point mean/stddev`,
+          //   type: 'bubble',
+          //   data: rollingStats(vals, 8 * 14 * 24 * 3600 * 1000),
+          //   backgroundColor: `rgba(${colors[points]},0.25)`,
+          //   borderColor: 'rgba(0,0,0,0)',
+          // },
         ];
       })
   );
+
+  let total = 0;
+  const pointsOverTime = changeOverTime(
+    workOverTime.map((e) => ({
+      ...e,
+      y: (total += Number(e.estimate)),
+    })),
+    14 * 24 * 3600 * 1000
+  );
+  makeChart('Points per 14 days', [
+    {
+      label: 'Velocity',
+      type: 'line',
+      data: pointsOverTime,
+      tension: 0,
+      fill: false,
+    },
+    {
+      label: 'Velocity Bezier',
+      type: 'line',
+      data: bezier(pointsOverTime, 100),
+      fill: false,
+      borderColor: 'blue',
+    },
+  ]);
+
+  let total2 = 0;
+  const daysAssignedOverTime = changeOverTime(
+    workOverTime.map((e) => ({
+      ...e,
+      y: (total2 += Number(e.days)),
+    })),
+    14 * 24 * 3600 * 1000
+  );
+  makeChart('Days Assigned per 14 days', [
+    {
+      label: 'Velocity',
+      type: 'line',
+      data: daysAssignedOverTime,
+      tension: 0,
+      fill: false,
+    },
+    {
+      label: 'Velocity Bezier',
+      type: 'line',
+      data: bezier(daysAssignedOverTime, 100),
+      fill: false,
+      borderColor: 'blue',
+    },
+  ]);
 };
 go();
