@@ -3,26 +3,24 @@ const width = (canvas.width = innerWidth);
 const height = (canvas.height = innerHeight);
 const ctx = canvas.getContext('2d');
 
-const params = {
-  numPts: 5,
-  numBezierPts: 256,
-  opacity: 0.1,
-};
+const params = {numPts: 6, numBezierPts: 256};
 
 let pts, xc, yc;
 
 const reset = () => {
   pts = [];
   for (let i = 0; i < params.numPts; i++) {
+    const angle = 2 * Math.PI * Math.random();
     pts[i] = {
       x: Math.random() * width,
       y: Math.random() * height,
-      xs: Math.random() - 0.5,
-      ys: Math.random() - 0.5,
+      xs: 3 * Math.sin(angle),
+      ys: 3 * Math.cos(angle),
     };
   }
   xc = new Float32Array(params.numPts);
   yc = new Float32Array(params.numPts);
+  ctx.lineWidth = 0.1;
 };
 
 const loop = () => {
@@ -48,9 +46,10 @@ const loop = () => {
     }
   }
 
-  const {numPts, numBezierPts, opacity} = params;
+  const {numPts, numBezierPts} = params;
   for (let i = 0; i < numBezierPts; i++) {
     const hue = (360 * i) / numBezierPts;
+    const opacity = 1000 / numPts / numBezierPts;
     ctx.strokeStyle = `hsla(${hue},100%,50%,${opacity})`;
     ctx.beginPath();
     for (let j = 0; j < numPts; j++) {
@@ -75,6 +74,5 @@ reset();
 loop();
 
 const gui = new window.dat.GUI();
-gui.add(params, 'numPts', 3, 50).onChange(reset);
-gui.add(params, 'numBezierPts', 10, 1000);
-gui.add(params, 'opacity', 0, 0.5);
+gui.add(params, 'numPts', 3, 50).step(1).onChange(reset);
+gui.add(params, 'numBezierPts', 2, 1024).step(1);
