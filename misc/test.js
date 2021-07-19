@@ -1,10 +1,12 @@
+const {equals, toString} = require('ramda');
+
 const pass = () => console.log('\x1b[32m%s\x1b[0m', 'PASS');
 const fail = (msg) => console.log('\x1b[31m%s\x1b[0m', msg);
 
 const assertEquals = (actual, expected, description) => {
   if (description) console.log(description);
   if (equals(actual, expected)) pass();
-  else fail(`Expected ${toString(expected)}\nGot ${toString(actual)}\n\n`);
+  else fail(`Expected \n${toString(expected)}\nGot \n${toString(actual)}\n\n`);
   // else fail(`Expected\n${expected}\nGot\n${actual}\n`);
 };
 
@@ -13,7 +15,6 @@ exports.it = (desc, func) => {
   func();
 };
 
-const {equals, toString} = require('ramda');
 exports.Test = {
   describe: exports.it,
   it: exports.it,

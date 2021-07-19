@@ -19,6 +19,7 @@ module.exports = {
     'react/prop-types': 'off',
     'no-use-before-define': 'warn',
     'react/display-name': 'off',
+    'no-prototype-builtins': 'off',
   },
   settings: {react: {version: 'detect'}},
   // globals: Object.keys(require('ramda')).reduce((acc, key) => {

@@ -26,23 +26,18 @@ export class Grid {
     }
   }
   add(item) {
-    const {grid, cols, size} = this;
-    var col = Math.floor(item.x / size);
-    var row = Math.floor(item.y / size);
-    var vic = grid[row * cols + col].vicinity;
-    for (var i = 0; i < vic.length; i++) {
-      vic[i].items.push(item);
-    }
-    return grid[row * cols + col].items;
+    var col = Math.floor(item.x / this.size);
+    var row = Math.floor(item.y / this.size);
+    var vic = this.grid[row * this.cols + col].vicinity;
+    for (const v of vic) v.items.push(item);
+    return this.grid[row * this.cols + col].items;
   }
   clear() {
-    const {grid} = this;
-    for (var i = 0; i < grid.length; i++) {
-      grid[i].items.length = 0;
-    }
+    for (const cell of this.grid) cell.items.length = 0;
   }
   getNeighbors(x, y) {
-    const {grid, cols, size} = this;
-    return grid[Math.floor(y / size) * cols + Math.floor(x / size)].items;
+    const row = Math.min(this.rows - 1, Math.max(0, Math.floor(y / this.size)));
+    const col = Math.min(this.cols - 1, Math.max(0, Math.floor(x / this.size)));
+    return this.grid[row * this.cols + col].items;
   }
 }

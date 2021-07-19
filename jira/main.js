@@ -133,6 +133,14 @@ const go = async () => {
           .map((e) => ({...e, y: Number(e.days), r: 5}))
           .filter(({y}) => y < 50);
 
+        if (points == 3) {
+          const min = vals[0].x;
+          const max = vals[vals.length - 1].x;
+          console.log(
+            vals.map((v) => (v.x - min) / (max - min) + ',' + v.y).join(';')
+          );
+        }
+
         return [
           {
             label: `${points} point`,

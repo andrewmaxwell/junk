@@ -3,20 +3,22 @@
   "version": "1.0.0",
   "description": "just some junk",
   "dependencies": {
-    "chai": "^4.2.0"
+    "chai": "^4.3.4",
+    "node-fetch": "^2.6.1",
+    "papaparse": "^5.3.1"
   },
   "devDependencies": {
-    "@babel/core": "^7.12.3",
-    "@babel/plugin-transform-react-jsx": "^7.12.5",
+    "@babel/core": "^7.14.3",
+    "@babel/plugin-transform-react-jsx": "^7.14.3",
     "babel-core": "^6.26.3",
     "babel-eslint": "^10.1.0",
-    "eslint": "^7.13.0",
-    "eslint-config-prettier": "^8.1.0",
-    "eslint-plugin-prettier": "^3.3.1",
-    "eslint-plugin-react": "^7.22.0",
+    "eslint": "^7.27.0",
+    "eslint-config-prettier": "^8.3.0",
+    "eslint-plugin-prettier": "^3.4.0",
+    "eslint-plugin-react": "^7.23.2",
     "fsevents": "^2.3.2",
     "live-server": "^1.2.1",
-    "prettier": "^2.2.1",
+    "prettier": "^2.3.0",
     "ramda": "^0.27.1"
   },
   "scripts": {
