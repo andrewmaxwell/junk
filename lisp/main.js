@@ -88,11 +88,12 @@ const execute = (() => {
     ],
     [
       'lambda',
-      ([argList, body]) => (args, env) =>
-        evaluate(
-          body,
-          argList.map((arg, i) => [arg, evaluate(args[i], env)]).concat(env)
-        ),
+      ([argList, body]) =>
+        (args, env) =>
+          evaluate(
+            body,
+            argList.map((arg, i) => [arg, evaluate(args[i], env)]).concat(env)
+          ),
     ],
     // ['label', ([name, func], env) => [...env, [name, evaluate(func, env)]]],
     [
@@ -351,9 +352,8 @@ document.querySelectorAll('textarea').forEach((target) => {
   const handler = () => {
     target.style.height = '1px';
     target.style.height = 5 + target.scrollHeight + 'px';
-    document.querySelector(
-      `#result-${target.dataset.id}`
-    ).innerHTML = target.value ? formatOutput(exec(target.value)) : '';
+    document.querySelector(`#result-${target.dataset.id}`).innerHTML =
+      target.value ? formatOutput(exec(target.value)) : '';
   };
   target.addEventListener('input', handler);
   handler();

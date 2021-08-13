@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "smallpt",
+    "title": "Another Ray Tracer",
+    "year": 2021,
+    "desc": "Based on smallpt by Kevin Beason"
+  },
+  {
     "filePath": "bezier",
     "title": "Bezier Screensaver",
     "year": 2021,

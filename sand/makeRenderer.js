@@ -9,8 +9,8 @@ export const makeRenderer = (canvas, width, height, toColor) => {
   const data = new Uint32Array(buf);
 
   return (vals) => {
-    for (let i = 0; i < vals.length; i++) {
-      data[i] = toColor(vals[i]);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = toColor(vals[i], vals, i);
     }
     imageData.data.set(buf8);
     ctx.putImageData(imageData, 0, 0);
