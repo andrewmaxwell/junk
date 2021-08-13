@@ -21,7 +21,12 @@ const multiplyMut = (a, b) => {
   a.z *= b;
   return a;
 };
-const mult = (a, b) => Vec(a.x * b.x, a.y * b.y, a.z * b.z);
+const mult = (a, b) => {
+  a.x *= b.x;
+  a.y *= b.y;
+  a.z *= b.z;
+  return a;
+};
 const norm = (a) => {
   const m = 1 / Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
   a.x *= m;
@@ -49,95 +54,6 @@ const sphereIntersect = (s, r) => {
   return (t = b - det) > eps ? t : (t = b + det) > eps ? t : 0;
 };
 
-const materials = {
-  matte: (ray, color, x, obj, spheres, depth) => {
-    const n = norm(sub(x, obj.position));
-    const w = dot(n, ray.direction) < 0 ? n : multiply(n, -1);
-    const r1 = 2 * Math.PI * Math.random();
-    const r2 = Math.random();
-    const r2s = Math.sqrt(r2);
-    const u = norm(cross(Math.abs(w.x) > 0.1 ? Vec(0, 1) : Vec(1), w));
-    const v = cross(w, u);
-    const d = norm(
-      addMut(
-        addMut(
-          multiplyMut(u, Math.cos(r1) * r2s),
-          multiplyMut(v, Math.sin(r1) * r2s)
-        ),
-        multiply(w, Math.sqrt(1 - r2))
-      )
-    );
-    return addMut(
-      mult(color, getRayColor(Ray(x, d), spheres, depth)),
-      obj.emission
-    );
-  },
-  mirror: (ray, color, x, obj, spheres, depth) => {
-    const n = norm(sub(x, obj.position));
-    return addMut(
-      mult(
-        color,
-        getRayColor(
-          Ray(x, subMut(ray.direction, multiply(n, 2 * dot(n, ray.direction)))),
-          spheres,
-          depth
-        )
-      ),
-      obj.emission
-    );
-  },
-  glass: (ray, color, x, obj, spheres, depth) => {
-    const n = norm(sub(x, obj.position));
-    const w = dot(n, ray.direction) < 0 ? n : multiply(n, -1);
-    const reflRay = Ray(
-      x,
-      subMut(ray.direction, multiply(n, 2 * dot(n, ray.direction)))
-    );
-    const into = dot(n, w) > 0;
-    const nc = 1,
-      nt = 1.5,
-      nnt = into ? nc / nt : nt / nc,
-      ddn = dot(ray.direction, w);
-    let cos2t;
-
-    if ((cos2t = 1 - nnt * nnt * (1 - ddn * ddn)) < 0)
-      return addMut(
-        mult(color, getRayColor(reflRay, spheres, depth)),
-        obj.emission
-      );
-
-    const tdir = norm(
-      subMut(
-        multiply(ray.direction, nnt),
-        multiply(n, (into ? 1 : -1) * (ddn * nnt + Math.sqrt(cos2t)))
-      )
-    );
-    const a = nt - nc,
-      b = nt + nc,
-      R0 = (a * a) / (b * b),
-      c = 1 - (into ? -ddn : dot(tdir, n));
-    const Re = R0 + (1 - R0) * c * c * c * c * c,
-      Tr = 1 - Re,
-      P = 0.25 + 0.5 * Re,
-      RP = Re / P,
-      TP = Tr / (1 - P);
-    return addMut(
-      mult(
-        color,
-        depth > 2
-          ? Math.random() < P
-            ? multiply(getRayColor(reflRay, spheres, depth), RP)
-            : multiply(getRayColor(Ray(x, tdir), spheres, depth), TP)
-          : addMut(
-              multiply(getRayColor(reflRay, spheres, depth), Re),
-              multiply(getRayColor(Ray(x, tdir), spheres, depth), Tr)
-            )
-      ),
-      obj.emission
-    );
-  },
-};
-
 const getRayColor = (ray, spheres, depth = 0) => {
   let obj;
   let dist = Infinity;
@@ -151,49 +67,48 @@ const getRayColor = (ray, spheres, depth = 0) => {
 
   if (!obj) return Vec();
 
-  let color = obj.color;
+  let color = {...obj.color};
 
   if (++depth > 5) {
     const p = Math.max(color.x, color.y, color.z);
-    if (Math.random() < p / 2) color = multiply(color, 1 / p);
-    else return obj.emission;
+    if (Math.random() < p / 2) multiplyMut(color, 1 / p);
+    else return {...obj.emission};
   }
 
-  const x = addMut(multiply(ray.direction, dist), ray.position);
-  // return materials[obj.material](ray, color, x, obj, spheres, depth);
+  const pos = addMut(multiplyMut({...ray.direction}, dist), ray.position);
+  const n = norm(sub(pos, obj.position));
 
   switch (obj.material) {
     case 'matte': {
-      const n = norm(sub(x, obj.position));
-      const w = dot(n, ray.direction) < 0 ? n : multiply(n, -1);
+      const w = dot(n, ray.direction) < 0 ? n : multiplyMut(n, -1);
       const r1 = 2 * Math.PI * Math.random();
       const r2 = Math.random();
       const r2s = Math.sqrt(r2);
       const u = norm(cross(Math.abs(w.x) > 0.1 ? Vec(0, 1) : Vec(1), w));
       const v = cross(w, u);
-      const d = norm(
+      const direction = norm(
         addMut(
           addMut(
             multiplyMut(u, Math.cos(r1) * r2s),
             multiplyMut(v, Math.sin(r1) * r2s)
           ),
-          multiply(w, Math.sqrt(1 - r2))
+          multiplyMut(w, Math.sqrt(1 - r2))
         )
       );
       return addMut(
-        mult(color, getRayColor(Ray(x, d), spheres, depth)),
+        mult(color, getRayColor(Ray(pos, direction), spheres, depth)),
         obj.emission
       );
     }
-    case 'mirror': {
-      const n = norm(sub(x, obj.position));
+
+    case 'mirror':
       return addMut(
         mult(
           color,
           getRayColor(
             Ray(
-              x,
-              subMut(ray.direction, multiply(n, 2 * dot(n, ray.direction)))
+              pos,
+              subMut(ray.direction, multiplyMut(n, 2 * dot(n, ray.direction)))
             ),
             spheres,
             depth
@@ -201,26 +116,24 @@ const getRayColor = (ray, spheres, depth = 0) => {
         ),
         obj.emission
       );
-    }
+
     case 'glass': {
-      const n = norm(sub(x, obj.position));
       const w = dot(n, ray.direction) < 0 ? n : multiply(n, -1);
       const reflRay = Ray(
-        x,
+        pos,
         subMut(ray.direction, multiply(n, 2 * dot(n, ray.direction)))
       );
       const into = dot(n, w) > 0;
-      const nc = 1,
-        nt = 1.5,
-        nnt = into ? nc / nt : nt / nc,
-        ddn = dot(ray.direction, w);
-      let cos2t;
+      const nnt = into ? 2 / 3 : 1.5;
+      const ddn = dot(ray.direction, w);
+      const cos2t = 1 - nnt * nnt * (1 - ddn * ddn);
 
-      if ((cos2t = 1 - nnt * nnt * (1 - ddn * ddn)) < 0)
+      if (cos2t < 0) {
         return addMut(
           mult(color, getRayColor(reflRay, spheres, depth)),
           obj.emission
         );
+      }
 
       const tdir = norm(
         subMut(
@@ -228,11 +141,7 @@ const getRayColor = (ray, spheres, depth = 0) => {
           multiply(n, (into ? 1 : -1) * (ddn * nnt + Math.sqrt(cos2t)))
         )
       );
-      const a = nt - nc,
-        b = nt + nc,
-        R0 = (a * a) / (b * b),
-        c = 1 - (into ? -ddn : dot(tdir, n));
-      const Re = R0 + (1 - R0) * c * c * c * c * c,
+      const Re = 0.04 + 0.96 * (1 - (into ? -ddn : dot(tdir, n))) ** 5,
         Tr = 1 - Re,
         P = 0.25 + 0.5 * Re,
         RP = Re / P,
@@ -242,11 +151,11 @@ const getRayColor = (ray, spheres, depth = 0) => {
           color,
           depth > 2
             ? Math.random() < P
-              ? multiply(getRayColor(reflRay, spheres, depth), RP)
-              : multiply(getRayColor(Ray(x, tdir), spheres, depth), TP)
+              ? multiplyMut(getRayColor(reflRay, spheres, depth), RP)
+              : multiplyMut(getRayColor(Ray(pos, tdir), spheres, depth), TP)
             : addMut(
-                multiply(getRayColor(reflRay, spheres, depth), Re),
-                multiply(getRayColor(Ray(x, tdir), spheres, depth), Tr)
+                multiplyMut(getRayColor(reflRay, spheres, depth), Re),
+                multiplyMut(getRayColor(Ray(pos, tdir), spheres, depth), Tr)
               )
         ),
         obj.emission
@@ -266,7 +175,7 @@ const spheres = [
     rad: 100000,
     position: {x: 100001, y: 40.8, z: 81.6},
     emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.8, y: 0.8, z: 0.2},
+    color: {x: 0.2, y: 0.8, z: 0.2},
     material: 'matte',
   },
   {
@@ -282,7 +191,7 @@ const spheres = [
     rad: 100000,
     position: {x: 50, y: 40.8, z: 100000},
     emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.9, y: 0.9, z: 0.9},
+    color: {x: 1, y: 1, z: 1},
     material: 'matte',
   },
   {
@@ -290,7 +199,7 @@ const spheres = [
     rad: 100000,
     position: {x: 50, y: 40.8, z: -99830},
     emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.1, y: 0.1, z: 0.1},
+    color: {x: 0, y: 0, z: 0},
     material: 'matte',
   },
   {
@@ -298,7 +207,7 @@ const spheres = [
     rad: 100000,
     position: {x: 50, y: 100000, z: 81.6},
     emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.5, y: 0.5, z: 0.5},
+    color: {x: 0.8, y: 0.2, z: 0.2},
     material: 'matte',
   },
   {
@@ -306,7 +215,7 @@ const spheres = [
     rad: 100000,
     position: {x: 50, y: -99918.4, z: 81.6},
     emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.75, y: 0.75, z: 0.75},
+    color: {x: 0.8, y: 0.8, z: 0.2},
     material: 'matte',
   },
   {
@@ -358,13 +267,14 @@ self.onmessage = ({data: {width, height}}) => {
       rays.push(Ray(addMut(multiply(d, 140), camera.position), norm(d)));
     }
   }
-  for (let i = 0; i < 1000; i++) {
-    let j = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    let i = 0;
     for (const r of rays) {
       const pixel = getRayColor(r, spheres);
-      res[j++] = pixel.x * 256;
-      res[j++] = pixel.y * 256;
-      res[j++] = pixel.z * 256;
+      res[i++] = pixel.x * 256;
+      res[i++] = pixel.y * 256;
+      res[i++] = pixel.z * 256;
     }
     self.postMessage(res);
   }
