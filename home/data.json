@@ -12,6 +12,12 @@
     "desc": "Kinda fun to watch, took about an hour to make."
   },
   {
+    "filePath": "trebuchet",
+    "title": "Trebuchet Evolution",
+    "year": 2021,
+    "desc": "Slowly improving trebuchets using genetic algorithm and matter.js."
+  },
+  {
     "filePath": "carcassonne",
     "title": "Carcassonne Simulator",
     "year": 2020,

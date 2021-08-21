@@ -23,7 +23,7 @@ export function BuilderEditor() {
       [e.a.x - dx, e.a.y - dy],
       [e.b.x - dx, e.b.y - dy],
       [e.b.x + dx, e.b.y + dy],
-      [e.a.x + dx, e.a.y + dy]
+      [e.a.x + dx, e.a.y + dy],
     ];
   }
   function edgeIntersection(e1, e2) {
@@ -40,7 +40,7 @@ export function BuilderEditor() {
       t >= 0 &&
       t <= 1 && {
         x: e1.a.x + t * dx1,
-        y: e1.a.y + t * dy1
+        y: e1.a.y + t * dy1,
       }
     );
   }
@@ -56,14 +56,14 @@ export function BuilderEditor() {
       [e1.a, e2.a],
       [e1.a, e2.b],
       [e1.b, e2.a],
-      [e1.b, e2.b]
+      [e1.b, e2.b],
     ];
     for (var i = 0; i < pairs.length; i++) {
       var p = pairs[i];
       var sqDist = dist2(p[0].x - p[1].x, p[0].y - p[1].y);
       var midPoint = {
         x: (p[0].x + p[1].x) / 2,
-        y: (p[0].y + p[1].y) / 2
+        y: (p[0].y + p[1].y) / 2,
       };
       if (
         sqDist < minDist &&
@@ -146,15 +146,15 @@ export function BuilderEditor() {
     self.nodes.splice(self.nodes.indexOf(node), 1);
   }
   function cleanUp() {
-    self.edges = self.edges.filter(function(e) {
+    self.edges = self.edges.filter(function (e) {
       return dist2(e.a.x - e.b.x, e.a.y - e.b.y) > 4;
     });
 
-    self.wheels = self.wheels.filter(function(w) {
+    self.wheels = self.wheels.filter(function (w) {
       return w.radius > 2;
     });
 
-    self.nodes = self.nodes.filter(function(n) {
+    self.nodes = self.nodes.filter(function (n) {
       for (let i = 0; i < self.wheels.length; i++) {
         if (self.wheels[i] == n) {
           return true;
@@ -171,7 +171,7 @@ export function BuilderEditor() {
     updateJoints();
   }
   function updateHighlightedNodes() {
-    self.highlightedNodes = self.nodes.filter(function(n) {
+    self.highlightedNodes = self.nodes.filter(function (n) {
       var inBox = inSelectBox(n.x, n.y);
       var tempDeselected = inBox && self.selectBox.invert;
       var tempSelected = inBox && !self.selectBox.invert;
@@ -187,7 +187,7 @@ export function BuilderEditor() {
           self.joints.push({
             a: self.edges[i],
             b: self.edges[j],
-            coord: intersection
+            coord: intersection,
           });
         }
       }
@@ -197,14 +197,14 @@ export function BuilderEditor() {
             a: self.edges[i],
             b: self.wheels[j],
             coord: self.wheels[j],
-            offsetB: [0, 0]
+            offsetB: [0, 0],
           });
         }
       }
     }
   }
 
-  this.mouseDown = function(x, y, ctrl, alt, shift) {
+  this.mouseDown = function (x, y, ctrl, alt, shift) {
     x = Math.round(x);
     y = Math.round(y);
 
@@ -213,7 +213,7 @@ export function BuilderEditor() {
         x,
         y,
         radius: 0,
-        resize: true
+        resize: true,
       };
       self.nodes.push(wheel);
       self.wheels.push(wheel);
@@ -223,7 +223,7 @@ export function BuilderEditor() {
         a: {x, y},
         b: {x, y},
         pts: [],
-        fixed: false
+        fixed: false,
       };
       self.edges.push(edge);
       self.nodes.push(edge.a, edge.b);
@@ -234,7 +234,7 @@ export function BuilderEditor() {
         y,
         x2: x,
         y2: y,
-        invert: alt
+        invert: alt,
       };
     } else {
       var minNode = closeNode(x, y);
@@ -254,7 +254,7 @@ export function BuilderEditor() {
             y,
             x2: x,
             y2: y,
-            invert: alt
+            invert: alt,
           };
         }
       }
@@ -264,7 +264,7 @@ export function BuilderEditor() {
   };
   var px = 0;
   var py = 0;
-  this.mouseMove = function(x, y, dragging) {
+  this.mouseMove = function (x, y, dragging) {
     x = Math.round(x);
     y = Math.round(y);
 
@@ -279,12 +279,12 @@ export function BuilderEditor() {
       var mx = x - px;
       var my = y - py;
 
-      selected.forEach(function(n) {
+      selected.forEach(function (n) {
         n.x += mx;
         n.y += my;
       });
 
-      self.edges.forEach(function(e) {
+      self.edges.forEach(function (e) {
         if (selected.contains(e.a) || selected.contains(e.b)) {
           e.pts = edgeBox(e);
         }
@@ -304,7 +304,7 @@ export function BuilderEditor() {
 
     return draw;
   };
-  this.mouseUp = function(x, y) {
+  this.mouseUp = function (x, y) {
     if (self.selectBox) {
       if (
         Math.abs(x - self.selectBox.x) < 2 &&
@@ -320,7 +320,7 @@ export function BuilderEditor() {
           }
         }
       } else {
-        selected = self.nodes.filter(function(n) {
+        selected = self.nodes.filter(function (n) {
           var inBox = inSelectBox(n.x, n.y);
           return (
             (inBox && !self.selectBox.invert) ||
@@ -340,7 +340,7 @@ export function BuilderEditor() {
     updateHighlightedNodes();
     cleanUp();
   };
-  this.removeSelected = function() {
+  this.removeSelected = function () {
     for (var i = 0; i < selected.length; i++) {
       removeNode(selected[i]);
     }
@@ -348,26 +348,26 @@ export function BuilderEditor() {
     updateHighlightedNodes();
     cleanUp();
   };
-  this.toggleFixed = function() {
-    self.edges.forEach(function(e) {
+  this.toggleFixed = function () {
+    self.edges.forEach(function (e) {
       if (selected.contains(e.a) || selected.contains(e.b)) {
         e.fixed = !e.fixed;
       }
     });
-    self.wheels.forEach(function(w) {
+    self.wheels.forEach(function (w) {
       if (selected.contains(w)) {
         w.fixed = !w.fixed;
       }
     });
   };
-  this.save = function() {
+  this.save = function () {
     var edgeData = [];
-    self.edges.forEach(function(e) {
+    self.edges.forEach(function (e) {
       edgeData.push((e.fixed ? 'f' : '') + e.a.x, e.a.y, e.b.x, e.b.y);
     });
 
     var wheelData = [];
-    self.wheels.forEach(function(w) {
+    self.wheels.forEach(function (w) {
       wheelData.push((w.fixed ? 'f' : '') + w.x, w.y, w.radius);
     });
 
@@ -375,14 +375,14 @@ export function BuilderEditor() {
       edgeData.join('_') + (wheelData.length ? '__' + wheelData.join('_') : '')
     );
   };
-  this.load = function(data) {
+  this.load = function (data) {
     self.nodes.length = 0;
     self.edges.length = 0;
     self.wheels.length = 0;
 
-    var parts = data.split('__').map(function(p) {
+    var parts = data.split('__').map(function (p) {
       return p
-        ? p.split('_').map(function(n) {
+        ? p.split('_').map(function (n) {
             var f = parseFloat(n);
             return isNaN(f) ? n : f;
           })
@@ -395,13 +395,13 @@ export function BuilderEditor() {
       const fixed = edgeData[i][0] == 'f';
       const n1 = {
         x: fixed ? parseFloat(edgeData[i].substring(1)) : edgeData[i],
-        y: edgeData[i + 1]
+        y: edgeData[i + 1],
       };
       const n2 = {x: edgeData[i + 2], y: edgeData[i + 3]};
       const edge = {
         a: n1,
         b: n2,
-        fixed
+        fixed,
       };
       edge.pts = edgeBox(edge);
       self.nodes.push(n1, n2);
@@ -414,7 +414,7 @@ export function BuilderEditor() {
         x: fixed ? parseFloat(wheelData[i].substring(1)) : wheelData[i],
         y: wheelData[i + 1],
         radius: wheelData[i + 2],
-        fixed
+        fixed,
       };
       self.nodes.push(wheel);
       self.wheels.push(wheel);
@@ -422,7 +422,7 @@ export function BuilderEditor() {
 
     cleanUp();
   };
-  this.getInfo = function() {
+  this.getInfo = function () {
     // calculate cost
     let cost = 0;
     for (let i = 0; i < self.edges.length; i++) {
@@ -443,13 +443,13 @@ export function BuilderEditor() {
         minY = Infinity,
         maxY = -Infinity;
 
-      self.edges.forEach(function(e) {
+      self.edges.forEach(function (e) {
         minX = Math.min(minX, e.a.x, e.b.x);
         maxX = Math.max(maxX, e.a.x, e.b.x);
         minY = Math.min(minY, e.a.y, e.b.y);
         maxY = Math.max(maxY, e.a.y, e.b.y);
       });
-      self.wheels.forEach(function(w) {
+      self.wheels.forEach(function (w) {
         minX = Math.min(minX, w.x - w.radius);
         maxX = Math.max(maxX, w.x + w.radius);
         minY = Math.min(minY, w.y - w.radius);
@@ -461,7 +461,7 @@ export function BuilderEditor() {
     return {
       cost: cost.toFixed(2),
       size: size.toFixed(2),
-      pieces: self.edges.length + self.wheels.length
+      pieces: self.edges.length + self.wheels.length,
     };
   };
 }

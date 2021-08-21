@@ -9,15 +9,15 @@ var game = new BuilderGame(levels[levelName]());
 
 document.title = 'Physics Builder - ' + levelName;
 
-$.fn.paneToggler = function() {
-  return $(this).each(function() {
+$.fn.paneToggler = function () {
+  return $(this).each(function () {
     var self = $(this);
     var title = self.attr('name');
     var hidden = false;
     var content = $('<div>').html(self.html());
     var button = $('<button>')
       .text('Hide ' + title)
-      .on('click', function() {
+      .on('click', function () {
         if (hidden) {
           $(this)
             .text('Hide ' + title)
@@ -35,10 +35,7 @@ $.fn.paneToggler = function() {
         }
       });
 
-    self
-      .empty()
-      .append(content)
-      .append(button);
+    self.empty().append(content).append(button);
 
     if (localStorage['hide' + title]) {
       button.click();
@@ -47,21 +44,19 @@ $.fn.paneToggler = function() {
 };
 $('.pane').paneToggler();
 $('#levelSelector')
-  .on('change', function() {
+  .on('change', function () {
     location.hash = '';
     location.search = $(this).val();
   })
   .append(
-    Object.keys(levels).map(function(levelName) {
-      return $('<option>')
-        .val(levelName)
-        .text(levelName);
+    Object.keys(levels).map(function (levelName) {
+      return $('<option>').val(levelName).text(levelName);
     })
   )
   .val(levelName);
 
 $('#fastForward')
-  .change(function() {
+  .change(function () {
     var val = '' + $(this).val();
     if (val && /^[0-9]+$/.test(val)) {
       game.fastForward = val * 60;
@@ -69,7 +64,7 @@ $('#fastForward')
   })
   .val(0);
 
-$('#simButton').click(function() {
+$('#simButton').click(function () {
   if ($(this).text() == 'Simulate') {
     $(this).text('Stop');
     game.startSimulating();
@@ -79,7 +74,7 @@ $('#simButton').click(function() {
   }
 });
 
-$('body').on('keypress', function(e) {
+$('body').on('keypress', function (e) {
   if (e.which == 32) {
     e.preventDefault();
     $('#simButton').click();
@@ -87,7 +82,7 @@ $('body').on('keypress', function(e) {
 });
 
 $(window)
-  .on('hashchange', function() {
+  .on('hashchange', function () {
     game.changeState(location.hash.substring(1));
   })
   .trigger('hashchange');

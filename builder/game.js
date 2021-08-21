@@ -1,78 +1,6 @@
-'use strict';
-import {BuilderEditor} from './BuilderEditor.js';
+import {BuilderEditor} from './builderEditor.js';
 import {Sim, animationLoop} from './box2dutils.js';
-
-function Camera() {
-  var self = this;
-
-  var cameraSpeed = 0.1;
-  var moveSpeed = 30;
-  var zoomSpeed = 1.001;
-  var movementThreshold = 1;
-  var zoomThreshold = 0.002;
-
-  self.target = {};
-  self.x = self.target.x = 0;
-  self.y = self.target.y = 0;
-  self.zoom = self.targetZoom = 0.6;
-  self.move = function(pressing) {
-    if (pressing.left) self.target.x -= moveSpeed / self.zoom;
-    if (pressing.right) self.target.x += moveSpeed / self.zoom;
-    if (pressing.up) self.target.y -= moveSpeed / self.zoom;
-    if (pressing.down) self.target.y += moveSpeed / self.zoom;
-
-    self.x += (self.target.x - self.x) * cameraSpeed;
-    self.y += (self.target.y - self.y) * cameraSpeed;
-    self.zoom += (self.targetZoom - self.zoom) * cameraSpeed;
-
-    if (
-      Math.abs(self.x - self.target.x) * self.zoom > movementThreshold ||
-      Math.abs(self.y - self.target.y) * self.zoom > movementThreshold ||
-      Math.abs(self.zoom - self.targetZoom) > zoomThreshold
-    ) {
-      return true;
-    } else {
-      self.x = self.target.x;
-      self.y = self.target.y;
-      self.zoom = self.targetZoom;
-      return false;
-    }
-  };
-  self.changeZoom = function(amt) {
-    self.targetZoom *= Math.pow(zoomSpeed, amt);
-  };
-  self.toWorldCoords = function(x, y) {
-    return {
-      x: (x - innerWidth / 2) / self.zoom + self.x,
-      y: (y - innerHeight / 2) / self.zoom + self.y
-    };
-  };
-  self.transform = function(ctx) {
-    ctx.translate(innerWidth / 2, innerHeight / 2);
-    ctx.scale(self.zoom, self.zoom);
-    ctx.translate(-self.x, -self.y);
-  };
-  self.isVisible = function(x, y) {
-    x = ((x - self.x) * self.zoom) / innerWidth;
-    y = ((y - self.y) * self.zoom) / innerHeight;
-    return x >= -0.5 && x < 0.5 && y >= -0.5 && y < 0.5;
-  };
-  self.save = function() {
-    return (
-      Math.round(self.target.x) +
-      '_' +
-      Math.round(self.target.y) +
-      '_' +
-      self.targetZoom.toFixed(2)
-    );
-  };
-  self.load = function(str) {
-    var parts = str.split('_').map(parseFloat);
-    self.target.x = parts[0] && !isNaN(parts[0]) ? parts[0] : 0;
-    self.target.y = parts[1] && !isNaN(parts[1]) ? parts[1] : 0;
-    self.targetZoom = parts[2] && !isNaN(parts[2]) ? parts[2] : 0.6;
-  };
-}
+import {Camera} from './camera.js';
 
 export function BuilderGame(level) {
   var self = this;
@@ -83,7 +11,7 @@ export function BuilderGame(level) {
   self.editor = new BuilderEditor();
   self.sim = new Sim({
     canvas,
-    gravity: 9.8
+    gravity: 9.8,
   });
   self.simulating = false;
   self.fastForward = 0;
@@ -106,7 +34,7 @@ export function BuilderGame(level) {
     37: 'left',
     38: 'up',
     39: 'right',
-    40: 'down'
+    40: 'down',
   };
   var mouse = {x: 0, y: 0};
   var pressing = {};
@@ -184,7 +112,7 @@ export function BuilderGame(level) {
     },
     resize() {
       update();
-    }
+    },
   };
   for (var e in listeners) {
     window.addEventListener(e, listeners[e]);
@@ -195,15 +123,15 @@ export function BuilderGame(level) {
     if (level.setup) level.setup(self);
   }
   function addItemsToSim() {
-    self.editor.edges.concat(self.editor.wheels).forEach(function(b) {
+    self.editor.edges.concat(self.editor.wheels).forEach(function (b) {
       b._body = self.sim.make(b);
     });
-    self.editor.joints.forEach(function(j) {
+    self.editor.joints.forEach(function (j) {
       self.sim.make({
         a: j.a._body,
         b: j.b._body,
         offsetA: [j.coord.x, j.coord.y],
-        offsetB: j.offsetB || [j.coord.x, j.coord.y]
+        offsetB: j.offsetB || [j.coord.x, j.coord.y],
       });
     });
   }
@@ -271,7 +199,7 @@ export function BuilderGame(level) {
     T.lineCap = 'round';
     T.strokeStyle = 'rgba(0,0,0,0.5)';
     T.beginPath();
-    self.sim.joints.forEach(function(j) {
+    self.sim.joints.forEach(function (j) {
       var info = self.sim.getInfo(j);
       T.moveTo(info.x, info.y);
       T.lineTo(info.x2 + 0.1, info.y2);
@@ -298,10 +226,10 @@ export function BuilderGame(level) {
       T.lineWidth = 0.5 * iz;
       T.strokeStyle = 'black';
       T.beginPath();
-      ed.edges.forEach(function(e) {
+      ed.edges.forEach(function (e) {
         if (!e.fixed) drawEdge(T, e);
       });
-      ed.wheels.forEach(function(w) {
+      ed.wheels.forEach(function (w) {
         if (!w.fixed) drawWheel(T, w);
       });
       T.stroke();
@@ -310,10 +238,10 @@ export function BuilderGame(level) {
       T.lineWidth = 0.25 * iz;
       T.fillStyle = 'rgba(0,255,0,0.15)';
       T.beginPath();
-      ed.edges.forEach(function(e) {
+      ed.edges.forEach(function (e) {
         if (e.fixed) drawEdge(T, e);
       });
-      ed.wheels.forEach(function(w) {
+      ed.wheels.forEach(function (w) {
         if (w.fixed) drawWheel(T, w);
       });
       T.fill();
@@ -322,7 +250,7 @@ export function BuilderGame(level) {
       // joints
       T.fillStyle = 'rgba(0,0,0,0.5)';
       T.beginPath();
-      ed.joints.forEach(function(j) {
+      ed.joints.forEach(function (j) {
         T.moveTo(j.coord.x + 2 * iz, j.coord.y);
         T.arc(j.coord.x, j.coord.y, 2 * iz, 0, 2 * Math.PI);
       });
@@ -331,7 +259,7 @@ export function BuilderGame(level) {
       // selected points
       T.fillStyle = 'rgba(0,255,0,0.5)';
       T.beginPath();
-      ed.highlightedNodes.forEach(function(n) {
+      ed.highlightedNodes.forEach(function (n) {
         T.moveTo(n.x + 4 * iz, n.y);
         T.arc(n.x, n.y, 4 * iz, 0, 2 * Math.PI);
       });
@@ -376,14 +304,14 @@ export function BuilderGame(level) {
   }
 
   // this is the animation loop. It continues running until it returns false
-  var update = animationLoop(function() {
+  var update = animationLoop(function () {
     var viewIsMoving = self.view.move(pressing);
     if (self.simulating) self.sim.tick();
     draw();
     return viewIsMoving || self.simulating;
   });
 
-  self.startSimulating = function() {
+  self.startSimulating = function () {
     addItemsToSim();
     self.simulating = true;
     if (level.onStart) level.onStart(self);
@@ -392,7 +320,7 @@ export function BuilderGame(level) {
     }
     update();
   };
-  self.stopSimulating = function() {
+  self.stopSimulating = function () {
     self.simulating = false;
     resetSim();
     update();
@@ -410,7 +338,7 @@ export function BuilderGame(level) {
   }
 
   // called by window.hashchange
-  self.changeState = function(stateStr) {
+  self.changeState = function (stateStr) {
     // load editor and view from hash
     if (stateStr !== undefined && !stateChangeIsInternal) {
       var parts = stateStr.split('|');

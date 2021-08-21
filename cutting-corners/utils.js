@@ -1,6 +1,6 @@
 export const interpolate = (a, b, s) => ({
   x: a.x * (1 - s) + b.x * s,
-  y: a.y * (1 - s) + b.y * s
+  y: a.y * (1 - s) + b.y * s,
 });
 
 const getAngle = (a, b, c) => {
@@ -10,7 +10,7 @@ const getAngle = (a, b, c) => {
   return Math.acos((bc * bc + ab * ab - ac * ac) / (2 * bc * ab));
 };
 
-export const indexOfMinAngle = vertices => {
+export const indexOfMinAngle = (vertices) => {
   let index = 0,
     minAngle = Infinity;
   vertices.forEach((p, i) => {

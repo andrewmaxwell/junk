@@ -1,0 +1,18 @@
+<body style="margin: 0; background: black; color: white; font-family: monospace">
+  <style>
+    canvas {margin: 1px}
+    li{margin:5px 0}
+  </style>
+  <ul style="position: fixed; bottom: 0; right: 0; width: 250px">
+    <li><strong>simSpeed</strong>: Increase this to speed up the simulation. Does not affect results.</li>
+    <li><strong>simLength</strong>: The number of iterations to run each simulation.</li>
+    <li><strong>popSize</strong>: The number of trebuchets in each generation.</li>
+    <li><strong>mutationRate</strong>: The probability that any trait will be randomized instead of being calculated as a mix of its parents.</li>
+    <li><strong>breederRatio</strong>: If the ratio is 0.2, then the top 20% get to reproduce to make the next generation. Reproduction is always between two different breeders.</li>
+    <li><strong>simsToDisplay</strong>: Choose how many simulations to display at once.</li>
+    <li><strong>optimizeFor</strong>: Choose the measure of success.</li>
+  </ul>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.17.1/matter.min.js" integrity="sha512-3CP+e7z5ieYYTIyvRvV3eGVYR67yXg5V2mWfg8pEJJd2mlh8tG/cnDv5scTmRztEYHTksBlpPOmxFOiMtHfZdQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.7/dat.gui.min.js" integrity="sha512-LF8ZB1iTwi4Qvkm4pekHG4a437Y9Af5ZuwbnW4GTbAWQeR2E4KW8WF+xH8b9psevV7wIlDMx1MH9YfPqgKhA/Q==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script type="module" src="main.js"></script>
+</body>

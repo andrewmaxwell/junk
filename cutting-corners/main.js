@@ -21,8 +21,8 @@ const params = {
     friction: 1,
     frictionStatic: 5,
     frictionAir: 0,
-    restitution: 0.5
-  }
+    restitution: 0.5,
+  },
 };
 
 const reset = () => {
@@ -38,7 +38,7 @@ const reset = () => {
   sim.setGravity(gravity);
   sim.addRectangle(width / 2, height, width, size, {
     ...bodyOptions,
-    isStatic: true
+    isStatic: true,
   });
   for (let i = 0; i <= rows; i++) {
     for (let j = 0; j < i; j++) {
@@ -50,7 +50,7 @@ const reset = () => {
   renderer.render(sim.getBodies(), numCuts);
 };
 
-const cutCorner = box => {
+const cutCorner = (box) => {
   const vertices = box.vertices.map(({x, y}) => ({x, y}));
   if (vertices.length < 4) return;
   const index = indexOfMinAngle(vertices);
@@ -93,9 +93,7 @@ const loop = () => {
 
 const gui = new window.dat.GUI();
 const f1 = gui.addFolder('Initial Settings');
-f1.add(params, 'rows', 1, 25)
-  .step(1)
-  .onChange(reset);
+f1.add(params, 'rows', 1, 25).step(1).onChange(reset);
 f1.add(params, 'spacing', 1, 2).onChange(reset);
 f1.open();
 
@@ -106,7 +104,7 @@ f2.add(params, 'keepCuts');
 f2.open();
 
 const f3 = gui.addFolder('Simulator Settings');
-f3.add(params, 'gravity', 0, 10).onChange(v => sim.setGravity(v));
+f3.add(params, 'gravity', 0, 10).onChange((v) => sim.setGravity(v));
 
 const setOptions = () => sim.setBodyOptions(params.bodyOptions);
 f3.add(params.bodyOptions, 'friction', 0, 1).onChange(setOptions);
@@ -119,7 +117,7 @@ gui.add(
     'pause/resume': () => {
       paused = !paused;
       if (!paused) loop();
-    }
+    },
   },
   'pause/resume'
 );
@@ -133,7 +131,7 @@ const mousedown = ({pageX: x, pageY: y}) => {
   }
 };
 
-const keypress = e => {
+const keypress = (e) => {
   if (e.key === 'r') reset();
   if (e.key === 'm') {
     const management = sim.addCircle(
