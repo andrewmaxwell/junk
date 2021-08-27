@@ -91,15 +91,16 @@ const loop = async () => {
   }
 };
 
+reset();
+loop();
+
 const gui = new window.dat.GUI();
 gui.add(params, 'simSpeed', 1, 20, 1);
 gui.add(params, 'simLength', 50, 500, 1);
-gui.add(params, 'popSize', 10, 100, 1);
-gui.add(params, 'mutationRate', 0, 1);
-gui.add(params, 'breederRatio', 0, 1);
+gui.add(params, 'popSize', 10, 100, 1).onChange((v) => (alg.popSize = v));
+gui.add(params, 'mutationRate', 0, 1).onChange((v) => (alg.mutationRate = v));
+gui.add(params, 'breederRatio', 0, 1).onChange((v) => (alg.breederRatio = v));
+gui.add(params, 'breederRatio', 0, 1).onChange((v) => (alg.breederRatio = v));
 gui.add(params, 'simsToDisplay', 0, 16, 1);
 gui.add(params, 'optimizeFor', Object.keys(goals));
 gui.add({'Reset Population': reset}, 'Reset Population');
-
-reset();
-loop();
