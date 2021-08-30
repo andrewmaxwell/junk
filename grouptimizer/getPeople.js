@@ -1,45 +1,44 @@
-/* global $ */
-const dataFields = [
-  'name',
-  'gender',
-  'absent',
-  'contrib',
-  'weights',
-  'sponsor'
-];
+const getData = async () => {
+  const response = await fetch(
+    'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ03_eRjHaTw-LlfgdomjIuuGo-aCG6-gK6-zivdQaZonq7AmOEIAua6A5GPh3LFMC4VEQykhRLLBDD/pub?output=tsv'
+  );
+  return await response.text();
+};
 
-export default dataUrl =>
-  $.getJSON(dataUrl).then(data => {
-    const people = data.feed.entry
-      .map(row => {
-        const person = dataFields.reduce((res, field) => {
-          const val = row['gsx$' + field].$t;
-          const num = parseFloat(val);
-          res[field] = isNaN(num) ? val : num;
-          return res;
-        }, {});
+const fromTSV = (str) => {
+  const [headers, ...rows] = str.split('\r\n').map((l) => l.split('\t'));
+  return rows.map((r) =>
+    Object.fromEntries(
+      headers.map((h, i) => [
+        h.toLowerCase(),
+        r[i] === '' || isNaN(r[i]) ? r[i] : Number(r[i]),
+      ])
+    )
+  );
+};
 
-        person.weights = person.weights
-          .split(/\s*,\s*/)
-          .reduce((weights, nameAndValue) => {
-            const [person2Name, weight] = nameAndValue.split(/\s*:\s*/);
-            if (person2Name) weights[person2Name] = parseFloat(weight, 10);
-            return weights;
-          }, {});
+const parseWeights = (weights) =>
+  Object.fromEntries(
+    weights.split(/\s*,\s*/).map((nameAndValue) => {
+      const [person2Name, weight] = nameAndValue
+        .split(':')
+        .map((s) => s.trim());
+      return [person2Name, Number(weight)];
+    })
+  );
 
-        return person;
-      })
-      .filter(row => !row.absent);
+const withWeightsMirrored = (people) => {
+  for (const {weights, name} of people) {
+    for (const person2Name in weights) {
+      const person2 = people.find((p) => p.name === person2Name);
+      if (person2) person2.weights[name] = weights[person2Name];
+    }
+  }
+  return people;
+};
 
-    people.forEach(person1 => {
-      Object.keys(person1.weights).forEach(person2Name => {
-        const person2 = people.find(p => p.name === person2Name);
-        if (person2) {
-          person2.weights[person1.name] = person1.weights[person2Name];
-        }
-      });
-      delete person1.absent;
-    });
-
-    return people;
-  });
+export default async () => {
+  const people = fromTSV(await getData()).filter((p) => !p.absent);
+  for (const person of people) person.weights = parseWeights(person.weights);
+  return withWeightsMirrored(people);
+};

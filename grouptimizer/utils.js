@@ -1,4 +1,4 @@
-const average = nums => {
+const average = (nums) => {
   let sum = 0;
   for (let i = 0; i < nums.length; i++) {
     sum += nums[i];
@@ -6,7 +6,7 @@ const average = nums => {
   return sum / nums.length;
 };
 
-export const variance = nums => {
+export const variance = (nums) => {
   const avg = average(nums);
   let squareDiffSum = 0;
   for (let i = 0; i < nums.length; i++) {
@@ -35,4 +35,4 @@ export const randWhere = (max, func) => {
   return res;
 };
 
-export const standardDeviation = nums => Math.sqrt(variance(nums));
+export const standardDeviation = (nums) => Math.sqrt(variance(nums));

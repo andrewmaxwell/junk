@@ -7,14 +7,15 @@ export default class SimulatedAnnealingSolver {
     this.initialTemperature = initialTemperature;
     this.maxIterations = maxIterations;
     this.currentState = this.bestState = initialState;
-    this.minCost = this.maxCost = this.currentCost = this.getCost(
-      this.currentState
-    );
+    this.minCost =
+      this.maxCost =
+      this.currentCost =
+        this.getCost(this.currentState);
     this.iterations = 0;
     this.isDone = false;
   }
   easing(t) {
-    return --t * t;
+    return -(--t * t * t);
   }
   iterate() {
     if (this.isDone) return;
@@ -26,6 +27,7 @@ export default class SimulatedAnnealingSolver {
     this.temperature =
       this.initialTemperature *
       this.easing(this.iterations / this.maxIterations);
+
     if (
       costDelta <= 0 ||
       Math.random() < Math.exp(-costDelta / this.temperature)

@@ -7,18 +7,18 @@ export default class StatGraph {
   addGraph(g) {
     this.graphs.push(g);
     this.reset();
-    return val => {
+    return (val) => {
       g.min = Math.min(g.min, val);
       g.max = Math.max(g.max, val);
       g.data.push(val);
     };
   }
   reset() {
-    this.graphs.forEach(g => {
+    for (const g of this.graphs) {
       g.min = g.forceMin !== undefined ? g.forceMin : Infinity;
       g.max = -Infinity;
       g.data = [];
-    });
+    }
     this.draw();
   }
   resize(width, height) {
@@ -35,7 +35,7 @@ export default class StatGraph {
     T.font = 'monospace';
 
     this.graphs
-      .filter(g => g.data.length)
+      .filter((g) => g.data.length)
       .forEach(({color, data, min, max}, i) => {
         T.fillStyle = T.strokeStyle = color;
         T.beginPath();
@@ -45,9 +45,6 @@ export default class StatGraph {
             H - ((data[i] - min) / (max - min)) * H
           );
         }
-        // for (let x = 0; x <= W; x+=2){
-        // 	T.lineTo(x, H - (g.data[Math.floor(x / W * g.data.length)] - g.min) / (g.max - g.min) * H);
-        // }
         T.stroke();
 
         T.fillText(data[data.length - 1], 0, H - 12 - 10 * i);
