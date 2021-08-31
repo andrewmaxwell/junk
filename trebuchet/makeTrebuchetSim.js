@@ -37,7 +37,7 @@ export const makeTrebuchetSim = (params) => {
   };
 
   const base = sim.addRectangle(0, -baseHeight / 2, baseWidth, baseHeight, {
-    baseDensity,
+    density: baseDensity,
     ...opts,
   });
 
@@ -46,7 +46,7 @@ export const makeTrebuchetSim = (params) => {
     -baseHeight + fulcrumShiftY,
     armLengthLeft + armLengthRight,
     armThickness,
-    {armDensity, ...opts}
+    {density: armDensity, ...opts}
   );
 
   sim.addConstraint({
@@ -61,10 +61,7 @@ export const makeTrebuchetSim = (params) => {
     armLengthRight + fulcrumShiftX,
     -baseHeight + fulcrumShiftY,
     weightRad,
-    {
-      ...opts,
-      density: weightDensity,
-    }
+    {...opts, density: weightDensity}
   );
 
   sim.addConstraint({

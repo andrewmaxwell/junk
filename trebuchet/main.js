@@ -1,6 +1,7 @@
 import {GeneticAlg} from './geneticAlg.js';
 import {makeTrebuchetSim} from './makeTrebuchetSim.js';
 import {Renderer} from './renderer.js';
+import {goals, traits} from './data.js';
 
 const width = 800;
 const height = 300;
@@ -14,26 +15,7 @@ const params = {
   numChampions: 1,
   simsToDisplay: 6,
   optimizeFor: 'Distance Right',
-  traits: {
-    baseWidth: {min: 1, max: 100},
-    baseHeight: {min: 1, max: 100},
-    baseDensity: {min: 0, max: 0.1},
-    armLengthLeft: {min: 0, max: 100},
-    armLengthRight: {min: 0, max: 100},
-    armThickness: {min: 1, max: 10},
-    armDensity: {min: 0, max: 0.1},
-    weightRad: {min: 1, max: 40},
-    weightDensity: {min: 0, max: 0.1},
-    launchAngle: {min: 0, max: 3},
-    fulcrumX: {min: 0, max: 1},
-    fulcrumY: {min: 0, max: 1},
-  },
-};
-
-const goals = {
-  'Distance Right': (s) => s.ball.position.x,
-  'Distance Left': (s) => -s.ball.position.x,
-  'Max Altitude': (s) => s.maxAltitude,
+  traits,
 };
 
 const makeScenario = (obj, index) => {
@@ -104,3 +86,7 @@ gui.add(params, 'breederRatio', 0, 1).onChange((v) => (alg.breederRatio = v));
 gui.add(params, 'simsToDisplay', 0, 16, 1);
 gui.add(params, 'optimizeFor', Object.keys(goals));
 gui.add({'Reset Population': reset}, 'Reset Population');
+gui.add(
+  {'Design Your Own': () => open('maker.html', '_blank')},
+  'Design Your Own'
+);
