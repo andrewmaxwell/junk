@@ -12,6 +12,8 @@ const params = {
   ...objMap(({min, max}) => (max + min) / 2, traits),
 };
 
+const gui = new window.dat.GUI();
+
 const loadFromHash = () => {
   for (const p of location.hash.slice(1).split(',')) {
     const [key, val] = p.split(':');
@@ -20,9 +22,14 @@ const loadFromHash = () => {
   }
 };
 
-let treb, renderer, frameCounter;
+let treb,
+  renderer,
+  frameCounter,
+  bestScore = -Infinity,
+  best = {};
 
 const reset = () => {
+  for (const c of gui.__controllers) c.updateDisplay();
   location.hash = Object.entries(params)
     .map(([k, v]) => `${k}:${v}`)
     .join(',');
@@ -41,7 +48,14 @@ const loop = async () => {
 
   treb.sim.step();
   const score = treb.getData(goals)[params.measure];
-  renderer.render(`${params.measure}: ${Math.round(score)}`);
+  if (score > bestScore) {
+    bestScore = score;
+    best = {...params};
+  }
+
+  renderer.render(
+    `${params.measure}: ${Math.round(score)} (Best: ${Math.round(bestScore)})`
+  );
 
   if (++frameCounter >= params.simLength) reset();
 };
@@ -50,11 +64,31 @@ loadFromHash();
 reset();
 loop();
 
-const gui = new window.dat.GUI();
 gui.add(params, 'simLength', 50, 500, 1).onChange(reset);
 gui.add(params, 'measure', Object.keys(goals)).onChange(reset);
 for (const [key, {min, max}] of Object.entries(traits)) {
   gui.add(params, key, min, max, 0.001).onChange(reset);
 }
+gui.add(
+  {
+    Randomize: () => {
+      for (const [t, {min, max}] of Object.entries(traits)) {
+        params[t] =
+          Math.round((min + Math.random() * (max - min)) * 1000) / 1000;
+      }
+      reset();
+    },
+  },
+  'Randomize'
+);
+gui.add(
+  {
+    'Load Best': () => {
+      for (const k in best) params[k] = best[k];
+      reset();
+    },
+  },
+  'Load Best'
+);
 
 addEventListener('hashchange', loadFromHash);
