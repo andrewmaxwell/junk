@@ -94,11 +94,9 @@ const putShape = (shape, grid, r, c, num) => {
   const newGrid = grid.map((c) => [...c]);
   for (let i = 0; i < shape.length; i++) {
     for (let j = 0; j < shape[0].length; j++) {
-      if (shape[i][j]) {
-        if (grid[i + r][j + c]) return false;
-        // if (!grid[i - 1])
-        newGrid[i + r][j + c] = num;
-      }
+      if (!shape[i][j]) continue;
+      if (grid[i + r][j + c]) return false;
+      newGrid[i + r][j + c] = num;
     }
   }
 
@@ -123,7 +121,7 @@ const colors = [
   '\x1b[35m', // magenta
 ];
 
-const getCombos = (size) => {
+const getCombos = async (size) => {
   const start = new Array(size).fill(new Array(size).fill(0));
   const queue = [start];
   const ominoes = getOminoes(size);
@@ -131,23 +129,23 @@ const getCombos = (size) => {
 
   while (queue.length) {
     const curr = queue.pop();
-    // await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 500));
     const num = getCount(curr) / size + 1;
 
+    console.log(
+      curr.map((r) => r.flatMap((v) => [colors[v], '#']).join('')).join('\n') +
+        '\n'
+    );
+
     if (num === size + 1) {
-      console.log(
-        curr
-          .map((r) => r.flatMap((v) => [colors[v], '#']).join(''))
-          .join('\n') + '\n'
-      );
       result.push(curr);
       console.log(result.length);
       continue;
     }
 
     for (const s of ominoes) {
-      for (let r = 0; r < size - s.length + 1; r++) {
-        for (let c = 0; c < size - s[0].length + 1; c++) {
+      for (let r = size - s.length; r >= 0; r--) {
+        for (let c = size - s[0].length; c >= 0; c--) {
           const newShape = putShape(s, curr, r, c, num);
           if (newShape) queue.push(newShape);
         }
