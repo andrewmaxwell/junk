@@ -1,8 +1,9 @@
-/* global $ */
 import SimulatedAnnealingSolver from './solver.js';
 import {rand, standardDeviation, randWhere} from './utils.js';
 import StatGraph from './statGraph.js';
 import getPeople from './getPeople.js';
+import {makeReport} from './makeReport.js';
+import {updateMyJSON} from './myJSON.js';
 
 const stats = new StatGraph(document.getElementById('statCanvas'));
 const annealingGraph = stats.addGraph({color: 'red'});
@@ -91,7 +92,7 @@ const loop = () => {
   if (solver.isDone) {
     const groups = solver.bestState.map((g) => ({
       list: g
-        .sort((a, b) => b.sponsor - a.sponsor || b.contrib - a.contrib)
+        .sort((a, b) => a.sponsor - b.sponsor || a.contrib - b.contrib)
         .map((p) => p.name)
         .join(', '),
       stats: Object.entries(g.stats)
@@ -111,6 +112,7 @@ const loop = () => {
   }
 };
 
+const {$} = window;
 $(window)
   .on('resize', () => {
     stats.resize(window.innerWidth, 300);
@@ -135,14 +137,14 @@ const makeInitialState = (numGroups, people) => {
   return res;
 };
 
-$('button').on('click', async function () {
+$('.go').on('click', async function () {
   const numGroups = parseFloat($('#numGroups').val()) || 4;
   const gender = $(this).data('gender');
 
   $(this).prop('disabled', true);
   const people = (await getPeople())
     .sort((a, b) => b.contrib - a.contrib)
-    .filter((p) => !gender || p.gender === gender);
+    .filter((p) => !p.absent && (!gender || p.gender === gender));
 
   console.log(people);
   $(this).prop('disabled', false);
@@ -153,4 +155,15 @@ $('button').on('click', async function () {
   console.log('>>>', solver.minCost);
 
   loop();
+});
+
+$('#send').on('click', async () => {
+  const people = await getPeople();
+  const history = await updateMyJSON(people);
+
+  const emailAddress = 'jgovier8@gmail.com';
+  const subject = encodeURIComponent(`Attendance ${new Date().toDateString()}`);
+  const body = encodeURIComponent(makeReport(people, history));
+
+  open(`mailto:${emailAddress}?subject=${subject}&body=${body}`);
 });

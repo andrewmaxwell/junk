@@ -1,3 +1,6 @@
+import 'https://cdnjs.cloudflare.com/ajax/libs/ramda/0.27.1/ramda.min.js';
+const {evolve, map, pipe, fromPairs, split, trim} = window.R;
+
 const getData = async () => {
   const response = await fetch(
     'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ03_eRjHaTw-LlfgdomjIuuGo-aCG6-gK6-zivdQaZonq7AmOEIAua6A5GPh3LFMC4VEQykhRLLBDD/pub?output=tsv'
@@ -5,29 +8,29 @@ const getData = async () => {
   return await response.text();
 };
 
+const processRow = (row, headers) =>
+  Object.fromEntries(
+    headers.map((h, i) => [
+      h.toLowerCase(),
+      row[i] === '' || isNaN(row[i]) ? row[i] : Number(row[i]),
+    ])
+  );
+
 const fromTSV = (str) => {
   const [headers, ...rows] = str.split('\r\n').map((l) => l.split('\t'));
-  return rows.map((r) =>
-    Object.fromEntries(
-      headers.map((h, i) => [
-        h.toLowerCase(),
-        r[i] === '' || isNaN(r[i]) ? r[i] : Number(r[i]),
-      ])
-    )
-  );
+  return rows.map((r) => processRow(r, headers));
 };
 
-const parseWeights = (weights) =>
-  Object.fromEntries(
-    weights.split(/\s*,\s*/).map((nameAndValue) => {
-      const [person2Name, weight] = nameAndValue
-        .split(':')
-        .map((s) => s.trim());
-      return [person2Name, Number(weight)];
-    })
-  );
+const parseWeights = pipe(
+  split(','),
+  map((nameAndValue) => {
+    const [person2Name, weight] = nameAndValue.split(':').map(trim);
+    return [person2Name, Number(weight)];
+  }),
+  fromPairs
+);
 
-const withWeightsMirrored = (people) => {
+const mirrorWeights = (people) => {
   for (const {weights, name} of people) {
     for (const person2Name in weights) {
       const person2 = people.find((p) => p.name === person2Name);
@@ -37,8 +40,10 @@ const withWeightsMirrored = (people) => {
   return people;
 };
 
-export default async () => {
-  const people = fromTSV(await getData()).filter((p) => !p.absent);
-  for (const person of people) person.weights = parseWeights(person.weights);
-  return withWeightsMirrored(people);
-};
+const processData = pipe(
+  fromTSV,
+  map(evolve({weights: parseWeights})),
+  mirrorWeights
+);
+
+export default () => getData().then(processData);
