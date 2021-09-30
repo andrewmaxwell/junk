@@ -1,4 +1,3 @@
-import 'https://cdnjs.cloudflare.com/ajax/libs/ramda/0.27.1/ramda.min.js';
 const {evolve, map, pipe, fromPairs, split, trim} = window.R;
 
 const getData = async () => {

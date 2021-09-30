@@ -1,88 +1,15 @@
-import SimulatedAnnealingSolver from './solver.js';
-import {rand, standardDeviation, randWhere} from './utils.js';
 import StatGraph from './statGraph.js';
 import getPeople from './getPeople.js';
 import {makeReport} from './makeReport.js';
 import {updateMyJSON} from './myJSON.js';
+import {makeSolver} from './solver.js';
 
 const stats = new StatGraph(document.getElementById('statCanvas'));
 const annealingGraph = stats.addGraph({color: 'red'});
 const temperatureGraph = stats.addGraph({color: 'green', forceMin: 0});
+const solver = makeSolver();
 
-const getGroupStats = (group) => {
-  let genderTotal = 0;
-  let contribTotal = 0;
-  let numStudents = 0;
-  let weightSum = 0;
-
-  // for each person
-  for (let j = 0; j < group.length; j++) {
-    const {sponsor, gender, contrib, weights} = group[j];
-
-    if (!sponsor) {
-      genderTotal += gender === 'f';
-      contribTotal += contrib;
-      numStudents++;
-    }
-
-    // for each person after the current person in the group, so we get each pair
-    for (let k = 0; k < j; k++) {
-      weightSum += weights[group[k].name] || 0;
-    }
-  }
-
-  return {
-    genderRatio: genderTotal / numStudents,
-    contribAverage: contribTotal / numStudents,
-    weightSum,
-  };
-};
-
-const solver = (window.top.solver = new SimulatedAnnealingSolver({
-  getCost: (grouping) => {
-    const genderRatios = []; // we want the genders to be balanced
-    const contribAverages = []; // we want each group to have a similar average contrib
-    let weightCost = 0;
-
-    // for each group
-    for (let i = 0; i < grouping.length; i++) {
-      const g = grouping[i];
-      const stats = getGroupStats(g);
-      genderRatios[i] = stats.genderRatio;
-      contribAverages[i] = stats.contribAverage;
-      weightCost += stats.weightSum;
-      g.stats = stats;
-    }
-
-    const genderSD = standardDeviation(genderRatios);
-    const avContribSD = standardDeviation(contribAverages);
-    return genderSD + avContribSD - weightCost + 2;
-  },
-  generateNeighbor: (grouping) => {
-    // pick two random groups and swap a random person from each
-    const newGrouping = grouping.slice(0);
-
-    const groupIndex1 = rand(newGrouping.length);
-    const groupIndex2 = randWhere(newGrouping.length, (r) => r === groupIndex1);
-
-    const group1 = (newGrouping[groupIndex1] =
-      newGrouping[groupIndex1].slice(0));
-    const group2 = (newGrouping[groupIndex2] =
-      newGrouping[groupIndex2].slice(0));
-
-    const personIndex1 = rand(group1.length);
-    const personIndex2 = randWhere(
-      group2.length,
-      (r) => group1[personIndex1].sponsor !== group2[r].sponsor
-    );
-
-    const temp = group1[personIndex1];
-    group1[personIndex1] = group2[personIndex2];
-    group2[personIndex2] = temp;
-
-    return newGrouping;
-  },
-}));
+let people, attendanceHistory;
 
 const loop = () => {
   for (let i = 0; !solver.isDone && i < 1000; i++) {
@@ -100,9 +27,9 @@ const loop = () => {
         .join(', '),
     }));
 
-    $('#output').html(
-      groups.map((g) => `${g.list}<br>${g.stats}`).join('<br><br>')
-    );
+    document.querySelector('#output').innerHTML = groups
+      .map((g) => `${g.list}<br>${g.stats}`)
+      .join('<br><br>');
     console.log(solver.minCost);
   } else {
     requestAnimationFrame(loop);
@@ -112,12 +39,11 @@ const loop = () => {
   }
 };
 
-const {$} = window;
-$(window)
-  .on('resize', () => {
-    stats.resize(window.innerWidth, 300);
-  })
-  .trigger('resize');
+const resize = () => {
+  stats.resize(window.innerWidth, 300);
+};
+window.addEventListener('resize', resize);
+resize();
 
 const makeInitialState = (numGroups, people) => {
   const res = [];
@@ -137,33 +63,44 @@ const makeInitialState = (numGroups, people) => {
   return res;
 };
 
-$('.go').on('click', async function () {
-  const numGroups = parseFloat($('#numGroups').val()) || 4;
-  const gender = $(this).data('gender');
+document.querySelectorAll('.go').forEach((button) => {
+  button.addEventListener('click', async function () {
+    const numGroups =
+      parseFloat(document.querySelector('#numGroups').value) || 4;
 
-  $(this).prop('disabled', true);
-  const people = (await getPeople())
-    .sort((a, b) => b.contrib - a.contrib)
-    .filter((p) => !p.absent && (!gender || p.gender === gender));
+    const gender = button.dataset?.gender;
 
-  console.log(people);
-  $(this).prop('disabled', false);
+    const filteredPeople = people
+      .filter((p) => !p.absent && (!gender || p.gender === gender))
+      .sort((a, b) => b.contrib - a.contrib);
 
-  solver.init(makeInitialState(numGroups, people), 10, 10_000 * people.length);
-  stats.reset();
+    solver.init(
+      makeInitialState(numGroups, filteredPeople),
+      10,
+      10_000 * filteredPeople.length
+    );
+    stats.reset();
 
-  console.log('>>>', solver.minCost);
+    console.log('>>>', solver.minCost);
 
-  loop();
+    loop();
+  });
 });
 
-$('#send').on('click', async () => {
-  const people = await getPeople();
-  const history = await updateMyJSON(people);
-
+document.querySelector('#send').addEventListener('click', async () => {
   const emailAddress = 'jgovier8@gmail.com';
   const subject = encodeURIComponent(`Attendance ${new Date().toDateString()}`);
-  const body = encodeURIComponent(makeReport(people, history));
+  const body = encodeURIComponent(makeReport(people, attendanceHistory));
 
   open(`mailto:${emailAddress}?subject=${subject}&body=${body}`);
 });
+
+const init = async () => {
+  people = await getPeople();
+  attendanceHistory = await updateMyJSON(people);
+  document.querySelector('#output').innerText = makeReport(
+    people,
+    attendanceHistory
+  );
+};
+init();

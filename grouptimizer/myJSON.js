@@ -31,6 +31,7 @@ export const updateMyJSON = async (people) => {
     ...historical,
     ...(existing?.data ?? {}),
     [key]: people
+      .filter((p) => !p.absent)
       .map((p) => p.id)
       .sort((a, b) => a - b)
       .join(','),
