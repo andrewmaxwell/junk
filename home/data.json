@@ -36,6 +36,12 @@
     "desc": "A clone of a game I played when I was a kid."
   },
   {
+    "filePath": "lisp",
+    "title": "Lisp Interpreter",
+    "year": 2020,
+    "desc": "A very basic implementation of Lisp"
+  },
+  {
     "filePath": "program-in-html",
     "title": "Program in HTML",
     "year": 2020,
