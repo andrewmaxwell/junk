@@ -1,6 +1,8 @@
 const isAtom = (expr) => !Array.isArray(expr) || !expr.length;
 const toBool = (val) => (val ? 't' : []);
 const evaluate = (expr, env) => {
+  if (!isNaN(expr)) return Number(expr);
+
   if (isAtom(expr)) {
     for (const [key, val] of env) {
       if (key === expr) return val;
@@ -54,6 +56,7 @@ const defaultEnv = [
     ],
   ],
   ['list', (args, env) => args.map((a) => evaluate(a, env))],
+  ['+', ([a, b], env) => evaluate(a, env) + evaluate(b, env)],
 ];
 
 // takes an array of expressions, returns the value of the last one. The ones before it can only be defuns

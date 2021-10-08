@@ -1,4 +1,4 @@
-import {parse} from './parse.js'; 
+import {parse} from './parse.js';
 import {execute} from './execute.js';
 
 const nullFunc = `
@@ -103,6 +103,14 @@ const evalFunc =
 
 `;
 
+const reduce = `
+(defun reduce (func acc arr) 
+  (cond 
+    (arr (reduce func (func acc (car arr)) (cdr arr))) 
+    ('else acc)))
+
+`;
+
 const tests = [
   ['(quote a)', 'a', 'quote returns its first argument as a literal'],
   ["'a", 'a', 'quote shorthand'],
@@ -203,6 +211,7 @@ const tests = [
     evalFunc + "(eval. '((lambda (x y) (cons x (cdr y))) 'a '(b c d)) '())",
     ['a', 'c', 'd'],
   ],
+  [reduce + "(reduce + 0 '(9 8 7))", 24],
 ];
 
 const exec = (str) => {

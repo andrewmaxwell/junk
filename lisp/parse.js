@@ -8,7 +8,7 @@ const nest = (tokens) => {
     else if (t === ')') {
       if (!indexes.length) throw new Error('Unexpected )');
       result.push(result.splice(indexes.pop())); // am I bad person?
-    } else result.push(t);
+    } else result.push(isNaN(t) ? t : Number(t));
   }
   if (indexes.length) throw new Error(`Missing ${indexes.length} )`);
   return result;
