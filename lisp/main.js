@@ -105,10 +105,26 @@ const evalFunc =
 
 const reduce = `
 (defun reduce (func acc arr) 
-  (cond 
-    (arr (reduce func (func acc (car arr)) (cdr arr))) 
-    ('else acc)))
+  (cond (arr (reduce func (func acc (car arr)) (cdr arr))) 
+    ('t acc)))
 
+`;
+
+const filter = `
+(defun filter (pred arr)
+  (cond (arr 
+      (cond ((pred (car arr)) (cons (car arr) (filter pred (cdr arr))))
+        ('t (filter pred (cdr arr)))))
+    ('t arr)))
+
+`;
+
+const map = `
+(defun map (func arr)
+  (cond (arr (cons (func (car arr)) (map func (cdr arr))))
+    ('t arr)))
+
+(map car '((a b) (c d) (e f)))
 `;
 
 const tests = [
@@ -211,7 +227,13 @@ const tests = [
     evalFunc + "(eval. '((lambda (x y) (cons x (cdr y))) 'a '(b c d)) '())",
     ['a', 'c', 'd'],
   ],
-  [reduce + "(reduce + 0 '(9 8 7))", 24],
+  [map, ['a', 'c', 'e'], 'An implementation of map'],
+  [reduce + "(reduce + 0 '(9 8 7))", 24, 'An implementation of reduce'],
+  [
+    filter + "(filter (lambda (x) (> x 5)) '(1 3 4 5 7 9 11 13))",
+    [7, 9, 11, 13],
+    'An implementation of filter',
+  ],
 ];
 
 const exec = (str) => {

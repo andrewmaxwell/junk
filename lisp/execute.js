@@ -15,49 +15,57 @@ const evaluate = (expr, env) => {
   }
 };
 
-const defaultEnv = [
-  ['quote', ([a]) => a],
-  ['atom', ([a], env) => toBool(isAtom(evaluate(a, env)))],
-  [
-    'eq',
-    ([a, b], env) => {
-      a = evaluate(a, env);
-      b = evaluate(b, env);
-      return toBool(a === b || (!a.length && !b.length));
-    },
-  ],
-  ['car', ([a], env) => evaluate(a, env)[0]],
-  ['cdr', ([a], env) => evaluate(a, env).slice(1)],
-  ['cons', ([a, b], env) => [evaluate(a, env), ...evaluate(b, env)]],
-  [
-    'cond',
-    (args, env) => {
-      for (const [pred, expr] of args) {
-        const v = evaluate(pred, env);
-        if (v && (!Array.isArray(v) || v.length)) return evaluate(expr, env);
-      }
-    },
-  ],
-  [
-    'lambda',
+const defaultEnv = Object.entries({
+  quote: ([a]) => a,
+  atom: ([a], env) => toBool(isAtom(evaluate(a, env))),
+  eq: ([a, b], env) => {
+    a = evaluate(a, env);
+    b = evaluate(b, env);
+    return toBool(a === b || (!a.length && !b.length));
+  },
+  car: ([a], env) => evaluate(a, env)[0],
+  cdr: ([a], env) => evaluate(a, env).slice(1),
+  cons: ([a, b], env) => [evaluate(a, env), ...evaluate(b, env)],
+  cond: (args, env) => {
+    for (const [pred, expr] of args) {
+      const v = evaluate(pred, env);
+      if (v && (!Array.isArray(v) || v.length)) return evaluate(expr, env);
+    }
+  },
+  lambda:
     ([argList, body]) =>
-      (args, env) =>
-        evaluate(body, [
-          ...argList.map((arg, i) => [arg, evaluate(args[i], env)]),
-          ...env,
-        ]),
+    (args, env) =>
+      evaluate(body, [
+        ...argList.map((arg, i) => [arg, evaluate(args[i], env)]),
+        ...env,
+      ]),
+  label: ([name, func], env) => [...env, [name, evaluate(func, env)]],
+  defun: ([name, args, body], env) => [
+    ...env,
+    [name, evaluate(['lambda', args, body], env)],
   ],
-  // ['label', ([name, func], env) => [...env, [name, evaluate(func, env)]]],
-  [
-    'defun',
-    ([name, args, body], env) => [
-      ...env,
-      [name, evaluate(['lambda', args, body], env)],
-    ],
-  ],
-  ['list', (args, env) => args.map((a) => evaluate(a, env))],
-  ['+', ([a, b], env) => evaluate(a, env) + evaluate(b, env)],
-];
+  list: (args, env) => args.map((a) => evaluate(a, env)),
+  ...Object.fromEntries(
+    Object.entries({
+      '+': (a, b) => a + b,
+      '-': (a, b) => a - b,
+      '*': (a, b) => a * b,
+      '/': (a, b) => a / b,
+      '%': (a, b) => a % b,
+      '>': (a, b) => a > b,
+      '<': (a, b) => a < b,
+      '>=': (a, b) => a >= b,
+      '<=': (a, b) => a <= b,
+      '=': (a, b) => a === b,
+      '**': (a, b) => a ** b,
+      and: (a, b) => a && b,
+      or: (a, b) => a || b,
+    }).map(([op, func]) => [
+      op,
+      ([a, b], env) => func(evaluate(a, env), evaluate(b, env)),
+    ])
+  ),
+});
 
 // takes an array of expressions, returns the value of the last one. The ones before it can only be defuns
 export const execute = (exprs) =>
