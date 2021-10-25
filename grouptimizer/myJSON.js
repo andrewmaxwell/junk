@@ -22,27 +22,28 @@ const historical = {
     '1,2,3,4,13,15,16,17,18,19,20,21,22,23,24,26,27,28,29,30,32,33,35',
   '2021-04-14': '1,2,3,7,10,15,17,19,20,21,23,24,26,28,29,30,32,34,35',
   '2021-02-03': '2,3,7,9,10,15,17,19,20,21,23,24,26,28,30,32,34,35,38',
+  '2021-09-23':
+    '1,2,4,6,7,10,11,13,14,15,19,20,21,23,24,26,27,30,32,33,36,39,40,41',
+  '2021-10-25':
+    '1,2,3,5,6,7,10,13,15,17,19,20,21,23,24,26,27,28,30,32,34,36,39,40,45',
+  '2021-10-20':
+    '1,2,3,5,6,7,10,13,15,17,19,20,21,23,24,26,27,28,30,32,34,36,39,40,45',
+  '2021-10-13':
+    '1,2,3,5,6,7,10,11,13,15,17,19,20,21,23,24,26,27,28,29,30,31,32,34,36,39,40,41,42,45,46',
+  '2021-10-06':
+    '1,2,3,6,7,10,11,13,15,17,19,20,21,23,26,27,28,29,30,32,34,36,39,40,41,42,45',
+  '2021-09-30': '1,2,3,5,6,11,15,19,20,21,23,24,26,29,30,32,34,39,40,41,42',
 };
 
-export const updateMyJSON = async (people) => {
+export const getMyJSON = async () => {
   const existing = await fetch(url).then((r) => r.json());
-  const key = new Date().toISOString().slice(0, 10);
-  const newData = {
-    ...historical,
-    ...(existing?.data ?? {}),
-    [key]: people
-      .filter((p) => !p.absent)
-      .map((p) => p.id)
-      .sort((a, b) => a - b)
-      .join(','),
-  };
+  return {...historical, ...(existing?.data ?? {})};
+};
 
-  console.log('newData', newData);
-  // fetch(url, {
-  //   method: 'PUT',
-  //   headers: {'Content-Type': 'application/json'},
-  //   body: JSON.stringify({lastEdited: new Date(), data: newData}),
-  // });
-
-  return newData;
+export const updateMyJSON = async (data) => {
+  fetch(url, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({lastEdited: new Date(), data}),
+  });
 };

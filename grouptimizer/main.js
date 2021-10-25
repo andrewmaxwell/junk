@@ -1,7 +1,7 @@
 import StatGraph from './statGraph.js';
 import getPeople from './getPeople.js';
 import {makeReport} from './makeReport.js';
-import {updateMyJSON} from './myJSON.js';
+import {getMyJSON, updateMyJSON} from './myJSON.js';
 import {makeSolver} from './solver.js';
 
 const stats = new StatGraph(document.getElementById('statCanvas'));
@@ -87,20 +87,28 @@ document.querySelectorAll('.go').forEach((button) => {
   });
 });
 
-document.querySelector('#send').addEventListener('click', async () => {
-  const emailAddress = 'jgovier8@gmail.com';
+document.querySelector('#send').addEventListener('click', () => {
   const subject = encodeURIComponent(`Attendance ${new Date().toDateString()}`);
   const body = encodeURIComponent(makeReport(people, attendanceHistory));
-
-  open(`mailto:${emailAddress}?subject=${subject}&body=${body}`);
+  updateMyJSON(attendanceHistory);
+  open(`mailto:$jgovier8@gmail.com?subject=${subject}&body=${body}`);
 });
 
-const init = async () => {
+(async () => {
   people = await getPeople();
-  attendanceHistory = await updateMyJSON(people);
+  const dateToday = new Date().toISOString().slice(0, 10);
+  attendanceHistory = {
+    ...(await getMyJSON()),
+    [dateToday]: people
+      .filter((p) => !p.absent)
+      .map((p) => p.id)
+      .sort((a, b) => a - b)
+      .join(','),
+  };
+
+  console.log('attendanceHistory', attendanceHistory);
   document.querySelector('#output').innerText = makeReport(
     people,
     attendanceHistory
   );
-};
-init();
+})();

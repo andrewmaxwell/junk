@@ -8,12 +8,12 @@ var T = canvas.getContext('2d');
 var NUM = 2 ** 12;
 
 var params = {
-  rad: 50,
+  rad: 30,
   restDensity: 0.2,
   stiffness: 300,
   stiffnessNear: 700,
   speed: 0.001,
-  gravity: 50
+  gravity: 50,
 };
 
 var width,
@@ -166,7 +166,7 @@ const handlers = {
     T.lineWidth = 2;
     T.lineCap = 'round';
   },
-  mousemove: e => {
+  mousemove: (e) => {
     if (!e.which) return;
     for (var i = 0; i < NUM; i++) {
       if (Math.hypot(xc[i] - e.offsetX, yc[i] - e.offsetY) < 150) {
@@ -175,11 +175,11 @@ const handlers = {
       }
     }
   },
-  deviceorientation: e => {
+  deviceorientation: (e) => {
     e.preventDefault();
     grav.x = e.gamma / 90;
     grav.y = e.beta / 90;
-  }
+  },
   // devicemotion: e => {
   //   for (var i = 0; i < NUM; i++) {
   //     xp[i] -= e.acceleration.x;
