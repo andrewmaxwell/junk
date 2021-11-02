@@ -18,6 +18,12 @@
     "desc": "Slowly improving trebuchets using genetic algorithm and matter.js."
   },
   {
+    "filePath": "weather",
+    "title": "Weather Graphs",
+    "year": 2021,
+    "desc": "Uses location API and a weather API to create graphs from the forecast"
+  },
+  {
     "filePath": "carcassonne",
     "title": "Carcassonne Simulator",
     "year": 2020,
