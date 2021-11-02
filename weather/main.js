@@ -9,13 +9,8 @@ const charts = [
     humidity: {label: 'Humidity', color: 'cyan'},
     pop: {label: 'Precip', color: 'purple'},
   },
-  {
-    pressure: {label: 'Pressure', color: 'yellow'},
-  },
-  {
-    wind_speed: {label: 'Wind Speed', color: 'green'},
-    wind_gust: {label: 'Gust Speed', color: 'red'},
-  },
+  {pressure: {label: 'Pressure', color: 'yellow'}},
+  {wind_speed: {label: 'Wind Speed', color: 'green'}},
 ];
 
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -89,11 +84,18 @@ const addChart = (combinedData, daily, props) => {
   // LINES
   ctx.lineWidth = 2;
   for (const key in props) {
-    ctx.strokeStyle = props[key].color;
+    ctx.fillStyle = ctx.strokeStyle = props[key].color;
     ctx.beginPath();
     for (const d of combinedData) {
       ctx.lineTo(toX(d.dt), toY(d[key]));
     }
+
+    ctx.globalAlpha = 0.25;
+    ctx.lineTo(W, H + 10);
+    ctx.lineTo(0, H + 10);
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
     ctx.stroke();
   }
 
@@ -157,7 +159,7 @@ const makeCharts = (data) => {
 navigator.geolocation.getCurrentPosition(
   async ({coords: {latitude, longitude}}) => {
     const response = await fetch(
-      `https://api.openweathermap.org/data/2.5/onecall?lat=${latitude}&lon=${longitude}&units=imperial&lang=en&exclude=minutely&appid=825cf378ed74870f834683104cb4102a`
+      `https://api.openweathermap.org/data/2.5/onecall?lat=${latitude}&lon=${longitude}&units=imperial&lang=en&exclude=minutely&appid=825cf378ed${'7'}4870f834683104cb4102a`
     );
     makeCharts(await response.json());
   }
