@@ -65,6 +65,7 @@ const defaultEnv = Object.entries({
       ([a, b], env) => func(evaluate(a, env), evaluate(b, env)),
     ])
   ),
+  floor: ([a], env) => Math.floor(evaluate(a, env)),
 });
 
 // takes an array of expressions, returns the value of the last one. The ones before it can only be defuns

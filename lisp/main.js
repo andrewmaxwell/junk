@@ -127,6 +127,81 @@ const map = `
 (map car '((a b) (c d) (e f)))
 `;
 
+const mergeSort = `
+(defun take (n arr)
+  (cond
+    (n (cons (car arr) (take (- n 1) (cdr arr))))
+    ('t '())))
+
+(defun drop (n arr)
+  (cond
+    (n (drop (- n 1) (cdr arr)))
+    ('t arr)))
+
+(defun length (arr)
+  (cond
+    (arr (+ 1 (length (cdr arr))))
+    ('t 0)))
+
+(defun halfLength (arr)
+  (floor (/ (length arr) 2)))
+
+(defun merge (a b)
+  (cond
+    ((and a b)
+      (cond
+        ((< (car a) (car b)) 
+          (cons (car a) (merge (cdr a) b)))
+        ('t 
+          (cons (car b) (merge a (cdr b))))))
+    (a a)
+    ('t b)))
+
+(defun mergeSort (arr)
+  (cond
+    ((cdr arr)
+      (merge
+        (mergeSort (take (halfLength arr) arr))
+        (mergeSort (drop (halfLength arr) arr))))
+    ('t arr)))
+
+`;
+
+const binaryTree = `
+(defun getProp (name obj)
+  (cond
+    (obj (cond
+      ((eq name (car (car obj))) (car (cdr (car obj))))
+      ('t (getProp name (cdr obj)))))
+      ('t '())))
+
+(defun deleteProp (name obj)
+  (cond
+    (obj (cond 
+      ((eq name (car (car obj))) (cdr obj))
+      ('t (cons (car obj) (deleteProp name (cdr obj))))))
+      ('t '())))
+
+(defun setProp (name value obj)
+  (cons 
+    (list name value) 
+    (deleteProp name obj)))
+
+(defun addTo (tree name value) 
+    (setProp name (addNode (getProp name tree) value) tree))
+
+(defun addNode (tree value)
+  (cond 
+    (tree 
+      (cond
+        ((< value (getProp 'value tree)) (addTo tree 'left value))
+        ('t (addTo tree 'right value))))
+        ('t (list (list 'value value)))))
+
+(defun buildTree (arr) (reduce addNode '() arr))
+
+`;
+
 const tests = [
   ['(quote a)', 'a', 'quote returns its first argument as a literal'],
   ["'a", 'a', 'quote shorthand'],
@@ -233,6 +308,51 @@ const tests = [
     filter + "(filter (lambda (x) (> x 5)) '(1 3 4 5 7 9 11 13))",
     [7, 9, 11, 13],
     'An implementation of filter',
+  ],
+  [
+    mergeSort + "(mergeSort '(5 9 1 3 0 8 5 2 3 3 -7 3.14))",
+    [-7, 0, 1, 2, 3, 3, 3, 3.14, 5, 5, 8, 9],
+    'Merge Sort',
+  ],
+  [
+    reduce + binaryTree + "(buildTree '(5 3 2 1 4 9 6 8 7))",
+    [
+      [
+        'right',
+        [
+          [
+            'left',
+            [
+              [
+                'right',
+                [
+                  ['left', [['value', 7]]],
+                  ['value', 8],
+                ],
+              ],
+              ['value', 6],
+            ],
+          ],
+          ['value', 9],
+        ],
+      ],
+      [
+        'left',
+        [
+          ['right', [['value', 4]]],
+          [
+            'left',
+            [
+              ['left', [['value', 1]]],
+              ['value', 2],
+            ],
+          ],
+          ['value', 3],
+        ],
+      ],
+      ['value', 5],
+    ],
+    'Binary Tree',
   ],
 ];
 
