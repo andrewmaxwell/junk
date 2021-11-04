@@ -128,6 +128,9 @@ const map = `
 `;
 
 const mergeSort = `
+(defun and (x y)
+  (cond (x (cond (y y) ('t '()))) ('t '())))
+
 (defun take (n arr)
   (cond
     (n (cons (car arr) (take (- n 1) (cdr arr))))
@@ -199,6 +202,102 @@ const binaryTree = `
         ('t (list (list 'value value)))))
 
 (defun buildTree (arr) (reduce addNode '() arr))
+
+`;
+
+const mazeSolver = `
+(defun and (x y)
+  (cond (x (cond (y y) ('t '()))) ('t '())))
+
+(defun or (x y)
+  (cond (x x) (y y) ('t '())))
+
+(defun not (x)
+  (cond (x '()) ('t 't)))
+
+(defun includes (arr el)
+  (cond
+    (arr (or
+      (eq (car arr) el)
+      (includes (cdr arr) el)
+    ))
+    ('t '())
+  )
+)
+
+(defun getIndex (arr i)
+  (cond
+    (arr (cond
+      (i (getIndex (cdr arr) (- i 1)))
+      ('t (car arr))
+    ))
+    ('t '())
+  )
+)
+
+(defun getValAtCoords (grid coord)
+  (getIndex 
+    (getIndex grid (car (cdr coord)))
+    (car coord)
+  )
+)
+
+(defun exploreDir (maze path end dx dy)
+  (solveMazeRecursive 
+    maze 
+    (cons 
+      (list 
+        (+ (car (car path)) dx) 
+        (+ (car (cdr (car path))) dy)
+      ) 
+      path
+    )
+    end
+  )
+)
+
+(defun solveMazeRecursive (maze path end)
+  (cond
+    ((eq (car path) end) path)
+    (
+      (and 
+        (eq 1 (getValAtCoords maze (car path)))
+        (not (includes (cdr path) (car path)))
+      )
+      (or
+        (or
+          (exploreDir maze path end 1 0)
+          (exploreDir maze path end 0 1)
+        )
+        (or
+          (exploreDir maze path end -1 0)
+          (exploreDir maze path end 0 -1)
+        )
+      )
+    )
+    ('t '())
+  )
+)
+
+(defun solveMaze (maze start end)
+  (solveMazeRecursive maze (list end) start)
+)
+
+(solveMaze 
+  '(
+    (1 1 0 0 0 0 0)
+    (0 1 0 1 1 1 0)
+    (0 1 1 1 0 1 0)
+    (0 0 0 1 0 0 0)
+    (0 1 0 1 1 1 0)
+    (0 1 1 1 0 0 0)
+    (0 0 0 1 1 1 0)
+    (0 1 1 1 0 1 0)
+    (0 0 0 0 0 1 1)
+  )
+  '(0 0)
+  '(6 8)
+)
 
 `;
 
@@ -353,6 +452,27 @@ const tests = [
       ['value', 5],
     ],
     'Binary Tree',
+  ],
+  [
+    mazeSolver,
+    [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [1, 2],
+      [2, 2],
+      [3, 2],
+      [3, 3],
+      [3, 4],
+      [3, 5],
+      [3, 6],
+      [4, 6],
+      [5, 6],
+      [5, 7],
+      [5, 8],
+      [6, 8],
+    ],
+    'Maze Solver',
   ],
 ];
 

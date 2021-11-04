@@ -1,35 +1,40 @@
 const isAtom = (expr) => !Array.isArray(expr) || !expr.length;
 const toBool = (val) => (val ? 't' : []);
+const fromBool = (val) => val && (!Array.isArray(val) || val.length);
 const evaluate = (expr, env) => {
-  if (!isNaN(expr)) return Number(expr);
+  if (typeof expr === 'number') return expr;
 
   if (isAtom(expr)) {
     for (const [key, val] of env) {
       if (key === expr) return val;
     }
-    throw new Error(`${expr} is not defined`);
+    throw new Error(`\`${expr}\` is not defined`);
   } else {
     const func = evaluate(expr[0], env);
-    if (typeof func === 'function') return func(expr.slice(1), env);
+    if (typeof func === 'function') {
+      const result = func(expr.slice(1), env);
+      // console.log('>>>', expr, '->', result);
+      return result;
+    }
     throw new Error(`Not a function: ${JSON.stringify(expr[0])}`);
   }
 };
 
+const deepEq = (a, b) =>
+  Array.isArray(a) && Array.isArray(b)
+    ? a.length === b.length && a.every((x, i) => deepEq(x, b[i]))
+    : a === b;
+
 const defaultEnv = Object.entries({
   quote: ([a]) => a,
   atom: ([a], env) => toBool(isAtom(evaluate(a, env))),
-  eq: ([a, b], env) => {
-    a = evaluate(a, env);
-    b = evaluate(b, env);
-    return toBool(a === b || (!a.length && !b.length));
-  },
+  eq: ([a, b], env) => toBool(deepEq(evaluate(a, env), evaluate(b, env))),
   car: ([a], env) => evaluate(a, env)[0],
   cdr: ([a], env) => evaluate(a, env).slice(1),
   cons: ([a, b], env) => [evaluate(a, env), ...evaluate(b, env)],
   cond: (args, env) => {
     for (const [pred, expr] of args) {
-      const v = evaluate(pred, env);
-      if (v && (!Array.isArray(v) || v.length)) return evaluate(expr, env);
+      if (fromBool(evaluate(pred, env))) return evaluate(expr, env);
     }
   },
   lambda:
@@ -56,10 +61,7 @@ const defaultEnv = Object.entries({
       '<': (a, b) => a < b,
       '>=': (a, b) => a >= b,
       '<=': (a, b) => a <= b,
-      '=': (a, b) => a === b,
       '**': (a, b) => a ** b,
-      and: (a, b) => a && b,
-      or: (a, b) => a || b,
     }).map(([op, func]) => [
       op,
       ([a, b], env) => func(evaluate(a, env), evaluate(b, env)),
