@@ -356,28 +356,9 @@ const tests = [
     'new',
   ],
   [
-    evalFunc + "(eval. 'x '((x a) (y b)))",
-    'a',
-    'With just a handful or relatively small functions, we can write a function that can fully execute this language.',
-  ],
-  [evalFunc + "(eval. '(eq 'a 'a) '())", 't'],
-  [evalFunc + "(eval. '(cons x '(b c)) '((x a) (y b)))", ['a', 'b', 'c']],
-  [
-    evalFunc + "(eval. '(cond ((atom x) 'atom) ('t 'list)) '((x '(a b))))",
-    'list',
-  ],
-  [
-    evalFunc + "(eval. '(f '(b c)) '((f (lambda (x) (cons 'a x)))))",
-    ['a', 'b', 'c'],
-  ],
-  [
-    evalFunc +
-      "(eval. '((lambda (x) (cons 'a x)) '(b c)) '((f (lambda (x) (cons 'a x)))))",
-    ['a', 'b', 'c'],
-  ],
-  [
     evalFunc + "(eval. '((lambda (x y) (cons x (cdr y))) 'a '(b c d)) '())",
     ['a', 'c', 'd'],
+    'With just a handful or relatively small functions, we can write a function that can fully execute this language.',
   ],
   [map, ['a', 'c', 'e'], 'An implementation of map'],
   [reduce + "(reduce + 0 '(9 8 7))", 24, 'An implementation of reduce'],
