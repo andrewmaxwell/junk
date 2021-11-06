@@ -1,5 +1,3 @@
-/* eslint-disable sonarjs/no-duplicate-string */
-
 const ops = {
   '=': (a, b) => a !== undefined && a == b,
   '<>': (a, b) => a != b,

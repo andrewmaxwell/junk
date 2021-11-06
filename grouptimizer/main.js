@@ -1,7 +1,7 @@
 import StatGraph from './statGraph.js';
 import getPeople from './getPeople.js';
 import {makeReport} from './makeReport.js';
-import {getMyJSON, updateMyJSON} from './myJSON.js';
+import {getMyJSON, updateMyJSON} from './getMyJSON.js';
 import {makeSolver} from './solver.js';
 
 const stats = new StatGraph(document.getElementById('statCanvas'));
@@ -65,6 +65,8 @@ const makeInitialState = (numGroups, people) => {
 
 document.querySelectorAll('.go').forEach((button) => {
   button.addEventListener('click', async function () {
+    updateMyJSON(attendanceHistory);
+
     const numGroups =
       parseFloat(document.querySelector('#numGroups').value) || 4;
 
@@ -90,11 +92,10 @@ document.querySelectorAll('.go').forEach((button) => {
 document.querySelector('#send').addEventListener('click', () => {
   const subject = encodeURIComponent(`Attendance ${new Date().toDateString()}`);
   const body = encodeURIComponent(makeReport(people, attendanceHistory));
-  updateMyJSON(attendanceHistory);
-  open(`mailto:$jgovier8@gmail.com?subject=${subject}&body=${body}`);
+  open(`mailto:jgovier8@gmail.com?subject=${subject}&body=${body}`);
 });
 
-(async () => {
+const init = async () => {
   people = await getPeople();
   const dateToday = new Date().toISOString().slice(0, 10);
   attendanceHistory = {
@@ -111,4 +112,6 @@ document.querySelector('#send').addEventListener('click', () => {
     people,
     attendanceHistory
   );
-})();
+};
+
+init();

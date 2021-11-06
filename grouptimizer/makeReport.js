@@ -29,7 +29,7 @@ const nameList = (people) =>
   people
     .map((p) => p.name)
     .sort()
-    .join(', ');
+    .join('\n');
 
 const getNewStudentNames = (attendanceHistory, minDaysAgo, maxDaysAgo) => {
   const minTime = Date.now() - minDaysAgo * 24 * 3600000;
@@ -42,7 +42,7 @@ const getNewStudentNames = (attendanceHistory, minDaysAgo, maxDaysAgo) => {
     const arr = date < minTime ? past : recent;
     for (const p of people) arr.add(p);
   }
-  return nameList([...recent].filter((p) => !p.sponsor && !past.has(p)));
+  return [...recent].filter((p) => !p.sponsor && !past.has(p));
 };
 
 const processAbsences = (people) => {
@@ -53,7 +53,10 @@ const processAbsences = (people) => {
   }
   return Object.entries(acc)
     .sort((a, b) => a[0] - b[0])
-    .map(([i, w]) => `Absent ${i} week${i == 1 ? '' : 's'}: ${nameList(w)}`)
+    .map(
+      ([i, w]) =>
+        `Absent ${i} week${i == 1 ? '' : 's'}: (${w.length})\n${nameList(w)}\n`
+    )
     .join('\n');
 };
 
@@ -66,11 +69,10 @@ export const makeReport = (people, attendanceHistory) => {
   const highsSchoolers = students.filter((p) => p.grade >= 9);
   const middleSchoolers = students.filter((p) => p.grade < 9);
 
-  const sponsorNames = nameList(sponsors);
-  const highSchoolBoys = nameList(intersect(highsSchoolers, boys));
-  const highSchoolGirls = nameList(intersect(highsSchoolers, girls));
-  const middleSchoolBoys = nameList(intersect(middleSchoolers, boys));
-  const middleSchoolGirls = nameList(intersect(middleSchoolers, girls));
+  const highSchoolBoys = intersect(highsSchoolers, boys);
+  const highSchoolGirls = intersect(highsSchoolers, girls);
+  const middleSchoolBoys = intersect(middleSchoolers, boys);
+  const middleSchoolGirls = intersect(middleSchoolers, girls);
 
   attendanceHistory = processAttendance(attendanceHistory, people);
 
@@ -78,19 +80,29 @@ export const makeReport = (people, attendanceHistory) => {
   const absences = processAbsences(people.filter((p) => !p.sponsor));
 
   return `
-Sponsors: ${sponsors.length}
 Students: ${students.length}
 High Schoolers: ${highsSchoolers.length}
 Middle Schoolers: ${middleSchoolers.length}
 Boys: ${boys.length}
 Girls: ${girls.length}
 
-Sponsors: ${sponsorNames}
-High School Boys: ${highSchoolBoys}
-High School Girls: ${highSchoolGirls}
-Middle School Boys: ${middleSchoolBoys}
-Middle School Girls: ${middleSchoolGirls}
+Sponsors (${sponsors.length}): 
+${nameList(sponsors)}
 
-New students this week: ${newStudentsThisWeek || 'None'}
+High School Boys (${highSchoolBoys.length}): 
+${nameList(highSchoolBoys)}
+
+High School Girls (${highSchoolGirls.length}): 
+${nameList(highSchoolGirls)}
+
+Middle School Boys (${middleSchoolBoys.length}): 
+${nameList(middleSchoolBoys)}
+
+Middle School Girls (${middleSchoolGirls.length}): 
+${nameList(middleSchoolGirls)}
+
+New students this week (${newStudentsThisWeek.length}): 
+${nameList(newStudentsThisWeek)}
+
 ${absences}`.trim();
 };

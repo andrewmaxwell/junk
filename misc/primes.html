@@ -1,0 +1,10 @@
+<script>
+const start = Date.now();
+
+const primes = [];
+for (let i = 2; i < 1e6; i++) {
+    if (primes.every(p => i % p)) primes.push(i);
+}
+
+document.body.innerHTML = Date.now() - start;
+</script>
