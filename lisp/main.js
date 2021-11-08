@@ -279,6 +279,45 @@ const mazeSolver = `
 
 `;
 
+const nester = `
+(defun and (x y)
+  (cond (x (cond (y y) ('t '()))) ('t '())))
+
+(defun take (n arr)
+  (cond
+    (n (cons (car arr) (take (- n 1) (cdr arr))))
+    ('t '())))
+
+(defun drop (n arr)
+  (cond
+    (n (drop (- n 1) (cdr arr)))
+    ('t arr)))
+
+(defun getIndexOfClose (str index depth)
+  (cond
+    ((and (eq '] (car str)) (eq 0 depth)) index)
+    ('t (getIndexOfClose
+      (cdr str)
+      (+ 1 index)
+      (+ depth (cond
+        ((eq '[ (car str)) 1)
+        ((eq '] (car str)) -1)
+        ('t 0)))))))
+
+(defun goDeeper (arr index)
+  (cons
+    (nest (take index arr))
+    (nest (drop (+ index 1) arr))))
+
+(defun nest (str) 
+  (cond
+    ((eq '[ (car str)) 
+      (goDeeper (cdr str) (getIndexOfClose (cdr str) 0 0)))
+    ((car str) (cons (car str) (nest (cdr str))))
+    ('t '())))
+
+`;
+
 const tests = [
   ['(quote a)', 'a', 'quote returns its first argument as a literal'],
   ["'a", 'a', 'quote shorthand'],
@@ -432,6 +471,11 @@ const tests = [
       [6, 8],
     ],
     'Maze Solver',
+  ],
+  [
+    nester + "(nest 'a[b[c][d]]e)",
+    ['a', ['b', ['c'], ['d']], 'e'],
+    'String to nested lists',
   ],
 ];
 
