@@ -40,10 +40,9 @@ export const getMyJSON = async () => {
   return {...historical, ...(existing?.data ?? {})};
 };
 
-export const updateMyJSON = async (data) => {
+export const updateMyJSON = (data) =>
   fetch(url, {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({lastEdited: new Date(), data}),
   });
-};

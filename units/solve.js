@@ -50,8 +50,11 @@ const exp = ({left: lv, right: lu}, rv) => ({
 const simplifyVal = (left, right, conversions) =>
   right.reduce(
     (result, u) => {
-      const m = u.match(/^([a-z_]+)(\d*)$/);
-      if (!m) throw new Error(`Unrecognizable unit: "${u}"`);
+      const m = u.match?.(/^([a-z_]+)(\d*)$/);
+      if (!m)
+        throw new Error(
+          `Unrecognizable unit: "${u}", try one of the examples below.`
+        );
 
       const unit = m[1];
       const exponent = Number(m[2] || 1);
@@ -65,7 +68,7 @@ const simplifyVal = (left, right, conversions) =>
     {op: 'val', left, right: {}}
   );
 
-const simplify = (ast, conversions) => {
+const simplify = (ast = {}, conversions) => {
   const {op, left, right} = ast;
   switch (op) {
     case 'to':
@@ -93,7 +96,6 @@ const simplify = (ast, conversions) => {
       return simplifyVal(left, right, conversions);
     }
   }
-  return ast;
 };
 
 export const solve = (input, conversions) => {

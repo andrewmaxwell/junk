@@ -99,13 +99,20 @@ const runTests = () => {
 };
 
 const outputSolution = () => {
+  const conversions = parseConversions(conversionField.value);
+  if (conversions.error) {
+    outputField.innerHTML = `<span style="color:red">Invalid Conversion Syntax</span>`;
+    return;
+  }
+
   try {
-    const conversions = parseConversions(conversionField.value);
     const s = solve(inputField.value, conversions);
     console.log(s);
-    outputField.innerHTML = '= ' + s.solution;
+    outputField.innerHTML = '= ' + (s.solution || '');
+    localStorage.unitInput = inputField.value;
   } catch (e) {
-    outputField.innerHTML = `<span style="color:red">${e.message}</span>`;
+    outputField.innerHTML = `<span style="color:red">Invalid Syntax</span>`;
+    throw e;
   }
 };
 
@@ -126,12 +133,7 @@ const init = () => {
     inputField.value = e.target.dataset.value;
     outputSolution();
   });
-
-  inputField.addEventListener('input', () => {
-    localStorage.unitInput = inputField.value;
-    outputSolution();
-  });
-
+  inputField.addEventListener('input', outputSolution);
   conversionField.addEventListener('input', outputSolution);
 
   if (localStorage.unitInput) inputField.value = localStorage.unitInput;

@@ -40,6 +40,7 @@ const parseUnits = (units) => units;
 // }, {});
 
 export const parse = (tokens = []) => {
+  if (!tokens.length) return;
   const indexOfOp = getIndexOfOp(tokens);
   return indexOfOp > -1
     ? {
