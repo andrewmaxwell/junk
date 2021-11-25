@@ -317,6 +317,79 @@ const nester = `
 
 `;
 
+const transpileToJS = `
+
+(defun map (func arr)
+  (cond (arr (cons (func (car arr)) (map func (cdr arr))))
+    ('t arr)))
+
+(defun join (d arr)
+  (cond
+    ((cdr arr) (+ (car arr) d (join d (cdr arr))))
+    ('t arr)))
+
+(defun printData (data)
+  (cond
+    ((atom data) (+ "'" data "'"))
+    ('t (+ "[" (join ", " (map printData data)) "]"))))
+
+(defun cadr (x) (car (cdr x)))
+(defun caddr (x) (car (cdr (cdr x))))
+(defun defunToJS (args) (+ 
+  "const " 
+  (car args) 
+  " = (" 
+  (join ", " (cadr args))
+  ") => " 
+  (toJS (caddr args))))
+
+(defun pairToJS (args) (+ "isTruthy(" (toJS (car args)) ") ? " (toJS (cadr args))))
+(defun condToJS (args) (+ (join " : " (map pairToJS args)) " : []"))
+(defun consToJS (args) (+ "[" (toJS (car args)) ", ..." (toJS (cadr args)) "]"))
+(defun carToJS (args) (+ (toJS (car args)) "[0]"))
+(defun cdrToJS (args) (+ (toJS (car args)) ".slice(1)"))
+(defun quoteToJS (args) (printData (car args)))
+(defun atomToJS (args) (+ "!" (toJS (car args)) "?.length"))
+(defun plusToJS (args) (join " + " (map toJS args)))
+(defun eqToJS (args) (join " == " (map toJS args)))
+(defun listToJS (args) (+ "[" (join ", " (map toJS args)) "]"))
+
+(defun getFunc (name)
+  (cond
+    ((eq name 'defun) defunToJS)
+    ((eq name 'cond) condToJS)
+    ((eq name 'cons) consToJS)
+    ((eq name 'car) carToJS)
+    ((eq name 'cdr) cdrToJS)
+    ((eq name 'quote) quoteToJS)
+    ((eq name 'atom) atomToJS)
+    ((eq name '+) plusToJS)
+    ((eq name 'eq) eqToJS)
+    ((eq name 'list) listToJS)
+    ('t '())
+  )
+)
+
+(defun toJS (code)
+  (cond
+    ((getFunc code) (+ "(x) => " (toJS (list code 'x))))
+    ((atom code) code)
+    ((getFunc (car code)) ((getFunc (car code)) (cdr code)))
+    ('t (+ (toJS (car code)) "(" (join ", " (map toJS (cdr code))) ")"))
+  )
+)
+
+(defun transpileToJS (code) 
+  (+ "const isTruthy = (x) => x && (!Array.isArray(x) || x.length);\n" (join ";\n" (map toJS code))))
+
+(transpileToJS '(
+  (defun map (func arr)
+    (cond (arr (cons (func (car arr)) (map func (cdr arr))))
+      ('t arr)))
+  (map car '((1 2) (3 4) (5 6)))
+))
+`;
+
 const tests = [
   ['(quote a)', 'a', 'quote returns its first argument as a literal'],
   ["'a", 'a', 'quote shorthand'],
@@ -476,6 +549,13 @@ const tests = [
     ['a', ['b', ['c'], ['d']], 'e'],
     'String to nested lists',
   ],
+  [
+    transpileToJS,
+    `const isTruthy = (x) => x && (!Array.isArray(x) || x.length);
+const map = (func, arr) => isTruthy(arr) ? [func(arr[0]), ...map(func, arr.slice(1))] : isTruthy('t') ? arr : [];
+map((x) => x[0], [['1', '2'], ['3', '4'], ['5', '6']])`,
+    'Lisp to JS Transpiler',
+  ],
 ];
 
 const exec = (str) => {
@@ -496,7 +576,7 @@ document.querySelector('#root').innerHTML = tests
     <div class="container">
       <p>${desc}</p>
       <textarea data-id="${i}">${input.trim()}</textarea>
-      <div>><span id="result-${i}" class="result">${actual}</span></div>
+      <div class="result"><span id="result-${i}">${actual}</span></div>
     </div>
   `;
   })

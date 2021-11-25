@@ -64,7 +64,7 @@ const defaultEnv = Object.entries({
       '**': (a, b) => a ** b,
     }).map(([op, func]) => [
       op,
-      ([a, b], env) => func(evaluate(a, env), evaluate(b, env)),
+      (args, env) => args.map((x) => evaluate(x, env)).reduce(func),
     ])
   ),
   floor: ([a], env) => Math.floor(evaluate(a, env)),
