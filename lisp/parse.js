@@ -1,4 +1,4 @@
-const tokenize = (str) => str.match(/\(|\)|'|[^\s()]+/g);
+const tokenize = (str) => str.match(/\(|\)|"[^"]*"|'|[^\s()]+/g);
 
 const nest = (tokens) => {
   const indexes = [];
@@ -20,6 +20,8 @@ const parseQuote = (node) => {
   for (const n of node) {
     if (res[res.length - 1] === "'")
       res.splice(res.length - 1, 1, ['quote', parseQuote(n)]);
+    else if (n[0] === '"' && n[n.length - 1] === '"')
+      res.push(['quote', n.slice(1, -1)]);
     else res.push(parseQuote(n));
   }
   return res;
