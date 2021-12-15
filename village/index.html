@@ -1,0 +1,23 @@
+<body>
+  <style>
+    body {font-size: 8px;}
+    .unit {
+      position: absolute;
+      transition: all 0.5s;
+      border-radius: 2px;
+      cursor: pointer;
+      outline: 1px solid rgba(0,0,0,0.1);
+      text-align: center;
+      color: white;
+    }
+    .unit:hover {
+      outline: 1px solid rgba(0,0,0,0.5);
+      z-index: 10
+    }
+  </style>
+  <div style="column-count: 2; column-gap: 20px">
+    <div id="controls"></div>
+  </div>
+  <div id="stats" style="position: fixed; bottom: 0; right: 0; padding: 10px"></div>
+  <script type="module" src="main.js"></script>
+</body>
