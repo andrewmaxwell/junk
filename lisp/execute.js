@@ -68,8 +68,15 @@ const defaultEnv = Object.entries({
     ])
   ),
   floor: ([a], env) => Math.floor(evaluate(a, env)),
+  defmacro: ([name, [argName], body], env) => [
+    [
+      name,
+      (args, env) => evaluate(evaluate(body, [[argName, args], ...env]), env),
+    ],
+    ...env,
+  ],
 });
 
-// takes an array of expressions, returns the value of the last one. The ones before it can only be defuns
+// takes an array of expressions, returns the value of the last one. The ones before it can only be defuns of defmacros
 export const execute = (exprs) =>
   exprs.reduce((env, line) => evaluate(line, env), defaultEnv);

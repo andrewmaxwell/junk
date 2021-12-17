@@ -390,6 +390,25 @@ const transpileToJS = `
 ))
 `;
 
+const macroExample = `
+(defun reduce (func acc arr) 
+  (cond (arr (reduce func (func acc (car arr)) (cdr arr))) 
+    ('t acc)))
+
+(defun nestOps (r arg) 
+  (cons (car arg) (cons r (cdr arg))))
+
+(defmacro -> (args)
+  (reduce nestOps (car args) (cdr args))
+)
+
+(defun funTime (m)
+  (-> m (/ 4) (+ 1) (* m))
+)
+
+(funTime 10)
+`;
+
 const tests = [
   ['(quote a)', 'a', 'quote returns its first argument as a literal'],
   ["'a", 'a', 'quote shorthand'],
@@ -439,8 +458,7 @@ const tests = [
     'lambda defines a function. Its first argument is a list of argument names, its second argument is an expression, and it can be immediately invoked',
   ],
   ["((lambda (x y) (cons x (cdr y))) 'z '(a b c))", ['z', 'b', 'c'], ''],
-  ["((lambda (f) (f '(b c))) (lambda (x) (cons 'a x)))", ['a', 'b', 'c'], ''], // Paul's paper has the second lambda quoted, but that doesn't make sense
-  // ["(subst 'm 'm '(a b (a b c) d))"],
+  ["((lambda (f) (f '(b c))) (lambda (x) (cons 'a x)))", ['a', 'b', 'c'], ''],
   [
     nullFunc + "(null. 'a)",
     [],
@@ -469,7 +487,12 @@ const tests = [
   [
     evalFunc + "(eval. '((lambda (x y) (cons x (cdr y))) 'a '(b c d)) '())",
     ['a', 'c', 'd'],
-    'With just a handful or relatively small functions, we can write a function that can fully execute this language.',
+    'With just a handful of small functions, we can write a function that can fully execute this language.',
+  ],
+  [
+    macroExample,
+    35,
+    'Macros are like functions that operate on their arguments before executing them. Here is an implementation of thread-first.',
   ],
   [map, ['a', 'c', 'e'], 'An implementation of map'],
   [reduce + "(reduce + 0 '(9 8 7))", 24, 'An implementation of reduce'],
