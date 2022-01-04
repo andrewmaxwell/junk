@@ -10,30 +10,30 @@ const buildIndex = (str) => {
   return nodes;
 };
 
-const longestFrom = (nodes, path) =>
-  nodes[path[path.length - 1]].reduce((longest, x) => {
-    const p = path.includes(x) ? [] : longestFrom(nodes, [...path, x]);
-    return p.length > longest.length ? p : longest;
-  }, path);
+const longestFrom = (nodeIndex, path) => {
+  let result = path.length;
+  const lastInPath = path[path.length - 1];
+  const connectedNodes = nodeIndex[lastInPath];
 
-const lengthOfLongestPath = (str) => {
-  const nodes = buildIndex(str);
-  return Object.keys(nodes).reduce(
-    (max, n) => Math.max(max, longestFrom(nodes, [n]).length),
-    0
-  );
+  for (const x of connectedNodes) {
+    if (!path.includes(x)) {
+      const next = longestFrom(nodeIndex, [...path, x]);
+      if (next > result) result = next;
+    }
+  }
+  return result;
 };
 
-const allPathsFrom = (nodes, path) => [
-  path,
-  ...nodes[path[path.length - 1]].flatMap((x) =>
-    path.includes(x) ? [] : allPathsFrom(nodes, path + x)
-  ),
-];
+const lengthOfLongestPath = (str) => {
+  const nodeIndex = buildIndex(str);
+  const uniqueNodes = Object.keys(nodeIndex);
 
-const allPaths = (str) => {
-  const nodes = buildIndex(str);
-  return Object.keys(nodes).flatMap((n) => allPathsFrom(nodes, n));
+  let max = 0;
+  for (const node of uniqueNodes) {
+    const len = longestFrom(nodeIndex, [node]);
+    if (len > max) max = len;
+  }
+  return max;
 };
 
 const {Test} = require('./test');
@@ -42,4 +42,16 @@ Test.assertDeepEquals(lengthOfLongestPath('abcdcefeba'), 5);
 Test.assertDeepEquals(lengthOfLongestPath('ab,cd,ef'), 2);
 Test.assertDeepEquals(lengthOfLongestPath('aelbgkanmaf,bhim,idc'), 11);
 
-console.log(allPaths('abcdcefeba'));
+// const allPathsFrom = (nodes, path) => [
+//   path,
+//   ...nodes[path[path.length - 1]].flatMap((x) =>
+//     path.includes(x) ? [] : allPathsFrom(nodes, path + x)
+//   ),
+// ];
+
+// const allPaths = (str) => {
+//   const nodes = buildIndex(str);
+//   return Object.keys(nodes).flatMap((n) => allPathsFrom(nodes, n));
+// };
+
+// console.log(allPaths('abcdcefeba'));

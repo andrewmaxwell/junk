@@ -21,7 +21,8 @@ exports.Test = {
   assertEquals,
   assertSimilar: assertEquals,
   assertDeepEquals: assertEquals,
-  expectError: (func) => {
+  expectError: (desc, func) => {
+    console.log(desc);
     try {
       func();
       fail('Expected an error.');
@@ -37,4 +38,5 @@ exports.Test = {
     if (bool) pass();
     else fail(msg);
   },
+  inspect: toString,
 };
