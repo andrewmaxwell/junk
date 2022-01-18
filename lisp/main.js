@@ -303,7 +303,7 @@ const nester = `
         ((eq '] (car str)) -1)
         ('t 0)))))))
 
-(defun goDeeper (arr index)
+(defun nestDeeper (arr index)
   (cons
     (nest (take index arr))
     (nest (drop (+ index 1) arr))))
@@ -311,7 +311,7 @@ const nester = `
 (defun nest (str) 
   (cond
     ((eq '[ (car str)) 
-      (goDeeper (cdr str) (getIndexOfClose (cdr str) 0 0)))
+      (nestDeeper (cdr str) (getIndexOfClose (cdr str) 0 0)))
     ((car str) (cons (car str) (nest (cdr str))))
     ('t '())))
 
@@ -391,10 +391,6 @@ const transpileToJS = `
 `;
 
 const macroExample = `
-(defun reduce (func acc arr) 
-  (cond (arr (reduce func (func acc (car arr)) (cdr arr))) 
-    ('t acc)))
-
 (defun nestOps (r arg) 
   (cons (car arg) (cons r (cdr arg))))
 
@@ -490,7 +486,7 @@ const tests = [
     'With just a handful of small functions, we can write a function that can fully execute this language.',
   ],
   [
-    macroExample,
+    reduce + macroExample,
     35,
     'Macros are like functions that operate on their arguments before executing them. Here is an implementation of thread-first.',
   ],
@@ -579,6 +575,11 @@ const map = (func, arr) => isTruthy(arr) ? [func(arr[0]), ...map(func, arr.slice
 map((x) => x[0], [['1', '2'], ['3', '4'], ['5', '6']])`,
     'Lisp to JS Transpiler',
   ],
+  // [
+  //   reduce + nester + bf + "(brainfuck '++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.')",
+  //   'Hello, World!\n',
+  //   'Brainfuck Interpreter'
+  // ]
 ];
 
 const exec = (str) => {

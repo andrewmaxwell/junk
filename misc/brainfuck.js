@@ -348,7 +348,7 @@ const toBF = (ast) => {
 
 const kcuf = (code, debug) => {
   const ast = fromSource(code);
-  // if (debug) console.log(JSON.stringify(ast, null, 2));
+  if (debug) console.log(JSON.stringify(ast, null, 2));
   return toBF(ast);
 };
 
@@ -378,7 +378,7 @@ const Execute = (program, input = '', debug) => {
   )(inputVals);
 };
 
-import {Test} from './test';
+const {Test} = require('./test');
 const toChars = (s) => s.split('').map((c) => c.charCodeAt(0));
 const Check = (code, input, expect, debug) => {
   const bf = kcuf(code, debug);
@@ -400,7 +400,8 @@ Check(
 		rem &&Some comment~!@#$":<
 		`,
   '?',
-  'Bye?'
+  'Bye?',
+  true
 );
 
 Check(

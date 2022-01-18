@@ -1,116 +1,98 @@
-const resolveLabels = (lines) => {
-  const labels = {};
-  const resolveLabel = (name) => {
-    if (name in labels) return labels[name];
-    throw new Error(`Invalid label "${name}"`);
-  };
-  return lines
-    .reduce((res, line) => {
-      if (line[0] === 'label') labels[line[1]] = res.length;
-      else res.push(line);
-      return res;
-    }, [])
-    .map((line) =>
-      line[0] === 'jmp'
-        ? ['jmp', resolveLabel(line[1]), '//', line[1]]
-        : line[0] === 'jp0'
-        ? ['jp0', line[1], resolveLabel(line[2]), '//', line[2]]
-        : line
-    );
+const set = (index, val, arr) => {
+  const copy = [...arr];
+  copy[index] = val;
+  return copy;
 };
 
-const ops = {
-  set: ([target, value], env) => {
-    env.mem[target] = Number(value);
-  },
-  add: ([target, value], env) => {
-    env.mem[target] += Number(value);
-  },
-  jmp: ([value], env) => {
-    env.inst = Number(value) - 1;
-  },
-  jp0: ([target, lineNum], env) => {
-    if (!env.mem[target]) env.inst = lineNum - 1;
-  },
-  out: ([value], env) => {
-    env.output += String.fromCharCode(env.mem[value]);
-  },
-  drf: ([target, source], env) => {
-    env.mem[target] = env.mem[env.mem[source]];
-  },
-};
+const addToIndex = (arr, index, val) =>
+  set(index, (arr[index] || 0) + val, arr);
 
-const run = (asm, debug) => {
-  const code = resolveLabels(
-    asm
-      .split('\n')
-      .filter((s) => s.replace(/\/\/.*/g, '').trim())
-      .map((s) => s.trim().split(/\s+/))
-  );
-
-  const env = {inst: 0, mem: [], output: ''};
-  for (let x = 0; x < 50 && code[env.inst]; x++) {
-    const [op, ...args] = code[env.inst];
-    if (!ops[op]) throw new Error(`wtf is ${op}?!`);
-    ops[op](args, env);
-    if (debug) console.log(op, ...args, env);
-    env.inst++;
+const nest = (tokens) => {
+  const indexes = [];
+  const result = [];
+  for (const t of tokens) {
+    if (t === '[') indexes.push(result.length);
+    else result.push(t === ']' ? result.splice(indexes.pop()) : t); // I'm a bad person
   }
-  return env.output;
+  return result;
 };
 
-const {Test} = require('../misc/test');
-Test.assertDeepEquals(
-  run(`
-set 1 4
-set 2 3 // location of next link
+const execNode = (env, node) => {
+  if (Array.isArray(node)) {
+    return env.data[env.dataPtr]
+      ? execNode(node.reduce(execNode, env), node)
+      : env;
+  }
 
-set 3 5
-set 4 5 // location of next link
+  const {input, data, dataPtr, output} = env;
+  if (node === '>') return {...env, dataPtr: dataPtr + 1};
+  if (node === '<') return {...env, dataPtr: dataPtr - 1};
+  if (node === '+') return {...env, data: addToIndex(data, dataPtr, 1)};
+  if (node === '-') return {...env, data: addToIndex(data, dataPtr, -1)};
+  if (node === '.')
+    return {...env, output: output + String.fromCharCode(data[dataPtr])};
+  if (node === ',')
+    return {...env, input: input.slice(1), data: set(dataPtr, input[0], data)};
+  return env;
+};
 
-set 5 6
-set 6 0 // end of list
+const brainfuck = (program, input) =>
+  nest(program).reduce(execNode, {input, data: [], dataPtr: 0, output: ''});
 
-set 7 1 // location of first link
-jmp printList
-
-label printList
-set 8 40  // (
-out 8
-jmp printInner
-label donePrintInner
-set 8 41   // )
-out 8
-jmp donePrintList
-
-label printInner
-jp0 7 donePrintInner // if the value at 7 is 0, jump to the end
-drf 8 7 // put the value that 7 points to in 8
-add 8 48 // convert number to ascii
-out 8 // output it (the value of the link)
-add 7 1 // increment pointer to point at location of next link
-drf 7 7 // dereference the value there
-jp0 7 donePrintInner // if the value at 7 is 0, jump to the end
-set 8 32 // space
-out 8
-jmp printInner // loop
-
-label donePrintList
-`),
-  '(4 5 6)'
+const result = brainfuck(
+  '++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.'
 );
 
+console.log(result);
+
 /*
-
-(defun append (x y)
+(defun getIndex (arr i)
   (cond
-    (x (cons (car x) (append. (cdr x) y))) 
-    ((null. x) y)
-    ('t (cons (car x) (append. (cdr x) y)))))
+    (i (getIndex (cdr arr) (- i 1)))
+    ('t (car arr))))
 
-(append. '(a b) '(c d))
+(defun setIndex (arr index val)
+  (cond
+    (index (cons (car arr) (setIndex (cdr arr) (- index 1) val)))
+    ('t (cons val (cdr arr)))))
+
+(defun or (a b)
+  (cond (a a) ('t b)))
+
+(defun addToIndex (arr index val)
+  (setIndex arr index (+ (or (getIndex arr index) 0) val)))
+
+(defun getCurrentData (env)
+  (getIndex (getIndex env 1) (getIndex env 2)))
+
+(defun addToData (env val)
+  (setIndex env 2 (addToIndex (getIndex env 2) (getCurrentData env) val)))
+
+(defun addToOutput (env)
+  (setIndex env 3 (+ (getIndex env 3) (numToChar (getCurrentData env)))))
+
+(defun execInst (env inst)
+  (cond
+    ((eq inst '>') (addToIndex env 2 1))
+    ((eq inst '<') (addToIndex env 2 -1))
+    ((eq inst '+') (addToData env 1))
+    ((eq inst '-') (addToData env -1))
+    ((eq inst '.') (addToOutput env))
+    ((eq inst ','))
+  )
+)
+
+
+
+(defun execNode (env node)
+  (cond
+    (isAtom (execInst env node))
+    ((getCurrentData env) (execNode (reduce execNode env node) node))
+    ('t env)))
+
+(defun brainfuck (program input)
+  (reduce execNode (list input '() 0 '') (nest program))
+
+(brainfuck '++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.')
 
 */
-run(`
-
-`);

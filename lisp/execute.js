@@ -68,6 +68,7 @@ const defaultEnv = Object.entries({
     ])
   ),
   floor: ([a], env) => Math.floor(evaluate(a, env)),
+  numToChar: ([a], env) => String.fromCharCode(evaluate(a, env)),
   defmacro: ([name, [argName], body], env) => [
     [
       name,

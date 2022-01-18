@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "looptap",
+    "title": "Looptap",
+    "year": 2022,
+    "desc": "My version of CoogyLoop. Click when the ball is in the arc."
+  },
+  {
     "filePath": "smallpt",
     "title": "Another Ray Tracer",
     "year": 2021,
