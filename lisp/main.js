@@ -380,8 +380,10 @@ const transpileToJS = `
 )
 
 (defun transpileToJS (code) 
-  (+ "const isTruthy = (x) => x && (!Array.isArray(x) || x.length);\n" (join ";\n" (map toJS code))))
-
+  (+ 
+    "const isTruthy = (x) => x && (!Array.isArray(x) || x.length);\\n" 
+    (join ";\\n" (map toJS code))))
+    
 (transpileToJS '(
   (defun map (func arr)
     (cond (arr (cons (func (car arr)) (map func (cdr arr))))
@@ -648,7 +650,6 @@ const exec = (str) => {
   try {
     return execute(parse(str));
   } catch (e) {
-    console.error(e);
     return e.message;
   }
 };

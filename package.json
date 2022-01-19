@@ -2,6 +2,7 @@
   "name": "junk",
   "version": "1.0.0",
   "description": "just some junk",
+  "type": "module",
   "dependencies": {
     "chai": "^4.3.4",
     "node-fetch": "^3.0.0",
