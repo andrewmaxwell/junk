@@ -405,6 +405,65 @@ const macroExample = `
 (funTime 10)
 `;
 
+const bf = `
+(defun get (arr i)
+  (cond
+    (i (get (cdr arr) (- i 1)))
+    ('t (car arr))))
+
+(defun set (arr i val)
+  (cond
+    (i (cons (car arr) (set (cdr arr) (- i 1) val)))
+    ('t (cons val (cdr arr)))))
+
+(defun or (a b)
+  (cond (a a) ('t b)))
+
+(defun getCurrentData (env)
+  (or (get (getData env) (getDataPtr env)) 0))
+
+(defun getInput (env) (get env 0))
+(defun setInput (env val) (set env 0 val))
+(defun consumeInput (env) (setInput env (cdr (getInput env))))
+(defun readInput (env)
+  (setData env (set (getData env) (getDataPtr env) (car getInput))))
+
+(defun getData (env) (get env 1))
+(defun setData (env data) (set env 1 data))
+(defun addToCurrentData (env val)
+  (setData env (set (getData env) (getDataPtr env) (+ (getCurrentData env) val))))
+
+(defun getDataPtr (env) (get env 2))
+(defun setDataPtr (env val) (set env 2 val))
+(defun moveDataPtr (env dir) 
+  (setDataPtr env (+ (getDataPtr env) dir)))
+
+(defun getOutput (env) (get env 3))
+(defun setOutput (env val) (set env 3 val))
+(defun appendToOutput (env)
+  (setOutput env (+ (getOutput env) (numToChar (getCurrentData env)))))
+
+(defun execInst (env inst)
+  (cond
+    ((eq inst ">") (moveDataPtr env 1))
+    ((eq inst "<") (moveDataPtr env -1))
+    ((eq inst "+") (addToCurrentData env 1))
+    ((eq inst "-") (addToCurrentData env -1))
+    ((eq inst ".") (appendToOutput env))
+    ((eq inst ",") (consumeInput (readInput env)))
+    ('t env)))
+
+(defun execNode (env node)
+  (cond
+    ((atom node) (execInst env node))
+    ((getCurrentData env) (execNode (reduce execNode env node) node))
+    ('t env)))
+
+(defun brainfuck (program input)
+  (getOutput (reduce execNode (list input '() 0 "") (nest program))))
+  
+`;
+
 const tests = [
   ['(quote a)', 'a', 'quote returns its first argument as a literal'],
   ["'a", 'a', 'quote shorthand'],
@@ -575,17 +634,21 @@ const map = (func, arr) => isTruthy(arr) ? [func(arr[0]), ...map(func, arr.slice
 map((x) => x[0], [['1', '2'], ['3', '4'], ['5', '6']])`,
     'Lisp to JS Transpiler',
   ],
-  // [
-  //   reduce + nester + bf + "(brainfuck '++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.')",
-  //   'Hello, World!\n',
-  //   'Brainfuck Interpreter'
-  // ]
+  [
+    reduce +
+      nester +
+      bf +
+      '(brainfuck "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." "")',
+    'Hello World!\n',
+    'Brainfuck Interpreter',
+  ],
 ];
 
 const exec = (str) => {
   try {
     return execute(parse(str));
   } catch (e) {
+    console.error(e);
     return e.message;
   }
 };

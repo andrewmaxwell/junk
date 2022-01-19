@@ -1,22 +1,31 @@
 const isAtom = (expr) => !Array.isArray(expr) || !expr.length;
 const toBool = (val) => (val ? 't' : []);
 const fromBool = (val) => val && (!Array.isArray(val) || val.length);
-const evaluate = (expr, env) => {
+// const toLisp = (expr) =>
+//   Array.isArray(expr) ? `(${expr.map(toLisp).join(' ')})` : expr;
+const printStack = (stack) =>
+  stack
+    .map((s) => `\n    at ${s}`)
+    .reverse()
+    .join('');
+const evaluate = (expr, env, stack = []) => {
   if (typeof expr === 'number') return expr;
 
   if (isAtom(expr)) {
     for (const [key, val] of env) {
       if (key === expr) return val;
     }
-    throw new Error(`\`${expr}\` is not defined`);
+    throw new Error(`\`${expr}\` is not defined${printStack(stack)}`);
   } else {
-    const func = evaluate(expr[0], env);
+    const func = evaluate(expr[0], env, [...stack, expr[0]]);
     if (typeof func === 'function') {
-      const result = func(expr.slice(1), env);
-      // console.log('>>>', expr, '->', result);
+      const result = func(expr.slice(1), env, [...stack, expr[0]]);
+      // console.log('>>>', toLisp(expr), '->', result);
       return result;
     }
-    throw new Error(`Not a function: ${JSON.stringify(expr[0])}`);
+    throw new Error(
+      `Not a function: ${JSON.stringify(expr[0])}${printStack(stack)}`
+    );
   }
 };
 
@@ -27,29 +36,43 @@ const deepEq = (a, b) =>
 
 const defaultEnv = Object.entries({
   quote: ([a]) => a,
-  atom: ([a], env) => toBool(isAtom(evaluate(a, env))),
-  eq: ([a, b], env) => toBool(deepEq(evaluate(a, env), evaluate(b, env))),
-  car: ([a], env) => evaluate(a, env)[0],
-  cdr: ([a], env) => evaluate(a, env).slice(1),
-  cons: ([a, b], env) => [evaluate(a, env), ...evaluate(b, env)],
-  cond: (args, env) => {
+  atom: ([a], env, stack) =>
+    toBool(isAtom(evaluate(a, env, [...stack, 'atom']))),
+  eq: ([a, b], env, stack) =>
+    toBool(deepEq(evaluate(a, env), evaluate(b, env, [...stack, 'eq']))),
+  car: ([a], env, stack) => evaluate(a, env, [...stack, 'car'])[0],
+  cdr: ([a], env, stack) => evaluate(a, env, [...stack, 'cdr']).slice(1),
+  cons: ([a, b], env, stack) => [
+    evaluate(a, env, [...stack, 'cons head']),
+    ...evaluate(b, env, [...stack, 'cons tail']),
+  ],
+  cond: (args, env, stack) => {
     for (const [pred, expr] of args) {
-      if (fromBool(evaluate(pred, env))) return evaluate(expr, env);
+      if (fromBool(evaluate(pred, env, [...stack, 'cond predicate'])))
+        return evaluate(expr, env, [...stack, 'cond body']);
     }
   },
   lambda:
     ([argList, body]) =>
-    (args, env) =>
-      evaluate(body, [
-        ...argList.map((arg, i) => [arg, evaluate(args[i], env)]),
-        ...env,
-      ]),
-  label: ([name, func], env) => [...env, [name, evaluate(func, env)]],
-  defun: ([name, args, body], env) => [
+    (args, env, stack) =>
+      evaluate(
+        body,
+        [
+          ...argList.map((arg, i) => [arg, evaluate(args[i], env, stack)]),
+          ...env,
+        ],
+        stack
+      ),
+  label: ([name, func], env, stack) => [
     ...env,
-    [name, evaluate(['lambda', args, body], env)],
+    [name, evaluate(func, env, [...stack, 'label'])],
   ],
-  list: (args, env) => args.map((a) => evaluate(a, env)),
+  defun: ([name, args, body], env, stack) => [
+    ...env,
+    [name, evaluate(['lambda', args, body], env, [...stack, 'defun'])],
+  ],
+  list: (args, env, stack) =>
+    args.map((a) => evaluate(a, env, [...stack, 'list'])),
   ...Object.fromEntries(
     Object.entries({
       '+': (a, b) => a + b,
@@ -64,15 +87,22 @@ const defaultEnv = Object.entries({
       '**': (a, b) => a ** b,
     }).map(([op, func]) => [
       op,
-      (args, env) => args.map((x) => evaluate(x, env)).reduce(func),
+      (args, env, stack) =>
+        args.map((x) => evaluate(x, env, [...stack, op])).reduce(func),
     ])
   ),
-  floor: ([a], env) => Math.floor(evaluate(a, env)),
-  numToChar: ([a], env) => String.fromCharCode(evaluate(a, env)),
-  defmacro: ([name, [argName], body], env) => [
+  floor: ([a], env, stack) => Math.floor(evaluate(a, env, [...stack, 'floor'])),
+  numToChar: ([a], env, stack) =>
+    String.fromCharCode(evaluate(a, env, [...stack, 'numToChar'])),
+  defmacro: ([name, [argName], body], env, stack) => [
     [
       name,
-      (args, env) => evaluate(evaluate(body, [[argName, args], ...env]), env),
+      (args, env) =>
+        evaluate(
+          evaluate(body, [[argName, args], ...env], [...stack, 'macro body']),
+          env,
+          [...stack, 'defmacro']
+        ),
     ],
     ...env,
   ],

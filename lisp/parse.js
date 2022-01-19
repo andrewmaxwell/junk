@@ -1,4 +1,5 @@
-const tokenize = (str) => str.match(/\(|\)|"[^"]*"|'|[^\s()]+/g);
+const tokenize = (str) =>
+  str.replace(/\/\/.*/g, '').match(/\(|\)|"[^"]*"|'|[^\s()]+/g);
 
 const nest = (tokens) => {
   const indexes = [];
