@@ -2,6 +2,7 @@ const weeksAgo = (date) => Math.round((Date.now() - date) / (7 * 24 * 3600000));
 
 const processAttendance = (attendanceHistory, people) => {
   const personIndex = Object.fromEntries(people.map((p) => [p.id, p]));
+
   const result = Object.entries(attendanceHistory)
     .map(([dateStr, arr]) => ({
       date: new Date(dateStr),
@@ -12,10 +13,9 @@ const processAttendance = (attendanceHistory, people) => {
     }))
     .sort((a, b) => a.date - b.date);
 
+  for (const p of people) p.dates = [];
   for (const {date, people} of result) {
-    for (const p of people) {
-      p.lastPresent = date;
-    }
+    for (const p of people) p.dates.push(date);
   }
   return result;
 };
@@ -48,7 +48,7 @@ const getNewStudentNames = (attendanceHistory, minDaysAgo, maxDaysAgo) => {
 const processAbsences = (people) => {
   const acc = {};
   for (const p of people) {
-    const w = weeksAgo(p.lastPresent);
+    const w = weeksAgo(p.dates[p.dates.length - 1]);
     if (w) (acc[w] = acc[w] || []).push(p);
   }
   return Object.entries(acc)
@@ -56,6 +56,29 @@ const processAbsences = (people) => {
     .map(
       ([i, w]) =>
         `Absent ${i} week${i == 1 ? '' : 's'}: (${w.length})\n${nameList(w)}\n`
+    )
+    .join('\n');
+};
+
+const leaderboard = (people, attendanceHistory) => {
+  const oneYearAgo = Date.now() - 356 * 24 * 3600 * 1000;
+  return people
+    .map((p) => {
+      const pastYearCount = p.dates.reduce((n, d) => n + (d >= oneYearAgo), 0);
+      const pastYearTotal = attendanceHistory.reduce(
+        (n, {date}) => n + (date >= p.dates[0]),
+        0
+      );
+      return {
+        name: p.name,
+        pastYearCount,
+        pastYearTotal,
+        sorter: (pastYearCount * pastYearCount) / pastYearTotal,
+      };
+    })
+    .sort((a, b) => b.sorter - a.sorter)
+    .map(
+      (p, i) => `${i + 1}. ${p.name} (${p.pastYearCount} / ${p.pastYearTotal})`
     )
     .join('\n');
 };
@@ -77,7 +100,7 @@ export const makeReport = (people, attendanceHistory) => {
   attendanceHistory = processAttendance(attendanceHistory, people);
 
   const newStudentsThisWeek = getNewStudentNames(attendanceHistory, 7, 60);
-  const absences = processAbsences(people.filter((p) => !p.sponsor));
+  const absences = processAbsences(people);
 
   return `
 Students: ${students.length}
@@ -104,5 +127,9 @@ ${nameList(middleSchoolGirls)}
 New students this week (${newStudentsThisWeek.length}): 
 ${nameList(newStudentsThisWeek)}
 
-${absences}`.trim();
+${absences.trim()}
+
+Attendance Leaderboard (Past Year)
+${leaderboard(people, attendanceHistory)}
+`;
 };

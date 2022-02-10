@@ -108,6 +108,10 @@ const init = async () => {
   };
 
   console.log('attendanceHistory', attendanceHistory);
+  document.querySelector('#numGroups').value = people.reduce(
+    (n, p) => n + (!p.absent && p.sponsor ? 1 : 0),
+    0
+  );
   document.querySelector('#output').innerText = makeReport(
     people,
     attendanceHistory
