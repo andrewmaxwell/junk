@@ -26,9 +26,13 @@ const evaluate = (expr, env, stack = []) => {
     const {val, loc} = car(expr);
     const func = evaluate(car(expr), env, cons(`${val} ${loc}`, stack));
     if (typeof func === 'function') {
-      const result = func(cdr(expr), env, cons(`${val} ${loc}`, stack));
-      // console.log('>>>', toLisp(expr), '->', result);
-      return result;
+      try {
+        const result = func(cdr(expr), env, cons(`${val} ${loc}`, stack));
+        // console.log('>>>', toLisp(expr), '->', result);
+        return result;
+      } catch (e) {
+        throw new Error(`An error occurred: ${e.message}${printStack(stack)}`);
+      }
     }
     throw new Error(
       `${JSON.stringify(getVals(car(expr)))} is not a function${printStack(
@@ -74,16 +78,18 @@ const defaultEnv = Object.entries({
     }
   },
   lambda:
-    ([argList, body]) =>
-    (args, env, stack) =>
-      evaluate(
+    ([argList, body], outerEnv) =>
+    (args, innerEnv, stack) => {
+      const env = [...innerEnv, ...outerEnv];
+      return evaluate(
         body,
         concat(
           argList.map((arg, i) => list(arg.val, evaluate(args[i], env, stack))),
           env
         ),
         stack
-      ),
+      );
+    },
   defun: ([{val, loc}, args, body], env, stack) =>
     cons(
       list(val, evaluate([{val: 'lambda', loc}, args, body], env, stack)),
