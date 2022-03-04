@@ -70,7 +70,7 @@ const run = (asm, debug) => {
   return env.output;
 };
 
-const {Test} = require('../misc/test');
+import {Test} from '../misc/test.js';
 Test.assertDeepEquals(
   run(`
 set 1 4

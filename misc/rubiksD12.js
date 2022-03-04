@@ -14,7 +14,6 @@
 */
 
 import {PriorityQueue} from './PriorityQueue.js';
-import {Trie} from './Trie.js';
 
 const rotationData = {
   w: [
@@ -147,33 +146,48 @@ valcolwgpt`
   .replace(/[^a-z]/g, '')
   .split('');
 
-const getDiff = (arr) => arr.reduce((diff, t, i) => diff + (t !== goal[i]), 0);
+const getCost = (arr) => arr.reduce((cost, t, i) => cost + (t !== goal[i]), 0);
 
 const go = () => {
-  const seen = new Trie();
-  const q = new PriorityQueue((a, b) => a.diff < b.diff);
+  const seen = {};
+  const q = new PriorityQueue((a, b) => a.cost < b.cost);
 
-  q.push({arr: start, diff: getDiff(start), moves: []});
+  q.push({arr: start, cost: getCost(start), moves: ''});
 
-  for (let i = 0; i < 1e5 && q.size(); i++) {
+  for (let i = 0; i < 10 && q.size(); i++) {
     const curr = q.pop();
     for (const {move, order} of rotations) {
       const next = rotate(curr.arr, order);
-      const nextScore = getDiff(next);
+      const nextScore = getCost(next);
       if (!nextScore) return curr.moves + move;
       const str = next.join('');
-      if (seen.has(str)) continue;
-      seen.add(str);
-      q.push({arr: next, diff: nextScore, moves: curr.moves + move});
+      if (seen[str]) continue;
+      seen[str] = true;
+      q.push({arr: next, cost: nextScore, moves: curr.moves + move});
     }
   }
 
-  console.log(q.heap.pop(), q.size());
+  // console.log(q.heap.pop(), q.size());
+  // console.log(seen);
+  console.log(q);
 };
 
-// import {Test} from './test.js';
-// Test.assertDeepEquals(getDiff(start), 111);
-// Test.assertDeepEquals(getDiff(goal), 0);
+// const solver = new SimulatedAnnealingSolver({
+//   initialTemperature: 10,
+//   coolingFactor: 0.9999,
+//   getCost,
+//   generateNeighbor: (s) => {
+//     const {order} = rotations[Math.floor(Math.random() * rotations.length)];
+//     return rotate(s, order);
+//   },
+// });
+// const go = () => {
+//   solver.init(start);
+//   for (let i = 0; i < 1e6; i++) {
+//     solver.iterate();
+//   }
+//   return solver;
+// };
 
 console.time();
 const result = go();
