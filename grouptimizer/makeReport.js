@@ -76,6 +76,7 @@ const leaderboard = (people, attendanceHistory) => {
         sorter: (pastYearCount * pastYearCount) / pastYearTotal,
       };
     })
+    .filter((p) => p.pastYearTotal)
     .sort((a, b) => b.sorter - a.sorter)
     .map(
       (p, i) => `${i + 1}. ${p.name} (${p.pastYearCount} / ${p.pastYearTotal})`
