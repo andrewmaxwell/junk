@@ -15,14 +15,19 @@ const exprToString = (expr, wrap) => {
   return wrap ? `(${res})` : res;
 };
 
-const evaluate = (str, lib) =>
-  exprToString(simplify(resolvePlaceholders(parseExpr(str), lib)));
+const evaluate = (str, lib, debug) =>
+  exprToString(simplify(resolvePlaceholders(parseExpr(str), lib), debug));
 
 const lib = parseLib(`
 false = λab.b
 true = λab.a
-inc = λnfx.f(nfx) 
-plus = λmnfx.mf(nfx)
+succ = λnfx.f(nfx) 
+
+add = λmnfx.mf(nfx)
+mult = λnkf.n(kf)
+pow = λnk.k(n)
+
+one = λfx.fx
 two = λfx.f(fx)
 three = λfx.f(f(fx))`);
 
@@ -31,10 +36,11 @@ const tests = [
   ['λx.x', 'λx.x'],
   ['(λx.x)y', 'y'],
   ['(λx.x)(λx.x)', 'λa.a'],
-  ['$plus $two $three', 'λfx.f(f(f(f(fx))))'],
-  //   ['$inc ($inc $three)', 'λfx.f(f(f(f(fx))))'],
+  ['$add $two $three', 'λfx.f(f(f(f(fx))))'],
+  ['$succ $three', 'λfx.f(f(f(fx)))'],
+  ['$mult $two $three', 'λfx.f(f(f(f(f(fx)))))', true],
 ];
 
-for (const [input, expected] of tests) {
-  Test.assertEquals(evaluate(input, lib), expected);
+for (const [input, expected, debug] of tests) {
+  Test.assertEquals(evaluate(input, lib, debug), expected);
 }

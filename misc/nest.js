@@ -23,25 +23,30 @@
 
 */
 
-const nest = ([first, ...rest]) => {
-  if (!first) return [];
-  if (first === '(') {
-    let depth = 1;
-    for (let i = 0; i < rest.length; i++) {
-      if (rest[i] === '(') depth++;
-      else if (rest[i] === ')' && !--depth) {
-        return [nest(rest.slice(0, i)), ...nest(rest.slice(i + 1))];
-      }
-    }
-  }
-  return [first, ...nest(rest)];
+// const nest = ([first, ...rest]) => {
+//   if (!first) return [];
+//   if (first === '(') {
+//     let depth = 1;
+//     for (let i = 0; i < rest.length; i++) {
+//       if (rest[i] === '(') depth++;
+//       else if (rest[i] === ')' && !--depth) {
+//         return [nest(rest.slice(0, i)), ...nest(rest.slice(i + 1))];
+//       }
+//     }
+//   }
+//   return [first, ...nest(rest)];
+// };
+
+const nest = (input, acc = []) => {
+  const token = input.shift();
+  if (token === undefined || token === ')') return acc;
+  return nest(input, [...acc, token === '(' ? nest(input) : token]);
 };
 
-const {Test} = require('./test');
+import {Test} from './test.js';
 
-Test.assertDeepEquals(nest('a'), ['a']);
+Test.assertDeepEquals(nest(['a']), ['a']);
 Test.assertDeepEquals(nest(['(', 'a', 'b', ')']), [['a', 'b']]);
-
 Test.assertDeepEquals(nest('a(b(c)(d))e'.split('')), [
   'a',
   ['b', ['c'], ['d']],
