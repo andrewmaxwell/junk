@@ -65,7 +65,9 @@ const makeInitialState = (numGroups, people) => {
 
 document.querySelectorAll('.go').forEach((button) => {
   button.addEventListener('click', async function () {
-    updateMyJSON(attendanceHistory);
+    if (attendanceHistory && typeof attendanceHistory === 'object') {
+      updateMyJSON(attendanceHistory);
+    }
 
     const numGroups =
       parseFloat(document.querySelector('#numGroups').value) || 4;
@@ -98,16 +100,20 @@ document.querySelector('#send').addEventListener('click', () => {
 const init = async () => {
   people = await getPeople();
   const dateToday = new Date().toISOString().slice(0, 10);
-  attendanceHistory = {
-    ...(await getMyJSON()),
-    [dateToday]: people
-      .filter((p) => !p.absent)
-      .map((p) => p.id)
-      .sort((a, b) => a - b)
-      .join(','),
-  };
 
-  console.log('attendanceHistory', attendanceHistory);
+  try {
+    attendanceHistory = {
+      ...(await getMyJSON()),
+      [dateToday]: people
+        .filter((p) => !p.absent)
+        .map((p) => p.id)
+        .sort((a, b) => a - b)
+        .join(','),
+    };
+    console.log('attendanceHistory', attendanceHistory);
+  } catch (e) {
+    console.error(e.message);
+  }
   document.querySelector('#numGroups').value = people.reduce(
     (n, p) => n + (!p.absent && p.sponsor ? 1 : 0),
     0

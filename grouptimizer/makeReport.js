@@ -84,7 +84,7 @@ const leaderboard = (people, attendanceHistory) => {
     .join('\n');
 };
 
-export const makeReport = (people, attendanceHistory) => {
+export const makeReport = (people, attendanceHistory = {}) => {
   const presentPeople = people.filter((p) => !p.absent);
   const sponsors = presentPeople.filter((p) => p.sponsor);
   const students = presentPeople.filter((p) => !p.sponsor);
