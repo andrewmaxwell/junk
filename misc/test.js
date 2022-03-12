@@ -45,3 +45,5 @@ export const Test = {
   },
   inspect: toString,
 };
+
+export const deepLog = (x) => console.dir(x, {depth: Infinity});

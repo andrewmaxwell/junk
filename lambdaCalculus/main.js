@@ -1,46 +1,37 @@
 // https://en.wikipedia.org/wiki/Lambda_calculus
 // https://justine.lol/lambda/
 
-import {parseExpr} from './parse.js';
+import {evaluate} from './evaluate.js';
+import {tests} from './tests.js';
 
-import {simplify} from './simplify.js';
-import {Test} from '../misc/test.js';
-import {parseLib, resolvePlaceholders} from './resolvePlaceholders.js';
+document.querySelector('#root').innerHTML = tests
+  .map(
+    ([input, , desc = '']) => `
+    <div class="container">
+      <p>${desc}</p>
+      <textarea>${input.trim()}</textarea>
+      <div class="result"></div>
+      <div class="time"></div>
+    </div>
+  `
+  )
+  .join('');
 
-const exprToString = (expr, wrap) => {
-  if (!expr || typeof expr !== 'object') return expr;
-  const res = Array.isArray(expr)
-    ? expr.map(exprToString).join('')
-    : `λ${expr.args.join('')}.${exprToString(expr.body)}`;
-  return wrap ? `(${res})` : res;
-};
-
-const evaluate = (str, lib, debug) =>
-  exprToString(simplify(resolvePlaceholders(parseExpr(str), lib), debug));
-
-const lib = parseLib(`
-false = λab.b
-true = λab.a
-succ = λnfx.f(nfx) 
-
-add = λmnfx.mf(nfx)
-mult = λnkf.n(kf)
-pow = λnk.k(n)
-
-one = λfx.fx
-two = λfx.f(fx)
-three = λfx.f(f(fx))`);
-
-const tests = [
-  ['x', 'x'],
-  ['λx.x', 'λx.x'],
-  ['(λx.x)y', 'y'],
-  ['(λx.x)(λx.x)', 'λa.a'],
-  ['$add $two $three', 'λfx.f(f(f(f(fx))))'],
-  ['$succ $three', 'λfx.f(f(f(fx)))'],
-  ['$mult $two $three', 'λfx.f(f(f(f(f(fx)))))', true],
-];
-
-for (const [input, expected, debug] of tests) {
-  Test.assertEquals(evaluate(input, lib, debug), expected);
-}
+document.querySelectorAll('textarea').forEach((target) => {
+  const handler = () => {
+    target.style.height = '1px';
+    target.style.height = target.scrollHeight + 'px';
+    if (target.value) {
+      const start = performance.now();
+      const result = evaluate(target.value);
+      const time = (performance.now() - start).toFixed(1) + ' ms';
+      target.nextElementSibling.innerHTML = `<span>= ${result}</span>`;
+      target.nextElementSibling.nextElementSibling.innerHTML = time;
+    } else {
+      target.nextElementSibling.innerHTML = '';
+      target.nextElementSibling.nextElementSibling.innerHTML = '';
+    }
+  };
+  target.addEventListener('input', handler);
+  handler();
+});

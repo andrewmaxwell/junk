@@ -12,3 +12,8 @@ export const eachNode = (func, ob) => {
     for (const key in ob) eachNode(func, ob[key]);
   }
 };
+
+// export const pipe =
+//   (...funcs) =>
+//   (input) =>
+//     funcs.reduce((r, f) => f(r), input);
