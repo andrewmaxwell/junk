@@ -36,7 +36,7 @@ export const tests = [
     'x',
   ],
   [
-    'Lambdas can be partially applied. This is the same lambda as above but with only one argument given. It returns a lambda that takes the second argument and returns the first.',
+    'Lambdas can be partially applied. This is the same lambda as above but with only one argument given. It returns a lambda that takes the second argument and returns the first. Then "b" is renamed to "a" in the result.',
     '(λab.a)x',
     'λa.x',
   ],
@@ -56,17 +56,22 @@ export const tests = [
     'λab.a',
   ],
   [
-    'Similarly, when the predicate in a boolean expression is false, we take the second value. So we can represent "false" as a function that takes two arguments and always returns the second.',
+    'Similarly, when the predicate in a ternary expression is false, we get the second value. So lets represent "false" as a function that takes two arguments and always returns the second.',
     'λab.b',
     'λab.b',
   ],
   [
-    'To negate a boolean, we can apply <code>λabc.acb</code>, which is called the C-combinator or Cardinal. The C-combinator takes a three arguments and applies them, reversing the arguments of the last two. Since booleans are functions that take two arguments and return one, this effectively switches which boolean they are.',
+    `To negate a boolean, we can apply <code>λabc.acb</code>, which is called the C-combinator or Cardinal. The C-combinator takes three arguments and applies them, reversing the order of the last two. Since booleans are functions that take two arguments and return one, this has the effect of switching their value!
+      <ol>
+        <li>First, to apply <code>λabc.acb</code> to <code>λab.a</code>, take the first argument of the first lambda (<code>a</code>), and replace it with <code>(λab.a)</code> everywhere it exists after the <code>.</code> in the first lambda. Then we remove the first argument. That gives us <code>λbc.(λab.a)cb</code>.</li>
+        <li>Next, we apply <code>(λab.a)</code> to <code>cb</code>. So <code>c</code> replaces <code>a</code> and <code>b</code> replaces <code>b</code>, which doesn't really do anything in this case. So doing that simplifies <code>(λab.a)cb</code> to <code>c</code> and we get <code>λbc.c</code>.</li>
+        <li>Normalize the variable names for our final answer: <code>λab.b</code>.</li>
+      </ol>`,
     '(λabc.acb)(λab.a)',
     'λab.b',
   ],
   [
-    "For convenience, lets assign names to these. This isn't part of lambda calculus, it's just convenient.",
+    'For convenience, lets assign names to these. This isn\'t part of lambda calculus, it\'s just convenient. In the example below <code>NOT FALSE</code> just means "apply <code>NOT</code> to <code>FALSE</code>"',
     `TRUE = λab.a
 FALSE = λab.b
 NOT = λabc.acb
@@ -75,7 +80,7 @@ NOT FALSE`,
     'TRUE',
   ],
   [
-    'For AND, we can use this lambda: <code>λab.aba</code>. It takes two boolean arguments and if the first is true, it returns the second. If it the first is false, it returns the first.  Go ahead and change the FALSE in the last line to TRUE and verify that the output is what you would expect.',
+    'For AND, we can use this lambda: <code>λab.aba</code>. It takes two boolean arguments and if the first is true, it returns the second. If the first is false, it returns the first.  Go ahead and change the FALSE in the last line to TRUE and verify that the output is what you would expect.',
     `TRUE = λab.a
 FALSE = λab.b
 AND = λab.aba
@@ -121,6 +126,44 @@ EQ = λab.ab(λcd.bdc)
 EQ FALSE TRUE
 `,
     'FALSE',
+  ],
+  [
+    'How about numbers? Here are the Church encodings for some numbers. They essentially mean "apply a function to a value this many times".',
+    `ONE = λab.ab
+TWO = λab.a(ab)
+THREE = λab.a(a(ab))
+FOUR = λab.a(a(a(ab)))
+    `,
+    'FOUR',
+  ],
+  [
+    'It would be annoying to have to define them all like this though. We need a lambda to get the successor.',
+    `ONE = λab.ab
+TWO = λab.a(ab),
+SUCC = λabc.b(abc)
+
+SUCC ONE`,
+    'TWO',
+  ],
+  [
+    `Let's do some more!`,
+    `ONE = λab.ab
+SUCC = λabc.b(abc)
+
+SUCC (SUCC (SUCC ONE))`,
+    'λab.a(a(a(ab)))',
+  ],
+  [
+    "What about zero? Following the same pattern, we need a lambda that applies a lambda to a value zero times. How about <code>λab.b</code>? That's the same as FALSE! That is perfect.",
+    `ZERO = λab.b
+SUCC = λabc.b(abc)
+ONE = SUCC ZERO
+TWO = SUCC ONE
+THREE = SUCC TWO
+
+SUCC (SUCC (SUCC ZERO))
+`,
+    'THREE',
   ],
   //   [
   //     `ID = λx.x\nID ID`,
