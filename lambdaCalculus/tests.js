@@ -46,17 +46,17 @@ export const tests = [
     'λab.a',
   ],
   [
-    "Just for fun, lets string several together. Remember, renaming the arguments doesn't change anything as long as they're in the same places.",
+    "Just for fun, let's string several together. Remember, renaming the arguments doesn't change anything as long as they're in the same places.",
     'λm.λnp.λxyz.mzy(xmn)p',
     'λabcdef.afe(dab)c',
   ],
   [
-    'So how is this useful? Maybe we need some values. Lets start with booleans. Here is how we\'ll represent "true": a lambda that takes two arguments and returns the first. Think of it like a ternary expression: when the predicate is true, you return the first value.',
+    'So how is this useful? Maybe we need some values. Let\'s start with booleans. Here is how we\'ll represent "true": a lambda that takes two arguments and returns the first. Think of it like a ternary expression: when the predicate is true, you return the first value.',
     'λab.a',
     'λab.a',
   ],
   [
-    'Similarly, when the predicate in a ternary expression is false, we get the second value. So lets represent "false" as a function that takes two arguments and always returns the second.',
+    'Similarly, when the predicate in a ternary expression is false, we get the second value. So let\'s represent "false" as a function that takes two arguments and always returns the second.',
     'λab.b',
     'λab.b',
   ],
@@ -71,7 +71,7 @@ export const tests = [
     'λab.b',
   ],
   [
-    'For convenience, lets assign names to these. This isn\'t part of lambda calculus, it\'s just convenient. In the example below <code>NOT FALSE</code> just means "apply <code>NOT</code> to <code>FALSE</code>"',
+    "For convenience, let's assign names to these. This isn't part of lambda calculus, it's just convenient. In the example below <code>NOT FALSE</code> just means \"apply <code>NOT</code> to <code>FALSE</code>\"",
     `TRUE = λab.a
 FALSE = λab.b
 NOT = λabc.acb
@@ -140,7 +140,7 @@ FOUR = λab.a(a(a(ab)))
     'It would be annoying to have to define them all like this though. We need a lambda to get the successor.',
     `ONE = λab.ab
 TWO = λab.a(ab),
-SUCC = λabc.b(abc)
+SUCC = λabc.b(abc) 
 
 SUCC ONE`,
     'TWO',
@@ -160,10 +160,11 @@ SUCC = λabc.b(abc)
 ONE = SUCC ZERO
 TWO = SUCC ONE
 THREE = SUCC TWO
+FOUR = λab.a(a(a(ab)))
 
-SUCC (SUCC (SUCC ZERO))
+SUCC THREE
 `,
-    'THREE',
+    'FOUR',
   ],
   //   [
   //     `ID = λx.x\nID ID`,

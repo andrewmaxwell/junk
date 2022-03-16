@@ -53,6 +53,7 @@ const resolvePlaceholders = (expr, lib) =>
 
 export const parse = (str) => {
   const lines = str
+    .replace(/\/\/.*/g, '') // remove comments
     .trim()
     .split('\n')
     .filter((l) => l.trim());
