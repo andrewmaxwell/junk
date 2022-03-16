@@ -6,7 +6,7 @@ import {tests} from './tests.js';
 
 document.querySelector('#root').innerHTML = tests
   .map(
-    ([input, , desc = '']) => `
+    ([desc, input]) => `
     <div class="container">
       <p>${desc}</p>
       <textarea>${input.trim()}</textarea>
@@ -15,7 +15,7 @@ document.querySelector('#root').innerHTML = tests
     </div>
   `
   )
-  .join('');
+  .join('<hr />');
 
 document.querySelectorAll('textarea').forEach((target) => {
   const handler = () => {

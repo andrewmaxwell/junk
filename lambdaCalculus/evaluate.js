@@ -1,19 +1,25 @@
-import {parse} from './parse.js';
+import {exprToString, parse} from './parse.js';
 import {simplify} from './simplify.js';
-
 import {replaceVars} from './replaceVars.js';
+import {treeMap} from './utils.js';
 
-const exprToString = (expr, wrap) => {
-  if (!expr || typeof expr !== 'object') return expr;
-  const res = Array.isArray(expr)
-    ? expr.map(exprToString).join('')
-    : `λ${expr.args.join('')}.${exprToString(expr.body)}`;
-  return wrap ? `(${res})` : res;
+const useNamesFromLib = (expr, lib) => {
+  const lookup = {};
+  for (const key in lib) {
+    lookup[exprToString(replaceVars(simplify(lib[key])))] = key;
+  }
+  return treeMap(
+    (node) => lookup[exprToString(replaceVars(node))] || node,
+    expr
+  );
 };
 
 export const evaluate = (str, debug) => {
   try {
-    return exprToString(replaceVars(simplify(parse(str), debug)));
+    const {lib, code} = parse(str);
+    return exprToString(
+      replaceVars(useNamesFromLib(simplify(code, debug), lib))
+    );
   } catch (e) {
     return e.message;
   }

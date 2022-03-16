@@ -3,12 +3,12 @@ import {treeMap} from './utils.js';
 
 const apply = (a, b, debug) => {
   const [firstArg, ...restArgs] = a.args;
-  const bWithReplacedVars = replaceVars(b, a);
-  const body = simplify(
-    treeMap((node) => (node === firstArg ? bWithReplacedVars : node), a.body),
-    debug
+  const bWithReplacedVars = replaceVars(b, [a, b]);
+  const body = treeMap(
+    (node) => (node === firstArg ? bWithReplacedVars : node),
+    a.body
   );
-  const r = restArgs.length ? {args: restArgs, body} : body;
+  const r = simplify(restArgs.length ? {args: restArgs, body} : body, debug);
   if (debug) console.dir({apply: 'apply', a, b, r}, {depth: Infinity});
   return r;
 };
@@ -40,7 +40,7 @@ export const simplify = (expr, debug) => {
   }
 
   if (expr && expr.body) {
-    const body = simplify(expr.body, debug);
+    const body = replaceVars(simplify(expr.body, debug), expr.args);
     return body.args
       ? {args: [...expr.args, ...body.args], body: body.body}
       : {...expr, body};

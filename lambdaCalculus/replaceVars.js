@@ -10,16 +10,19 @@ export const replaceVars = (expr, parentExpr = []) => {
   const varMapping = {};
   let counter = 0;
 
-  return treeMap((node) => {
-    if (node.args) {
-      return {
-        ...node,
-        args: node.args.map(
-          (el) => (varMapping[el] = varMapping[el] || availableVars[counter++])
-        ),
-      };
-    }
-    if (typeof node === 'string') return varMapping[node] || node;
-    return node;
-  }, expr);
+  return treeMap(
+    (node, path) =>
+      node?.args
+        ? {
+            ...node,
+            args: node.args.map(
+              (el) =>
+                (varMapping[el] = varMapping[el] || availableVars[counter++])
+            ),
+          }
+        : typeof node === 'string' && !path.includes('args')
+        ? varMapping[node] || node
+        : node,
+    expr
+  );
 };

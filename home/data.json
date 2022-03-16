@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "lambdaCalculus",
+    "title": "Lambda Calculus",
+    "year": 2022,
+    "desc": "An educational lambda calculus interpreter."
+  },
+  {
     "filePath": "looptap",
     "title": "Looptap",
     "year": 2022,
