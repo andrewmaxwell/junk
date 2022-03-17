@@ -7,9 +7,8 @@ const assertEquals = (actual, expected, description) => {
   if (description) console.log(description);
   if (equals(actual, expected)) pass();
   else {
-    if (Test.failFast)
-      throw new Error(`Expected\n${expected}\nGot\n${actual}\n`);
     fail(`Expected \n${toString(expected)}\nGot \n${toString(actual)}\n\n`);
+    if (Test.failFast) process.exit(1);
   }
   // else fail(`Expected\n${expected}\nGot\n${actual}\n`);
   // else throw new Error(`Expected\n${expected}\nGot\n${actual}\n`);

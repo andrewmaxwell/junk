@@ -1,12 +1,22 @@
-<style>
-* {font-family: monospace}
-.container {width: 800px; margin: 30px; padding-bottom: 30px; border-bottom: 1px solid #CCC}
-textarea {width: 100%; border: 0; background: #444; color: white}
-.result {background: rgba(0,0,0,0.1); padding: 2px 5px; margin-top: 3px; white-space: pre;}
-</style>
-<body>
-  <h1>Lisp in JS</h1>
-  <p>An implementation of McCarthy's Lisp as presented <a href="http://languagelog.ldc.upenn.edu/myl/llog/jmc.pdf" target="_blank">here</a> by Paul Graham. All lisp code is editable and runs immediately when changed.</p>
-  <div id="root"></div>
-  <script src="main.js" type="module"></script>
-</body>
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Lisp in JS</title>
+    <style>
+      * {font-family: monospace; border-radius: 2px}
+      body {max-width: 1200px; margin: 30px auto}
+      textarea {width: 100%; border: 0; padding: 1px 5px; background: #333; color: white; font-size: inherit}
+      .result {background: rgba(0,0,0,0.1); padding: 1px 5px; white-space: pre;}
+      .time {text-align: right; font-size: 0.5em; color: #AAA}
+    </style>
+  </head>
+  <body>
+    <h1>Lisp in JS</h1>
+    <p>An implementation of McCarthy's Lisp as presented <a href="http://languagelog.ldc.upenn.edu/myl/llog/jmc.pdf" target="_blank">here</a> by Paul Graham. All lisp code is editable and runs immediately when changed.</p>
+    <div id="root"></div>
+    <script src="main.js" type="module"></script>
+  </body>
+</html>
