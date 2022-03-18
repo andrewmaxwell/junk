@@ -18,7 +18,18 @@ const doStuff = () => {
   let result = '';
   for (const {name, size} of data) {
     const y = ((Math.log(size) - min) / (max - min)) * pageLength;
-    result += `<div class="item" style="top: ${y}" title="${name}">${name}: ${size.toExponential()}m</div>`;
+    result += `<div class="item" style="top:${y};left:60px" title="${name}">${name}: ${size.toExponential()}m</div>`;
+  }
+
+  for (
+    let i = 10 ** Math.floor(Math.log10(data[0].size) + 1);
+    i < data[data.length - 1].size * 10;
+    i *= 10
+  ) {
+    const y = ((Math.log(i) - min) / (max - min)) * pageLength;
+    result += `<div class="item label" style="top:${y}">${i.toExponential(
+      0
+    )}m</div>`;
   }
 
   document.querySelector('#result').innerHTML = result;
