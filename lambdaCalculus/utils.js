@@ -15,13 +15,13 @@ export const eachNode = (func, ob) => {
   }
 };
 
-// export const deepEq = (a, b) =>
-//   a === b ||
-//   (a &&
-//     b &&
-//     typeof a === 'object' &&
-//     typeof b === 'object' &&
-//     Object.keys({...a, ...b}).every((k) => deepEq(a[k], b[k])));
+export const deepEq = (a, b) =>
+  a === b ||
+  (a &&
+    b &&
+    typeof a === 'object' &&
+    typeof b === 'object' &&
+    Object.keys({...a, ...b}).every((k) => deepEq(a[k], b[k])));
 
 // export const pipe =
 //   (...funcs) =>

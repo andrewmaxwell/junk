@@ -1,7 +1,6 @@
 // https://en.wikipedia.org/wiki/Lambda_calculus
 // https://justine.lol/lambda/
 
-import {evaluate} from './evaluate.js';
 import {tests} from './tests.js';
 
 document.querySelector('#root').innerHTML = tests
@@ -18,15 +17,17 @@ document.querySelector('#root').innerHTML = tests
   .join('<hr />');
 
 document.querySelectorAll('textarea').forEach((target) => {
+  // evaluate in web workers so if any of them are really slow or crash it doesn't break the whole page hopefully
+  const worker = new Worker('worker.js', {type: 'module'});
+  worker.addEventListener('message', ({data: {result, time}}) => {
+    target.nextElementSibling.innerHTML = `<span>= ${result}</span>`;
+    target.nextElementSibling.nextElementSibling.innerHTML = time;
+  });
   const handler = () => {
-    target.style.height = '1px';
-    target.style.height = target.scrollHeight + 'px';
     if (target.value) {
-      const start = performance.now();
-      const result = evaluate(target.value);
-      const time = (performance.now() - start).toFixed(1) + ' ms';
-      target.nextElementSibling.innerHTML = `<span>= ${result}</span>`;
-      target.nextElementSibling.nextElementSibling.innerHTML = time;
+      target.style.height = '1px';
+      target.style.height = target.scrollHeight + 'px';
+      worker.postMessage(target.value);
     } else {
       target.nextElementSibling.innerHTML = '';
       target.nextElementSibling.nextElementSibling.innerHTML = '';

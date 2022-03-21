@@ -42,7 +42,7 @@ const parseLambda = (ast) => {
   };
 };
 
-const parseExpr = (str) => parseLambda(nest(str.match(/[λ.()a-z]|\w+/g)));
+const parseExpr = (str) => parseLambda(nest(str.match(/[λ.()a-z]|[A-Z]+/g)));
 
 const resolvePlaceholders = (expr, lib) =>
   treeMap((node) => {

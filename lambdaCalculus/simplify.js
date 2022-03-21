@@ -1,5 +1,5 @@
 import {replaceVars} from './replaceVars.js';
-import {treeMap} from './utils.js';
+import {deepEq, treeMap} from './utils.js';
 
 const apply = (a, b, debug) => {
   const [firstArg, ...restArgs] = a.args;
@@ -30,7 +30,7 @@ export const simplify = (expr, debug) => {
 
     const r = simplified.length === 1 ? simplify(simplified[0]) : simplified;
 
-    if (debug) {
+    if (debug && !deepEq(expr, r)) {
       console.dir(
         {simplify: 'simplify', before: expr, after: r},
         {depth: Infinity}

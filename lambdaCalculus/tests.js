@@ -10,6 +10,7 @@ DEC = λnfx.n(λgh.h(gf))(λu.x)(λu.u)
 
 C K == K I (cardinal is basically not, if you think of K being true and KI being false)
 C (K I) = K
+B = λfga.f(ga) // Bluebird, 1-1 Composition
 */
 
 export const tests = [
@@ -139,7 +140,7 @@ FOUR = λab.a(a(a(ab)))
   [
     'It would be annoying to have to define them all like this though. We need a lambda to get the successor.',
     `ONE = λab.ab
-TWO = λab.a(ab),
+TWO = λab.a(ab)
 SUCC = λabc.b(abc) 
 
 SUCC ONE`,
@@ -166,42 +167,25 @@ SUCC THREE
 `,
     'FOUR',
   ],
+  [
+    `I'd like to introduce <code>λabc.a(bc)</code>, known as the B-combinator, or the Bluebird. It is the combinator of composition. For now, it lets us write SUCC like this. We'll use it more later.`,
+    `ZERO = λab.b
+B = λabc.a(bc)
+SUCC = λab.Bb(ab)
+
+SUCC (SUCC ZERO)`,
+    'λab.a(ab)',
+  ],
+  // THIS ONE DOESN'T WORK DUE TO SOME BUG
   //   [
-  //     `ID = λx.x\nID ID`,
-  //     'λa.a',
-  //     "For convenience, we can assign names to lambdas. (This is not part of lambda calculus, it's just very convenient.)",
-  //   ],
-  //   [
-  //     `ADD = λmnfx.mf(nfx)
-  // TWO = λfx.f(fx)
-  // THREE = λfx.f(f(fx))
-  // ADD TWO THREE`,
-  //     'λab.a(a(a(a(ab))))',
-  //   ],
-  //   [
-  //     `INC = λnfx.f(nfx)
-  // THREE = λfx.f(f(fx))
-  // INC THREE`,
-  //     'λab.a(a(a(ab)))',
-  //   ],
-  //   [
-  //     `MULT = λnkf.n(kf)
-  // TWO = λfx.f(fx)
-  // THREE = λfx.f(f(fx))
-  // MULT TWO THREE`,
-  //     'λab.a(a(a(a(a(ab)))))',
-  //   ],
-  //   [
-  //     `POW = λnk.k(n)
-  // TWO = λfx.f(fx)
-  // THREE = λfx.f(f(fx))
-  // POW TWO THREE`,
-  //     'λab.a(a(a(a(a(a(a(ab)))))))',
-  //   ],
-  //   [
-  //     `DEC = λnfx.n(λgh.h(gf))(λu.x)(λu.u)
-  // THREE = λfx.f(f(fx))
-  // DEC THREE`,
-  //     'λab.a(ab)',
+  //     `Writing SUCC multiple times is tiring. We need an addition lambda. How can we apply SUCC X times? By applying a number to it!`,
+  //     `SUCC = λabc.b(abc)
+  // ADD = λab.a SUCC b
+  // ONE = λab.ab
+  // TWO = λab.a(ab)
+  // THREE = λab.a(a(ab))
+
+  // ADD TWO ONE`,
+  //     'THREE',
   //   ],
 ];
