@@ -1,5 +1,6 @@
 import {renameVars} from './renameVars.js';
 import {treeMap} from './utils.js';
+import {exprToString} from './exprToString.js';
 
 const nest = (tokens) => {
   const indexes = [];
@@ -13,14 +14,6 @@ const nest = (tokens) => {
   }
   if (indexes.length) throw new Error(`Missing ${indexes.length} )`);
   return result;
-};
-
-export const exprToString = (expr, wrap) => {
-  if (!expr || typeof expr !== 'object') return expr;
-  const res = Array.isArray(expr)
-    ? expr.map((el) => exprToString(el, true)).join('')
-    : `λ${expr.args.join('')}.${exprToString(expr.body)}`;
-  return wrap ? `(${res})` : res;
 };
 
 const parseLambda = (ast) => {

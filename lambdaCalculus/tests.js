@@ -168,17 +168,17 @@ SUCC THREE
 `,
     'FOUR',
   ],
-  //   [
-  //     `Writing SUCC multiple times is tiring. We need an addition lambda. How can we apply SUCC X times? By applying a number to it! (NOTE: There is some bug that keeps ADD from working properly in most cases. I haven't figured out why yet. But it seems to work for 1 + X.)`,
-  //     `SUCC = λabc.b(abc)
-  // ADD = λab.a SUCC b
-  // ONE = λab.ab
-  // TWO = λab.a(ab)
-  // THREE = λab.a(a(ab))
+  [
+    `Writing SUCC multiple times is tiring. We need an addition lambda. How can we apply SUCC X times? By applying a number to SUCC!`,
+    `SUCC = λabc.b(abc)
+ADD = λab.a SUCC b
+ONE = λab.ab
+TWO = λab.a(ab)
+THREE = λab.a(a(ab))
 
-  // ADD ONE TWO`,
-  //     'THREE',
-  //   ],
+ADD ONE TWO`,
+    'THREE',
+  ],
   [
     `How about multiplication? Since numbers are represented by lambdas that apply the first argument to the second some number of times, multiplying them is the same as composing them. <code>λabc.a(bc)</code> is also known as the B-combinator or the Bluebird.`,
     `TWO = λab.a(ab)

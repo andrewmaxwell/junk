@@ -4,7 +4,7 @@ import {tests} from './tests.js';
 
 Test.failFast = true;
 
-const run = (...args) => evaluate(...args).result;
+const run = (input) => evaluate(input).result;
 
 Test.assertEquals(run('λa.(λx.x)(λbc.acb)', true), 'λabc.acb');
 Test.assertEquals(run('λa.(λb.b)(λcd.adc)'), 'λabc.acb');

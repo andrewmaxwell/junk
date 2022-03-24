@@ -2,10 +2,16 @@ import {eachNode, treeMap} from './utils.js';
 
 const letters = 'abcdefghijklmnopqrstuvwxyz';
 
-export const renameVars = (expr, parentExpr = []) => {
+const getAvailableVars = (parentExpr) => {
   const possibleVarSet = new Set(letters);
-  eachNode((node) => possibleVarSet.delete(node), parentExpr);
-  const availableVars = [...possibleVarSet];
+  eachNode((node) => {
+    if (typeof node === 'string') possibleVarSet.delete(node);
+  }, parentExpr);
+  return [...possibleVarSet];
+};
+
+export const renameVars = (expr, parentExpr = []) => {
+  const availableVars = getAvailableVars(parentExpr); // TODO: what if this list runs out?
 
   const varMapping = {};
   let counter = 0;
