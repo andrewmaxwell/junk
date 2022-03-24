@@ -14,11 +14,3 @@ export const eachNode = (func, ob) => {
     for (const key in ob) eachNode(func, ob[key]);
   }
 };
-
-export const deepEq = (a, b) =>
-  a === b ||
-  (a &&
-    b &&
-    typeof a === 'object' &&
-    typeof b === 'object' &&
-    Object.keys({...a, ...b}).every((k) => deepEq(a[k], b[k])));

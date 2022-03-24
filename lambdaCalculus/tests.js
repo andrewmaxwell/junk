@@ -218,4 +218,128 @@ ONE = λab.ab
 ISZERO ONE`,
     'FALSE',
   ],
+  // Subtraction?
+  [
+    `We need data structures. The smallest one I can think of is a pair. The V-combinator (also known as the Vireo) is <code>λabc.cab</code>. It lets you hold onto the first two arguments and get them out later by applying it to <code>λab.a</code> (TRUE) to get back the first one or <code>λab.b</code> (FALSE) to get back the second one.`,
+    `PAIR = λabc.cab
+TWO = λab.a(ab)
+THREE = λab.a(a(ab))
+TRUE = λab.a
+FALSE = λab.b
+
+MYDATA = PAIR THREE TWO
+MYDATA TRUE
+`,
+    'THREE',
+  ],
+  [
+    `We can easily make function for getting the first or second items from a pair.`,
+    `PAIR = λabc.cab
+TWO = λab.a(ab)
+THREE = λab.a(a(ab))
+TRUE = λab.a
+FALSE = λab.b
+FIRST = λp.p TRUE
+SECOND = λp.p FALSE
+
+MYDATA = PAIR THREE TWO
+SECOND MYDATA
+`,
+    'TWO',
+  ],
+  [
+    `You may have noticed that we haven't talked about subtraction yet. That's because it's really tricky.`,
+    `TRUE = λab.a
+FALSE = λab.b
+ONE = λab.ab
+TWO = λab.a(ab)
+SUCC = λabc.b(abc)
+ISZERO = λa.a (TRUE FALSE) TRUE
+B = λabc.a(bc)
+PRED = λn.n (λg.ISZERO (g ONE) (λa.a) (B SUCC g)) (TRUE FALSE) FALSE
+
+PRED TWO
+    `,
+    'ONE',
+  ],
+
+  [
+    `Here's a different way to write PRED using pairs:`,
+    `TRUE = λab.a
+FALSE = λab.b
+TWO = λab.a(ab)
+THREE = λab.a(a(ab))
+
+PAIR = λabc.cab
+FIRST = λp.p TRUE
+SECOND = λp.p FALSE
+SUCC = λabc.b(abc)
+PHI = λp.PAIR (SECOND p) (SUCC (SECOND p))
+PRED = λn.FIRST (n PHI (PAIR FALSE FALSE))
+
+PRED THREE
+      `,
+    'TWO',
+  ],
+  [
+    'Using PRED, we can easily define subtraction.',
+    `TRUE = λab.a
+FALSE = λab.b
+TWO = λab.a(ab)
+THREE = λab.a(a(ab))
+FIVE = λab.a(a(a(a(ab))))
+
+PAIR = λabc.cab
+FIRST = λp.p TRUE
+SECOND = λp.p FALSE
+SUCC = λabc.b(abc)
+PHI = λp.PAIR (SECOND p) (SUCC (SECOND p))
+PRED = λn.FIRST (n PHI (PAIR FALSE FALSE))
+SUB = λnk.k PRED n
+
+SUB FIVE TWO`,
+    'THREE',
+  ],
+  //   [
+  //     'Using SUB, we can define less-than-or-equal.',
+  //     `TRUE = λab.a
+  // FALSE = λab.b
+  // TWO = λab.a(ab)
+  // THREE = λab.a(a(ab))
+
+  // PAIR = λabc.cab
+  // FIRST = λp.p TRUE
+  // SECOND = λp.p FALSE
+  // SUCC = λabc.b(abc)
+  // PHI = λp.PAIR (SECOND p) (SUCC (SECOND p))
+  // PRED = λn.FIRST (n PHI (PAIR FALSE FALSE))
+  // SUB = λnk.k PRED n
+  // ISZERO = λa.a (TRUE FALSE) TRUE
+  // LEQ = λnk.ISZERO (SUB n k)
+
+  // LEQ THREE TWO`,
+  //     'FALSE',
+  //   ],
+  //   [
+  //     'Using LEQ and AND, we can define numerical equality',
+  //     `TRUE = λab.a
+  // FALSE = λab.b
+  // TWO = λab.a(ab)
+  // THREE = λab.a(a(ab))
+
+  // PAIR = λabc.cab
+  // FIRST = λp.p TRUE
+  // SECOND = λp.p FALSE
+  // SUCC = λabc.b(abc)
+  // PHI = λp.PAIR (SECOND p) (SUCC (SECOND p))
+  // PRED = λn.FIRST (n PHI (PAIR FALSE FALSE))
+  // SUB = λnk.k PRED n
+  // ISZERO = λa.a (TRUE FALSE) TRUE
+  // LEQ = λnk.ISZERO (SUB n k)
+  // AND = λab.aba
+  // EQ = λnk.AND(LEQ n k)(LEQ k n)
+
+  // EQ TWO TWO`,
+  //     'FALSE',
+  //   ],
 ];

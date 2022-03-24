@@ -21,7 +21,11 @@ document.querySelector('#root').innerHTML = tests
 const worker = new Worker('worker.js', {type: 'module'});
 worker.addEventListener('message', ({data: {result, steps, time, id}}) => {
   const target = document.querySelector('#t' + id);
-  target.innerHTML = `<span>${steps.join('\n')}</span>`;
+  const pad = Math.floor(Math.log10(steps.length) + 1);
+  target.innerHTML = `<span>${steps
+    .map((line, i) => `<i>${(i + 1).toString().padStart(pad)}.</i> ${line}`)
+    .join('\n')}</span>`;
+  target.scrollTop = target.scrollHeight;
   target.nextElementSibling.innerHTML = `<span>${result}</span>`;
   target.nextElementSibling.nextElementSibling.innerHTML = time;
 });
