@@ -1,49 +1,57 @@
-import {replaceVars} from './replaceVars.js';
-import {deepEq, treeMap} from './utils.js';
+import {exprToString} from './parse.js';
+import {renameVars} from './renameVars.js';
+import {treeMap} from './utils.js';
 
-const apply = (a, b, debug) => {
+const apply = (a, b, steps, depth) => {
   const [firstArg, ...restArgs] = a.args;
-  const bWithReplacedVars = replaceVars(b, [a, b]);
+  const bWithReplacedVars = renameVars(b, [a, b]);
   const body = treeMap(
     (node) => (node === firstArg ? bWithReplacedVars : node),
     a.body
   );
-  const r = simplify(restArgs.length ? {args: restArgs, body} : body, debug);
-  if (debug) console.dir({apply: 'apply', a, b, r}, {depth: Infinity});
+  const r = simplify(
+    restArgs.length ? {args: restArgs, body} : body,
+    steps,
+    depth + 1
+  );
   return r;
 };
 
-export const simplify = (expr, debug) => {
+export const simplify = (expr, steps, depth = 0) => {
   if (Array.isArray(expr)) {
-    const terms = expr.map((el) => simplify(el, debug));
-    const simplified = [terms[0]];
+    const terms = expr.map((el) => simplify(el, steps, depth + 1));
 
-    // go through list of things to apply and apply the ones you can
-    for (let i = 1; i < terms.length; i++) {
-      const last = simplified[simplified.length - 1];
-      if (Array.isArray(last.args)) {
-        simplified[simplified.length - 1] = apply(last, terms[i], debug);
-      } else {
-        simplified.push(terms[i]);
-      }
-    }
-
-    const r = simplified.length === 1 ? simplify(simplified[0]) : simplified;
-
-    if (debug && !deepEq(expr, r)) {
-      console.dir(
-        {simplify: 'simplify', before: expr, after: r},
-        {depth: Infinity}
+    while (Array.isArray(terms[0]?.args) && terms.length > 1) {
+      const [a, b] = terms;
+      steps.push(
+        `${' '.repeat(depth)}(${exprToString(a)}) (${exprToString(b)})`
       );
+      const applied = apply(a, b, steps, depth + 1);
+      steps.push(`${' '.repeat(depth)} => ${exprToString(applied)}`);
+      // replace first two elements with the application of the first to the second
+      terms.splice(0, 2, applied);
     }
-    return r;
+
+    return terms.length === 1 ? terms[0] : terms;
   }
 
   if (expr && expr.body) {
-    const body = replaceVars(simplify(expr.body, debug), expr.args);
-    return body.args
+    const a = exprToString(expr);
+    const prevStepsLength = steps.length;
+    steps.push(' '.repeat(depth) + a);
+    const body = renameVars(simplify(expr.body, steps, depth + 1), expr.args);
+    const r = body.args
       ? {args: [...expr.args, ...body.args], body: body.body}
       : {...expr, body};
+
+    const b = exprToString(r);
+    if (a === b) {
+      steps.length = prevStepsLength;
+    } else {
+      steps.push(' '.repeat(depth) + ' => ' + b);
+    }
+
+    return r;
   }
 
   return expr;

@@ -2,7 +2,7 @@ import {eachNode, treeMap} from './utils.js';
 
 const letters = 'abcdefghijklmnopqrstuvwxyz';
 
-export const replaceVars = (expr, parentExpr = []) => {
+export const renameVars = (expr, parentExpr = []) => {
   const possibleVarSet = new Set(letters);
   eachNode((node) => possibleVarSet.delete(node), parentExpr);
   const availableVars = [...possibleVarSet];

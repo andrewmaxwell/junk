@@ -149,10 +149,11 @@ SUCC ONE`,
   [
     `Let's do some more!`,
     `ONE = λab.ab
+FOUR = λab.a(a(a(ab)))
 SUCC = λabc.b(abc)
 
 SUCC (SUCC (SUCC ONE))`,
-    'λab.a(a(a(ab)))',
+    'FOUR',
   ],
   [
     "What about zero? Following the same pattern, we need a lambda that applies a lambda to a value zero times. How about <code>λab.b</code>? That's the same as FALSE! That is perfect.",
@@ -167,25 +168,54 @@ SUCC THREE
 `,
     'FOUR',
   ],
-  [
-    `I'd like to introduce <code>λabc.a(bc)</code>, known as the B-combinator, or the Bluebird. It is the combinator of composition. For now, it lets us write SUCC like this. We'll use it more later.`,
-    `ZERO = λab.b
-B = λabc.a(bc)
-SUCC = λab.Bb(ab)
-
-SUCC (SUCC ZERO)`,
-    'λab.a(ab)',
-  ],
-  // THIS ONE DOESN'T WORK DUE TO SOME BUG
   //   [
-  //     `Writing SUCC multiple times is tiring. We need an addition lambda. How can we apply SUCC X times? By applying a number to it!`,
+  //     `Writing SUCC multiple times is tiring. We need an addition lambda. How can we apply SUCC X times? By applying a number to it! (NOTE: There is some bug that keeps ADD from working properly in most cases. I haven't figured out why yet. But it seems to work for 1 + X.)`,
   //     `SUCC = λabc.b(abc)
   // ADD = λab.a SUCC b
   // ONE = λab.ab
   // TWO = λab.a(ab)
   // THREE = λab.a(a(ab))
 
-  // ADD TWO ONE`,
+  // ADD ONE TWO`,
   //     'THREE',
   //   ],
+  [
+    `How about multiplication? Since numbers are represented by lambdas that apply the first argument to the second some number of times, multiplying them is the same as composing them. <code>λabc.a(bc)</code> is also known as the B-combinator or the Bluebird.`,
+    `TWO = λab.a(ab)
+THREE = λab.a(a(ab))
+SIX = λab.a(a(a(a(a(ab)))))
+MULT = λabc.a(bc)
+
+MULT TWO THREE`,
+    'SIX',
+  ],
+  [
+    `If you thought the lambda for multiplication was simple, wait until you see the one for exponentiation: <code>λab.ba</code>. This is also known as the T<sub>h</sub>-Combinator or Thrush.`,
+    `TWO = λab.a(ab)
+THREE = λab.a(a(ab))
+EIGHT = λab.a(a(a(a(a(a(a(ab)))))))
+POW = λab.ba
+
+POW TWO THREE`,
+    'EIGHT',
+  ],
+  [
+    'How about a lambda to tell us if a number is zero? Remember that TRUE is a lambda that always returns its first argument and FALSE and ZERO are the same thing.',
+    `TRUE = λab.a
+FALSE = λab.b
+ISZERO = λa.a(TRUE FALSE)TRUE
+
+ISZERO FALSE`,
+    'TRUE',
+  ],
+  [
+    'If you give ISZERO any other number, it will return <code>λab.b</code>.',
+    `TRUE = λab.a
+FALSE = λab.b
+ISZERO = λa.a(TRUE FALSE)TRUE
+ONE = λab.ab
+
+ISZERO ONE`,
+    'FALSE',
+  ],
 ];

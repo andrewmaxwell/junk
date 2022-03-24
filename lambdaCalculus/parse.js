@@ -1,4 +1,4 @@
-import {replaceVars} from './replaceVars.js';
+import {renameVars} from './renameVars.js';
 import {treeMap} from './utils.js';
 
 const nest = (tokens) => {
@@ -18,7 +18,7 @@ const nest = (tokens) => {
 export const exprToString = (expr, wrap) => {
   if (!expr || typeof expr !== 'object') return expr;
   const res = Array.isArray(expr)
-    ? expr.map(exprToString).join('')
+    ? expr.map((el) => exprToString(el, true)).join('')
     : `λ${expr.args.join('')}.${exprToString(expr.body)}`;
   return wrap ? `(${res})` : res;
 };
@@ -47,7 +47,7 @@ const parseExpr = (str) => parseLambda(nest(str.match(/[λ.()a-z]|[A-Z]+/g)));
 const resolvePlaceholders = (expr, lib) =>
   treeMap((node) => {
     if (typeof node !== 'string' || node !== node.toUpperCase()) return node;
-    if (lib[node]) return replaceVars(lib[node], expr);
+    if (lib[node]) return renameVars(lib[node], expr);
     throw new Error(`${node} is not defined`);
   }, expr);
 
