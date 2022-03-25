@@ -57,12 +57,12 @@ export const tests = [
     'λab.a',
   ],
   [
-    'Similarly, when the predicate in a ternary expression is false, we get the second value. So let\'s represent "false" as a function that takes two arguments and always returns the second.',
+    'Similarly, when the predicate in a ternary expression is false, we get the second value. So let\'s represent "false" as a lambda that takes two arguments and always returns the second.',
     'λab.b',
     'λab.b',
   ],
   [
-    `To negate a boolean, we can apply <code>λabc.acb</code>, which is called the C-combinator or Cardinal. The C-combinator takes three arguments and applies them, reversing the order of the last two. Since booleans are functions that take two arguments and return one, this has the effect of switching their value!
+    `To negate a boolean, we can apply <code>λabc.acb</code>, which is called the C-combinator or Cardinal. The C-combinator takes three arguments and applies them, reversing the order of the last two. Since booleans are lambdas that take two arguments and return one, this has the effect of switching their value!
       <ol>
         <li>First, to apply <code>λabc.acb</code> to <code>λab.a</code>, take the first argument of the first lambda (<code>a</code>), and replace it with <code>(λab.a)</code> everywhere it exists after the <code>.</code> in the first lambda. Then we remove the first argument. That gives us <code>λbc.(λab.a)cb</code>.</li>
         <li>Next, we apply <code>(λab.a)</code> to <code>cb</code>. So <code>c</code> replaces <code>a</code> and <code>b</code> replaces <code>b</code>, which doesn't really do anything in this case. So doing that simplifies <code>(λab.a)cb</code> to <code>c</code> and we get <code>λbc.c</code>.</li>
@@ -108,7 +108,7 @@ M FALSE TRUE`,
     'TRUE',
   ],
   [
-    'You can do boolean equality with <code>λab.ab(NOT b)</code>. It takes two "boolean" arguments (and remember, booleans in lambda calculus are functions that take two arguments and either return their first or second argument). Then if the first is true, it returns the second. If the first is false, it returns NOT the second.',
+    'You can do boolean equality with <code>λab.ab(NOT b)</code>. It takes two "boolean" arguments (and remember, booleans in lambda calculus are lambdas that take two arguments and either return their first or second argument). Then if the first is true, it returns the second. If the first is false, it returns NOT the second.',
     `TRUE = λab.a
 FALSE = λab.b
 NOT = λabc.acb
@@ -129,7 +129,7 @@ EQ FALSE TRUE
     'FALSE',
   ],
   [
-    'How about numbers? Here are the Church encodings for some numbers. They essentially mean "apply a function to a value this many times".',
+    'How about numbers? Here are the Church encodings for some numbers. They essentially mean "apply a lambda to a value this many times".',
     `ONE = λab.ab
 TWO = λab.a(ab)
 THREE = λab.a(a(ab))
@@ -233,7 +233,7 @@ MYDATA TRUE
     'THREE',
   ],
   [
-    `We can easily make function for getting the first or second items from a pair.`,
+    `We can easily make lambdas for getting the first or second items from a pair.`,
     `PAIR = λabc.cab
 TWO = λab.a(ab)
 THREE = λab.a(a(ab))
@@ -248,23 +248,7 @@ SECOND MYDATA
     'TWO',
   ],
   [
-    `You may have noticed that we haven't talked about subtraction yet. That's because it's really tricky.`,
-    `TRUE = λab.a
-FALSE = λab.b
-ONE = λab.ab
-TWO = λab.a(ab)
-SUCC = λabc.b(abc)
-ISZERO = λa.a (TRUE FALSE) TRUE
-B = λabc.a(bc)
-PRED = λn.n (λg.ISZERO (g ONE) (λa.a) (B SUCC g)) (TRUE FALSE) FALSE
-
-PRED TWO
-    `,
-    'ONE',
-  ],
-
-  [
-    `Here's a different way to write PRED using pairs:`,
+    `You may have noticed that we haven't talked about subtraction yet. That's because it's really tricky. First we need a predecessor lambda. The predecessor lambda is clever: it increments pairs of successive numbers and returns the smaller one to find the predecessor.`,
     `TRUE = λab.a
 FALSE = λab.b
 TWO = λab.a(ab)
@@ -282,7 +266,7 @@ PRED THREE
     'TWO',
   ],
   [
-    'Using PRED, we can easily define subtraction.',
+    'Using PRED, we can easily define subtraction. Just apply PRED so many times.',
     `TRUE = λab.a
 FALSE = λab.b
 TWO = λab.a(ab)
