@@ -1,20 +1,6 @@
 import {renameVars} from './renameVars.js';
-import {treeMap} from './utils.js';
+import {nest, treeMap} from './utils.js';
 import {exprToString} from './exprToString.js';
-
-const nest = (tokens) => {
-  const indexes = [];
-  const result = [];
-  for (const t of tokens) {
-    if (t === '(') indexes.push(result.length);
-    else if (t === ')') {
-      if (!indexes.length) throw new Error('Unexpected )');
-      result.push(result.splice(indexes.pop()));
-    } else result.push(t);
-  }
-  if (indexes.length) throw new Error(`Missing ${indexes.length} )`);
-  return result;
-};
 
 const parseLambda = (ast) => {
   if (!Array.isArray(ast)) return ast;
