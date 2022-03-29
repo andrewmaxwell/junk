@@ -3,10 +3,10 @@ const weeksAgo = (date) => Math.round((Date.now() - date) / (7 * 24 * 3600000));
 const processAttendance = (attendanceHistory, people) => {
   const personIndex = Object.fromEntries(people.map((p) => [p.id, p]));
 
-  const result = Object.entries(attendanceHistory)
-    .map(([dateStr, arr]) => ({
-      date: new Date(dateStr),
-      people: arr
+  const result = attendanceHistory
+    .map(({date, ids}) => ({
+      date,
+      people: ids
         .split(',')
         .map((n) => personIndex[n])
         .filter((i) => i),
@@ -132,5 +132,5 @@ ${absences.trim()}
 
 Attendance Leaderboard (Past Year)
 ${leaderboard(people, attendanceHistory)}
-`;
+`.trim();
 };
