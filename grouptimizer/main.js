@@ -104,6 +104,11 @@ const init = async () => {
     people,
     attendanceHistory
   );
+  document.querySelector('#recent').innerText = attendanceHistory[
+    attendanceHistory.length - 1
+  ]?.date
+    ?.toDateString()
+    .slice(0, 10);
 };
 
 init();
