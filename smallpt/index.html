@@ -1,4 +1,9 @@
-<body style="margin:0">
+<body style="margin:0;background:black;font-family:sans-serif">
   <canvas style="height: 100vh; image-rendering: pixelated;"></canvas>
+  <div style="position:fixed;top:0;right:0;width:300px;padding:0 20px;color:white;background:rgba(0,0,0,0.5)">
+    <h3>Please be patient...</h3>
+    <p>This app does billions of calculations per second to simulate the paths of light rays through a simple scene. Over time, it produces an increasingly photorealistic scene created purely by math.</p>
+    <p>It uses no GPU or hardware acceleration. When the page loads, each CPU core is given instructions on how to render single, low-quality approximations of the scene and send them to the screen as fast as they can, over and over. Over time, they add up to a higher quality image.</p>
+  </div>
   <script type="module" src="main.js"></script>
 </body>
