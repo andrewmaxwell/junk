@@ -1,7 +1,7 @@
 {
   "name": "junk",
   "version": "1.0.0",
-  "description": "just some junk",
+  "description": "my side projects",
   "type": "module",
   "dependencies": {
     "node-fetch": "^3.2.3",
@@ -11,8 +11,7 @@
     "@babel/core": "^7.17.9",
     "@babel/plugin-transform-react-jsx": "^7.17.3",
     "babel-core": "^6.26.3",
-    "babel-eslint": "^10.1.0",
-    "eslint": "^8.13.0",
+    "eslint": "^8.14.0",
     "eslint-config-prettier": "^8.5.0",
     "eslint-plugin-import": "^2.26.0",
     "eslint-plugin-prettier": "^4.0.0",
