@@ -64,16 +64,15 @@ const leaderboard = (people, attendanceHistory) => {
   const oneYearAgo = Date.now() - 356 * 24 * 3600 * 1000;
   return people
     .map((p) => {
-      const pastYearCount = p.dates.reduce((n, d) => n + (d >= oneYearAgo), 0);
-      const pastYearTotal = attendanceHistory.reduce(
-        (n, {date}) => n + (date >= p.dates[0]),
-        0
-      );
+      const pastYearCount = p.dates.filter((d) => d >= oneYearAgo).length;
+      const pastYearTotal = attendanceHistory.filter(
+        ({date}) => date >= p.dates[0] && date >= oneYearAgo
+      ).length;
       return {
         name: p.name,
         pastYearCount,
         pastYearTotal,
-        sorter: (pastYearCount * pastYearCount) / pastYearTotal,
+        sorter: pastYearCount ** 2 / pastYearTotal,
       };
     })
     .filter((p) => p.pastYearTotal)
