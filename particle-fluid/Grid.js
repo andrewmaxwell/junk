@@ -26,18 +26,14 @@ export default class {
     }
   }
   add(x, y, i) {
-    const {grid, cols, rad} = this;
-    var cell = grid[Math.floor(y / rad) * cols + Math.floor(x / rad)];
-    if (!cell) throw new Error(`Bad coords: ${x}, ${y}`);
-    for (var j = 0; j < cell.vicinity.length; j++) {
-      cell.vicinity[j].items.push(i);
-    }
+    const {grid, rows, cols, rad} = this;
+    const row = Math.max(0, Math.min(rows - 1, Math.floor(y / rad)));
+    const col = Math.max(0, Math.min(cols - 1, Math.floor(x / rad)));
+    const cell = grid[row * cols + col];
+    for (const v of cell.vicinity) v.items.push(i);
     return cell.items;
   }
   clear() {
-    const {grid} = this;
-    for (var i = 0; i < grid.length; i++) {
-      grid[i].items.length = 0;
-    }
+    for (const g of this.grid) g.items.length = 0;
   }
 }

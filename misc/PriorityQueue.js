@@ -16,33 +16,37 @@ export class PriorityQueue {
     return this.heap.length;
   }
   push(value) {
-    const {heap, compare} = this;
-    heap.push(value);
-    let i = heap.length - 1;
-    while (i > 0 && compare(heap[i], heap[parent(i)])) {
-      swap(heap, i, parent(i));
+    this.heap.push(value);
+    let i = this.heap.length - 1;
+    while (i > 0 && this.compare(this.heap[i], this.heap[parent(i)])) {
+      swap(this.heap, i, parent(i));
       i = parent(i);
     }
   }
   pop() {
-    const {heap, compare} = this;
-    const poppedValue = heap[0];
-    const bottom = heap.length - 1;
-    if (bottom > 0) swap(heap, 0, bottom);
-    heap.pop();
+    const poppedValue = this.heap[0];
+    const bottom = this.heap.length - 1;
+    if (bottom > 0) swap(this.heap, 0, bottom);
+    this.heap.pop();
     let i = 0;
     while (
-      (left(i) < heap.length && compare(heap[left(i)], heap[i])) ||
-      (right(i) < heap.length && compare(heap[right(i)], heap[i]))
+      (left(i) < this.heap.length &&
+        this.compare(this.heap[left(i)], this.heap[i])) ||
+      (right(i) < this.heap.length &&
+        this.compare(this.heap[right(i)], this.heap[i]))
     ) {
       const maxChild =
-        right(i) < heap.length && compare(heap[right(i)], heap[left(i)])
+        right(i) < this.heap.length &&
+        this.compare(this.heap[right(i)], this.heap[left(i)])
           ? right(i)
           : left(i);
-      swap(heap, i, maxChild);
+      swap(this.heap, i, maxChild);
       i = maxChild;
     }
     return poppedValue;
+  }
+  peak() {
+    return this.heap[0];
   }
 }
 
