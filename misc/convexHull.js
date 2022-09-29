@@ -83,7 +83,3 @@ Test.assertDeepEquals(
   expected,
   'Central point, colinear point and duplicated point'
 );
-
-...toPairs(disabledDefaults).map(([field, val]) =>
-  when(propEq(field, val), dissoc(field))
-);
