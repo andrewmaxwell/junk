@@ -1,22 +1,32 @@
 import fetch from 'node-fetch';
 import {URL} from 'url';
+import fs from 'fs';
 
-const DELAY_MS = 1000;
-
-const wait = () => new Promise((r) => setTimeout(r, DELAY_MS));
+const TIMEOUT = 10_000;
+const NUM_PARALLEL = 32;
 
 const toAbsolute = (absoluteParent, relativeUrl) => {
   try {
     return new URL(relativeUrl, absoluteParent).href;
   } catch (e) {
     console.error(`CANNOT CONVERT ${absoluteParent} + ${relativeUrl}`);
-    return relativeUrl;
+    return '';
   }
 };
 
 const get = async (url) => {
   try {
-    const response = await fetch(url);
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), TIMEOUT);
+    const response = await fetch(url, {
+      signal: ctrl.signal,
+      rejectUnauthorized: false,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36',
+      },
+    });
+    clearTimeout(timeout);
     return await response.text();
   } catch (e) {
     console.log(`CANNOT FETCH ${e.message}: ${url}`);
@@ -24,25 +34,56 @@ const get = async (url) => {
   }
 };
 
-const main = async (startingUrl) => {
-  const q = [startingUrl]; // the queue of urls to be checked
-  const seen = new Set(q); // keep track of what URLs we've already collected
+const getLinksFrom = async (url) => {
+  const text = await get(url);
+  return (text.match(/href=["'][^"'#]+/gi) || [])
+    .map((link) => toAbsolute(url, link.slice(6)))
+    .filter((x) => x.startsWith('http'));
+};
 
-  for (const url of q) {
-    console.log('Checking', url);
-    await wait(DELAY_MS); // add a delay so you aren't DOSing anyone.
-    const text = await get(url);
-    const links = text.match(/(?<=href=")[^"]+|(?<=href=')[^']+/gi) || [];
+const getStream = (filename) => {
+  fs.writeFileSync(filename, '');
+  return fs.createWriteStream(filename, {flags: 'a'});
+};
 
-    for (const u of links) {
-      const abs = toAbsolute(url, u);
-      if (seen.has(abs)) continue; // this is much faster than q.includes(abs)
-      seen.add(abs);
-      q.push(abs);
-      console.log(url, '->', u);
-    }
-    console.log('Found', q.length, 'URLs so far');
+const urlStream = getStream('urls.js');
+const edgeStream = getStream('edges.txt');
+
+let counter = 0;
+const urlIndex = {};
+const getIndex = (url) => {
+  if (urlIndex[url] === undefined) {
+    urlIndex[url] = counter++;
+    urlStream.write(url + '\n');
+  }
+  return urlIndex[url];
+};
+
+const getGraph = async (startUrl, maxDepth) => {
+  const inQ = new Set();
+  const q = [{url: startUrl, depth: 0}];
+
+  for (let i = 0; i < q.length; i += NUM_PARALLEL) {
+    const promises = q.slice(i, i + NUM_PARALLEL).map(async ({url, depth}) => {
+      const links = await getLinksFrom(url);
+      console.log(url, depth);
+      if (links.length)
+        edgeStream.write(`${getIndex(url)}:${links.map(getIndex).join(',')}\n`);
+      if (depth === maxDepth) return;
+      for (const link of links) {
+        if (inQ.has(link)) continue;
+        inQ.add(link);
+        q.push({url: link, depth: depth + 1});
+      }
+    });
+
+    const percent = Math.round((100 * i) / q.length);
+    console.log(`${i}/${q.length} complete (${percent}%)`);
+
+    await Promise.all(promises);
   }
 };
 
-main('https://en.wikipedia.org/wiki/Main_Page');
+getGraph('https://en.wikipedia.org/wiki/Web_crawler', 2).then(() =>
+  console.log('DONE"')
+);
