@@ -102,16 +102,12 @@ const input = {
   ],
 };
 
-// console.log(jsonToSQL(input));
-
-/*
-Expected Result:
-[
+import {Test} from './test.js';
+Test.assertDeepEquals(jsonToSQL(input), [
   'CREATE TABLE people (id int, name text, age int);',
   'INSERT INTO people (id, name, age) VALUES (218, "Bob", 42), (286, "Bill", 37);',
   'CREATE TABLE people_children (id int, name text, age int, people_id int);',
   'INSERT INTO people_children (id, name, age, people_id) VALUES (384, "Charles", 17, 218), (704342, "Tina", 12, 218), (191, "Bobby", 13, 286), (519343, "Jethro", 11, 286);',
   'CREATE TABLE people_children_hobbies (id int, name text, people_children_id int);',
-  'INSERT INTO people_children_hobbies (id, name, people_children_id) VALUES (959, "arson", 384), (630, "Instagram", 704342), (300, "horse", 704342), (708, "sportball", 191), (23, "xbox", 519343);'
-]
-*/
+  'INSERT INTO people_children_hobbies (id, name, people_children_id) VALUES (959, "arson", 384), (630, "Instagram", 704342), (300, "horse", 704342), (708, "sportball", 191), (23, "xbox", 519343);',
+]);

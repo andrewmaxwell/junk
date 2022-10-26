@@ -7,8 +7,13 @@ const assertEquals = (actual, expected, description) => {
   if (description) console.log(description);
   if (equals(actual, expected)) pass();
   else {
-    // fail(`Expected \n${toString(expected)}\nGot \n${toString(actual)}\n\n`);
-    fail(`Expected\n${expected}\nGot\n${actual}\n`);
+    fail(`Expected \n${toString(expected)}\nGot \n${toString(actual)}\n\n`);
+    // fail(`Expected\n${expected}\nGot\n${actual}\n`);
+
+    // fail('Got');
+    // console.dir(actual, {depth: null});
+    // fail('FAIL');
+
     if (Test.failFast) process.exit(1);
   }
 };
@@ -18,9 +23,9 @@ export const it = (desc, func) => {
   func();
 };
 
+export const describe = it;
+
 export const Test = {
-  describe: it,
-  it,
   assertEquals,
   assertSimilar: assertEquals,
   assertDeepEquals: assertEquals,
@@ -45,3 +50,15 @@ export const Test = {
 };
 
 export const deepLog = (x) => console.dir(x, {depth: Infinity});
+
+export const logger =
+  (label, func) =>
+  (...args) => {
+    const result = func(...args);
+    console.log(`${label} args:`);
+    for (const a of args) deepLog(a);
+    console.log(`${label} result:`);
+    deepLog(result);
+    console.log('----------------------');
+    return result;
+  };

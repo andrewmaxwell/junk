@@ -1,48 +1,98 @@
-https://www.codewars.com/kata/57ff9d3b8f7dda23130015fa/train/javascript
+let open;
+// https://www.codewars.com/kata/57ff9d3b8f7dda23130015fa/train/javascript
 
 const dirs = [
-  {x: 1, y: 0},
-  {x: 1, y: 1},
-  {x: 0, y: 1},
-  {x: -1, y: 1},
-  {x: -1, y: 0},
-  {x: -1, y: -1},
-  {x: 0, y: -1},
-  {x: 1, y: -1},
+  [1, 0],
+  [1, 1],
+  [0, 1],
+  [-1, 1],
+  [-1, 0],
+  [-1, -1],
+  [0, -1],
+  [1, -1],
 ];
-
-const isSafe = (map, r, c) => {
-  for (const {x, y} of dirs) {
-    const nr = r + y;
-    const nc = c + x;
-    if (map[nr] && map[nr][nc] == 0) return true;
-  }
-  return false;
-};
-
-const getSafeCell = (map) => {
-  for (let r = 0; r < map.length; r++) {
-    for (let c = 0; c < map[r].length; c++) {
-      if (map[r][c] === '?' && isSafe(map, r, c)) return [r, c];
-    }
-  }
-};
 
 const solveMine = (map, n) => {
   console.log(map);
   map = map.split('\n').map((r) => r.split(' '));
-  while (true) {
-    const safeCell = getSafeCell(map);
-    if (!safeCell) {
-      return map
-        .map((r) => r.join(' '))
-        .join('\n')
-        .replace(/\?/g, 'x');
-      // return res.match(/x/g).length === n ? res : '?';
+
+  for (let i = 0; i < map.length; i++) {
+    for (let j = 0; j < map[i].length; j++) {
+      if (map[i][j] !== '0') continue;
+      for (const [dx, dy] of dirs) {
+        const nx = j + dx;
+        const ny = i + dy;
+        if (map[ny] && map[ny][nx] === '?') {
+          map[ny][nx] = open(ny, nx);
+        }
+      }
     }
-    const [r, c] = safeCell;
-    map[r][c] = open(r, c);
-    console.log('>>', r, c, map[r][c]);
-    console.log(map.map((r) => r.join(' ')).join('\n'));
   }
+
+  return map.map((r) => r.join(' ')).join('\n');
 };
+
+import {Test} from './test.js';
+let map, result;
+
+const game = {
+  read: (map) => {
+    map = map.split('\n').map((r) => r.split(' '));
+    open = (row, col) => {
+      const val = map[row][col];
+      if (val === 'x') throw new Error('you dead');
+      return val;
+    };
+  },
+};
+
+map = `? ? ? ? ? ?
+? ? ? ? ? ?
+? ? ? 0 ? ?
+? ? ? ? ? ?
+? ? ? ? ? ?
+0 0 0 ? ? ?`;
+result = `1 x 1 1 x 1
+2 2 2 1 2 2
+2 x 2 0 1 x
+2 x 2 1 2 2
+1 1 1 1 x 1
+0 0 0 1 1 1`;
+
+game.read(result);
+Test.assertSimilar(solveMine(map, 6), result);
+
+// map = `0 ? ?
+// 0 ? ?`;
+// result = `0 1 x
+// 0 1 1`;
+// game.read(result);
+// Test.assertSimilar(solveMine(map, 1), '?');
+
+// map = `0 ? ?
+// 0 ? ?`;
+// result = `0 2 x
+// 0 2 x`;
+// game.read(result);
+// Test.assertSimilar(solveMine(map, 2), result);
+
+// map = `? ? ? ? 0 0 0
+// ? ? ? ? 0 ? ?
+// ? ? ? 0 0 ? ?
+// ? ? ? 0 0 ? ?
+// 0 ? ? ? 0 0 0
+// 0 ? ? ? 0 0 0
+// 0 ? ? ? 0 ? ?
+// 0 0 0 0 0 ? ?
+// 0 0 0 0 0 ? ?`;
+// result = `1 x x 1 0 0 0
+// 2 3 3 1 0 1 1
+// 1 x 1 0 0 1 x
+// 1 1 1 0 0 1 1
+// 0 1 1 1 0 0 0
+// 0 1 x 1 0 0 0
+// 0 1 1 1 0 1 1
+// 0 0 0 0 0 1 x
+// 0 0 0 0 0 1 1`;
+// game.read(result);
+// Test.assertSimilar(solveMine(map, 6), result);

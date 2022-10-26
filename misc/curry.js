@@ -1,18 +1,20 @@
 const __ = {__: true};
 
-const curry = (func, totalArgs = func.length) => (...args) => {
-  if (args.length >= totalArgs && !args.some((a) => a === __)) {
-    return func(...args);
-  }
-
-  return curry((...restArgs) => {
-    for (let i = 0, j = 0; i < args.length || j < restArgs.length; i++) {
-      if (i >= args.length || (args[i] === __ && j < restArgs.length))
-        args[i] = restArgs[j++];
+const curry =
+  (func, totalArgs = func.length) =>
+  (...args) => {
+    if (args.length >= totalArgs && !args.some((a) => a === __)) {
+      return func(...args);
     }
-    return func(...args);
-  }, totalArgs - args.length);
-};
+
+    return curry((...restArgs) => {
+      for (let i = 0, j = 0; i < args.length || j < restArgs.length; i++) {
+        if (i >= args.length || (args[i] === __ && j < restArgs.length))
+          args[i] = restArgs[j++];
+      }
+      return func(...args);
+    }, totalArgs - args.length);
+  };
 
 const add3 = curry((a, b, c) => a - b / c);
 console.log(add3(1, 2, 3));
