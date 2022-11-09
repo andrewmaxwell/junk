@@ -5,47 +5,21 @@ import {V} from './V.js';
 const rows = 64;
 const cols = rows;
 
-const spheres = [
-  {
-    position: new V(10, 2, 2),
-    color: new V(128, 0, 128), // purple
-    radius: 1.5,
-  },
-  {
-    position: new V(-3, 0, 2),
-    color: new V(256, 160, 224), // pink
-    radius: 1.5,
-  },
-  {
-    position: new V(3, 0, 2),
-    color: new V(0, 0, 128), // blue
-    radius: 1.5,
-  },
-  {
-    position: new V(1.5, 0, 4.5),
-    color: new V(256, 256, 192), // yellow
-    radius: 1.5,
-  },
-  {
-    position: new V(-1, 10, 4),
-    color: new V(0, 128, 128), // teal
-    radius: 4.0,
-  },
-  {
-    position: new V(0, 0, 7),
-    color: new V(256, 160, 128), // orange
-    radius: 1.5,
-  },
-];
 const rm = new RayMarcher({
   camera: {position: new V(0, 0, 0), target: new V(0, 0, 0), zoom: 20},
   things: [
     // floor
-    {color: new V(255, 255, 255), dist: (p) => Math.abs(p.z)},
+    {dist: (p) => Math.abs(p.z)},
 
     // spheres
-    ...spheres.map((s) => ({
-      color: s.color,
+    ...[
+      {position: new V(10, 2, 2), radius: 1.5},
+      {position: new V(-3, 0, 2), radius: 1.5},
+      {position: new V(3, 0, 2), radius: 1.5},
+      {position: new V(1.5, 0, 4.5), radius: 1.5},
+      {position: new V(-1, 10, 4), radius: 4.0},
+      {position: new V(0, 0, 7), radius: 1.5},
+    ].map((s) => ({
       dist: (p) => p.dist(s.position) - s.radius,
     })),
   ],
@@ -58,7 +32,8 @@ const render = makeRenderer(canvas, cols, rows, (v) => color(v.x, v.y, v.z));
 const draw = () => {
   for (let sy = 0; sy < rows; sy++) {
     for (let sx = 0; sx < cols; sx++) {
-      data[sy * cols + sx] = rm.getPixel(sx / cols, sy / rows);
+      const v = rm.getPixel(sx / cols, sy / rows);
+      data[sy * cols + sx] = new V(v, v, v);
     }
   }
   render(data);

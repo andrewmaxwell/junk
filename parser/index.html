@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<style>
+body {font-family: sans-serif;background:#222;color:white}
+.box {float: left; width: 50%}
+textarea {width: 98%; height: 300px; background: rgba(255,255,255,0.1); color: white}
+h4 {margin: 0}
+.obj {border: 1px solid #888; margin: 0 3px 1px 3px; display: inline-block; border-radius: 3px;}
+.obj label {font-size: 0.5em; position: relative; top: -7px; padding: 0 2px}
+.value {margin: 5px}
+</style>
+<body>
+  <div class="box">
+    <h4>Grammar</h4>
+    <textarea id="grammar" spellcheck="false">number: ^(-?\d+(\.\d+)?)
+string: ^"([^"]*)"
+boolean: ^(true|false)
+
+exprList: commaExprList|main
+commaExprList: main , exprList
+array: [ exprList? ]
+
+pair: string : main
+commaPairList: pair , pairList
+pairList: commaPairList|pair
+object: { pairList? }
+
+main: number|string|boolean|null|array|object
+    </textarea>
+  </div>
+  <div class="box">
+    <h4>Input</h4>
+    <textarea id="input" spellcheck="false">{"x":[{"a":[{"b":1}]}],"m":true}</textarea>
+  </div>
+  <div id="result"></div>
+  <h3>Notes:</h3>
+  <ul>
+    <li>The grammar must contain a "main" type.</li>
+    <li>The order of types does not matter.</li>
+    <li>Regular expressions must start with ^</li>
+    <li>"OR" types must be separated by | and should have no spaces in them.</li>
+    <li>Concatenated types are separated with spaces and can include optional components (add a ?)</li>
+  </ul>
+  <script type="module" src="main.js"></script>
+</body>

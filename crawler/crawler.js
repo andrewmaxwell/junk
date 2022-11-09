@@ -3,7 +3,7 @@ import {URL} from 'url';
 import fs from 'fs';
 
 const TIMEOUT = 10_000;
-const NUM_PARALLEL = 32;
+const NUM_PARALLEL = 8;
 
 const toAbsolute = (absoluteParent, relativeUrl) => {
   try {
@@ -46,7 +46,7 @@ const getStream = (filename) => {
   return fs.createWriteStream(filename, {flags: 'a'});
 };
 
-const urlStream = getStream('urls.js');
+const urlStream = getStream('urls.txt');
 const edgeStream = getStream('edges.txt');
 
 let counter = 0;
@@ -84,6 +84,4 @@ const getGraph = async (startUrl, maxDepth) => {
   }
 };
 
-getGraph('https://en.wikipedia.org/wiki/Web_crawler', 2).then(() =>
-  console.log('DONE"')
-);
+getGraph('https://www.spacejam.com/1996/', 3);

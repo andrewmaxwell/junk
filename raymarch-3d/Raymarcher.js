@@ -1,8 +1,8 @@
 import {V} from './V.js';
 
 const MAX_DIST = 50;
-const MIN_DIST = 0.1;
-const MAX_STEPS = 16;
+const MIN_DIST = 0.01;
+const MAX_STEPS = 32;
 
 export class RayMarcher {
   constructor({camera, things}) {
@@ -38,12 +38,9 @@ export class RayMarcher {
       .addM(vVector.scale(y * zoom))
       .normalize();
 
-    return this.getRayColor(position, rayDirection);
-  }
-  getRayColor(rayStart, rayDirection) {
     let dist = 0;
     // let closest;
-    const curr = rayStart.copy();
+    const curr = position.copy();
     for (let i = 0; dist < MAX_DIST && i < MAX_STEPS; i++) {
       let nextDist = Infinity;
       for (const t of this.things) {
@@ -60,11 +57,6 @@ export class RayMarcher {
       curr.addM(rayDirection.scale(nextDist));
     }
 
-    const v = Math.max(0, Math.min(255, 256 * (1 - dist / MAX_DIST)));
-    return new V(v, v, v);
-
-    // return closest.color
-    //   .scale(1 - dist / MAX_DIST)
-    //   .eachM((v) => Math.floor(Math.max(0, Math.min(255, v))));
+    return Math.max(0, Math.min(255, 256 * (1 - dist / MAX_DIST)));
   }
 }
