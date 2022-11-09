@@ -17,6 +17,7 @@ const parseGrammar = (str) =>
 const render = (obj) => {
   if (Array.isArray(obj)) return obj.map(render).join('');
   if (obj && typeof obj === 'object') {
+    if (obj.error) return `<pre class="error">${obj.error}</pre>`;
     return `<div class="obj">
       <label>${obj.type}</label>
       <div>${render(obj.value)}</div>
@@ -34,14 +35,17 @@ const update = () => {
   location.hash = encodeURIComponent(
     JSON.stringify([grammarInput.value.trim(), inputInput.value.trim()])
   );
+  let parsed;
   try {
     const grammar = parseGrammar(grammarInput.value);
     const input = inputInput.value.trim();
-    const parsed = parse(input, grammar);
-    resultDiv.innerHTML = render(parsed);
+    parsed = parse(input, grammar);
   } catch (e) {
-    resultDiv.innerHTML = e.message;
+    console.error(e);
+    parsed = {error: e.message};
   }
+  console.log(parsed);
+  resultDiv.innerHTML = render(parsed);
 };
 
 grammarInput.addEventListener('input', update);

@@ -4,9 +4,10 @@ body {font-family: sans-serif;background:#222;color:white}
 .box {float: left; width: 50%}
 textarea {width: 98%; height: 300px; background: rgba(255,255,255,0.1); color: white}
 h4 {margin: 0}
-.obj {border: 1px solid #888; margin: 0 3px 1px 3px; display: inline-block; border-radius: 3px;}
+.obj {border: 1px solid rgba(255,255,255,0.2); margin: 0 3px 1px 3px; display: inline-block; border-radius: 3px;}
 .obj label {font-size: 0.5em; position: relative; top: -7px; padding: 0 2px}
 .value {margin: 5px}
+.error {display: block; color: red}
 </style>
 <body>
   <div class="box">
@@ -31,7 +32,7 @@ main: number|string|boolean|null|array|object
     <h4>Input</h4>
     <textarea id="input" spellcheck="false">{"x":[{"a":[{"b":1}]}],"m":true}</textarea>
   </div>
-  <div id="result"></div>
+  <div id="result" style="clear:both"></div>
   <h3>Notes:</h3>
   <ul>
     <li>The grammar must contain a "main" type.</li>
