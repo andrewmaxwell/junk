@@ -1,5 +1,13 @@
 import {parse} from './parse.js';
 
+const debounce = (func, ms = 500) => {
+  let timeout;
+  return (...args) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), ms);
+  };
+};
+
 const parseGrammar = (str) =>
   str.split('\n').reduce((res, l) => {
     const name = l.split(':', 1)[0].trim();
@@ -30,11 +38,20 @@ const grammarInput = document.querySelector('#grammar');
 const inputInput = document.querySelector('#input');
 const resultDiv = document.querySelector('#result');
 
-const update = () => {
-  console.clear();
+const setHash = debounce(() => {
   location.hash = encodeURIComponent(
     JSON.stringify([grammarInput.value.trim(), inputInput.value.trim()])
   );
+});
+const onHashChange = () => {
+  [grammarInput.value, inputInput.value] = JSON.parse(
+    decodeURIComponent(location.hash.slice(1))
+  );
+};
+
+const update = () => {
+  console.clear();
+  setHash();
   let parsed;
   try {
     const grammar = parseGrammar(grammarInput.value);
@@ -51,9 +68,7 @@ const update = () => {
 grammarInput.addEventListener('input', update);
 inputInput.addEventListener('input', update);
 
-if (location.hash.length > 1) {
-  [grammarInput.value, inputInput.value] = JSON.parse(
-    decodeURIComponent(location.hash.slice(1))
-  );
-}
+onHashChange();
 update();
+
+window.addEventListener('hashchange', onHashChange);
