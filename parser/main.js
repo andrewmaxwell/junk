@@ -22,16 +22,24 @@ const parseGrammar = (str) =>
     return res;
   }, {});
 
+const escape = (str) =>
+  str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
 const render = (obj) => {
   if (Array.isArray(obj)) return obj.map(render).join('');
   if (obj && typeof obj === 'object') {
-    if (obj.error) return `<pre class="error">${obj.error}</pre>`;
+    if (obj.error) return `<pre class="error">${escape(obj.error)}</pre>`;
     return `<div class="obj">
-      <label>${obj.type}</label>
+      <label>${escape(obj.type)}</label>
       <div>${render(obj.value)}</div>
     </div>`;
   }
-  return `<div class="value">${obj}</div>`;
+  return `<div class="value">${escape(obj)}</div>`;
 };
 
 const grammarInput = document.querySelector('#grammar');
@@ -40,14 +48,9 @@ const resultDiv = document.querySelector('#result');
 
 const setHash = debounce(() => {
   location.hash = encodeURIComponent(
-    JSON.stringify([grammarInput.value.trim(), inputInput.value.trim()])
+    JSON.stringify([grammarInput.value, inputInput.value])
   );
 });
-const onHashChange = () => {
-  [grammarInput.value, inputInput.value] = JSON.parse(
-    decodeURIComponent(location.hash.slice(1))
-  );
-};
 
 const update = () => {
   console.clear();
@@ -68,7 +71,13 @@ const update = () => {
 grammarInput.addEventListener('input', update);
 inputInput.addEventListener('input', update);
 
+const onHashChange = () => {
+  [grammarInput.value, inputInput.value] = JSON.parse(
+    decodeURIComponent(location.hash.slice(1))
+  );
+  update();
+};
+
 onHashChange();
-update();
 
 window.addEventListener('hashchange', onHashChange);
