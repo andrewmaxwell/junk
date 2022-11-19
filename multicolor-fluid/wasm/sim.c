@@ -13,32 +13,35 @@ nodemon --watch sim.c -O3 --exec "emcc -o sim.js sim.c -s NO_EXIT_RUNTIME=1 -s \
        __typeof__ (b) _b = (b); \
      _a < _b ? _a : _b; })
 
-#define CEILING(x, y) (((x) + (y)-1) / (y))
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
 #include <emscripten/emscripten.h>
 
-// import Grid from '../particle-fluid/Grid.js';
+#define numParticles 16384
+#define numColors 3
+#define gravity 0.0009765625
+#define stiffness 0.03125
 
-#define width 1200.0
-#define height 800.0
-#define numParticles 10000
-#define numColors 2
-#define radius 32.0
-#define gravity 0.01
-#define stiffness 100.0
-#define repulsion 0.05
-#define invRad2 1.0 / (radius * radius)
-#define speed 10
-
-#define rows CEILING(height, radius)
-#define cols CEILING(width, radius)
+#define rows 40
+#define cols 75
+#define radius 16.0
 #define cellSize 256
-#define gridLength (int)(rows * cols * cellSize)
+
+// cols * radius
+#define width 1200.0
+
+// rows * radius
+#define height 600.0
+
+// rows * cols * cellSize
+#define gridLength 768000
 int grid[gridLength];
+
+// rows * cols * 10
+#define vicinityIndexLength 30000
+int vicinityIndexes[vicinityIndexLength];
 
 // current coordinates of particles
 float xCoord[numParticles];
@@ -52,11 +55,17 @@ float yPrev[numParticles];
 float xPrev2[numParticles];
 float yPrev2[numParticles];
 
-// used for storing intermediate calculations when figuring out how particles interact
-int neighborIndex[cellSize];
-float neighborGradient[cellSize];
-float neighborX[cellSize];
-float neighborY[cellSize];
+void setPrev2()
+{
+  for (int i = 0; i < numParticles; i++)
+  {
+    xPrev2[i] = xCoord[i];
+    yPrev2[i] = yCoord[i];
+  }
+}
+
+// to prevent calculating more than once, the vicinity index gets saved for each particle each frame
+int cachedVicinityIndex[numParticles];
 
 float rando()
 {
@@ -65,7 +74,7 @@ float rando()
 
 void clearGrid()
 {
-  for (int i = 0; i < gridLength; i++)
+  for (int i = 0; i < gridLength; i += cellSize)
   {
     grid[i] = 0;
   }
@@ -73,7 +82,7 @@ void clearGrid()
 
 /*
 
-The screen is split up into a grid. 
+The screen is split up into a grid.
 Each grid cell is [radius] wide and tall.
 It is represented by [cellSize] ints.
 The first one is the number of particles in that cell.
@@ -87,7 +96,41 @@ void addToGrid(int i)
   int cellIndex = (row * cols + col) * cellSize;
   if (grid[cellIndex] < cellSize - 1)
   {
-    grid[++grid[cellIndex] + cellIndex] = i;
+    int count = ++grid[cellIndex];
+    grid[count + cellIndex] = i;
+  }
+  cachedVicinityIndex[i] = (row * cols + col) * 10;
+}
+
+void calculateVicinityIndexes()
+{
+  for (int i = 0; i < rows * cols * 10; i++)
+  {
+    vicinityIndexes[i] = 0;
+  }
+  for (int row = 0; row < rows; row++)
+  {
+    for (int col = 0; col < cols; col++)
+    {
+      int vicinityIndex = (row * cols + col) * 10;
+      for (int r = max(0, row - 1); r <= min(rows - 1, row + 1); r++)
+      {
+        for (int c = max(0, col - 1); c <= min(cols - 1, col + 1); c++)
+        {
+          int count = ++vicinityIndexes[vicinityIndex];
+          vicinityIndexes[count + vicinityIndex] = (r * cols + c) * cellSize;
+        }
+      }
+    }
+  }
+}
+
+void setInitialPositions()
+{
+  for (int i = 0; i < numParticles; i++)
+  {
+    xCoord[i] = xPrev[i] = width * rando();
+    yCoord[i] = yPrev[i] = height * rando();
   }
 }
 
@@ -122,6 +165,9 @@ void moveParticle(int i)
   bounceOffWalls(i);
 }
 
+// used for storing intermediate calculations when figuring out how particles interact
+int neighborIndex[cellSize];
+float neighborGradient[cellSize];
 void interactParticles()
 {
   for (int i = 0; i < numParticles; i++)
@@ -130,53 +176,43 @@ void interactParticles()
     float nearDensity = 0;
 
     // for each of the 9 cells in this particle's vicinity
-    // I think I could calculate some of this ahead of time to speed things up a bit.
-    int row = max(0, min(rows - 1, floor(yCoord[i] / radius)));
-    int col = max(0, min(cols - 1, floor(xCoord[i] / radius)));
-    for (int r = max(0, row - 1); r <= min(rows - 1, row + 1); r++)
+    int vicIndex = cachedVicinityIndex[i];
+    for (int j = 1; j < vicinityIndexes[vicIndex]; j++)
     {
-      for (int c = max(0, col - 1); c <= min(cols - 1, col + 1); c++)
+      int cellIndex = vicinityIndexes[vicIndex + j];
+      // this loop calculates the forces between nearby particles
+      for (int k = 1; k < grid[cellIndex]; k++)
       {
-        int cellIndex = (r * cols + c) * cellSize;
+        int n = grid[cellIndex + k];
+        if (n == i)
+          continue;
+        float dx = xCoord[n] - xCoord[i];
+        float dy = yCoord[n] - yCoord[i];
+        float lsq = dx * dx + dy * dy;
 
-        // this loop calculates the forces between nearby particles
-        for (int k = 1; k < grid[cellIndex]; k++)
-        {
-          int n = grid[cellIndex + k];
-          if (n == i)
-            continue;
-          float dx = xCoord[n] - xCoord[i];
-          float dy = yCoord[n] - yCoord[i];
-          float lsq = dx * dx + dy * dy;
+        // some of the particles in the vicinity are too far away
+        if (lsq >= radius * radius)
+          continue;
 
-          // some of the particles in the vicinity are too far away
-          if (lsq >= radius * radius)
-            continue;
-
-          float g = 1.0 - sqrt(lsq) / radius;
-          nearDensity += g * g * g;
-          neighborIndex[numNeighbors] = n;
-          neighborGradient[numNeighbors] = g;
-          neighborX[numNeighbors] = dx;
-          neighborY[numNeighbors] = dy;
-          numNeighbors++;
-        }
+        float g = 1.0 - sqrt(lsq) / radius;
+        nearDensity += g * g * g;
+        neighborIndex[numNeighbors] = n;
+        neighborGradient[numNeighbors] = g;
+        numNeighbors++;
       }
     }
 
-    float nearPressure = stiffness * nearDensity * invRad2;
+    float nearPressure = stiffness * nearDensity;
 
     // this loop applies the forces
     for (int k = 0; k < numNeighbors; k++)
     {
       int n = neighborIndex[k];
       float ng = neighborGradient[k];
-      float amt =
-          (n % numColors) == (i % numColors)
-              ? (nearPressure * ng * ng) / (1.0 - ng) / radius
-              : ng * ng * repulsion;
-      float ax = neighborX[k] * amt;
-      float ay = neighborY[k] * amt;
+      float amt = nearPressure * ng * ng;
+      if ((n % numColors) == (i % numColors)) amt /= (1.0 - ng) * radius;
+      float ax = (xCoord[n] - xCoord[i]) * amt;
+      float ay = (yCoord[n] - yCoord[i]) * amt;
       xCoord[i] -= ax;
       yCoord[i] -= ay;
       xCoord[n] += ax;
@@ -185,38 +221,34 @@ void interactParticles()
   }
 }
 
+void tick()
+{
+  clearGrid();
+  for (int i = 0; i < numParticles; i++)
+  {
+    moveParticle(i);
+    addToGrid(i);
+  };
+  interactParticles();
+}
+
 #define EXTERN
 EXTERN EMSCRIPTEN_KEEPALIVE void init()
 {
   time_t t;
   srand((unsigned)time(&t));
-  for (int i = 0; i < numParticles; i++)
-  {
-    xCoord[i] = xPrev[i] = width * rando();
-    yCoord[i] = yPrev[i] = height * rando();
-  }
+  setInitialPositions();
+  calculateVicinityIndexes();
   printf("Created %d particles\n", numParticles);
 }
 
 EXTERN EMSCRIPTEN_KEEPALIVE void iterate()
 {
-  // copy coords
-  for (int i = 0; i < numParticles; i++)
-  {
-    xPrev2[i] = xCoord[i];
-    yPrev2[i] = yCoord[i];
-  }
-
-  for (int i = 0; i < speed; i++)
-  {
-    clearGrid();
-    for (int i = 0; i < numParticles; i++)
-    {
-      moveParticle(i);
-      addToGrid(i);
-    };
-    interactParticles();
-  }
+  setPrev2();
+  tick();
+  tick();
+  tick();
+  tick();
 }
 
 EXTERN EMSCRIPTEN_KEEPALIVE float *getX()

@@ -1,5 +1,3 @@
-const {Module} = window;
-
 const getVarsFromCode = async () => {
   const response = await fetch('./sim.c');
   const code = await response.text();
@@ -13,14 +11,16 @@ const getVarsFromCode = async () => {
   return {vars};
 };
 
-Module.onRuntimeInitialized = async () => {
-  Module.ccall('init');
+window.Module.onRuntimeInitialized = async () => {
+  const {wasmMemory, _init, _getX, _getY, _getPrevX, _getPrevY, _iterate} =
+    window;
+
+  _init();
 
   const {
     vars: {width, height, numParticles, numColors},
   } = await getVarsFromCode();
 
-  const {wasmMemory, _getX, _getY, _getPrevX, _getPrevY, _iterate} = window;
   const xCoord = new Float32Array(wasmMemory.buffer, _getX(), numParticles);
   const yCoord = new Float32Array(wasmMemory.buffer, _getY(), numParticles);
   const xPrev = new Float32Array(wasmMemory.buffer, _getPrevX(), numParticles);
@@ -50,19 +50,4 @@ Module.onRuntimeInitialized = async () => {
   };
 
   loop();
-  // const {_iterate} = window;
-  // console.log('iterate!!!', _iterate());
 };
-
-// const memory = new WebAssembly.Memory({initial: 10, maximum: 100});
-
-// const importObject = {
-//   // imports: {imported_func: (arg) => console.log(arg)},
-//   js: {mem: memory},
-// };
-// WebAssembly.instantiateStreaming(fetch('sim.wasm'), importObject).then(
-//   (obj) => {
-//     // obj.instance.exports.exported_func()
-//     console.log(obj, memory);
-//   }
-// );
