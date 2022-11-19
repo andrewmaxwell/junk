@@ -1,17 +1,13 @@
 /*
 cd multicolor-fluid/wasm
-nodemon --watch sim.c -O3 --exec "emcc -o sim.js sim.c -s NO_EXIT_RUNTIME=1 -s \"EXPORTED_RUNTIME_METHODS=ccall\""
+nodemon --watch sim.c -O3 --exec "emcc -o sim.js sim.c"
 */
 
 #define max(a, b) \
-  ({ __typeof__ (a) _a = (a); \
-       __typeof__ (b) _b = (b); \
-     _a > _b ? _a : _b; })
+  ((a > b) * (a) + (a <= b) * (b))
 
 #define min(a, b) \
-  ({ __typeof__ (a) _a = (a); \
-       __typeof__ (b) _b = (b); \
-     _a < _b ? _a : _b; })
+  ((a < b) * (a) + (a >= b) * (b))
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -91,8 +87,10 @@ By using this grid, we don't have to compare each particle against each other pa
 */
 void addToGrid(int i)
 {
-  int row = max(0, min(rows - 1, floor(yCoord[i] / radius)));
-  int col = max(0, min(cols - 1, floor(xCoord[i] / radius)));
+  int r = floor(yCoord[i] / radius);
+  int c = floor(xCoord[i] / radius);
+  int row = max(0, min(rows - 1, r));
+  int col = max(0, min(cols - 1, c));
   int cellIndex = (row * cols + col) * cellSize;
   if (grid[cellIndex] < cellSize - 1)
   {
@@ -136,22 +134,17 @@ void setInitialPositions()
 
 void bounceOffWalls(int i)
 {
-  if (xCoord[i] < 0)
-  {
-    xCoord[i] = -xCoord[i];
-  }
-  else if (xCoord[i] > width - 1)
-  {
-    xCoord[i] = 2.0 * width - 2.0 - xCoord[i];
-  }
-  if (yCoord[i] < 0)
-  {
-    yCoord[i] = -yCoord[i];
-  }
-  else if (yCoord[i] > height - 1)
-  {
-    yCoord[i] = 2.0 * height - 2.0 - yCoord[i];
-  }
+  xCoord[i] = xCoord[i] < 0 
+    ? -xCoord[i] 
+    : xCoord[i] > width - 1 
+    ? 2.0 * width - 2.0 - xCoord[i]
+    : xCoord[i];
+
+  yCoord[i] = yCoord[i] < 0 
+    ? -yCoord[i] 
+    : yCoord[i] > height - 1 
+    ? 2.0 * height - 2.0 - yCoord[i]
+    : yCoord[i];
 }
 
 void moveParticle(int i)
@@ -209,8 +202,8 @@ void interactParticles()
     {
       int n = neighborIndex[k];
       float ng = neighborGradient[k];
-      float amt = nearPressure * ng * ng;
-      if ((n % numColors) == (i % numColors)) amt /= (1.0 - ng) * radius;
+      int colorsSame = (n % numColors) == (i % numColors);
+      float amt = nearPressure * ng * ng / (colorsSame * (1.0 - ng) * radius + !colorsSame);
       float ax = (xCoord[n] - xCoord[i]) * amt;
       float ay = (yCoord[n] - yCoord[i]) * amt;
       xCoord[i] -= ax;

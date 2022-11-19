@@ -32,8 +32,13 @@ window.Module.onRuntimeInitialized = async () => {
   canvas.height = height;
   ctx.lineWidth = 2;
   ctx.lineCap = 'round';
+
+  let totalTime = 0;
+  let frame = 0;
   const loop = () => {
+    const start = performance.now();
     _iterate();
+    totalTime += performance.now() - start;
 
     ctx.clearRect(0, 0, width, height);
     ctx.lineWidth = 2;
@@ -46,6 +51,10 @@ window.Module.onRuntimeInitialized = async () => {
       }
       ctx.stroke();
     }
+
+    const time = Math.round(totalTime / ++frame);
+    ctx.fillStyle = 'white';
+    ctx.fillText(time, 3, 10);
     requestAnimationFrame(loop);
   };
 
