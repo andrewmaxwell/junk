@@ -1,6 +1,6 @@
 /*
 cd multicolor-fluid/wasm
-nodemon --watch sim.c -O3 --exec "emcc -o sim.js sim.c"
+nodemon --watch sim.c --exec "emcc -O3 -o sim.mjs sim.c"
 */
 
 #define max(a, b) \
@@ -262,4 +262,14 @@ EXTERN EMSCRIPTEN_KEEPALIVE float *getPrevX()
 EXTERN EMSCRIPTEN_KEEPALIVE float *getPrevY()
 {
   return yPrev2;
+}
+
+EXTERN EMSCRIPTEN_KEEPALIVE void moveMouse (int x, int y, int xs, int ys) {
+  for (int i = 0; i < numParticles; i++) {
+    float dist = hypot(xCoord[i] - x, yCoord[i] - y);
+    float amt = 0.05 * (1.0 - dist / 100.0);
+    if (amt < 0) continue;
+    xPrev[i] -= amt * xs;
+    yPrev[i] -= amt * ys;
+  }
 }

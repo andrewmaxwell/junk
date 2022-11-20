@@ -5,6 +5,7 @@
     "__tuple": "c",
     "array": "c",
     "algorithm": "c",
-    "chrono": "c"
+    "chrono": "c",
+    "stdio.h": "c"
   }
 }
