@@ -148,7 +148,7 @@ export class World {
       }
     }
   }
-  makeSlinky(x, y, w, h, rad = 2, thickness = 10) {
+  makeSlinky(x, y, w, h, rad = 4, thickness = 10) {
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
@@ -176,7 +176,7 @@ export class World {
           Math.hypot(balls[i].x - balls[j].x, balls[i].y - balls[j].y) <
           rad * 4
         ) {
-          this.link(balls[i], balls[j], 1 / 30);
+          this.link(balls[i], balls[j], 1 / 20);
         }
       }
     }

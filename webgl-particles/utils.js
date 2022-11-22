@@ -37,25 +37,14 @@ function createTexture(gl, data, width, height) {
   return tex;
 }
 
-function createFramebuffer(gl, tex) {
-  const fb = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-  gl.framebufferTexture2D(
-    gl.FRAMEBUFFER,
-    gl.COLOR_ATTACHMENT0,
-    gl.TEXTURE_2D,
-    tex,
-    0
-  );
-  return fb;
-}
-
 export const createProgram = (
   gl,
   vertexShader,
   fragmentShader,
-  attrib,
-  uniforms
+  attribName,
+  uniforms,
+  size,
+  bufferData
 ) => {
   const program = gl.createProgram();
   gl.attachShader(program, loadShader(gl, vertexShader, gl.VERTEX_SHADER));
@@ -69,9 +58,24 @@ export const createProgram = (
     return null;
   }
 
+  const attribLocation = gl.getAttribLocation(program, attribName);
+
+  const bindBuffer = makeBufferBinder(gl, bufferData);
+
   return {
-    program,
-    [attrib]: gl.getAttribLocation(program, attrib),
+    use: () => {
+      bindBuffer();
+      gl.enableVertexAttribArray(attribLocation);
+      gl.vertexAttribPointer(
+        attribLocation,
+        size, // size (num components)
+        gl.FLOAT, // type of data in buffer
+        false, // normalize
+        0, // stride (0 = auto)
+        0 // offset
+      );
+      gl.useProgram(program);
+    },
     ...Object.fromEntries(
       uniforms.map((u) => [u, gl.getUniformLocation(program, u)])
     ),
@@ -136,8 +140,17 @@ export const makeBufferBinder = (gl, data) => {
 };
 
 export const makeFrame = (gl, data, width, height = width) => {
+  const frameBuffer = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuffer);
+
   const texture = createTexture(gl, data, width, height);
-  const frameBuffer = createFramebuffer(gl, texture);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,
+    texture,
+    0
+  );
   return {
     bindTexture: (id) => {
       gl.activeTexture(id);
