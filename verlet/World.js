@@ -72,14 +72,14 @@ class Ball {
     b.x -= dx * amount;
     b.y -= dy * amount;
   }
-  setDistance(b, len) {
+  setDistance(b, len, stiffness) {
     const dx = this.x - b.x;
     const dy = this.y - b.y;
     const sqDist = dx * dx + dy * dy;
     if (sqDist < 1) return;
 
     const actualDist = Math.sqrt(sqDist);
-    const amount = (len / actualDist - 1) / 16;
+    const amount = (len / actualDist - 1) * stiffness;
     this.x += dx * amount;
     this.y += dy * amount;
     b.x -= dx * amount;
@@ -104,12 +104,12 @@ export class World {
   addBlock(x, y, w, h) {
     this.blocks.push({x, y, w, h});
   }
-  link(a, b) {
-    this.links.push({a, b, len: Math.hypot(a.x - b.x, a.y - b.y)});
+  link(a, b, stiffness) {
+    this.links.push({a, b, len: Math.hypot(a.x - b.x, a.y - b.y), stiffness});
   }
   step(params) {
-    for (const {a, b, len} of this.links) {
-      a.setDistance(b, len);
+    for (const {a, b, len, stiffness} of this.links) {
+      a.setDistance(b, len, stiffness);
     }
     for (let s = 0; s < params.steps; s++) {
       this.grid.clear();
@@ -128,5 +128,74 @@ export class World {
         }
       }
     }
+  }
+  makeSoftbodyRect(x, y, w, h, rad = 4) {
+    const balls = [];
+    for (let i = 0; i < h; i++) {
+      balls[i] = [];
+      for (let j = 0; j < w; j++) {
+        balls[i][j] = this.addBall(x + j * rad * 2, y + i * rad * 2, rad);
+      }
+    }
+
+    const stiffness = 1 / 16;
+    for (let i = 0; i < h; i++) {
+      for (let j = 0; j < w; j++) {
+        if (balls[i + 1]) this.link(balls[i][j], balls[i + 1][j], stiffness);
+        if (balls[i][j + 1]) this.link(balls[i][j], balls[i][j + 1], stiffness);
+        if (balls[i + 1]?.[j + 1])
+          this.link(balls[i][j], balls[i + 1][j + 1], stiffness);
+      }
+    }
+  }
+  makeSlinky(x, y, w, h, rad = 2, thickness = 10) {
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.lineWidth = thickness;
+    ctx.lineCap = ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let i = rad; i < h - rad; i++) {
+      const xc = rad + (w - 2 * rad) * (Math.cos(i / 8) / 2 + 0.5);
+      ctx.lineTo(xc, i);
+    }
+    ctx.stroke();
+    const pixels = ctx.getImageData(0, 0, w, h);
+    const balls = [];
+    for (let i = 0; i < h; i += rad * 2) {
+      for (let j = 0; j < w; j += rad * 2) {
+        if (pixels.data[(i * w + j) * 4 + 3])
+          balls.push(this.addBall(x + j, y + i, rad));
+      }
+    }
+
+    for (let i = 1; i < balls.length; i++) {
+      for (let j = 0; j < i; j++) {
+        if (
+          Math.hypot(balls[i].x - balls[j].x, balls[i].y - balls[j].y) <
+          rad * 4
+        ) {
+          this.link(balls[i], balls[j], 1 / 30);
+        }
+      }
+    }
+
+    // let prev = [];
+    // for (let i = 0; i < h; i++) {
+    //   const xc = x + (Math.sin(i) / 2 + 0.5) * w;
+    //   const yc = y + i * rad * 2;
+    //   const row = [];
+    //   for (let j = 0; j < thickness; j++) {
+    //     row[j] = this.addBall(xc + j * rad * 2, yc, rad);
+    //   }
+    //   const group = [...row, ...prev];
+    //   for (let j = 1; j < group.length; j++) {
+    //     for (let k = 0; k < j; k++) {
+    //       this.link(group[j], group[k], 1 / 200);
+    //     }
+    //   }
+    //   prev = row;
+    // }
   }
 }

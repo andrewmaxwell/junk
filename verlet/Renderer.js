@@ -18,13 +18,14 @@ export class Renderer {
       ctx.fillRect(x, y, w, h);
     }
 
-    // ctx.strokeStyle = 'white';
-    // ctx.beginPath();
-    // for (const {a, b} of links) {
-    //   ctx.moveTo(a.x, a.y);
-    //   ctx.lineTo(b.x, b.y);
-    // }
-    // ctx.stroke();
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 0.1;
+    ctx.beginPath();
+    for (const {a, b} of links) {
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
 
     for (const {x, y, rad, color} of balls) {
       ctx.fillStyle = color;
