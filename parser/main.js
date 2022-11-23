@@ -78,6 +78,10 @@ const onHashChange = () => {
   update();
 };
 
+if (location.hash.length < 2) {
+  document.querySelector('#default').click();
+}
+
 onHashChange();
 
 window.addEventListener('hashchange', onHashChange);

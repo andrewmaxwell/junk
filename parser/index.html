@@ -14,32 +14,18 @@ a {color: #CCC; margin: 0 3px}
   <div class="box">
     <div style="float:right; margin-right: 15px">
       Examples: 
-      <a href="#%5B%22number%3A%20%5E(-%3F%5C%5Cd%2B(%5C%5C.%5C%5Cd%2B)%3F)%5Cnstring%3A%20%5E%5C%22(%5B%5E%5C%22%5D*)%5C%22%5Cnboolean%3A%20%5E(true%7Cfalse)%5Cn%5CnexprList%3A%20commaExprList%7Cmain%5CncommaExprList%3A%20main%20%2C%20exprList%5Cnarray%3A%20%5B%20exprList%3F%20%5D%5Cn%5Cnpair%3A%20string%20%3A%20main%5CncommaPairList%3A%20pair%20%2C%20pairList%5CnpairList%3A%20commaPairList%7Cpair%5Cnobject%3A%20%7B%20pairList%3F%20%7D%5Cn%5Cnmain%3A%20number%7Cstring%7Cboolean%7Cnull%7Carray%7Cobject%22%2C%22%7B%5C%22x%5C%22%3A%5B%7B%5C%22a%5C%22%3A%5B%7B%5C%22b%5C%22%3A1%7D%5D%7D%5D%2C%5C%22m%5C%22%3Atrue%7D%22%5D">JSON</a>
+      <a id="default" href="#%5B%22number%3A%20%5E(-%3F%5C%5Cd%2B(%5C%5C.%5C%5Cd%2B)%3F)%5Cnstring%3A%20%5E%5C%22(%5B%5E%5C%22%5D*)%5C%22%5Cnboolean%3A%20%5E(true%7Cfalse)%5Cn%5CnexprList%3A%20commaExprList%7Cmain%5CncommaExprList%3A%20main%20%2C%20exprList%5Cnarray%3A%20%5B%20exprList%3F%20%5D%5Cn%5Cnpair%3A%20string%20%3A%20main%5CncommaPairList%3A%20pair%20%2C%20pairList%5CnpairList%3A%20commaPairList%7Cpair%5Cnobject%3A%20%7B%20pairList%3F%20%7D%5Cn%5Cnmain%3A%20number%7Cstring%7Cboolean%7Cnull%7Carray%7Cobject%22%2C%22%7B%5C%22x%5C%22%3A%5B%7B%5C%22a%5C%22%3A%5B%7B%5C%22b%5C%22%3A1%7D%5D%7D%5D%2C%5C%22m%5C%22%3Atrue%7D%22%5D">JSON</a>
       <a href="#%5B%22id%3A%20%5E%5B%5E'%5C%22()%5C%5Cs%5D%2B%5Cnsp%3A%20%5E%5C%5Cs%2B%5Cnstring%3A%20%5E%5C%22(%5B%5E%5C%22%5D*)%5C%22%5Cnnumber%3A%20%5E(-%3F%5C%5Cd%2B(%5C%5C.%5C%5Cd%2B)%3F)%5CnsExpr%3A%20(%20exprList%3F%20)%5Cnquoted%3A%20'%20expr%5Cnexpr%3A%20number%7CsExpr%7Cquoted%7Cid%7Cstring%5CnanotherExpr%3A%20sp%20expr%20anotherExpr%3F%5CnexprList%3A%20expr%20anotherExpr%3F%5Cnmain%3A%20exprList%22%2C%22(defun%20null.%20(x)%20(eq%20x%20-5.4))%5Cn%5Cn(null.%20'a)%22%5D">Lisp</a>
       <a href="#%5B%22name%3A%20%5E%5Ba-zA-Z0-9-%5D%2B%5Cntext%3A%20%5E%5C%5Cs*%5B%5E<%5D%2B%5Cnstring%3A%20%5E%5C%5Cs*%5C%22(%5B%5E%5C%22%5D*)%5C%22%5C%5Cs*%5Cn_%3A%20%5E%5C%5Cs*%5Cn<%3A%20%5E%5C%5Cs*<%5C%5Cs*%5Cn<%2F%3A%20%5E%5C%5Cs*<%5C%5C%2F%5C%5Cs*%5Cn>%3A%20%5E%5C%5Cs*>%5C%5Cs*%5Cn%3D%3A%20%5E%5C%5Cs*%3D%5C%5Cs*%5Cn%5CnattributeValue%3A%20%3D%20string%5Cnattributes%3A%20name%20attributeValue%3F%20attributes%3F%5CncloseTag%3A%20<%2F%20name%20>%5CnopenTag%3A%20<%20name%20_%20attributes%3F%20>%5Cntag%3A%20openTag%20main%20closeTag%5CntagList%3A%20tag%20tagList%3F%5Cnmain%3A%20tagList%7Ctext%22%2C%22<html>%5Cn%20%20<head>%5Cn%20%20%20%20<title>This%20is%20some%20html<%2Ftitle>%5Cn%20%20<%2Fhead>%5Cn%20%20<body%20style%3D%5C%22background%3A%20green%5C%22>%5Cn%20%20%20%20<h1>Hello%2C%20World!<%2Fh1>%5Cn%20%20%20%20<button%20onClick%3D%5C%22alert('do%20not%20click%20me!')%5C%22>Do%20not%20click.<%2Fbutton>%5Cn%20%20<%2Fbody>%5Cn<%2Fhtml>%22%5D">HTML</a>
     </div>
     <h4>
       Grammar
     </h4>
-    <textarea id="grammar" spellcheck="false">number: ^(-?\d+(\.\d+)?)
-string: ^"([^"]*)"
-boolean: ^(true|false)
-
-exprList: commaExprList|main
-commaExprList: main , exprList
-array: [ exprList? ]
-
-pair: string : main
-commaPairList: pair , pairList
-pairList: commaPairList|pair
-object: { pairList? }
-
-main: number|string|boolean|null|array|object
-    </textarea>
+    <textarea id="grammar" spellcheck="false"></textarea>
   </div>
   <div class="box">
     <h4>Input</h4>
-    <textarea id="input" spellcheck="false">{"x":[{"a":[{"b":1}]}],"m":true}</textarea>
+    <textarea id="input" spellcheck="false"></textarea>
   </div>
   <div id="result" style="clear:both"></div>
   <h3>Notes:</h3>
