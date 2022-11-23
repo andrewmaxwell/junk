@@ -1,5 +1,5 @@
 import {simRunner} from './simRunner.js';
-import {renderer} from './renderer.js';
+import {makeRenderer} from './makeRenderer.js';
 import {makeGl, orthographic} from './utils.js';
 import {PositionFrames} from './PositionFrames.js';
 import {FrameRateDisplay} from './frameRate.js';
@@ -30,7 +30,7 @@ for (let i = 0; i < currentPositions.length; i += 4) {
 
 const positionFrames = new PositionFrames(gl, currentPositions, textureSize);
 const runSim = await simRunner(gl);
-const render = await renderer(gl, textureSize);
+const render = await makeRenderer(gl, textureSize);
 const iterate = () => {
   runSim(positionFrames, textureSize);
   render(positionFrames.currentFrame, projection);

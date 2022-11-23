@@ -1,6 +1,6 @@
 import {createProgram} from './utils.js';
 
-export const renderer = async (gl, textureSize) => {
+export const makeRenderer = async (gl, textureSize) => {
   const prog = createProgram(
     gl,
     `
