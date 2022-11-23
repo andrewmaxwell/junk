@@ -30,6 +30,12 @@
     "desc": "A quick proof of concept for a simple physics engine."
   },
   {
+    "filePath": "webgl-particles",
+    "title": "WebGL Particles",
+    "year": 2022,
+    "desc": "360,000 particles and three moving gravity wells. Simulated and rendered on the GPU."
+  },
+  {
     "filePath": "smallpt",
     "title": "Another Ray Tracer",
     "year": 2021,

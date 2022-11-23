@@ -31,16 +31,14 @@ for (let i = 0; i < currentPositions.length; i += 4) {
 const positionFrames = new PositionFrames(gl, currentPositions, textureSize);
 const runSim = await simRunner(gl);
 const render = await makeRenderer(gl, textureSize);
-const iterate = () => {
-  runSim(positionFrames, textureSize);
-  render(positionFrames.currentFrame, projection);
-  positionFrames.swap();
-};
 
 const frameRateDisplay = new FrameRateDisplay();
 
 const loop = () => {
-  if (document.hasFocus()) frameRateDisplay.measure(iterate);
+  runSim(positionFrames, textureSize);
+  render(positionFrames.currentFrame, projection);
+  positionFrames.swap();
+  frameRateDisplay.tick();
   requestAnimationFrame(loop);
 };
 

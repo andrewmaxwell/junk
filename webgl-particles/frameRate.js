@@ -1,6 +1,6 @@
 export class FrameRateDisplay {
   constructor() {
-    this.total = 0;
+    this.prev;
     this.frames = 0;
     const div = (this.frameRateDiv = document.createElement('div'));
     div.style.position = 'fixed';
@@ -8,11 +8,11 @@ export class FrameRateDisplay {
     div.style.right = 0;
     document.body.append(div);
   }
-  measure(func) {
-    const start = performance.now();
-    func();
-    this.total += performance.now() - start;
-    this.frameRateDiv.innerHTML =
-      Math.round((100 * this.total) / ++this.frames) / 100 + ' ms';
+  tick() {
+    this.frames++;
+    const now = performance.now();
+    const fps = Math.round(1000 / (now - this.prev));
+    this.frameRateDiv.innerHTML = `${fps} fps`;
+    this.prev = now;
   }
 }

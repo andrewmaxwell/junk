@@ -21,13 +21,12 @@ const reset = () => {
   frame = 0;
   resize();
 
-  // for (let i = 0; i < 5; i++) {
-  //   const height = 10 + Math.random() * 500;
-  //   world.addBlock((i + 1) * 200, innerHeight - height, 50, height);
-  // }
+  for (let i = 0; i < 5; i++) {
+    const height = 10 + Math.random() * 500;
+    world.addBlock((i + 1) * 200, innerHeight - height, 50, height);
+  }
 
   // world.makeSoftbodyRect(100, 100, 10, 10);
-  world.makeSlinky(100, 50, 300, 400);
 };
 
 const loop = () => {
@@ -64,6 +63,9 @@ const init = () => {
       ball.x += e.movementX * amt;
       ball.y += e.movementY * amt;
     }
+  });
+  window.addEventListener('dblclick', (e) => {
+    world.makeSlinky(e.pageX, e.pageY, 300, 400);
   });
 
   reset();
