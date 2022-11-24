@@ -1,4 +1,4 @@
-function loadShader(gl, shaderSource, shaderType) {
+const loadShader = (gl, shaderSource, shaderType) => {
   const shader = gl.createShader(shaderType);
   gl.shaderSource(shader, shaderSource);
   gl.compileShader(shader);
@@ -14,9 +14,9 @@ function loadShader(gl, shaderSource, shaderType) {
     return null;
   }
   return shader;
-}
+};
 
-function createTexture(gl, data, width, height) {
+const createTexture = (gl, data, width, height) => {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texImage2D(
@@ -35,20 +35,28 @@ function createTexture(gl, data, width, height) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   return tex;
-}
+};
+
+const typeMappings = {
+  vec2: 'uniform2f',
+  mat4: 'uniformMatrix4fv',
+  float: 'uniform1f',
+};
 
 export const createProgram = (
   gl,
-  vertexShader,
-  fragmentShader,
-  attribName,
-  uniforms,
-  size,
-  bufferData
+  vertexShaderStr,
+  fragmentShaderStr,
+  attribSize,
+  bufferData,
+  drawType
 ) => {
   const program = gl.createProgram();
-  gl.attachShader(program, loadShader(gl, vertexShader, gl.VERTEX_SHADER));
-  gl.attachShader(program, loadShader(gl, fragmentShader, gl.FRAGMENT_SHADER));
+  gl.attachShader(program, loadShader(gl, vertexShaderStr, gl.VERTEX_SHADER));
+  gl.attachShader(
+    program,
+    loadShader(gl, fragmentShaderStr, gl.FRAGMENT_SHADER)
+  );
   gl.linkProgram(program);
   const linked = gl.getProgramParameter(program, gl.LINK_STATUS);
   if (!linked) {
@@ -58,27 +66,52 @@ export const createProgram = (
     return null;
   }
 
+  const combinedCode = vertexShaderStr + '\n' + fragmentShaderStr;
+  const uniformUpdaters = {};
+  const [, attribName] = combinedCode.match(/attribute \w+ (\w+);/);
   const attribLocation = gl.getAttribLocation(program, attribName);
+  for (const [, type, name] of combinedCode.matchAll(/uniform (\w+) (\w+);/g)) {
+    const loc = gl.getUniformLocation(program, name);
+    if (type === 'sampler2D') {
+      uniformUpdaters[name] = (texture, num) => {
+        gl.activeTexture(gl['TEXTURE' + num]);
+        gl.bindTexture(gl.TEXTURE_2D, texture.texture);
+        gl.uniform1i(loc, num);
+      };
+    } else if (typeMappings[type]) {
+      uniformUpdaters[name] = (...args) => gl[typeMappings[type]](loc, ...args);
+    } else {
+      throw new Error(`wtf is ${type}`);
+    }
+  }
 
-  const bindBuffer = makeBufferBinder(gl, bufferData);
+  const buff = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buff);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(bufferData), gl.STATIC_DRAW);
 
   return {
-    use: () => {
-      bindBuffer();
+    run: (params, output = null) => {
+      gl.viewport(0, 0, innerWidth, innerHeight);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, output);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buff);
       gl.enableVertexAttribArray(attribLocation);
       gl.vertexAttribPointer(
         attribLocation,
-        size, // size (num components)
+        attribSize, // size (num components)
         gl.FLOAT, // type of data in buffer
         false, // normalize
         0, // stride (0 = auto)
         0 // offset
       );
       gl.useProgram(program);
+
+      for (const key in params) {
+        if (Array.isArray(params[key])) uniformUpdaters[key](...params[key]);
+        else uniformUpdaters[key](params[key]);
+      }
+
+      gl.drawArrays(drawType, 0, bufferData.length / attribSize);
     },
-    ...Object.fromEntries(
-      uniforms.map((u) => [u, gl.getUniformLocation(program, u)])
-    ),
   };
 };
 
@@ -102,7 +135,7 @@ export const makeGl = (canvas) => {
   return gl;
 };
 
-export function orthographic(
+export const orthographic = (
   left,
   right,
   bottom,
@@ -110,7 +143,7 @@ export function orthographic(
   near,
   far,
   dst = new Float32Array(16)
-) {
+) => {
   dst[0] = 2 / (right - left);
   dst[1] = 0;
   dst[2] = 0;
@@ -128,16 +161,9 @@ export function orthographic(
   dst[14] = (near + far) / (near - far);
   dst[15] = 1;
   return dst;
-}
+};
 
 export const getFile = async (filename) => (await fetch(filename)).text();
-
-export const makeBufferBinder = (gl, data) => {
-  const buff = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buff);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
-  return () => gl.bindBuffer(gl.ARRAY_BUFFER, buff);
-};
 
 export const makeFrame = (gl, data, width, height = width) => {
   const frameBuffer = gl.createFramebuffer();
@@ -151,11 +177,5 @@ export const makeFrame = (gl, data, width, height = width) => {
     texture,
     0
   );
-  return {
-    bindTexture: (id) => {
-      gl.activeTexture(id);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-    },
-    bindFrame: () => gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuffer),
-  };
+  return {frameBuffer, texture};
 };

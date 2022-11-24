@@ -2,8 +2,8 @@
 
 precision highp float;
 
-uniform sampler2D positionTex;
-uniform vec2 texDimensions;
+uniform sampler2D stateTexture;
+uniform float textureSize;
 uniform vec2 canvasDimensions;
 uniform float time;
 
@@ -19,15 +19,15 @@ vec2 attract(vec2 attractor, vec2 particle, float strength) {
 const int numAttractors = 3;
 
 void main() {
-  vec2 texcoord = gl_FragCoord.xy / texDimensions;
+  vec2 texcoord = gl_FragCoord.xy / textureSize;
   
-  vec4 p = texture2D(positionTex, texcoord);
+  vec4 p = texture2D(stateTexture, texcoord);
   vec2 velocity = (p.xy - p.zw);
   vec2 n = p.xy + velocity;
 
   // for (int x = 0; x < 100; x++) {
   //   for (int y = 0; y < 100; y++) {
-  //     vec2 b = texture2D(positionTex, vec2(x, y) / texDimensions).xy;
+  //     vec2 b = texture2D(stateTexture, vec2(x, y) / textureSize).xy;
   //     n += attract(b, p.xy, 0.001);
   //   }
   // }
