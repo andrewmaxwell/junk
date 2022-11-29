@@ -1,4 +1,5 @@
-import {parse} from './parse.js';
+import {parse, parseGrammar} from './parse.js';
+import {examples} from './examples.js';
 
 const debounce = (func, ms = 500) => {
   let timeout;
@@ -8,35 +9,28 @@ const debounce = (func, ms = 500) => {
   };
 };
 
-const parseGrammar = (str) =>
-  str.split('\n').reduce((res, l) => {
-    const name = l.split(':', 1)[0].trim();
-    const val = l.slice(name.length + 1).trim();
-    if (name && val)
-      res[name] =
-        val[0] === '^'
-          ? new RegExp(val)
-          : !val.includes(' ')
-          ? {any: val.split('|')}
-          : {concat: val.split(' ')};
-    return res;
-  }, {});
+const delimiter = '!!$$~~';
+const encode = (grammar, code) => btoa(grammar + delimiter + code);
+const decode = (str) => atob(str).split(delimiter);
 
 const escape = (str) =>
-  str
+  ('' + str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 
-const render = (obj) => {
-  if (Array.isArray(obj)) return obj.map(render).join('');
+const render = (obj, odd = false) => {
+  if (Array.isArray(obj)) return obj.map((el) => render(el, odd)).join('');
   if (obj && typeof obj === 'object') {
-    if (obj.error) return `<pre class="error">${escape(obj.error)}</pre>`;
-    return `<div class="obj">
+    if (obj.errors) {
+      const err = obj.errors.map((e) => e.error).join('\nOR\n');
+      return `<pre class="error">${escape(err)}</pre>`;
+    }
+    return `<div class="obj ${odd ? 'odd' : 'even'}">
       <label>${escape(obj.type)}</label>
-      <div>${render(obj.value)}</div>
+      <div>${render(obj.value, !odd)}</div>
     </div>`;
   }
   return `<div class="value">${escape(obj)}</div>`;
@@ -45,41 +39,48 @@ const render = (obj) => {
 const grammarInput = document.querySelector('#grammar');
 const inputInput = document.querySelector('#input');
 const resultDiv = document.querySelector('#result');
+const timeDiv = document.querySelector('#time');
+const examplesDiv = document.querySelector('#examples');
 
-const setHash = debounce(() => {
-  location.hash = encodeURIComponent(
-    JSON.stringify([grammarInput.value, inputInput.value])
-  );
-});
-
-const update = () => {
+const update = debounce(() => {
   console.clear();
-  setHash();
+  location.hash = encode(grammarInput.value, inputInput.value);
   let parsed;
   try {
     const grammar = parseGrammar(grammarInput.value);
     const input = inputInput.value.trim();
+    const start = performance.now();
     parsed = parse(input, grammar);
+    const time = performance.now() - start;
+    timeDiv.innerHTML = `Parsed in ${Math.round(time * 10) / 10} ms`;
   } catch (e) {
     console.error(e);
     parsed = {error: e.message};
   }
   console.log(parsed);
   resultDiv.innerHTML = render(parsed);
-};
+});
 
 grammarInput.addEventListener('input', update);
 inputInput.addEventListener('input', update);
 
 const onHashChange = () => {
-  [grammarInput.value, inputInput.value] = JSON.parse(
-    decodeURIComponent(location.hash.slice(1))
-  );
-  update();
+  const [newGrammar, newInput] = decode(location.hash.slice(1));
+  if (newGrammar !== grammarInput.value || newInput !== inputInput.value) {
+    grammarInput.value = newGrammar;
+    inputInput.value = newInput;
+    update();
+  }
 };
 
+examplesDiv.innerHTML += examples
+  .map(
+    ({name, grammar, code}) => `<a href="#${encode(grammar, code)}">${name}</a>`
+  )
+  .join('');
+
 if (location.hash.length < 2) {
-  document.querySelector('#default').click();
+  document.querySelector('#examples a').click();
 }
 
 onHashChange();
