@@ -9,7 +9,7 @@ const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const parseRegex = (regex, str, index, type, path) => {
   const m = str.match(regex);
-  if (m) return {type, value: m[1] || m[0], length: m[0].length};
+  if (m) return {type, value: m[0], length: m[0].length};
 
   const error = `Expected "${type}" at "${trunc(str)}"\n${path.join(' ')}`;
   return {errors: [{error, index}]};
@@ -62,8 +62,7 @@ export const parseGrammar = (str) =>
       .split('\n')
       .filter((l) => l.trim())
       .map((l) => {
-        const name = l.split(':', 1)[0];
-        const val = l.slice(name.length + 1).trim();
-        return [name.trim(), val[0] === '^' ? new RegExp(val) : val.split(' ')];
+        const [, name, val] = l.trim().match(/([^:\s]+)\s*:\s*(.*)/);
+        return [name, val[0] === '^' ? new RegExp(val) : val.split(' ')];
       })
   );

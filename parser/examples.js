@@ -80,16 +80,16 @@ main: values`,
   },
   {
     name: 'ES6',
-    grammar: `id: ^(?!(for|const|let|var|function|new|await|import|export|while|in|with|try|catch|break|true|false|null|class)\\b)([a-zA-Z_$][a-zA-Z0-9_$]*)\\s*
-string: ^'([^']*)'\\s*
-number: ^(-?\\d+(\\.\\d+)?)\\s*
-or: ^(\\|\\|)\\s*
-regex: ^(\\/.*\\/[gi]*)\\s*
-templateString: ^\`([^\`]*)\`\\s*
-comment: ^//\\s*(.*)\\s*
+    grammar: `id: ^(?!(for|const|let|var|function|new|await|import|export|while|in|with|try|catch|break|true|false|null|class)\\b)[a-zA-Z_$][a-zA-Z0-9_$]*\\s*
+string: ^'[^']*'\\s*
+number: ^-?\\d+(\\.\\d+)?\\s*
+or: ^\\|\\|\\s*
+regex: ^\\/.*\\/[gi]*\\s*
+templateString: ^\`[^\`]*\`\\s*
+comment: ^//\\s*.*\\s*|^/\\*.*\\*/\\s*
 
 moreExprList: , exprList
-exprList: expr moreExprList?
+exprList: expr? moreExprList?
 parenExpr: ( exprList? )
 bracketExpr: [ exprList? ]
 
