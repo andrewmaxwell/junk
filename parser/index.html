@@ -7,7 +7,7 @@ h4 {margin: 0}
 .obj {margin: 2px; display: inline-block; border-radius: 3px;}
 .obj label {display: block; font-size: 0.5em; padding: 0 2px}
 .odd {background: #000}
-.even {background: #222}
+.even {background: #333}
 .value {margin: 5px}
 .error {display: block; color: red}
 a {color: #CCC; margin: 0 3px}
@@ -30,11 +30,16 @@ a {color: #CCC; margin: 0 3px}
   <div id="result" style="clear:both"></div>
   <h3>Notes:</h3>
   <ul>
+    <li>Each line of the grammar is a "type", and each type has a name followed by a colon followed by either a regex or a list of types/literals.</li>
     <li>The grammar must contain a "main" type.</li>
     <li>The order of types does not matter.</li>
-    <li>Regular expressions must start with ^</li>
-    <li>"OR" types must be separated by | and should have no spaces in them.</li>
-    <li>Concatenated types are separated with spaces and can include optional components (add a ?)</li>
+    <li>Regular expressions must start with ^ and should probably end with a \s* to ignore whitespace after them.</li>
+    <li>Non-Regex types are made of one or more parts concatenated by single spaces.</li>
+    <li>The parts themselves can be made optional by adding a question mark.</li>
+    <li>The parts can also match multiple other types by concatenating them with pipes.</li>
+    <li>If a part does not match a type, it is treated as a literal.</li>
+    <li>White space is ignored after literals (but not regexes).</li>
+    <li>The grammar is case sensitive. I could add a control for making it case-insensitive if necessary.</li>
   </ul>
   <script type="module" src="main.js"></script>
 </body>

@@ -1,5 +1,6 @@
 import {parse, parseGrammar} from './parse.js';
 import {examples} from './examples.js';
+import {renderAst} from './renderAst.js';
 
 const debounce = (func, ms = 500) => {
   let timeout;
@@ -9,41 +10,22 @@ const debounce = (func, ms = 500) => {
   };
 };
 
-const delimiter = '!!$$~~';
+const delimiter = '!!$$~~'; // something unlikely to appear in grammar or source
 const encode = (grammar, code) => btoa(grammar + delimiter + code);
 const decode = (str) => atob(str).split(delimiter);
 
-const escape = (str) =>
-  ('' + str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-
-const render = (obj, odd = false) => {
-  if (Array.isArray(obj)) return obj.map((el) => render(el, odd)).join('');
-  if (obj && typeof obj === 'object') {
-    if (obj.errors) {
-      const err = obj.errors.map((e) => e.error).join('\nOR\n');
-      return `<pre class="error">${escape(err)}</pre>`;
-    }
-    return `<div class="obj ${odd ? 'odd' : 'even'}">
-      <label>${escape(obj.type)}</label>
-      <div>${render(obj.value, !odd)}</div>
-    </div>`;
-  }
-  return `<div class="value">${escape(obj)}</div>`;
-};
+document.querySelector('#examples').innerHTML += examples
+  .map(
+    ({name, grammar, code}) => `<a href="#${encode(grammar, code)}">${name}</a>`
+  )
+  .join('');
 
 const grammarInput = document.querySelector('#grammar');
 const inputInput = document.querySelector('#input');
 const resultDiv = document.querySelector('#result');
 const timeDiv = document.querySelector('#time');
-const examplesDiv = document.querySelector('#examples');
 
 const update = debounce(() => {
-  console.clear();
   location.hash = encode(grammarInput.value, inputInput.value);
   let parsed;
   try {
@@ -58,7 +40,7 @@ const update = debounce(() => {
     parsed = {error: e.message};
   }
   console.log(parsed);
-  resultDiv.innerHTML = render(parsed);
+  resultDiv.innerHTML = renderAst(parsed);
 });
 
 grammarInput.addEventListener('input', update);
@@ -73,16 +55,10 @@ const onHashChange = () => {
   }
 };
 
-examplesDiv.innerHTML += examples
-  .map(
-    ({name, grammar, code}) => `<a href="#${encode(grammar, code)}">${name}</a>`
-  )
-  .join('');
-
 if (location.hash.length < 2) {
   document.querySelector('#examples a').click();
+} else {
+  onHashChange();
 }
-
-onHashChange();
 
 window.addEventListener('hashchange', onHashChange);
