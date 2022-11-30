@@ -1,4 +1,3 @@
-import {parse, parseGrammar} from './parse.js';
 import {examples} from './examples.js';
 import {renderAst} from './renderAst.js';
 
@@ -24,27 +23,7 @@ const grammarInput = document.querySelector('#grammar');
 const inputInput = document.querySelector('#input');
 const resultDiv = document.querySelector('#result');
 const timeDiv = document.querySelector('#time');
-
-const update = debounce(() => {
-  location.hash = encode(grammarInput.value, inputInput.value);
-  let parsed;
-  try {
-    const grammar = parseGrammar(grammarInput.value);
-    const input = inputInput.value.trim();
-    const start = performance.now();
-    parsed = parse(input, grammar);
-    const time = performance.now() - start;
-    timeDiv.innerHTML = `Parsed in ${Math.round(time * 10) / 10} ms`;
-  } catch (e) {
-    console.error(e);
-    parsed = {error: e.message};
-  }
-  console.log(parsed);
-  resultDiv.innerHTML = renderAst(parsed);
-});
-
-grammarInput.addEventListener('input', update);
-inputInput.addEventListener('input', update);
+const errorDiv = document.querySelector('#error');
 
 const onHashChange = () => {
   const [newGrammar, newInput] = decode(location.hash.slice(1));
@@ -54,6 +33,45 @@ const onHashChange = () => {
     update();
   }
 };
+
+const updateHash = debounce(() => {
+  window.removeEventListener('hashchange', onHashChange);
+  location.hash = encode(grammarInput.value, inputInput.value);
+  window.addEventListener('hashchange', onHashChange);
+});
+
+let worker;
+
+const update = () => {
+  updateHash();
+
+  worker?.terminate();
+  resultDiv.innerHTML = 'Parsing...';
+  timeDiv.innerHTML = '';
+  errorDiv.innerHTML = '';
+
+  const code = inputInput.value.trim();
+
+  worker = new Worker('./worker.js', {type: 'module'});
+  worker.addEventListener('message', ({data: {parsed, time}}) => {
+    console.log(parsed);
+    resultDiv.innerHTML = renderAst(parsed);
+    timeDiv.innerHTML = `Parsed in ${Math.round(time * 10) / 10} ms`;
+    if (parsed.errors) {
+      errorDiv.innerText = parsed.errors.map((e) => e.error).join('\nOR\n');
+    }
+    if (parsed.length < code.length) {
+      errorDiv.innerText = `Stopped parsing at: ${code.slice(parsed.length)}`;
+    }
+  });
+  worker.postMessage({
+    grammarStr: grammarInput.value,
+    code,
+  });
+};
+
+grammarInput.addEventListener('input', update);
+inputInput.addEventListener('input', update);
 
 if (location.hash.length < 2) {
   document.querySelector('#examples a').click();

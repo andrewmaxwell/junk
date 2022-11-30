@@ -18,10 +18,6 @@ const collapse = (obj) =>
 export const renderAst = (obj, odd = false) => {
   if (Array.isArray(obj)) return obj.map((el) => renderAst(el, odd)).join('');
   if (obj && typeof obj === 'object') {
-    if (obj.errors) {
-      const err = obj.errors.map((e) => e.error).join('\nOR\n');
-      return `<pre class="error">${escape(err)}</pre>`;
-    }
     obj = collapse(obj);
     return `<div class="obj ${odd ? 'odd' : 'even'}">
       <label>${escape(obj.type)}</label>

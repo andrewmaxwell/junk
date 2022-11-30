@@ -3,12 +3,16 @@ export const examples = [
     name: 'JSON',
     grammar: `number: ^(-?\\d+(\\.\\d+)?)\\s*
 string: ^"([^"]*)"\\s*
-moreValues: , valueList
-valueList: value moreValues?
+
+commaValue: , value
+valueList: value commaValue*
 array: [ valueList? ]
-morePairs: , pairList
-pairList: string : value morePairs?
+
+pair: string : value
+commaPair: , pair
+pairList: pair commaPair*
 object: { pairList? }
+
 value: number|string|true|false|null|array|object
 main: value`,
     code: `{
@@ -32,11 +36,11 @@ main: value`,
 text: ^([^<]+)\\s*
 string: ^"([^"]*)"\\s*
 attributeValue: = string
-attributes: name attributeValue? attributes?
+attributes: name attributeValue?
 closeTag: </ name >
-tagList: < name attributes? > tagList|text? closeTag? tagList?
+tagList: < name attributes* > tagList|text* closeTag?
 docType: <!DOCTYPE name >
-main: docType? tagList|text`,
+main: docType? tagList|text*`,
     code: `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -57,10 +61,10 @@ main: docType? tagList|text`,
     grammar: `id: ^([^'"()\\s]+)\\s*
 string: ^"([^"]*)"\\s*
 number: ^(-?\\d+(\\.\\d+)?)\\s*
-sExpr: ( values? )
+
+sExpr: ( number|sExpr|quoted|id|string* )
 quoted: ' sExpr|id
-values: number|sExpr|quoted|id|string values?
-main: values`,
+main: number|sExpr|quoted|id|string*`,
     code: `(defun reduce (func acc arr) 
   (cond (arr (reduce func (func acc (car arr)) (cdr arr))) 
     ('t acc)))
@@ -80,29 +84,30 @@ main: values`,
   },
   {
     name: 'ES6',
-    grammar: `id: ^(?!(for|const|let|var|function|new|await|import|export|while|in|with|try|catch|break|true|false|null|class)\\b)[a-zA-Z_$][a-zA-Z0-9_$]*\\s*
-string: ^'[^']*'\\s*
+    grammar: `id: ^(?!(for|const|let|var|function|new|await|import|export|while|in|with|try|catch|break|true|false|null|undefined|class)\\b)[a-zA-Z_$][a-zA-Z0-9_$]*\\s*
+string: ^('[^']*'|"[^"]*")\\s*
 number: ^-?\\d+(\\.\\d+)?\\s*
 or: ^\\|\\|\\s*
 regex: ^\\/.*\\/[gi]*\\s*
 templateString: ^\`[^\`]*\`\\s*
 comment: ^//\\s*.*\\s*|^/\\*.*\\*/\\s*
+boolean: true|false
 
-moreExprList: , exprList
-exprList: expr? moreExprList?
+moreExprList: , expr?
+exprList: expr? moreExprList*
 parenExpr: ( exprList? )
 bracketExpr: [ exprList? ]
 
 block: { statementList }
 
 method: id parenExpr block
-keyValPair: id : expr
-moreObjectItems: , objectItems
-objectItems: keyValPair|method|id moreObjectItems? ,?
+keyValPair: id|string : expr
+objSpread: ... expr
+moreObjectItems: , keyValPair|method|id
+objectItems: keyValPair|method|id|objSpread moreObjectItems* ,?
 object: { objectItems? }
 
-methodList: method methodList?
-namedClass: class id { methodList? }
+namedClass: class id { method* }
 
 arrowFunction: parenExpr => expr|block
 namedFunction: function id parenExpr block
@@ -111,11 +116,17 @@ infixExpr: +=|+|-=|-|*=|*|/=|!==|!=|/|===|==|=|<=|<|>=|>|%=|%|&&|or|instanceof|i
 ternary: ? expr : expr
 property: . id|bracketExpr
 moreExpr: infixExpr|ternary|++|--|property|parenExpr|bracketExpr moreExpr?
-expr: ...? typeof? await? !|-? new? number|id|string|templateString|arrowFunction|namedFunction|namedClass|parenExpr|bracketExpr|object|regex moreExpr?
+expr: ...? typeof? await? !|-? new? number|boolean|null|undefined|id|string|templateString|arrowFunction|namedFunction|namedClass|parenExpr|bracketExpr|object|regex moreExpr?
 
 initialization: = expr
+destructureRename: : id
+destructurePair: id initialization|objDestructure|destructureRename?
+commaDestructurePair: , destructurePair
+destructurePairs: destructurePair commaDestructurePair*
+objDestructure: { destructurePairs? }
+
 moreVars: , varDeclaration
-varDeclaration: id|bracketExpr initialization? moreVars?
+varDeclaration: id|bracketExpr|objDestructure initialization? moreVars?
 declaration: var|let|const varDeclaration ;?
 
 exprStatement: expr ;?
@@ -160,5 +171,12 @@ JOIN "businessStructureChildren" bsc
   ON bs.id = bsc."businessStructureId"
 WHERE id = 10
 LIMIT 1;`,
+  },
+  {
+    name: 'BF',
+    grammar: `loop: [ inst* ]
+inst: +|-|>|<|.|,|loop
+main: inst*`,
+    code: `++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.`,
   },
 ];

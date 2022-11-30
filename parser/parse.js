@@ -25,6 +25,12 @@ const parseOr = (options, str, grammar, index, path) => {
   return {errors: errors.sort((a, b) => b.index - a.index)};
 };
 
+const suffixes = {
+  '?': {min: 0, max: 1},
+  '+': {min: 1, max: 1000},
+  '*': {min: 0, max: 1000},
+};
+
 export const parse = (str, grammar, index = 0, path = ['main']) => {
   const type = path[path.length - 1];
 
@@ -37,23 +43,29 @@ export const parse = (str, grammar, index = 0, path = ['main']) => {
   }
 
   const result = [];
+  const optionalErrors = [];
   let length = 0;
   for (const el of grammar[type]) {
-    const optional = el.length > 1 && el[el.length - 1] === '?';
-    const elNoQm = optional ? el.slice(0, -1) : el;
-    const value =
-      elNoQm.length > 1 && elNoQm.includes('|')
-        ? parseOr(elNoQm.split('|'), str, grammar, index + length, path)
-        : parse(str, grammar, index + length, [...path, elNoQm]);
-    if (value.errors) {
-      if (!optional) return value;
-      // TODO: what do you do with errors of optional things?
-    } else {
-      result.push(value);
-      length += value.length;
+    const suffix = el.length > 1 && suffixes[el[el.length - 1]];
+    const elNoSuffix = suffix ? el.slice(0, -1) : el;
+    const {min, max} = suffix || {min: 1, max: 1};
+    let count = 0;
+    for (let i = 0; i < max; i++) {
+      const value =
+        elNoSuffix.length > 1 && elNoSuffix.includes('|')
+          ? parseOr(elNoSuffix.split('|'), str, grammar, index + length, path)
+          : parse(str, grammar, index + length, [...path, elNoSuffix]);
+      if (value.errors) {
+        if (count < min) return {...value, optionalErrors};
+        optionalErrors.push(...value.errors); // TODO: what to do with these?
+      } else {
+        count++;
+        result.push(value);
+        length += value.length;
+      }
     }
   }
-  return {type, value: result, length};
+  return {type, value: result, length, optionalErrors};
 };
 
 export const parseGrammar = (str) =>
