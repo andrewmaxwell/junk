@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "wave",
+    "title": "3D Function Visualizer",
+    "year": 2022,
+    "desc": "Visualize functions in 3D"
+  },
+  {
     "filePath": "lambdaCalculus",
     "title": "Lambda Calculus",
     "year": 2022,
