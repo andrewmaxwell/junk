@@ -1,13 +1,6 @@
+import {debounce} from '../misc/debounce.js';
 import {TYPES, SPRITE_SIZE} from './consts.js';
 import {drawSprite} from './renderer.js';
-
-const debounce = (func, ms) => {
-  let timeout;
-  return (...args) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), ms);
-  };
-};
 
 export const initEditor = ({game, canvas, renderer, reset}) => {
   let editMode = false;

@@ -1,3 +1,4 @@
+import {debounce} from '../misc/debounce.js';
 import {projection} from './projection.js';
 
 const calculateGrid = (
@@ -81,17 +82,20 @@ const render = (canvas, squares) => {
 const main = () => {
   const canvas = document.querySelector('canvas');
 
-  const params = {
-    resolution: 32,
-    scale: 10,
-    cameraZoom: 300,
-    cameraDistance: 8,
-    minX: -1,
-    maxX: 1,
-    minY: -1,
-    maxY: 1,
-    function: `Math.sin(y * time * 0.003 + time / 31) + 0.2 * Math.sin(-y + time / 29) + 0.8 * Math.cos(x * y * 0.74 - time / 43) + 0.9 * Math.sin(x * -6.4 + time / 87)`,
-  };
+  const params =
+    location.hash.length > 1
+      ? JSON.parse(atob(location.hash.slice(1)))
+      : {
+          resolution: 32,
+          scale: 10,
+          cameraZoom: 300,
+          cameraDistance: 8,
+          minX: -1,
+          maxX: 1,
+          minY: -5,
+          maxY: 5,
+          function: `Math.sin(y * time * 0.003 + time / 31) + 0.2 * Math.sin(-y + time / 29) + 0.8 * Math.cos(x * y * 0.74 - time / 43) + 0.9 * Math.sin(x * -6.4 + time / 87)`,
+        };
 
   const createFunc = () => {
     params.func = new Function('x', 'y', 'time', 'return ' + params.function);
@@ -115,16 +119,23 @@ const main = () => {
   canvas.addEventListener('mousemove', mouseMove);
   canvas.addEventListener('touchstart', mouseMove);
 
+  const save = debounce(() => {
+    location.hash = btoa(JSON.stringify(params));
+  });
+
   const gui = new window.dat.GUI();
-  gui.add(params, 'resolution', 10, 100, 1);
-  gui.add(params, 'scale', 1, 100);
-  gui.add(params, 'cameraZoom', 1, 1000);
-  gui.add(params, 'cameraDistance', 0, 20);
-  gui.add(params, 'minX');
-  gui.add(params, 'maxX');
-  gui.add(params, 'minY');
-  gui.add(params, 'maxY');
-  gui.add(params, 'function').onChange(createFunc);
+  gui.add(params, 'resolution', 10, 100, 1).onChange(save);
+  gui.add(params, 'scale', 1, 100).onChange(save);
+  gui.add(params, 'cameraZoom', 1, 1000).onChange(save);
+  gui.add(params, 'cameraDistance', 0, 20).onChange(save);
+  gui.add(params, 'minX').onChange(save);
+  gui.add(params, 'maxX').onChange(save);
+  gui.add(params, 'minY').onChange(save);
+  gui.add(params, 'maxY').onChange(save);
+  gui.add(params, 'function').onChange(() => {
+    createFunc();
+    save();
+  });
 
   createFunc();
   loop();

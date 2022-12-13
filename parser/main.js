@@ -1,13 +1,6 @@
+import {debounce} from '../misc/debounce.js';
 import {examples} from './examples.js';
 import {renderAst} from './renderAst.js';
-
-const debounce = (func, ms = 500) => {
-  let timeout;
-  return (...args) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), ms);
-  };
-};
 
 const delimiter = '!!$$~~'; // something unlikely to appear in grammar or source
 const encode = (grammar, code) => btoa(grammar + delimiter + code);
