@@ -26,14 +26,14 @@ const calculateGrid = (
 const calculateSquares = (params, angX, angZ, time) => {
   const {resolution, cameraZoom, cameraDistance} = params;
   const project = projection(
-    cameraDistance * Math.cos(angX) * Math.sin(angZ),
-    cameraDistance * Math.sin(angX) * Math.sin(angZ),
-    cameraDistance * Math.cos(angZ),
-    Math.PI - angZ,
-    0,
-    (3 * Math.PI) / 2 - angX,
-    0,
-    0,
+    cameraDistance * Math.cos(angX) * Math.sin(angZ), // camera x
+    cameraDistance * Math.sin(angX) * Math.sin(angZ), // camera y
+    cameraDistance * Math.cos(angZ), // camera z
+    Math.PI - angZ, // camera rotation x
+    0, // camera rotation y
+    (3 * Math.PI) / 2 - angX, // camera rotation z
+    0, // camera pointed at x
+    0, // camera pointed at y
     cameraZoom
   );
 
