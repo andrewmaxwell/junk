@@ -93,7 +93,13 @@ const main = () => {
         };
 
   const createFunc = () => {
-    params.func = new Function('x', 'y', 'time', 'return ' + params.function);
+    try {
+      const f = new Function('x', 'y', 'time', 'return ' + params.function);
+      f();
+      params.func = f;
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   let angX = Math.PI / 2;
