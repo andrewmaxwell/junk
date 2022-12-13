@@ -1,11 +1,24 @@
 import {debounce} from '../misc/debounce.js';
 import {projection} from './projection.js';
 
-const calculateGrid = (
-  project,
-  {resolution, scale, minX, maxX, minY, maxY, func},
+const calculateSquares = (
+  {resolution, scale, cameraZoom, cameraDistance, minX, maxX, minY, maxY, func},
+  angX,
+  angZ,
   time
 ) => {
+  const project = projection(
+    cameraDistance * Math.cos(angX) * Math.sin(angZ), // camera x
+    cameraDistance * Math.sin(angX) * Math.sin(angZ), // camera y
+    cameraDistance * Math.cos(angZ), // camera z
+    Math.PI - angZ, // camera rotation x
+    0, // camera rotation y
+    (3 * Math.PI) / 2 - angX, // camera rotation z
+    0, // camera pointed at x
+    0, // camera pointed at y
+    cameraZoom
+  );
+
   const grid = [];
   for (let i = 0; i < resolution; i++) {
     grid[i] = [];
@@ -20,24 +33,6 @@ const calculateGrid = (
       );
     }
   }
-  return grid;
-};
-
-const calculateSquares = (params, angX, angZ, time) => {
-  const {resolution, cameraZoom, cameraDistance} = params;
-  const project = projection(
-    cameraDistance * Math.cos(angX) * Math.sin(angZ), // camera x
-    cameraDistance * Math.sin(angX) * Math.sin(angZ), // camera y
-    cameraDistance * Math.cos(angZ), // camera z
-    Math.PI - angZ, // camera rotation x
-    0, // camera rotation y
-    (3 * Math.PI) / 2 - angX, // camera rotation z
-    0, // camera pointed at x
-    0, // camera pointed at y
-    cameraZoom
-  );
-
-  const grid = calculateGrid(project, params, time);
 
   const squares = [];
   for (let i = 0; i < resolution - 1; i++) {
