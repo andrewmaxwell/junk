@@ -3,7 +3,12 @@
   <head>
     <meta name=viewport content="width=device-width,initial-scale=1">
     <title>Grouptimizer</title>
-    <style>* {font-family: sans-serif}</style>
+    <style>
+      * {font-family: sans-serif}
+      #attendance td {width: 16px}
+      #attendance .absent {background: rgba(255,255,255,0.2)}
+      #attendance .present {background: white}
+    </style>
   </head>
   <body style="background: #222; color: white">
 		<input type="number" min="2" max="9" id="numGroups" value="4" placeholder="Number of Groups" />
@@ -16,6 +21,9 @@
     <div id="output">
       <p>Loading...</p>
     </div>
+
+    <h3>Attendance Table</h3>
+    <table id="attendance"></table>
 		<canvas id="statCanvas" style="position: fixed; bottom: 5px; left: 5px; pointer-events: none"></canvas>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.4/xlsx.full.min.js" integrity="sha512-gtII6Z4fZyONX9GBrF28JMpodY4vIOI0lBjAtN/mcK7Pz19Mu1HHIRvXH6bmdChteGpEccxZxI0qxXl9anY60w==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script type="module" src="main.js"></script>

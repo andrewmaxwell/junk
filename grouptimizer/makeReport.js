@@ -1,3 +1,6 @@
+// If this is 1, then all weeks are equally valuable. It's it's 0.5, each week is worth half as much as the week after
+const leaderboardWeight = 0.95;
+
 const weeksAgo = (date) => Math.round((Date.now() - date) / (7 * 24 * 3600000));
 
 const processAttendance = (attendanceHistory, people) => {
@@ -60,28 +63,23 @@ const processAbsences = (people) => {
     .join('\n');
 };
 
-const leaderboard = (people, attendanceHistory) => {
-  const oneYearAgo = Date.now() - 356 * 24 * 3600 * 1000;
-  return people
+const now = Date.now();
+const msInWeek = 7 * 24 * 3600 * 1000;
+
+const leaderboard = (people) =>
+  people
     .map((p) => {
-      const pastYearCount = p.dates.filter((d) => d >= oneYearAgo).length;
-      const pastYearTotal = attendanceHistory.filter(
-        ({date}) => date >= p.dates[0] && date >= oneYearAgo
-      ).length;
-      return {
-        name: p.name,
-        pastYearCount,
-        pastYearTotal,
-        sorter: pastYearCount ** 2 / pastYearTotal,
-      };
+      let score = 0;
+      for (const date of p.dates) {
+        score += leaderboardWeight ** Math.round((now - date) / msInWeek);
+      }
+      p.score = score.toLocaleString();
+      return p;
     })
-    .filter((p) => p.pastYearTotal)
-    .sort((a, b) => b.sorter - a.sorter)
-    .map(
-      (p, i) => `${i + 1}. ${p.name} (${p.pastYearCount} / ${p.pastYearTotal})`
-    )
+    .filter((p) => p.score)
+    .sort((a, b) => b.score - a.score)
+    .map((p, i) => `${i + 1}. ${p.name} (${p.score}, ${p.dates.length})`)
     .join('\n');
-};
 
 export const makeReport = (people, attendanceHistory = {}) => {
   const presentPeople = people.filter((p) => !p.absent);
@@ -129,7 +127,9 @@ ${nameList(newStudentsThisWeek)}
 
 ${absences.trim()}
 
-Attendance Leaderboard (Past Year)
-${leaderboard(people, attendanceHistory)}
+Attendance Leaderboard (each week present is worth ${
+    leaderboardWeight * 100
+  }% as much as the next one)
+${leaderboard(people)}
 `.trim();
 };

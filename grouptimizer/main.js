@@ -2,6 +2,7 @@ import StatGraph from './statGraph.js';
 import {makeReport} from './makeReport.js';
 import {makeSolver} from './solver.js';
 import {getData} from './getData.js';
+import {makeAttendanceTable} from './makeAttendanceTable.js';
 
 const stats = new StatGraph(document.getElementById('statCanvas'));
 const annealingGraph = stats.addGraph({color: 'red'});
@@ -104,6 +105,7 @@ const init = async () => {
     people,
     attendanceHistory
   );
+  document.querySelector('#attendance').innerHTML = makeAttendanceTable(people);
   document.querySelector('#recent').innerText = attendanceHistory[
     attendanceHistory.length - 1
   ]?.date
