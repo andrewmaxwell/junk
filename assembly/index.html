@@ -1,0 +1,87 @@
+<style>
+  .col {flex-grow: 1}
+  .col+.col {margin-left: 10px}
+  .col>* {width: 100%}
+</style>
+<body style="display:flex;font-family:monospace;color:white;background:#111">
+  <div class="col">
+    <h3>Code</h3>
+    <textarea id="asm" style="height: 100%;background:none;color:white">// push some starting values onto the stack
+$currentNumber = 1
+$one = 1
+$max = 100
+$three = 3
+$five = 5
+$fifteen = 15
+$f = 70
+$i = 73
+$z = 90
+$b = 66
+$u = 85
+$nl = 10
+$result = 0
+
+#STARTLOOP 
+
+// if current value > 100, exit
+SUB $max $currentNumber $result
+BLZ $result #END 
+
+// if current value is divisible by 15, print FIZZBUZZ
+MOD $currentNumber $fifteen $result
+BNZ $result #BUZZ
+PRINTC $f
+PRINTC $i
+PRINTC $z
+PRINTC $z
+PRINTC $b
+PRINTC $u
+PRINTC $z
+PRINTC $z
+PRINTC $nl
+JUMP #INCREMENT
+
+// else if current value is divisible by 5, print BUZZ
+#BUZZ
+MOD $currentNumber $five $result
+BNZ $result #FIZZ
+PRINTC $b
+PRINTC $u
+PRINTC $z
+PRINTC $z
+PRINTC $nl
+JUMP #INCREMENT
+
+// else if current value is divisible by 3, print FIZZ
+#FIZZ
+MOD $currentNumber $three $result
+BNZ $result #NUMBER
+PRINTC $f
+PRINTC $i
+PRINTC $z
+PRINTC $z
+PRINTC $nl
+JUMP #INCREMENT
+
+// else print the number
+#NUMBER
+PRINTN $currentNumber
+PRINTC $nl
+
+// increment and go back to #STARTLOOP
+#INCREMENT
+ADD $currentNumber $one $currentNumber
+JUMP #STARTLOOP
+
+#END</textarea>
+  </div>
+  <div class="col">
+    <h3>Preprocessed</h3>
+    <pre id="preprocessed"></pre>
+  </div>
+  <div class="col">
+    <h3>Output</h3>
+    <pre id="output"></pre>
+  </div>
+  <script type="module" src="main.js"></script>
+</body>

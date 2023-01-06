@@ -15,15 +15,7 @@ export const makeAttendanceTable = (people) => {
   console.log(people);
 
   return people
-    .sort(
-      (a, b) =>
-        // for (let i = 0; i < a.weeks.length && i < b.weeks.length; i++) {
-        //   const diff = a.weeks[i].weeksAgo - b.weeks[i].weeksAgo;
-        //   if (diff) return diff;
-        // }
-        // return b.weeks.length - a.weeks.length;
-        b.score - a.score
-    )
+    .sort((a, b) => b.score - a.score)
     .map(({name, weeks}) => {
       const weekIndex = Object.fromEntries(
         weeks.map((w) => [w.weeksAgo, w.date])
