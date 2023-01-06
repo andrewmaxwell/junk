@@ -9,10 +9,8 @@ export const preprocess = (code) => {
     if (trimmed.startsWith('#')) {
       labels[trimmed] = lineNumber + 1;
     } else if (trimmed.startsWith('$')) {
-      const [label, value] = trimmed
-        .split(/\s*=\s*/g)
-        .map((t) => (isNaN(t) ? t : +t));
-      lines[lineNumber++] = ['PUSH', value];
+      const [label, value] = trimmed.split(/\s*=\s*/g);
+      lines[lineNumber++] = ['PUSH', +value];
       labels[label] = lineNumber;
     } else {
       lines[lineNumber++] = trimmed
