@@ -21,7 +21,4 @@ export class Env {
   print(val) {
     this.output += val;
   }
-  getOutput() {
-    return this.output;
-  }
 }
