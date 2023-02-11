@@ -14,9 +14,7 @@ const targetFunc = (arr) => {
   return result;
 };
 
-const inputSize = 10;
-
-export const makeTrainingData = (length) => {
+export const makeTrainingData = (length, inputSize) => {
   const dataSet = [];
   for (let i = 0; i < length; i++) {
     const input = makeArray(inputSize, () => (Math.random() < 0.5 ? 0 : 1));

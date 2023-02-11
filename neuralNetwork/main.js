@@ -3,11 +3,15 @@ import {NeuralNetwork} from './NeuralNetwork.js';
 import {Renderer} from './Renderer.js';
 import {Stats} from './Stats.js';
 
-export const trainingData = makeTrainingData(200);
-const inputLength = trainingData[0].input.length;
-const outputLength = trainingData[0].expected.length;
+const inputSize = 10;
 
-const neuralNet = new NeuralNetwork([inputLength, 10, outputLength]);
+const neuralNet = new NeuralNetwork([
+  inputSize,
+  inputSize * 2,
+  inputSize * 2,
+  inputSize * 2,
+  inputSize,
+]);
 const renderer = new Renderer(document.querySelector('#nn'));
 
 console.log(neuralNet);
@@ -15,9 +19,12 @@ console.log(neuralNet);
 const errorRate = new Stats(document.querySelector('#stats'), 400, 200);
 
 const loop = () => {
-  neuralNet.train(trainingData);
+  neuralNet.train(makeTrainingData(200, inputSize));
   renderer.render(neuralNet);
-  errorRate.push(neuralNet.getErrorRate(trainingData, isEqual));
+
+  const testData = makeTrainingData(100, inputSize);
+  errorRate.push(neuralNet.getErrorRate(testData, isEqual));
+
   requestAnimationFrame(loop);
 };
 loop();
