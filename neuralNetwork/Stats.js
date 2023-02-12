@@ -4,20 +4,21 @@ export class Stats {
     this.width = canvas.width;
     this.height = canvas.height;
     this.ctx = this.canvas.getContext('2d');
-    this.max = 0;
     this.values = [];
   }
   push(value) {
-    const {values, width, height, ctx} = this;
-    this.max = Math.max(this.max, value);
-    values.push(value);
-
+    this.values.push(value);
+  }
+  render() {
+    const {canvas, values, ctx} = this;
+    const width = (canvas.width = innerWidth);
+    const height = (canvas.height = innerHeight);
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
     ctx.moveTo(0, height);
     for (let i = 0; i < values.length; i++) {
       const x = width * (i / (values.length - 1));
-      const y = height * (values[i] / this.max);
+      const y = height * values[i];
       ctx.lineTo(x, y);
     }
     ctx.lineTo(width, height);
@@ -25,6 +26,11 @@ export class Stats {
 
     ctx.fillStyle = 'black';
     ctx.font = '20px sans-serif';
-    ctx.fillText(`Accuracy: ${((1 - value) * 100).toFixed()}%`, 5, height - 5);
+    const lastValue = values[values.length - 1];
+    ctx.fillText(
+      `Accuracy: ${((1 - lastValue) * 100).toFixed()}%`,
+      5,
+      height - 10
+    );
   }
 }

@@ -14,9 +14,12 @@ const targetFunc = (arr) => {
   return result;
 };
 
-export const makeTrainingData = (length, inputSize) => {
+const inputSize = 10;
+const trainingDataSize = 100;
+
+export const getTrainingData = () => {
   const dataSet = [];
-  for (let i = 0; i < length; i++) {
+  for (let i = 0; i < trainingDataSize; i++) {
     const input = makeArray(inputSize, () => (Math.random() < 0.5 ? 0 : 1));
     dataSet[i] = {input, expected: toOneHot(targetFunc(input), inputSize)};
   }
@@ -25,3 +28,5 @@ export const makeTrainingData = (length, inputSize) => {
 
 export const isEqual = (actual, expected) =>
   actual.every((x, i) => Math.round(x) === expected[i]);
+
+export const layerSizes = [inputSize, inputSize * 2, inputSize * 2, inputSize];
