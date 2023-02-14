@@ -1,19 +1,29 @@
-import {isEqual, getTrainingData, layerSizes} from './data/grouping.js';
+import {RunningMedian} from '../roomba/calcScore/RunningMedian.js';
+import {doStuff, getTrainingData, layerSizes} from './data/grouping.js';
 import {NeuralNetwork} from './NeuralNetwork.js';
 import {Renderer} from './Renderer.js';
-import {Stats} from './Stats.js';
+import {isEqual} from './utils.js';
 
-const neuralNet = new NeuralNetwork(layerSizes);
+const neuralNet = (window.neuralNet = new NeuralNetwork(layerSizes));
 const renderer = new Renderer(document.querySelector('#nn'));
-const errorRate = new Stats(document.querySelector('#stats'), 400, 200);
+const errorRate = [];
+const times = new RunningMedian();
 
 const loop = () => {
   if (document.hasFocus()) {
+    const start = performance.now();
     neuralNet.train(getTrainingData());
-    renderer.render(neuralNet);
-    errorRate.push(neuralNet.getErrorRate(getTrainingData(), isEqual));
-    errorRate.render();
+    errorRate.push(neuralNet.getErrorRate(getTrainingData(100), isEqual));
+    const time = times.push(performance.now() - start);
+
+    renderer.render(neuralNet, errorRate, time);
   }
   requestAnimationFrame(loop);
 };
 loop();
+
+window.addEventListener('keypress', (e) => {
+  if (e.code === 'Space') {
+    console.log(doStuff(neuralNet));
+  }
+});

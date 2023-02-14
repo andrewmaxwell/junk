@@ -1,10 +1,4 @@
-const makeArray = (length, func) => Array.from({length}, func);
-
-const toOneHot = (num, length) => {
-  const arr = new Array(length).fill(0);
-  arr[num] = 1;
-  return arr;
-};
+import {makeArray, toOneHot} from '../utils.js';
 
 const targetFunc = (arr) => {
   let result = 0;
@@ -14,19 +8,14 @@ const targetFunc = (arr) => {
   return result;
 };
 
-const inputSize = 10;
-const trainingDataSize = 100;
+const inputSize = 16;
 
-export const getTrainingData = () => {
-  const dataSet = [];
-  for (let i = 0; i < trainingDataSize; i++) {
+export const getTrainingData = (size = 1000) =>
+  makeArray(size, () => {
     const input = makeArray(inputSize, () => (Math.random() < 0.5 ? 0 : 1));
-    dataSet[i] = {input, expected: toOneHot(targetFunc(input), inputSize)};
-  }
-  return dataSet;
-};
-
-export const isEqual = (actual, expected) =>
-  actual.every((x, i) => Math.round(x) === expected[i]);
+    return {input, expected: toOneHot(targetFunc(input), inputSize)};
+  });
 
 export const layerSizes = [inputSize, inputSize * 2, inputSize * 2, inputSize];
+
+export const doStuff = (nn) => nn.serialize();

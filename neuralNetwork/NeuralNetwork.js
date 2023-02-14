@@ -1,85 +1,72 @@
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
-const mapSum = (arr, func) => arr.reduce((a, b) => a + func(b), 0);
-
-class Connection {
-  constructor(from, to) {
-    this.from = from;
-    this.to = to;
-    this.weight = Math.random() * 2 - 1;
-    this.change = 0;
-  }
-  getWeightedDelta() {
-    return this.weight * this.to.delta;
-  }
-  getWeightedValue() {
-    return this.weight * this.from.value;
-  }
-  updateWeight(delta, learnRate, momentum) {
-    this.change = learnRate * delta * this.from.value + momentum * this.change;
-    this.weight += this.change;
-  }
-}
-
-class Neuron {
-  constructor() {
-    this.bias = Math.random() * 2 - 1;
-    this.delta = 0;
-    this.value = 0;
-    this.inputs = [];
-    this.outputs = [];
-  }
-  connect(nextLayer) {
-    for (const to of nextLayer.neurons) {
-      const conn = new Connection(this, to);
-      this.outputs.push(conn);
-      to.inputs.push(conn);
-    }
-  }
-  setValue(x) {
-    this.value = x;
-  }
-  updateValue() {
-    this.value = sigmoid(
-      mapSum(this.inputs, (n) => n.getWeightedValue()) + this.bias
-    );
-  }
-  setOutputDelta(expectedVal) {
-    this.delta = (expectedVal - this.value) * this.value * (1 - this.value);
-  }
-  setDelta() {
-    const err = mapSum(this.outputs, (o) => o.getWeightedDelta());
-    this.delta = err * this.value * (1 - this.value);
-  }
-  updateWeightAndBias(learnRate, momentum) {
-    this.inputs.forEach((n) => n.updateWeight(this.delta, learnRate, momentum));
-    this.bias += learnRate * this.delta;
-  }
-}
+const dotProduct = (a, b) => {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+  return sum;
+};
 
 class Layer {
-  constructor(numNeurons) {
-    this.neurons = [];
+  constructor(numNeurons, prevLayerSize) {
+    this.deltas = new Float32Array(numNeurons);
+    this.values = new Float32Array(numNeurons);
+
+    if (!prevLayerSize) return;
+    this.biases = new Float32Array(numNeurons);
+    this.weights = [];
+    this.changes = [];
     for (let i = 0; i < numNeurons; i++) {
-      this.neurons.push(new Neuron());
+      this.biases[i] = Math.random() * 2 - 1;
+      this.weights[i] = new Float32Array(prevLayerSize);
+      this.changes[i] = new Float32Array(prevLayerSize);
+      for (let j = 0; j < prevLayerSize; j++) {
+        this.weights[i][j] = Math.random() * 2 - 1;
+      }
     }
   }
-  connect(nextLayer) {
-    this.neurons.forEach((n) => n.connect(nextLayer));
-  }
   setValues(input) {
-    this.neurons.forEach((n, i) => n.setValue(input[i]));
+    this.values.set(input);
   }
-  updateValues() {
-    this.neurons.forEach((n) => n.updateValue());
+  updateValues(prevLayer) {
+    const {values, biases, weights} = this;
+    for (let i = 0; i < biases.length; i++) {
+      values[i] = sigmoid(biases[i] + dotProduct(prevLayer.values, weights[i]));
+    }
   }
   setOutputDeltas(expected) {
-    this.neurons.forEach((n, i) => n.setOutputDelta(expected[i]));
+    const {deltas, values} = this;
+    for (let i = 0; i < deltas.length; i++) {
+      deltas[i] = (expected[i] - values[i]) * values[i] * (1 - values[i]);
+    }
   }
-  setDeltas() {
-    this.neurons.forEach((n) => n.setDelta());
+  getErrorForNeuron(index) {
+    // return dotProduct(transpose(weights)[index], deltas)
+    const {weights, deltas} = this;
+    let err = 0;
+    for (let j = 0; j < weights.length; j++) {
+      err += weights[j][index] * deltas[j];
+    }
+    return err;
   }
-  updateWeightsAndBiases(learnRate, momentum) {
-    this.neurons.forEach((n) => n.updateWeightAndBias(learnRate, momentum));
+  updateDeltas(nextLayer) {
+    const {deltas, values} = this;
+    for (let i = 0; i < values.length; i++) {
+      deltas[i] = nextLayer.getErrorForNeuron(i) * values[i] * (1 - values[i]);
+    }
+  }
+  updateWeightsAndBiases(prevLayer, learnRate, momentum) {
+    const {biases, weights, changes, deltas} = this;
+
+    prevLayer.updateDeltas(this);
+
+    for (let i = 0; i < weights.length; i++) {
+      for (let j = 0; j < weights[i].length; j++) {
+        changes[i][j] =
+          learnRate * deltas[i] * prevLayer.values[j] +
+          momentum * changes[i][j];
+        weights[i][j] += changes[i][j];
+      }
+      biases[i] += learnRate * deltas[i];
+    }
   }
 }
 
@@ -87,21 +74,17 @@ export class NeuralNetwork {
   constructor(layerSizes, learnRate = 0.5, momentum = 0.1) {
     this.learnRate = learnRate;
     this.momentum = momentum;
-    this.layers = layerSizes.map((len) => new Layer(len));
+    this.layers = layerSizes.map((len, i) => new Layer(len, layerSizes[i - 1]));
     this.inputLayer = this.layers[0];
     this.outputLayer = this.layers[this.layers.length - 1];
-
-    for (let l = 0; l < this.layers.length - 1; l++) {
-      this.layers[l].connect(this.layers[l + 1]);
-    }
   }
   #forward(input) {
     const {layers, inputLayer} = this;
 
     inputLayer.setValues(input);
 
-    for (let l = 1; l < layers.length; l++) {
-      layers[l].updateValues();
+    for (let i = 1; i < layers.length; i++) {
+      layers[i].updateValues(layers[i - 1]);
     }
   }
   #backpropagate(expected) {
@@ -109,12 +92,8 @@ export class NeuralNetwork {
 
     outputLayer.setOutputDeltas(expected);
 
-    for (let l = layers.length - 2; l >= 0; --l) {
-      layers[l].setDeltas();
-    }
-
-    for (const layer of layers) {
-      layer.updateWeightsAndBiases(learnRate, momentum);
+    for (let i = layers.length - 1; i >= 1; --i) {
+      layers[i].updateWeightsAndBiases(layers[i - 1], learnRate, momentum);
     }
   }
   train(trainingData) {
@@ -125,13 +104,25 @@ export class NeuralNetwork {
   }
   run(input) {
     this.#forward(input);
-    return this.outputLayer.neurons.map((t) => t.value);
+    return this.outputLayer.values;
   }
   getErrorRate(testingData, isEqual) {
-    const errorRate = mapSum(
-      testingData,
-      (t) => !isEqual(this.run(t.input), t.expected)
-    );
+    let errorRate = 0;
+    for (const {input, expected} of testingData) {
+      errorRate += !isEqual(this.run(input), expected);
+    }
     return errorRate / testingData.length;
+  }
+  serialize() {
+    const {layers, learnRate, momentum} = this;
+    return JSON.stringify({
+      learnRate,
+      momentum,
+      numInputs: layers[1].weights[0].length,
+      layers: layers.slice(1).map(({weights, biases}) => ({
+        weights: weights.map((r) => [...r]),
+        biases: [...biases],
+      })),
+    });
   }
 }
