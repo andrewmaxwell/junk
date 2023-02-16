@@ -8,10 +8,10 @@ const dotProduct = (a, b) => {
 
 class Layer {
   constructor(numNeurons, prevLayerSize) {
-    this.deltas = new Float32Array(numNeurons);
     this.values = new Float32Array(numNeurons);
 
     if (!prevLayerSize) return;
+    this.deltas = new Float32Array(numNeurons);
     this.biases = new Float32Array(numNeurons);
     this.weights = [];
     for (let i = 0; i < numNeurons; i++) {
@@ -31,31 +31,29 @@ class Layer {
       values[i] = sigmoid(biases[i] + dotProduct(prevLayer.values, weights[i]));
     }
   }
+  updateNeuronDelta(neuronIndex, error) {
+    this.deltas[neuronIndex] = reverseSigmoid(error, this.values[neuronIndex]);
+  }
   setOutputDeltas(expected) {
-    const {deltas, values} = this;
-    for (let i = 0; i < deltas.length; i++) {
-      deltas[i] = reverseSigmoid(expected[i] - values[i], values[i]);
-    }
-  }
-  getErrorForNeuron(neuronIndex) {
-    const {weights, deltas} = this;
-    let err = 0;
-    for (let i = 0; i < weights.length; i++) {
-      err += weights[i][neuronIndex] * deltas[i];
-    }
-    return err;
-  }
-  updateDeltas(nextLayer) {
-    const {deltas, values} = this;
-    for (let i = 0; i < values.length; i++) {
-      deltas[i] = reverseSigmoid(nextLayer.getErrorForNeuron(i), values[i]);
+    for (let i = 0; i < expected.length; i++) {
+      this.updateNeuronDelta(i, expected[i] - this.values[i]);
     }
   }
   updateWeightsAndBiases(prevLayer, learnRate) {
     const {biases, weights, deltas} = this;
 
-    prevLayer.updateDeltas(this);
+    // use weights and deltas to update previous layer's deltas
+    if (prevLayer.deltas) {
+      for (let i = 0; i < weights[0].length; i++) {
+        let err = 0;
+        for (let j = 0; j < weights.length; j++) {
+          err += weights[j][i] * deltas[j];
+        }
+        prevLayer.updateNeuronDelta(i, err);
+      }
+    }
 
+    // calc weights and biases using deltas and prev layer's values
     for (let i = 0; i < weights.length; i++) {
       for (let j = 0; j < weights[i].length; j++) {
         weights[i][j] += learnRate * deltas[i] * prevLayer.values[j];
@@ -66,7 +64,7 @@ class Layer {
 }
 
 export class NeuralNetwork {
-  constructor(layerSizes, learnRate = 0.5) {
+  constructor(layerSizes, learnRate = 0.3) {
     this.learnRate = learnRate;
     this.layers = layerSizes.map((len, i) => new Layer(len, layerSizes[i - 1]));
     this.inputLayer = this.layers[0];
@@ -81,19 +79,16 @@ export class NeuralNetwork {
       layers[i].updateValues(layers[i - 1]);
     }
   }
-  #backpropagate(expected) {
-    const {layers, learnRate, outputLayer} = this;
-
-    outputLayer.setOutputDeltas(expected);
-
-    for (let i = layers.length - 1; i >= 1; --i) {
-      layers[i].updateWeightsAndBiases(layers[i - 1], learnRate);
-    }
-  }
   train(trainingData) {
+    const {layers, learnRate, outputLayer} = this;
     for (const {input, expected} of trainingData) {
       this.#forward(input);
-      this.#backpropagate(expected);
+
+      // backpropagation
+      outputLayer.setOutputDeltas(expected);
+      for (let i = layers.length - 1; i >= 1; --i) {
+        layers[i].updateWeightsAndBiases(layers[i - 1], learnRate);
+      }
     }
   }
   run(input) {

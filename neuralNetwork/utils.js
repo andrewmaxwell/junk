@@ -16,3 +16,6 @@ export const makeArray = (length, func) => Array.from({length}, func);
 
 export const isEqual = (actual, expected) =>
   actual.every((x, i) => Math.round(x) === expected[i]);
+
+export const toBinary = (num, length) =>
+  num.toString(2).padStart(length, 0).split('').map(Number);

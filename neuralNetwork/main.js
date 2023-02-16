@@ -1,11 +1,12 @@
 import {RunningMedian} from '../roomba/calcScore/RunningMedian.js';
-import {doStuff, getTrainingData, layerSizes} from './data/grouping.js';
+import {doStuff, getTrainingData, layerSizes} from './data/prime.js';
 import {NeuralNetwork} from './NeuralNetwork.js';
 import {Renderer} from './Renderer.js';
 import {isEqual} from './utils.js';
 
 const neuralNet = (window.neuralNet = new NeuralNetwork(layerSizes));
 const renderer = new Renderer(document.querySelector('#nn'));
+
 const errorRate = [];
 const times = new RunningMedian();
 
@@ -27,3 +28,5 @@ window.addEventListener('keypress', (e) => {
     console.log(doStuff(neuralNet));
   }
 });
+
+console.log('trainingData sample', getTrainingData());
