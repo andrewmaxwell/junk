@@ -42,7 +42,7 @@ class Layer {
   updateWeightsAndBiases(prevLayer, learnRate) {
     const {biases, weights, deltas} = this;
 
-    // use weights and deltas to update previous layer's deltas
+    // use weights and deltas to update previous layer's deltas (except first layer, it has no deltas)
     if (prevLayer.deltas) {
       for (let i = 0; i < weights[0].length; i++) {
         let err = 0;
@@ -79,15 +79,16 @@ export class NeuralNetwork {
       layers[i].updateValues(layers[i - 1]);
     }
   }
-  train(trainingData) {
+  train(getTrainingData, iterations) {
     const {layers, learnRate, outputLayer} = this;
-    for (const {input, expected} of trainingData) {
+    for (let i = 0; i < iterations; i++) {
+      const {input, expected} = getTrainingData();
       this.#forward(input);
 
       // backpropagation
       outputLayer.setOutputDeltas(expected);
-      for (let i = layers.length - 1; i >= 1; --i) {
-        layers[i].updateWeightsAndBiases(layers[i - 1], learnRate);
+      for (let j = layers.length - 1; j >= 1; --j) {
+        layers[j].updateWeightsAndBiases(layers[j - 1], learnRate);
       }
     }
   }
@@ -95,12 +96,13 @@ export class NeuralNetwork {
     this.#forward(input);
     return this.outputLayer.values;
   }
-  getErrorRate(testingData, isEqual) {
+  getErrorRate(getTrainingData, isEqual) {
     let errorRate = 0;
-    for (const {input, expected} of testingData) {
+    for (let i = 0; i < 100; i++) {
+      const {input, expected} = getTrainingData();
       errorRate += !isEqual(this.run(input), expected);
     }
-    return errorRate / testingData.length;
+    return errorRate / 100;
   }
   serialize() {
     const {layers, learnRate} = this;

@@ -12,17 +12,13 @@ const lengthOfLongestIncreasingSubsequence = (arr) => {
 
 const inputSize = 16;
 
-export const getTrainingData = (size = 2000) => {
-  const res = [];
-  for (let i = 0; i < size; i++) {
-    const input = [];
-    for (let j = 0; j < inputSize; j++) {
-      input[j] = Math.round(Math.random() * inputSize) / inputSize;
-    }
-    const answer = lengthOfLongestIncreasingSubsequence(input);
-    res[i] = {input, expected: toOneHot(answer, inputSize), answer};
+export const getTrainingData = () => {
+  const input = [];
+  for (let j = 0; j < inputSize; j++) {
+    input[j] = Math.round(Math.random() * inputSize) / inputSize;
   }
-  return res;
+  const answer = lengthOfLongestIncreasingSubsequence(input);
+  return {input, expected: toOneHot(answer, inputSize), answer};
 };
 
 export const layerSizes = [

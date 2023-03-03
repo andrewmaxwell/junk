@@ -15,7 +15,20 @@ export const fromOneHot = (arr) => {
 export const makeArray = (length, func) => Array.from({length}, func);
 
 export const isEqual = (actual, expected) =>
-  actual.every((x, i) => Math.round(x) === expected[i]);
+  actual.every((x, i) => Math.round(x) === Math.round(expected[i]));
 
 export const toBinary = (num, length) =>
   num.toString(2).padStart(length, 0).split('').map(Number);
+
+export const throttle = (func, desiredMsPerFrame = 30) => {
+  let itsPerFrame = 0;
+  return () => {
+    const start = performance.now();
+    func(itsPerFrame);
+    itsPerFrame +=
+      Math.round(desiredMsPerFrame - performance.now() + start) * 4;
+  };
+};
+
+export const randomElement = (arr) =>
+  arr[Math.floor(Math.random() * arr.length)];

@@ -1,6 +1,6 @@
 import {toBinary} from '../utils.js';
 
-const inputSize = 12;
+const inputSize = 14;
 
 const len = 2 ** inputSize;
 const nums = [];
@@ -9,17 +9,13 @@ for (let i = 2; i <= len; i++) {
   for (let j = i * i; j < len; j += i) nums[j] = 1;
 }
 
-export const getTrainingData = (size = 2 ** 11) => {
-  const res = [];
-  for (let i = 0; i < size; i++) {
-    const num = Math.floor(Math.random() * 2 ** inputSize);
-    res[i] = {
-      input: toBinary(num, inputSize),
-      num,
-      expected: [nums[num] ? 0 : 1],
-    };
-  }
-  return res;
+export const getTrainingData = () => {
+  const num = Math.floor(Math.random() * 2 ** inputSize);
+  return {
+    input: toBinary(num, inputSize),
+    num,
+    expected: [nums[num] ? 0 : 1],
+  };
 };
 
 export const layerSizes = [inputSize, inputSize * 2, inputSize * 2, 1];

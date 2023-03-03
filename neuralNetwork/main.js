@@ -1,24 +1,31 @@
-import {RunningMedian} from '../roomba/calcScore/RunningMedian.js';
+// import {doStuff, getTrainingData, layerSizes} from './data/bible.js';
 import {doStuff, getTrainingData, layerSizes} from './data/prime.js';
 import {NeuralNetwork} from './NeuralNetwork.js';
+// import {makeNeuralNetwork, train, getErrorRate} from './nnFunctional.js';
 import {Renderer} from './Renderer.js';
-import {isEqual} from './utils.js';
+import {isEqual, throttle} from './utils.js';
 
 const neuralNet = (window.neuralNet = new NeuralNetwork(layerSizes));
+// let neuralNet = makeNeuralNetwork(layerSizes);
 const renderer = new Renderer(document.querySelector('#nn'));
-
 const errorRate = [];
-const times = new RunningMedian();
+let totalIterations = 0;
+
+const throttledFunc = throttle((itsPerFrame) => {
+  neuralNet.train(getTrainingData, itsPerFrame);
+  // train(neuralNet, getTrainingData(itsPerFrame));
+  errorRate.push(neuralNet.getErrorRate(getTrainingData, isEqual));
+  renderer.render(
+    neuralNet,
+    // {layers: neuralNet},
+    errorRate,
+    itsPerFrame,
+    (totalIterations += itsPerFrame)
+  );
+});
 
 const loop = () => {
-  if (document.hasFocus()) {
-    const start = performance.now();
-    neuralNet.train(getTrainingData());
-    errorRate.push(neuralNet.getErrorRate(getTrainingData(100), isEqual));
-    const time = times.push(performance.now() - start);
-
-    renderer.render(neuralNet, errorRate, time);
-  }
+  if (document.hasFocus()) throttledFunc();
   requestAnimationFrame(loop);
 };
 loop();
@@ -29,4 +36,4 @@ window.addEventListener('keypress', (e) => {
   }
 });
 
-console.log('trainingData sample', getTrainingData());
+console.log('trainingData sample', Array.from({length: 10}, getTrainingData));

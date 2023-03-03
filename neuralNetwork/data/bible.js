@@ -1,44 +1,77 @@
-import {fromOneHot, makeArray, toOneHot} from '../utils.js';
+import {randomElement} from '../utils.js';
+const inputLength = 16;
 
-const response = await fetch('../jibberjabber/bible.txt');
-const text = (await response.text())
-  .toLowerCase()
-  .replace(/[^ a-z]/g, '')
-  .slice(0, 1000);
-const letters = Array.from(new Set(text)).sort();
-const vocabIndex = Object.fromEntries(
-  letters.map((v, i, arr) => [v, (i / arr.length) * 2 - 1])
-);
+const encodeInput = (str, vocabIndex) => [...str].map((t) => vocabIndex[t]);
 
-const encodeInput = (str) => [...str].map((t) => vocabIndex[t]);
+const encodeOutput = (arr, letters, vocabIndex) => {
+  const x = 1 / arr.length;
+  const result = new Array(letters.length).fill(0);
+  for (const t of arr) result[vocabIndex[t]] += x;
+  return result;
+};
 
-console.log(letters, letters.length, text);
+const exp = 3;
+const decodeOutput = (arr, letters) => {
+  let total = 0;
+  for (const x of arr) total += x ** exp;
+  let r = Math.random() * total;
+  for (let i = 0; i < arr.length; i++) {
+    const x = arr[i] ** exp;
+    if (x >= r) return letters[i];
+    r -= x;
+  }
+  return '?';
+};
 
-const inputLength = 10;
+// import fs from 'fs';
+const getData = async () => {
+  const response = await fetch('../jibberjabber/bible.txt');
+  const text = (await response.text()).toLowerCase().replace(/[^ a-z]/g, '');
 
-export const getTrainingData = (size = 2000) =>
-  makeArray(size, () => {
-    const index = Math.floor(Math.random() * (text.length - inputLength - 1));
-    const strInput = text.slice(index, index + inputLength);
-    const strExpected = text[index + inputLength];
-    return {
-      strInput,
-      strExpected,
-      input: encodeInput(strInput),
-      expected: toOneHot(letters.indexOf(strExpected), letters.length),
-    };
-  });
+  // const text = fs
+  //   .readFileSync('./jibberjabber/bible.txt', 'utf-8')
+  //   .toLowerCase()
+  //   .replace(/[^ a-z]/g, '');
+  const letters = [...new Set(text)];
+  const inputVocabIndex = Object.fromEntries(
+    letters.map((v, i, arr) => [v, (i / arr.length) * 2 - 1])
+  );
+  const outputVocabIndex = Object.fromEntries(letters.map((v, i) => [v, i]));
 
-export const layerSizes = [inputLength, 10, 20, 10, letters.length];
+  const dict = {};
+  for (let i = 0; i < text.length - inputLength - 1; i++) {
+    const key = text.slice(i, i + inputLength);
+    (dict[key] = dict[key] || []).push(text[i + inputLength]);
+  }
 
-console.log(getTrainingData());
+  return {
+    text,
+    letters,
+    inputVocabIndex,
+    data: Object.entries(dict).map(([key, val]) => ({
+      key,
+      input: encodeInput(key, inputVocabIndex),
+      expected: encodeOutput(val, letters, outputVocabIndex),
+    })),
+  };
+};
 
-const decodeOutput = (arr) => letters[fromOneHot(arr)] || '?';
+const {text, data, letters, inputVocabIndex} = await getData();
+export const getTrainingData = () => randomElement(data);
+
+export const layerSizes = [
+  inputLength,
+  // letters.length,
+  letters.length * 2,
+  letters.length * 2,
+  letters.length,
+];
 
 export const doStuff = (net) => {
   let result = text.slice(0, inputLength);
   for (let i = 0; i < 1000; i++) {
-    result += decodeOutput(net.run(encodeInput(result.slice(-inputLength))));
+    const key = result.slice(-inputLength);
+    result += decodeOutput(net.run(encodeInput(key, inputVocabIndex)), letters);
   }
   return result;
 };

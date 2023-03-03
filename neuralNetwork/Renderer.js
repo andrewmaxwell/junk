@@ -79,20 +79,21 @@ export class Renderer {
       }
     }
   }
-  drawTime(time) {
+  drawStats(totalIterations, itsPerFrame) {
     const {ctx} = this;
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillStyle = 'black';
-    ctx.fillText(time.toLocaleString() + 'ms', 3, 3);
+    ctx.fillText(`${itsPerFrame.toLocaleString()} iterations/frame`, 3, 3);
+    ctx.fillText(`${totalIterations.toLocaleString()} total iterations`, 3, 15);
   }
-  render({layers}, errorRates, time) {
+  render({layers}, errorRates, itsPerFrame, totalIterations) {
     this.canvas.width = innerWidth;
     this.canvas.height = innerHeight;
     this.drawErrorRate(errorRates);
     this.drawConnections(layers);
     this.drawNeurons(layers);
-    this.drawTime(time);
+    this.drawStats(totalIterations, itsPerFrame);
   }
 }
