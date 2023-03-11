@@ -3,6 +3,9 @@ import {equals, toString} from 'ramda';
 const pass = () => console.log('\x1b[32m%s\x1b[0m', 'PASS');
 const fail = (msg) => console.log('\x1b[31m%s\x1b[0m', msg);
 
+const sort = (arr) =>
+  arr.sort((a, b) => toString(a).localeCompare(toString(b)));
+
 const assertEquals = (actual, expected, description) => {
   if (description) console.log(description);
   if (equals(actual, expected)) pass();
@@ -47,6 +50,7 @@ export const Test = {
     else fail(msg);
   },
   inspect: toString,
+  assertSameMembers: (a, b) => assertEquals(sort(a), sort(b)),
 };
 
 export const deepLog = (x) => console.dir(x, {depth: Infinity});

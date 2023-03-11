@@ -1,0 +1,1 @@
+Dithering - 2021 - Convert images to pixel art using just a few colors.

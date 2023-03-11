@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "neuralNetwork",
+    "title": "Neural Network",
+    "year": 2023,
+    "desc": "A visualization of a network learning to predict prime numbers."
+  },
+  {
     "filePath": "wave",
     "title": "3D Function Visualizer",
     "year": 2022,
@@ -52,6 +58,12 @@
     "title": "Bezier Screensaver",
     "year": 2021,
     "desc": "Kinda fun to watch, took about an hour to make."
+  },
+  {
+    "filePath": "dither",
+    "title": "Dithering",
+    "year": 2021,
+    "desc": "Convert images to pixel art using just a few colors."
   },
   {
     "filePath": "trebuchet",
