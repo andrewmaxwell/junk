@@ -13,22 +13,22 @@ document.querySelector('.examples').innerHTML = tests
       <textarea></textarea>
     </div>
     <div class="item">
-      <span class="arrow">➡️</span>
+      <span class="arrow">→</span>
       <label>Tokens</label>
       <pre class="tokens"></pre>
     </div>
     <div class="item">
-      <span class="arrow">➡️</span>
+      <span class="arrow">→</span>
       <label>Syntax Tree</label>
       <pre class="ast"></pre>
     </div>
     <div class="item">
-      <span class="arrow">➡️</span>
+      <span class="arrow">→</span>
       <label>Assembly</label>
       <pre class="asm"></pre>
     </div>
     <div class="item">
-      <span class="arrow">➡️</span>
+      <span class="arrow">→</span>
       <label>Result</label>
       <pre class="result"></pre>
     </div>

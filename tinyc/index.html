@@ -1,14 +1,8 @@
 <style>
-  body {
-    font-family: sans-serif
-  }
-
-  label {
-    display: block
-  }
-
-  .item textarea,
-  pre {
+  * {box-sizing: border-box}
+  body {font-family: sans-serif}
+  label {display: block}
+  textarea, pre {
     width: 100%;
     height: 300px;
     background: #333;
@@ -17,36 +11,15 @@
     margin: 0;
     padding: 5px
   }
-
-  .container {
-    width: 100%;
-    display: flex;
-    margin-bottom: 32px
-  }
-
-  .item {
-    flex: 1 1 auto;
-    margin-right: 20px;
-    position: relative;
-  }
-
-  .arrow {
-    position: absolute;
-    top: 50%;
-    left: -18px
-  }
-
-  .lineNum {
-    display: inline-block;
-    opacity: 0.25;
-    width: 30px
-  }
-
+  .container {width: 100%; display: flex; margin-bottom: 32px}
+  .item {flex: 1 1 auto; margin-right: 20px; position: relative}
+  .arrow {position: absolute; top: 50%; left: -18px; font-size: 20px}
+  .lineNum {display: inline-block; opacity: 0.25; width: 30px}
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github-dark.min.css" integrity="sha512-rO+olRTkcf304DQBxSWxln8JXCzTHlKnIdnMUwYvQa9/Jd4cQaNkItIUj6Z4nvW1dqK0SKXLbn9h4KwZTNtAyw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 <body style="background: #222; color: #EEE">
   <h1>Tiny Compiler</h1>
-  <p>The input is editable. The Tokens, Syntax Tree, Assembly, and Result update in real time. Inspired by Mark Feeley's
+  <p>The input is editable. The tokens, syntax tree, assembly, and results update in real time. Inspired by Mark Feeley's
     <a href="http://www.iro.umontreal.ca/~felipe/IFT2030-Automne2002/Complements/tinyc.c" target="_blank">tinyc.c</a>
   </p>
   <details style="margin: 10px 0 30px 0">
