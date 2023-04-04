@@ -22,6 +22,10 @@ function loop() {
   // draw the tree at the bottom middle
   tree.draw(ctx, window.innerWidth / 2, window.innerHeight, frameCounter);
 
+  canvas.style.filter = `hue-rotate(${
+    Math.cos(frameCounter / 100) * 30 - 30
+  }deg)`;
+
   frameCounter++;
   requestAnimationFrame(loop);
 }

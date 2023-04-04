@@ -2,7 +2,7 @@ const growSpeed = 1; // make it faster or slower
 const branchProbability = 0.01; // higher will make a smaller, denser tree.
 const branchAngleMultiplier = 1; // smaller will make it a straighter tree, bigger will make it get weird looking
 const thicknessMultiplier = 0.2; // bigger make chonky tree
-const swayAmount = 1; // how far does it sway
+const swayAmount = 0.5; // how far does it sway
 const swaySpeed = 1; // how fast does it sway
 
 export class Tree {
@@ -56,7 +56,7 @@ export class Tree {
       const branchThickness =
         0.2 + Math.sqrt(this.numDescendants()) * thicknessMultiplier;
 
-      ctx.strokeStyle = '#210';
+      ctx.strokeStyle = 'black';
       ctx.lineCap = 'round';
       ctx.lineWidth = branchThickness;
       ctx.beginPath();

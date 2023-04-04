@@ -6,6 +6,12 @@
     "desc": "A visualization of a network learning to predict prime numbers."
   },
   {
+    "filePath": "tinyc",
+    "title": "Tiny Compiler",
+    "year": 2023,
+    "desc": "Based on tinyc.c"
+  },
+  {
     "filePath": "wave",
     "title": "3D Function Visualizer",
     "year": 2022,
