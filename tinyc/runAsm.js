@@ -3,6 +3,7 @@ export const runAsm = (program) => {
   const vars = {};
   const stack = [];
   let pc = 0;
+  let output = '';
   while (pc < program.length) {
     const op = program[pc++];
     if (op === 'FETCH') stack.push(vars[program[pc++]] || 0);
@@ -15,6 +16,7 @@ export const runAsm = (program) => {
     else if (op === 'JMP') pc += program[pc];
     else if (op === 'JZ') pc += stack.pop() ? 1 : program[pc];
     else if (op === 'JNZ') pc += stack.pop() ? program[pc] : 1;
+    else if (op === 'PRINT') output += stack.pop();
   }
-  return vars;
+  return output;
 };

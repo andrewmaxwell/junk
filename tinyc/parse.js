@@ -18,6 +18,7 @@ const typeLengths = {
   expression: 1, // ;
   parenthetical: 2, // (, )
   block: 2, // {, }
+  argument: 1, // ,
 };
 
 // takes a node and returns the number of tokens that make it up
@@ -27,11 +28,19 @@ const len = ([type, ...args]) =>
     .map((a) => (Array.isArray(a) ? len(a) : 1))
     .reduce((a, b) => a + b, typeLengths[type] || 0);
 
-// tokens an array of tokens and returns the first term. A term can be a variable, a number, or a parenthesized expression
-const parseTerm = (tokens) =>
-  tokens[0]?.type === 'variable' || tokens[0]?.type === 'number'
-    ? [tokens[0].type, tokens[0].value]
-    : parseParenExpr(tokens);
+// tokens an array of tokens and returns the first term. A term can be a variable, a number, a string, a function call, or a parenthesized expression
+const parseTerm = (tokens) => {
+  const t = tokens[0]?.type;
+  if (t === 'number') return ['number', tokens[0].value];
+  if (t === 'string') return ['string', tokens[0].value];
+  if (t === 'variable') {
+    const x = ['variable', tokens[0].value];
+    return tokens[1]?.type === '('
+      ? ['functionCall', x, parseParenExpr(tokens.slice(1))]
+      : x;
+  }
+  return parseParenExpr(tokens);
+};
 
 // takes an array of tokens and returns an array of partially formed terms as long as they're joined by + or -
 const splitSum = (tokens) => {
@@ -76,12 +85,24 @@ const parseExpr = (tokens) => {
     : comparisonAst;
 };
 
+// takes an array of tokens and returns an array of argument nodes
+const parseArgs = (tokens) => {
+  if (tokens[0]?.type !== ',') return [];
+  const expr = parseExpr(tokens.slice(1));
+  return [['argument', expr], ...parseArgs(tokens.slice(1 + len(expr)))];
+};
+
 // takes an array of tokens and returns the parenthesized expression at the beginning
 const parseParenExpr = (tokens) => {
   expectToken('(', tokens[0]);
-  const expr = parseExpr(tokens.slice(1));
-  expectToken(')', tokens[len(expr) + 1]);
-  return ['parenthetical', expr];
+  const firstExpr = parseExpr(tokens.slice(1));
+  const ast = [
+    'parenthetical',
+    firstExpr,
+    ...parseArgs(tokens.slice(1 + len(firstExpr))),
+  ];
+  expectToken(')', tokens[len(ast) - 1]);
+  return ast;
 };
 
 // takes an array of tokens and returns a list of statements until it finds '}'
@@ -151,6 +172,7 @@ const parseStatement = (tokens) => {
 
 // takes an array of tokens and returns a syntax tree
 export const parse = (tokens) => {
+  tokens = [{type: '{'}, ...tokens, {type: '}'}];
   const ast = parseStatement(tokens);
   if (tokens.length !== len(ast)) {
     throw new Error(

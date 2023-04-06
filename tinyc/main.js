@@ -59,11 +59,7 @@ tests.forEach((t, i) => {
         .map((x, i) => `<span class="lineNum">${i + 1}</span>${x}`)
         .join('\n');
 
-      const result = runAsm(asm);
-      resultPre.innerText = Object.entries(result)
-        .map((p) => p.join(' = '))
-        .sort()
-        .join('\n');
+      resultPre.innerText = runAsm(asm);
     } catch (e) {
       resultPre.innerText = e.stack;
       console.error(e);
