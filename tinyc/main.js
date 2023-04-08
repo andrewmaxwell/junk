@@ -9,26 +9,26 @@ document.querySelector('.examples').innerHTML = tests
     (t, i) => `
   <h4 id="description${i}"></h4>
   <div class="container" id="test${i}">
-    <div class="item">
+    <div class="item" style="width: 25%">
       <label>Input</label>
       <textarea></textarea>
     </div>
-    <div class="item">
+    <div class="item" style="width: 15%">
       <span class="arrow">→</span>
       <label>Tokens</label>
       <pre class="tokens"></pre>
     </div>
-    <div class="item">
+    <div class="item" style="width: 25%">
       <span class="arrow">→</span>
       <label>Syntax Tree</label>
       <pre class="ast"></pre>
     </div>
-    <div class="item">
+    <div class="item" style="width: 10%">
       <span class="arrow">→</span>
       <label>Assembly</label>
       <pre class="asm"></pre>
     </div>
-    <div class="item">
+    <div class="item" style="width: 25%">
       <span class="arrow">→</span>
       <label>Result</label>
       <pre class="result"></pre>
@@ -75,7 +75,7 @@ tests.forEach((t, i) => {
 
     try {
       asm = toAsm(ast);
-      asmPre.innerHTML = highlight(JSON.stringify(asm, null, 2));
+      asmPre.innerHTML = asm.join('\n');
     } catch (e) {
       asmPre.innerText = e.stack;
       return;

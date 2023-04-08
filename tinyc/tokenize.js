@@ -1,4 +1,4 @@
-const reservedWords = ['do', 'else', 'if', 'while'];
+const reservedWords = ['do', 'else', 'if', 'while', 'for'];
 
 // takes a string and returns an array of tokens.
 // a token looks like {type: ';'} or {type: 'number', value: 51}
@@ -9,6 +9,6 @@ export const tokenize = (inputStr) =>
       if (t == +t) return {type: 'number', value: +t};
       if (t[0] === '"') return {type: 'string', value: t.slice(1, -1)};
       if (/^[a-z_]+$/i.test(t) && !reservedWords.includes(t))
-        return {type: 'variable', value: t};
+        return {type: 'var', value: t};
       return {type: t};
     });

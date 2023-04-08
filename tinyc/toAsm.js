@@ -31,9 +31,9 @@ export const toAsm = (node) => {
 
   if (kind === 'block') return args.flat();
 
-  const [a, b, c] = args;
+  const [a, b, c, d] = args;
   if (operators[kind]) return [...a, ...b, operators[kind]];
-  if (kind === 'variable') return ['FETCH', a];
+  if (kind === 'var') return ['FETCH', a];
   if (kind === 'not') return [...a, 'NOT'];
   if (kind === 'number' || kind === 'string') return ['PUSH', a];
   if (kind === 'assignment') return [...b, 'STORE', a[1]];
@@ -43,6 +43,17 @@ export const toAsm = (node) => {
   if (kind === 'whileLoop')
     return [...a, 'JZ', b.length + 3, ...b, 'JMP', -a.length - b.length - 3];
   if (kind === 'doWhile') return [...a, ...b, 'JNZ', -a.length - b.length - 1];
+  if (kind === 'forLoop')
+    return [
+      ...a,
+      ...b,
+      'JZ',
+      c.length + d.length + 3,
+      ...d,
+      ...c,
+      'JMP',
+      -b.length - c.length - d.length - 3,
+    ];
   if (kind === 'expression') return [...a, 'POP'];
   if (kind === 'parenthetical') return args.reverse().flat();
   if (kind === 'argument') return a;

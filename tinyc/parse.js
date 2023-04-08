@@ -2,23 +2,26 @@
 const expectToken = (expectedType, tokens) => {
   if (tokens[0]?.type !== expectedType)
     throw new Error(
-      `Expected first token to be of type "${expectedType}", got tokens "${tokens
+      `Expected "${expectedType}", got ${tokens
         .map((t) => (t.value === undefined ? t.type : t.value))
-        .join(' ')}"`
+        .join(' ')}`
     );
 };
 
 // different node types have different numbers of static tokens that need to be accounted for when calculating their length
 const typeLengths = Object.fromEntries(
   [
-    'number string functionCall variable', // 0
+    'number string functionCall var', // 0
     '+ - && || * / % < <= > >= == != not assignment ifStmt whileLoop semicolon expression argument', // 1
     'ifElse doWhile parenthetical block', // 2
-  ].flatMap((list, i) => list.split(' ').map((t) => [t, i]))
+    '',
+    '',
+    'forLoop', // 5
+  ].flatMap((list, i) => (list ? list.split(' ').map((t) => [t, i]) : []))
 );
 
 // takes a node and returns the number of tokens that make it up
-// example: ['+', ['variable', 'i'], ['number', 5]] represents i+5, which is 3 tokens
+// example: ['+', ['var', 'i'], ['number', 5]] represents i+5, which is 3 tokens
 const len = ([type, ...args]) => {
   if (typeLengths[type] === undefined) {
     throw new Error(`typeLength for ${type} is not defined!`);
@@ -32,16 +35,16 @@ const parseFunctionCall = (tokens) =>
   tokens[1]?.type === '('
     ? [
         'functionCall',
-        ['variable', tokens[0].value],
+        ['var', tokens[0].value],
         parseParenExpr(tokens.slice(1)),
       ]
-    : ['variable', tokens[0].value];
+    : ['var', tokens[0].value];
 
-// tokens an array of tokens and returns the first term. A term can be a variable, a number, a string, a function call, or a parenthesized expression
+// tokens an array of tokens and returns the first term. A term can be a var, a number, a string, a function call, or a parenthesized expression
 const parseTerm = (tokens) => {
   const t = tokens[0]?.type;
   if (t === 'number' || t === 'string') return [t, tokens[0].value];
-  if (t === 'variable') return parseFunctionCall(tokens);
+  if (t === 'var') return parseFunctionCall(tokens);
   return parseParenExpr(tokens);
 };
 
@@ -82,8 +85,8 @@ const parseOps = [
 
 // takes an array of tokens and returns either the first comparison or an assignment
 const parseExpr = (tokens) =>
-  tokens[0]?.type === 'variable' && tokens[1]?.type === '='
-    ? ['assignment', ['variable', tokens[0].value], parseExpr(tokens.slice(2))]
+  tokens[0]?.type === 'var' && tokens[1]?.type === '='
+    ? ['assignment', ['var', tokens[0].value], parseExpr(tokens.slice(2))]
     : parseOps(tokens);
 
 // takes an array of tokens and returns an array of argument nodes
@@ -146,6 +149,30 @@ const parseDoWhile = (tokens) => {
   return doAst;
 };
 
+const parseForLoop = (tokens) => {
+  expectToken('(', tokens.slice(1));
+
+  const initializer = parseExpr(tokens.slice(2));
+  const initializerLen = len(initializer);
+  expectToken(';', tokens.slice(initializerLen + 2));
+
+  const condition = parseExpr(tokens.slice(initializerLen + 3));
+  const conditionLen = len(condition);
+  expectToken(';', tokens.slice(initializerLen + conditionLen + 3));
+
+  const updater = parseExpr(tokens.slice(initializerLen + conditionLen + 4));
+  const updaterLen = len(updater);
+  expectToken(
+    ')',
+    tokens.slice(initializerLen + conditionLen + updaterLen + 4)
+  );
+
+  const body = parseStatement(
+    tokens.slice(initializerLen + conditionLen + updaterLen + 5)
+  );
+  return ['forLoop', initializer, condition, updater, body];
+};
+
 // takes an array of tokens and returns the expression at the beginning
 const parseExprStmt = (tokens) => {
   const expr = parseExpr(tokens);
@@ -162,6 +189,8 @@ const parseStatement = (tokens) => {
       return parseWhile(tokens);
     case 'do':
       return parseDoWhile(tokens);
+    case 'for':
+      return parseForLoop(tokens);
     case '{':
       return ['block', ...getStatements(tokens.slice(1))];
     case ';':
