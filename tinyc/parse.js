@@ -1,89 +1,90 @@
 // takes an expected type (string) and token and throws an error if the types don't match
-const expectToken = (expectedType, token) => {
-  if (token?.type !== expectedType)
-    throw new Error(`Expected "${expectedType}", got ${JSON.stringify(token)}`);
+const expectToken = (expectedType, tokens) => {
+  if (tokens[0]?.type !== expectedType)
+    throw new Error(
+      `Expected first token to be of type "${expectedType}", got tokens "${tokens
+        .map((t) => (t.value === undefined ? t.type : t.value))
+        .join(' ')}"`
+    );
 };
 
 // different node types have different numbers of static tokens that need to be accounted for when calculating their length
-const typeLengths = {
-  add: 1, // +
-  subtract: 1, // -
-  lessThan: 1, // <
-  assignment: 1, // =
-  ifStmt: 1, // if
-  ifElse: 2, // if, else
-  whileLoop: 1, // while
-  doWhile: 2, // do, while
-  semicolon: 1, // ;
-  expression: 1, // ;
-  parenthetical: 2, // (, )
-  block: 2, // {, }
-  argument: 1, // ,
-};
+const typeLengths = Object.fromEntries(
+  [
+    'number string functionCall variable', // 0
+    '+ - && || * / % < <= > >= == != not assignment ifStmt whileLoop semicolon expression argument', // 1
+    'ifElse doWhile parenthetical block', // 2
+  ].flatMap((list, i) => list.split(' ').map((t) => [t, i]))
+);
 
 // takes a node and returns the number of tokens that make it up
-// example: ['add', ['variable', 'i'], ['number', 5]] represents i+5, which is 3 tokens
-const len = ([type, ...args]) =>
-  args
+// example: ['+', ['variable', 'i'], ['number', 5]] represents i+5, which is 3 tokens
+const len = ([type, ...args]) => {
+  if (typeLengths[type] === undefined) {
+    throw new Error(`typeLength for ${type} is not defined!`);
+  }
+  return args
     .map((a) => (Array.isArray(a) ? len(a) : 1))
-    .reduce((a, b) => a + b, typeLengths[type] || 0);
+    .reduce((a, b) => a + b, typeLengths[type]);
+};
+
+const parseFunctionCall = (tokens) =>
+  tokens[1]?.type === '('
+    ? [
+        'functionCall',
+        ['variable', tokens[0].value],
+        parseParenExpr(tokens.slice(1)),
+      ]
+    : ['variable', tokens[0].value];
 
 // tokens an array of tokens and returns the first term. A term can be a variable, a number, a string, a function call, or a parenthesized expression
 const parseTerm = (tokens) => {
   const t = tokens[0]?.type;
-  if (t === 'number') return ['number', tokens[0].value];
-  if (t === 'string') return ['string', tokens[0].value];
-  if (t === 'variable') {
-    const x = ['variable', tokens[0].value];
-    return tokens[1]?.type === '('
-      ? ['functionCall', x, parseParenExpr(tokens.slice(1))]
-      : x;
-  }
+  if (t === 'number' || t === 'string') return [t, tokens[0].value];
+  if (t === 'variable') return parseFunctionCall(tokens);
   return parseParenExpr(tokens);
 };
 
-// takes an array of tokens and returns an array of partially formed terms as long as they're joined by + or -
-const splitSum = (tokens) => {
-  const type = tokens[0]?.type;
-  if (type !== '+' && type !== '-') return [];
-  const nextTerm = parseTerm(tokens.slice(1));
-  return [
-    ...splitSum(tokens.slice(1 + len(nextTerm))),
-    [type === '+' ? 'add' : 'subtract', nextTerm],
-  ];
+const parseNot = (tokens) =>
+  tokens[0]?.type === '!'
+    ? ['not', parseTerm(tokens.slice(1))]
+    : parseTerm(tokens);
+
+const parseChain = (nextFunc, types) => {
+  const splitChain = (tokens) => {
+    const type = tokens[0]?.type;
+    if (!types.includes(type)) return [];
+    const nextTerm = nextFunc(tokens.slice(1));
+    return [...splitChain(tokens.slice(1 + len(nextTerm))), [type, nextTerm]];
+  };
+
+  return (tokens) => {
+    const first = nextFunc(tokens);
+    return splitChain(tokens.slice(len(first))).reduce(
+      (a, [type, b]) => [type, a, b],
+      first
+    );
+  };
 };
 
-// takes an array of tokens and returns a node that totals up the terms
-const parseSum = (tokens) => {
-  const firstTerm = parseTerm(tokens);
-  return splitSum(tokens.slice(len(firstTerm))).reduce(
-    (a, [type, b]) => [type, a, b],
-    firstTerm
-  );
-};
-
-// takes an array of tokens and returns either the first comparison or the sum it starts with
-const parseComparison = (tokens) => {
-  const sum = parseSum(tokens);
-  const l = len(sum);
-  return tokens[l]?.type === '<'
-    ? ['lessThan', sum, parseSum(tokens.slice(l + 1))]
-    : sum;
-};
+const parseOps = [
+  ['*', '/', '%'],
+  ['+', '-'],
+  ['<<', '>>'],
+  ['<', '<=', '>', '>='],
+  ['==', '!='],
+  // ['&'],
+  // ['^'],
+  // ['|'],
+  ['&&'],
+  ['||'],
+].reduce(parseChain, parseNot);
 
 // takes an array of tokens and returns either the first comparison or an assignment
-const parseExpr = (tokens) => {
-  const comparisonAst = parseComparison(tokens);
-  return tokens[0]?.type === 'variable' &&
-    comparisonAst[0] === 'variable' &&
-    tokens[len(comparisonAst)]?.type === '='
-    ? [
-        'assignment',
-        comparisonAst,
-        parseExpr(tokens.slice(len(comparisonAst) + 1)),
-      ]
-    : comparisonAst;
-};
+const parseExpr = (tokens) =>
+  tokens[0]?.type === 'variable' && tokens[1]?.type === '='
+    ? ['assignment', ['variable', tokens[0].value], parseExpr(tokens.slice(2))]
+    : parseOps(tokens);
 
 // takes an array of tokens and returns an array of argument nodes
 const parseArgs = (tokens) => {
@@ -94,14 +95,14 @@ const parseArgs = (tokens) => {
 
 // takes an array of tokens and returns the parenthesized expression at the beginning
 const parseParenExpr = (tokens) => {
-  expectToken('(', tokens[0]);
+  expectToken('(', tokens);
   const firstExpr = parseExpr(tokens.slice(1));
   const ast = [
     'parenthetical',
     firstExpr,
     ...parseArgs(tokens.slice(1 + len(firstExpr))),
   ];
-  expectToken(')', tokens[len(ast) - 1]);
+  expectToken(')', tokens.slice(len(ast) - 1));
   return ast;
 };
 
@@ -135,20 +136,20 @@ const parseWhile = (tokens) => {
 // takes an array of tokens starting with {type: 'do'} and returns a do loop
 const parseDoWhile = (tokens) => {
   const loopBody = parseStatement(tokens.slice(1));
-  expectToken('while', tokens[len(loopBody) + 1]);
+  expectToken('while', tokens.slice(len(loopBody) + 1));
   const doAst = [
     'doWhile',
     loopBody,
     parseParenExpr(tokens.slice(len(loopBody) + 2)),
   ];
-  expectToken(';', tokens[len(doAst)]);
+  expectToken(';', tokens.slice(len(doAst)));
   return doAst;
 };
 
 // takes an array of tokens and returns the expression at the beginning
 const parseExprStmt = (tokens) => {
   const expr = parseExpr(tokens);
-  expectToken(';', tokens[len(expr)]);
+  expectToken(';', tokens.slice(len(expr)));
   return ['expression', expr];
 };
 
@@ -172,6 +173,7 @@ const parseStatement = (tokens) => {
 
 // takes an array of tokens and returns a syntax tree
 export const parse = (tokens) => {
+  // console.log(tokens);
   tokens = [{type: '{'}, ...tokens, {type: '}'}];
   const ast = parseStatement(tokens);
   if (tokens.length !== len(ast)) {

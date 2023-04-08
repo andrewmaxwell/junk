@@ -6,6 +6,22 @@ const printf = (args) => [
     .flatMap((char) => (char === '%d' ? 'PRINT' : ['PUSH', char, 'PRINT'])),
 ];
 
+const operators = {
+  '+': 'ADD',
+  '-': 'SUB',
+  '*': 'MULT',
+  '/': 'DIV',
+  '%': 'MOD',
+  '&&': 'AND',
+  '||': 'OR',
+  '<': 'LT',
+  '<=': 'LTE',
+  '>': 'GT',
+  '>=': 'GTE',
+  '==': 'EQ',
+  '!=': 'NEQ',
+};
+
 // takes a syntax tree (or node) and converts it to an array of assembly tokens (strings)
 export const toAsm = (node) => {
   if (!Array.isArray(node)) return node;
@@ -16,17 +32,16 @@ export const toAsm = (node) => {
   if (kind === 'block') return args.flat();
 
   const [a, b, c] = args;
+  if (operators[kind]) return [...a, ...b, operators[kind]];
   if (kind === 'variable') return ['FETCH', a];
+  if (kind === 'not') return [...a, 'NOT'];
   if (kind === 'number' || kind === 'string') return ['PUSH', a];
   if (kind === 'assignment') return [...b, 'STORE', a[1]];
-  if (kind === 'add') return [...a, ...b, 'ADD'];
-  if (kind === 'subtract') return [...a, ...b, 'SUB'];
-  if (kind === 'lessThan') return [...a, ...b, 'LT'];
   if (kind === 'ifStmt') return [...a, 'JZ', b.length + 1, ...b];
   if (kind === 'ifElse')
     return [...a, 'JZ', b.length + 3, ...b, 'JMP', c.length + 1, ...c];
   if (kind === 'whileLoop')
-    return [...a, 'JZ', b.length + 2, ...b, 'JMP', -a.length - b.length - 3];
+    return [...a, 'JZ', b.length + 3, ...b, 'JMP', -a.length - b.length - 3];
   if (kind === 'doWhile') return [...a, ...b, 'JNZ', -a.length - b.length - 1];
   if (kind === 'expression') return [...a, 'POP'];
   if (kind === 'parenthetical') return args.reverse().flat();
@@ -35,5 +50,5 @@ export const toAsm = (node) => {
   if (kind === 'functionCall') {
     if (a[1] === 'printf') return printf(b);
   }
-  throw new Error(`wtf is ${JSON.stringify(node)}`);
+  throw new Error(`ASM ERROR: wtf is ${JSON.stringify(node)}`);
 };
