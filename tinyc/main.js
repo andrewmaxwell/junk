@@ -7,6 +7,7 @@ import {tests} from './tests.js';
 document.querySelector('.examples').innerHTML = tests
   .map(
     (t, i) => `
+  <h4 id="description${i}"></h4>
   <div class="container" id="test${i}">
     <div class="item">
       <label>Input</label>
@@ -41,6 +42,7 @@ const highlight = (code) =>
   window.hljs.highlight(code, {language: 'javascript'}).value;
 
 tests.forEach((t, i) => {
+  document.querySelector(`#description${i}`).innerText = t.description;
   const row = document.querySelector(`#test${i}`);
   const textarea = row.querySelector('textarea');
   const tokensPre = row.querySelector('.tokens');

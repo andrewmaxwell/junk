@@ -1,18 +1,16 @@
 export const tests = [
   {
-    input: `i=125;
-j=100;
-printf("i = %d, j = %d", i, j);`,
-    expected: 'i = 125, j = 100',
-  },
-  {input: `printf("%d", 1+2-3+4-5+6);`, expected: '5'},
-  {input: 'if (0) printf("j"); else printf("i");', expected: 'i'},
-  {
-    input: `a=b=c=2<3;
-printf("a = %d, b = %d, c = %d", a, b, c);`,
-    expected: 'a = 1, b = 1, c = 1',
+    description:
+      'Use variables to store data and printf to print things. Currently printf is the only supported function.',
+    input: `i = 125;
+i = i - 13;
+i = i * 2;
+printf("the value is %d", i);`,
+    expected: 'the value is 224',
   },
   {
+    description:
+      'While loops, if, and else statements are supported along with blocks inside them.',
     input: `i=125;
 j=100;
 while (i-j) {
@@ -26,31 +24,16 @@ printf("i = %d, j = %d", i, j);`,
     expected: 'i = 25, j = 25',
   },
   {
+    description: 'Do loops are supported.',
     input: `i=1;
 do i=i+10; while (i<50);
 printf("i = %d", i);`,
     expected: 'i = 51',
   },
   {
-    input: `i=7;
-if (i < 5) x=1;
-if (i < 10) y=2;
-printf("i = %d, x = %d, y = %d", i, x, y);`,
-    expected: 'i = 7, x = 0, y = 2',
-  },
-  {
-    input: `i=1000;
-t=0;
-while (i) {
-  t = t + i;
-  i = i - 1;
-}
-printf("t = %d", t);`,
-    expected: 't = 500500',
-  },
-  {
+    description: 'Comparisons and logical operators are supported.',
     input: `printf(
-  "%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d", 
+  "%d%d%d%d%d%d%d%d%d%d%d%d", 
   1 + 2 < 3, 
   1 + 1 < 3, 
   1 + 2 <= 3, 
@@ -62,7 +45,11 @@ printf("t = %d", t);`,
   1 + 2 == 3, 
   2 + 2 == 3, 
   1 + 2 != 3,
-  2 + 2 != 3,
+  2 + 2 != 3
+);
+
+printf(
+  "%d%d%d%d%d%d%d%d%d%d",
   0 && 0, 
   0 && 1, 
   1 && 0,
@@ -77,18 +64,20 @@ printf("t = %d", t);`,
     expected: '0110011010010001011101',
   },
   {
-    input: `
-printf(
-  "%d %d %d %d %d",
+    description: 'Arithmetic operations are supported.',
+    input: `printf(
+  "%d %d %d %d %d %d",
   2 * 3,
   21 / 7,
   25 % 7,
   1 + 3 * 4,
-  6 - 13 % 2
+  13 % 2 - 6,
+  (4 + 3) * 4
 );`,
-    expected: '6 3 4 13 5',
+    expected: '6 3 4 13 -5 28',
   },
   {
+    description: 'This example prints out the prime numbers less than 100.',
     input: `i = 2;
 while (i < 100) {
   isPrime = 1;
