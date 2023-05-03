@@ -1,7 +1,7 @@
 const {Papa} = window;
 
-const normalizeByPerson = false;
-const normalizeByQuestion = false;
+// const normalizeByPerson = false;
+// const normalizeByQuestion = false;
 const colorThreshold = 15;
 
 const url =
@@ -12,30 +12,18 @@ const getDiff = (p1, p2) =>
 
 const getData = async () => (await fetch(url)).text();
 
-const processData = (data) =>
-  Papa.parse(data, {
+const processData = (str) => {
+  const data = Papa.parse(str, {
     header: true,
-  })
-    .data.map((row) => {
-      const name = row['Your Name'].trim();
-      return {
-        firstName: name.split(' ')[0],
-        lastName: name.split(' ').pop(),
-        name,
-        data: Object.fromEntries(
-          Object.entries(row)
-            .map(([key, val]) => [key, +val])
-            .filter(([, val]) => !isNaN(val))
-        ),
-      };
-    })
-    .sort(
-      (a, b) =>
-        a.lastName.localeCompare(b.lastName) ||
-        a.firstName.localeCompare(b.firstName)
-    );
+  }).data.map((row) => ({
+    name: row['Your Name'].trim(),
+    data: Object.fromEntries(
+      Object.entries(row)
+        .map(([key, val]) => [key, +val])
+        .filter(([, val]) => !isNaN(val))
+    ),
+  }));
 
-const sortData = (data) => {
   for (const row of data) {
     row.scores = {};
     row.totalDiff = 0;
@@ -46,33 +34,33 @@ const sortData = (data) => {
   return data.sort((a, b) => a.totalDiff - b.totalDiff);
 };
 
-const normalize = (data) => {
-  if (normalizeByPerson) {
-    for (const row of data) {
-      const vals = Object.values(row.data);
-      const min = Math.min(...vals);
-      const max = Math.max(...vals);
-      console.log(row.name, min, max);
-      for (const key in row.data) {
-        row.data[key] = (row.data[key] - min) / (max - min);
-      }
-    }
-  }
+// const normalize = (data) => {
+//   if (normalizeByPerson) {
+//     for (const row of data) {
+//       const vals = Object.values(row.data);
+//       const min = Math.min(...vals);
+//       const max = Math.max(...vals);
+//       console.log(row.name, min, max);
+//       for (const key in row.data) {
+//         row.data[key] = (row.data[key] - min) / (max - min);
+//       }
+//     }
+//   }
 
-  if (normalizeByQuestion) {
-    for (const key in data[0].data) {
-      const vals = data.map((row) => row.data[key]);
-      const min = Math.min(...vals);
-      const max = Math.max(...vals);
-      console.log(key, min, max);
-      for (const row of data) {
-        row.data[key] = (row.data[key] - min) / (max - min);
-      }
-    }
-  }
+//   if (normalizeByQuestion) {
+//     for (const key in data[0].data) {
+//       const vals = data.map((row) => row.data[key]);
+//       const min = Math.min(...vals);
+//       const max = Math.max(...vals);
+//       console.log(key, min, max);
+//       for (const row of data) {
+//         row.data[key] = (row.data[key] - min) / (max - min);
+//       }
+//     }
+//   }
 
-  return data;
-};
+//   return data;
+// };
 
 const getColor = (x, threshold) =>
   x < threshold
@@ -97,13 +85,11 @@ const similarityTable = (data) => {
   const rows = data
     .map(({name}) => {
       const cols = data
-        .map(
-          ({scores}) =>
-            `<td style="background:${getColor(
-              scores[name],
-              colorThreshold
-            )}"></td>`
-        )
+        .map(({name: n2, scores}) => {
+          const color = getColor(scores[name], colorThreshold);
+          const title = `${name} & ${n2}: ${scores[name].toFixed(1)}`;
+          return `<td style="background:${color}" title="${title}"></td>`;
+        })
         .join('');
       return `<tr><th>${name}</th>${cols}</tr>`;
     })
@@ -169,7 +155,7 @@ ${getAnswerTables(data)}
 `;
 
 const main = async () => {
-  const data = normalize(sortData(processData(await getData())));
+  const data = processData(await getData());
   console.log(data);
   document.body.innerHTML += makeHtml(data);
 };
