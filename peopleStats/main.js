@@ -72,16 +72,6 @@ const getColor = (x, threshold) =>
     ? `rgba(0,255,0,${1 - x / threshold})`
     : `rgba(255,0,0,${x / threshold - 1})`;
 
-const makeTable = (headers, rows) => `<table>
-<thead>
-  <tr>
-    <th></th>
-    ${headers}
-  </tr>
-</thead>
-<tbody>${rows}</tbody>
-</table>`;
-
 const similarityTable = (data) => {
   const headers = data
     .map(({name}) => `<th><div><span>${nameLink(name)}</span></div></th>`)
@@ -100,7 +90,20 @@ const similarityTable = (data) => {
     })
     .join('');
 
-  return makeTable(headers, rows);
+  return `
+  
+  <h1>Results</h1>
+  <p>Green means more similar. Red means different. The bright green diagonal is because everyone is 100% similar to themselves.<p>
+  <p>People at the top tended to give more moderate answers and people at the bottom tended toward extremes.</p>
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        ${headers}
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
 };
 
 // const getPairList = (data) => {
