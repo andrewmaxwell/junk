@@ -6,14 +6,9 @@ document.querySelector('.container').innerHTML =
     .map(
       (p) =>
         `<a href="${p.filePath}/" class="item">
-            <img src="${p.filePath}/image.png"/>
-            <strong>${p.title} - ${p.year}</strong>
-            <div class="desc">${p.desc}</div>
-           </a>`
+          <img src="${p.filePath}/image.png"/>
+          <strong>${p.title} - ${p.year}</strong>
+          <div class="desc">${p.desc}</div>
+        </a>`
     )
-    .join('') +
-  `
-    <span class="item break"></span>
-    <span class="item break"></span>
-    <span class="item break"></span>
-    `;
+    .join('') + '<span class="item break"></span>'.repeat(3);

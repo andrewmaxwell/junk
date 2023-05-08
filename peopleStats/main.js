@@ -32,11 +32,13 @@ const processData = (str, hidden) => {
   for (const row of data) {
     row.scores = {};
     row.totalDiff = 0;
+    row.totalScore = Object.values(row.answers).reduce((a, b) => a + b, 0);
     for (const r of data) {
       row.totalDiff += row.scores[r.name] = getDiff(row.answers, r.answers);
     }
   }
   return data.sort((a, b) => a.totalDiff - b.totalDiff);
+  // return data.sort((a, b) => a.totalScore - b.totalScore);
 };
 
 // const normalize = (data) => {

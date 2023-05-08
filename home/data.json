@@ -6,6 +6,12 @@
     "desc": "A visualization of a network learning to predict prime numbers."
   },
   {
+    "filePath": "peopleStats",
+    "title": "People Stats",
+    "year": 2023,
+    "desc": "Who do I know is most similar and most different?"
+  },
+  {
     "filePath": "tinyc",
     "title": "Tiny Compiler",
     "year": 2023,

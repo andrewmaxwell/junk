@@ -1,3 +1,30 @@
+// function calculate(rects) {
+//   if (!rects.length) return 0;
+
+//   rects.sort((a, b) => a[0] - b[0]);
+
+//   const yCoords = [...new Set(rects.flatMap(([, y0, , y1]) => [y0, y1]))].sort(
+//     (a, b) => a - b
+//   );
+
+//   const pos = [];
+//   const heights = [];
+//   for (let i = 0; i < yCoords.length - 1; i++) {
+//     pos[yCoords[i]] = 0;
+//     heights[yCoords[i]] = yCoords[i + 1] - yCoords[i];
+//   }
+
+//   let result = 0;
+//   for (const [x0, y0, x1, y1] of rects) {
+//     for (let i = y0; i < y1; i += heights[i]) {
+//       if (pos[i] > x1) continue;
+//       result += heights[i] * (x1 - Math.max(pos[i], x0));
+//       pos[i] = x1;
+//     }
+//   }
+//   return result;
+// }
+
 class Tree {
   constructor(start, end) {
     this.start = start;
@@ -46,7 +73,7 @@ const calculate = (recs) => {
   return result;
 };
 
-const {Test} = require('./test');
+import {Test} from './test.js';
 Test.assertEquals(calculate([]), 0, 'calculate([]) should return 0');
 Test.assertEquals(
   calculate([[0, 0, 1, 1]]),

@@ -1,5 +1,7 @@
 // https://oeis.org/A172477 or distinct https://oeis.org/A328020
 
+import {memoizeWith} from 'ramda';
+
 const padGrid = (grid) => {
   if (grid[0].some((x) => x))
     grid = [new Array(grid[0].length).fill(0), ...grid];
@@ -58,40 +60,47 @@ const rotate = (grid) => grid[0].map((_, i) => grid.map((r) => r[i])).reverse();
 const flip = (grid) => [...grid].reverse();
 const transforms = [rotate, rotate, rotate, flip, rotate, rotate, rotate];
 
-const getPolyominoes = (size) => {
-  const queue = [[[1]]];
-  const seen = {};
-  const result = [];
+const getPolyominoes = memoizeWith(
+  (s) => s,
+  (size) => {
+    const queue = [[[1]]];
+    const seen = {};
+    const result = [];
 
-  for (const curr of queue) {
-    if (numParts(curr) === size) {
-      // console.log(stringify((curr)) + '\n');
-      result.push(curr);
-      continue;
-    }
-
-    for (let n of getChildPolyominoes(curr)) {
-      const str = stringify(n);
-      if (
-        seen[str] ||
-        transforms.some((t) => {
-          n = t(n);
-          return seen[stringify(n)];
-        })
-      )
+    for (const curr of queue) {
+      if (numParts(curr) === size) {
+        // console.log(stringify((curr)) + '\n');
+        result.push(curr);
         continue;
+      }
 
-      seen[str] = true;
-      queue.push(n);
+      for (let n of getChildPolyominoes(curr)) {
+        const str = stringify(n);
+        if (
+          seen[str] ||
+          transforms.some((t) => {
+            n = t(n);
+            return seen[stringify(n)];
+          })
+        )
+          continue;
+
+        seen[str] = true;
+        queue.push(n);
+      }
     }
+    return result;
   }
-  return result;
-};
+);
 
 console.time();
-const result = getPolyominoes(7);
+const result = getPolyominoes(2);
 console.log(result.map(stringify).join('\n\n'));
 console.log(result.length);
 console.timeEnd();
+
+// console.log(
+//   Array.from({length: 10}, (_, i) => getPolyominoes(i + 1).length).join(', ')
+// );
 
 //////

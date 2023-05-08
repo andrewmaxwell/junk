@@ -1,21 +1,20 @@
-// let x = 3n * 10n ** 1020n;
-// let pi = x;
-// for (let i = 1n; x > 0; i += 2n) {
-//   x = (x * i) / ((i + 1n) * 4n);
-//   pi += x / (i + 2n);
-// }
-// console.log(pi / 10n ** 20n);
+const numberOfDigits = 100n;
 
-let a = 10000;
-let b;
-let c = 2800;
-let d;
-let e;
-let f = new Array(c + 1);
-let g;
-
-for (; b - c; ) {
-  f[b++] = a / 5;
+let x = 3n * 10n ** (numberOfDigits + 10n);
+let pi = x;
+for (let i = 1n; x > 0; i += 2n) {
+  x = (x * i) / ((i + 1n) * 4n);
+  pi += x / (i + 2n);
 }
-for (; (d = 0), (g = c * 2); c -= 14, console.log(e + d / a), e = d % a)
-  for (b = c; (d += f[b] * a), (f[b] = d % --g), (d /= g--), --b; d *= b);
+pi /= 10n ** 10n;
+console.log(pi);
+
+/*
+x = 3e100
+pi = x
+for (i = 1; x > 0; i += 2) {
+  x = (x * i) / (i + 1) / 4
+  pi = pi + x / (i + 2)
+}
+
+*/
