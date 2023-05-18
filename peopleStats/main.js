@@ -1,3 +1,5 @@
+import {correlationCoefficient} from './correlationCoefficient.js';
+
 const {Papa} = window;
 
 // const normalizeByPerson = false;
@@ -69,11 +71,6 @@ const processData = (str, hidden) => {
 //   return data;
 // };
 
-const getColor = (x, threshold) =>
-  x < threshold
-    ? `rgba(0,255,0,${1 - x / threshold})`
-    : `rgba(255,0,0,${x / threshold - 1})`;
-
 const similarityTable = (data) => {
   const headers = data
     .map(({name}) => `<th><div><span>${nameLink(name)}</span></div></th>`)
@@ -83,7 +80,10 @@ const similarityTable = (data) => {
     .map(({name}) => {
       const cols = data
         .map(({name: n2, scores}) => {
-          const color = getColor(scores[name], colorThreshold);
+          const color =
+            scores[name] < colorThreshold
+              ? `rgba(0,255,0,${1 - scores[name] / colorThreshold})`
+              : `rgba(255,0,0,${scores[name] / colorThreshold - 1})`;
           const title = `${name} & ${n2}: ${scores[name].toFixed(1)}`;
           return `<td style="background:${color}" title="${title}"></td>`;
         })
@@ -107,22 +107,6 @@ const similarityTable = (data) => {
     <tbody>${rows}</tbody>
   </table>`;
 };
-
-// const getPairList = (data) => {
-//   const pairs = [];
-//   for (const {name: n1, answers: p1} of data) {
-//     for (const {name: n2, answers: p2} of data) {
-//       if (n1 < n2) pairs.push({n1, n2, d: getDiff(p1, p2)});
-//     }
-//   }
-//   return (
-//     `<h1>Most Alike to Least Alike</h1>` +
-//     pairs
-//       .sort((a, b) => a.d - b.d)
-//       .map(({n1, n2, d}) => `<div>${n1} and ${n2}: ${d.toFixed(1)}</div>`)
-//       .join('')
-//   );
-// };
 
 const num = 5;
 const getMostAndLeast = (data) =>
@@ -172,6 +156,80 @@ const getShowAll = (hidden) =>
       </p>`
     : '';
 
+const correlationTable = (data) => {
+  const questions = Object.keys(data[0].answers).map((key) => ({
+    key,
+    answers: data.map((d) => d.answers[key]),
+  }));
+
+  const headers = questions
+    .map(({key}) => `<th><div><span>${key}</span></div></th>`)
+    .join('');
+
+  const rows = questions
+    .map((q1) => {
+      const cols = questions
+        .map((q2) => {
+          const corr = correlationCoefficient(q1.answers, q2.answers);
+          const color =
+            corr < 0 ? `rgba(255,0,0,${-corr})` : `rgba(0,255,0,${corr})`;
+          const title = `${q1.key} & ${q2.key}: ${corr}`;
+          return `<td style="background:${color}" title="${title}"></td>`;
+        })
+        .join('');
+      return `<tr><th>${q1.key}</th>${cols}</tr>`;
+    })
+    .join('');
+
+  return `
+  
+  <h1>Answer Correlations</h1>
+  <p>Green means positively correlated. Red means negatively correlated. Black means no correlation.<p>
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        ${headers}
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+};
+
+// const correlationList = (data) => {
+//   const questions = Object.keys(data[0].answers).map((key) => ({
+//     key,
+//     answers: data.map((d) => d.answers[key]),
+//   }));
+
+//   const correlations = [];
+//   for (let i = 1; i < questions.length; i++) {
+//     for (let j = 0; j < i; j++) {
+//       const corr = correlationCoefficient(
+//         questions[i].answers,
+//         questions[j].answers
+//       );
+//       correlations.push({
+//         a: questions[i].key,
+//         b: questions[j].key,
+//         correlation: corr,
+//       });
+//     }
+//   }
+
+//   return (
+//     '<h1>Correlations</h1>' +
+//     correlations
+//       .filter(({correlation}) => Math.abs(correlation) > 0.2)
+//       .sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation))
+//       .map(
+//         ({a, b, correlation}) =>
+//           `<div>${a} & ${b}: ${correlation.toFixed(2)}</div>`
+//       )
+//       .join('')
+//   );
+// };
+
 const main = async () => {
   const hidden =
     Object.fromEntries(new URLSearchParams(location.search)).hide?.split(',') ||
@@ -183,12 +241,13 @@ const main = async () => {
   const data = processData(await getData(), hidden);
   console.log(data);
 
-  document.body.innerHTML += `
-    ${getShowAll(hidden)}
-    ${similarityTable(data)}
-    ${getMostAndLeast(data)}
-    ${getAnswerTables(data)}
-  `;
+  document.body.innerHTML += [
+    getShowAll(hidden),
+    similarityTable(data),
+    correlationTable(data),
+    getMostAndLeast(data),
+    getAnswerTables(data),
+  ].join('');
 
   document.addEventListener('click', (e) => {
     switch (e.target.textContent.toLowerCase()) {
