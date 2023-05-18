@@ -34,13 +34,13 @@ const processData = (str, hidden) => {
   for (const row of data) {
     row.scores = {};
     row.totalDiff = 0;
-    row.totalScore = Object.values(row.answers).reduce((a, b) => a + b, 0);
     for (const r of data) {
-      row.totalDiff += row.scores[r.name] = getDiff(row.answers, r.answers);
+      const diff = getDiff(row.answers, r.answers);
+      row.scores[r.name] = diff;
+      row.totalDiff += diff ** 2;
     }
   }
   return data.sort((a, b) => a.totalDiff - b.totalDiff);
-  // return data.sort((a, b) => a.totalScore - b.totalScore);
 };
 
 // const normalize = (data) => {
@@ -160,7 +160,20 @@ const correlationTable = (data) => {
   const questions = Object.keys(data[0].answers).map((key) => ({
     key,
     answers: data.map((d) => d.answers[key]),
+    scores: {},
+    totalCorr: 0,
   }));
+
+  for (const q1 of questions) {
+    for (const q2 of questions) {
+      q1.totalCorr += q1.scores[q2.key] = correlationCoefficient(
+        q1.answers,
+        q2.answers
+      );
+    }
+  }
+
+  questions.sort((a, b) => b.totalCorr - a.totalCorr);
 
   const headers = questions
     .map(({key}) => `<th><div><span>${key}</span></div></th>`)
@@ -170,7 +183,7 @@ const correlationTable = (data) => {
     .map((q1) => {
       const cols = questions
         .map((q2) => {
-          const corr = correlationCoefficient(q1.answers, q2.answers);
+          const corr = q1.key === q2.key ? 1 : q1.scores[q2.key];
           const color =
             corr < 0 ? `rgba(255,0,0,${-corr})` : `rgba(0,255,0,${corr})`;
           const title = `${q1.key} & ${q2.key}: ${corr}`;
@@ -181,9 +194,7 @@ const correlationTable = (data) => {
     })
     .join('');
 
-  return `
-  
-  <h1>Answer Correlations</h1>
+  return `<h1>Answer Correlations</h1>
   <p>Green means positively correlated. Red means negatively correlated. Black means no correlation.<p>
   <table>
     <thead>
@@ -196,39 +207,35 @@ const correlationTable = (data) => {
   </table>`;
 };
 
-// const correlationList = (data) => {
-//   const questions = Object.keys(data[0].answers).map((key) => ({
-//     key,
-//     answers: data.map((d) => d.answers[key]),
-//   }));
+const correlationList = (data) => {
+  const questions = Object.keys(data[0].answers).map((key) => ({
+    key,
+    answers: data.map((d) => d.answers[key]),
+  }));
 
-//   const correlations = [];
-//   for (let i = 1; i < questions.length; i++) {
-//     for (let j = 0; j < i; j++) {
-//       const corr = correlationCoefficient(
-//         questions[i].answers,
-//         questions[j].answers
-//       );
-//       correlations.push({
-//         a: questions[i].key,
-//         b: questions[j].key,
-//         correlation: corr,
-//       });
-//     }
-//   }
+  const correlations = [];
+  for (const q1 of questions) {
+    for (const q2 of questions) {
+      if (q1.key >= q2.key) continue;
+      correlations.push({
+        q1,
+        q2,
+        correlation: correlationCoefficient(q1.answers, q2.answers),
+      });
+    }
+  }
 
-//   return (
-//     '<h1>Correlations</h1>' +
-//     correlations
-//       .filter(({correlation}) => Math.abs(correlation) > 0.2)
-//       .sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation))
-//       .map(
-//         ({a, b, correlation}) =>
-//           `<div>${a} & ${b}: ${correlation.toFixed(2)}</div>`
-//       )
-//       .join('')
-//   );
-// };
+  return (
+    '<h1>Correlations</h1>' +
+    correlations
+      .sort((a, b) => b.correlation - a.correlation)
+      .map(
+        ({q1, q2, correlation}) =>
+          `<div>${q1.key} & ${q2.key}: ${correlation.toFixed(2)}</div>`
+      )
+      .join('')
+  );
+};
 
 const main = async () => {
   const hidden =
@@ -247,6 +254,7 @@ const main = async () => {
     correlationTable(data),
     getMostAndLeast(data),
     getAnswerTables(data),
+    correlationList(data),
   ].join('');
 
   document.addEventListener('click', (e) => {
