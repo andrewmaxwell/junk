@@ -27,10 +27,11 @@ loop();
 const mouseMove = (e) => {
   params.angX = (e.pageX / innerWidth) * 10;
   params.angZ = -(e.pageY / innerHeight) * 10;
+  return false;
 };
 
 renderer.canvas.addEventListener('mousemove', mouseMove);
-renderer.canvas.addEventListener('touchstart', mouseMove);
+renderer.canvas.addEventListener('touchmove', (e) => mouseMove(e.touches[0]));
 
 const gui = new window.dat.GUI();
 gui.add(params, 'stiffness', 0, 0.1);

@@ -1,6 +1,6 @@
 import {World2D} from './World2D.js';
 
-const width = 800;
+const width = innerWidth;
 const height = 600;
 const stiffness = 0.01;
 
@@ -11,6 +11,7 @@ export const makePeopleGraph = (canvasId, data) => {
   const canvas = document.querySelector('#' + canvasId);
   canvas.width = width;
   canvas.height = height;
+  canvas.style.touchAction = 'none';
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = 'white';
   ctx.strokeStyle = 'blue';
@@ -69,7 +70,7 @@ export const makePeopleGraph = (canvasId, data) => {
   loop();
 
   let selected;
-  canvas.addEventListener('mousedown', (e) => {
+  const mouseDown = (e) => {
     let closest = Infinity;
     for (const point of world.points) {
       const d = Math.hypot(point.x - e.offsetX, point.y - e.offsetY);
@@ -78,15 +79,28 @@ export const makePeopleGraph = (canvasId, data) => {
         selected = point;
       }
     }
-  });
+    return false;
+  };
+  const convertForTouch = (func) => (e) => {
+    const {left, top} = e.target.getBoundingClientRect();
+    const {pageX, pageY} = e.targetTouches[0];
+    func({offsetX: pageX - left, offsetY: pageY - top});
+  };
+  canvas.addEventListener('mousedown', mouseDown);
+  canvas.addEventListener('touchstart', convertForTouch(mouseDown));
 
-  window.addEventListener('mousemove', (e) => {
+  const mouseMove = (e) => {
     if (!selected) return;
     selected.x = e.offsetX;
     selected.y = e.offsetY;
-  });
+    return false;
+  };
+  window.addEventListener('mousemove', mouseMove);
+  window.addEventListener('touchmove', convertForTouch(mouseMove));
 
-  window.addEventListener('mouseup', () => {
+  const mouseUp = () => {
     selected = null;
-  });
+  };
+  window.addEventListener('mouseup', mouseUp);
+  window.addEventListener('touchend', mouseUp);
 };
