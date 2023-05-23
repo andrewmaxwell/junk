@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "peopleNetwork3D",
+    "title": "3D People Network",
+    "year": 2023,
+    "desc": "A 3D network showing how similarly people answered a survey."
+  },
+  {
     "filePath": "neuralNetwork",
     "title": "Neural Network",
     "year": 2023,

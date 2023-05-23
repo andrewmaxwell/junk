@@ -21,7 +21,7 @@
     "ramda": "^0.28.0"
   },
   "scripts": {
-    "dev": "npm i && npm run gen && live-server --watch=peopleStats",
+    "dev": "npm i && npm run gen && live-server",
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "eslint .",
     "gen": "node generateHome.js"

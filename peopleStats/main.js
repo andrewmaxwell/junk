@@ -1,47 +1,13 @@
 import {correlationCoefficient} from './correlationCoefficient.js';
-
-const {Papa} = window;
+import {getData} from './getData.js';
+import {makePeopleGraph} from './makePeopleGraph.js';
 
 // const normalizeByPerson = false;
 // const normalizeByQuestion = false;
 const colorThreshold = 16;
 
-const url =
-  'https://docs.google.com/spreadsheets/d/e/2PACX-1vTass7p8cGivjWrAA9TRot_qISNUzyilgcnbFA4tmhP4b1lgk6JKlzL3R3FPLpBksY1ebswFMtQALmF/pub?output=csv';
-
-const getDiff = (p1, p2) =>
-  Math.hypot(...Object.keys(p1).map((key) => p1[key] - p2[key]));
-
 const toId = (str) => str.replace(/\W/g, '');
 const nameLink = (name) => `<a href="#${toId(name)}">${name}</a>`;
-
-const getData = async () => (await fetch(url)).text();
-
-const processData = (str, hidden) => {
-  const data = Papa.parse(str, {
-    header: true,
-  })
-    .data.map((row) => ({
-      name: row['Your Name'].trim(),
-      answers: Object.fromEntries(
-        Object.entries(row)
-          .map(([key, val]) => [key, +val])
-          .filter(([, val]) => !isNaN(val))
-      ),
-    }))
-    .filter(({name}) => !hidden.includes(name));
-
-  for (const row of data) {
-    row.scores = {};
-    row.totalDiff = 0;
-    for (const r of data) {
-      const diff = getDiff(row.answers, r.answers);
-      row.scores[r.name] = diff;
-      row.totalDiff += diff ** 2;
-    }
-  }
-  return data.sort((a, b) => a.totalDiff - b.totalDiff);
-};
 
 // const normalize = (data) => {
 //   if (normalizeByPerson) {
@@ -93,8 +59,6 @@ const similarityTable = (data) => {
     .join('');
 
   return `
-  
-  <h1>Results</h1>
   <p>Green means more similar. Red means different. The bright green diagonal is because everyone is 100% similar to themselves.<p>
   <p>People at the top tended to give more moderate answers and people at the bottom tended toward extremes.</p>
   <table>
@@ -237,6 +201,14 @@ const correlationList = (data) => {
   );
 };
 
+const peopleGraph = (data) => {
+  setTimeout(() => makePeopleGraph('peopleGraph', data), 100);
+  return `<p>People that are close to each other gave similar answers to the survey. The further away people are, the more different their answers. </p>
+  <p>Since it's presented in two dimensions, it's not 100% accurate. Blue lines indicate that two people should actually be further apart. Yellow lines mean they should be closer.</p>
+  <p>Try dragging names around!</p>
+  <canvas id="peopleGraph"></canvas>`;
+};
+
 const main = async () => {
   const hidden =
     Object.fromEntries(new URLSearchParams(location.search)).hide?.split(',') ||
@@ -245,11 +217,13 @@ const main = async () => {
   const hash = location.hash.slice(1);
   location.hash = '';
 
-  const data = processData(await getData(), hidden);
+  const data = await getData(hidden);
   console.log(data);
 
   document.body.innerHTML += [
     getShowAll(hidden),
+    '<h1>Results</h1>',
+    peopleGraph(data),
     similarityTable(data),
     correlationTable(data),
     getMostAndLeast(data),

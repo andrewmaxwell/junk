@@ -9,13 +9,13 @@ export const correlationCoefficient = (arr1, arr2) => {
   for (let i = 0; i < n; i++) {
     sum1 += arr1[i];
     sum2 += arr2[i];
-    sum1Sq += arr1[i] ** 2;
-    sum2Sq += arr2[i] ** 2;
+    sum1Sq += arr1[i] * arr1[i];
+    sum2Sq += arr2[i] * arr2[i];
     pSum += arr1[i] * arr2[i];
   }
 
   const denominator = Math.sqrt(
-    (sum1Sq - sum1 ** 2 / n) * (sum2Sq - sum2 ** 2 / n)
+    (sum1Sq - (sum1 * sum1) / n) * (sum2Sq - (sum2 * sum2) / n)
   );
 
   return denominator ? (pSum - (sum1 * sum2) / n) / denominator : 0;

@@ -29,9 +29,10 @@ export const projection = (
     py -= cameraY;
     pz -= cameraZ;
     const z = rg * px + rh * py + ri * pz;
+    const m = zoom / z;
     return {
-      x: (zoom / z) * (ra * px + rb * py + rc * pz - pointAtX),
-      y: (zoom / z) * (rd * px + re * py + rf * pz - pointAtY),
+      x: m * (ra * px + rb * py + rc * pz - pointAtX),
+      y: m * (rd * px + re * py + rf * pz - pointAtY),
       z,
     };
   };
