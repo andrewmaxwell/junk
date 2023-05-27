@@ -24,6 +24,12 @@
     "desc": "Based on tinyc.c"
   },
   {
+    "filePath": "triangularGameOfLife",
+    "title": "Triangular Game of Life",
+    "year": 2023,
+    "desc": "a variant of Conway's Game of Life on a triangular grid"
+  },
+  {
     "filePath": "wave",
     "title": "3D Function Visualizer",
     "year": 2022,

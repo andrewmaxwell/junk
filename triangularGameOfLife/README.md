@@ -1,0 +1,1 @@
+Triangular Game of Life - 2023 - a variant of Conway's Game of Life on a triangular grid
