@@ -17,17 +17,17 @@ export class Renderer {
       y: Math.floor(e.pageY / (size * Q)),
     };
   }
-  render(grid, cursor) {
+  render(game, cursor) {
     const {ctx} = this;
 
-    const rows = grid.length;
-    const cols = grid[0].length;
+    const {rows, cols} = game;
     const size = innerHeight / rows / Q;
 
     ctx.clearRect(0, 0, innerWidth, innerHeight);
     ctx.save();
     ctx.scale(size * 0.5, size * Q);
 
+    // background grid
     ctx.globalAlpha = 1 / 32;
     ctx.beginPath();
     for (let y = 0; y < rows; y++) {
@@ -40,11 +40,12 @@ export class Renderer {
     }
     ctx.fill();
 
+    // living cells
     ctx.globalAlpha = 3 / 4;
     ctx.beginPath();
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
-        if (!grid[y][x]) continue;
+        if (!game.get(x, y)) continue;
         const y1 = (x + y) % 2;
         ctx.moveTo(x, y + y1);
         ctx.lineTo(x + 1, y + (1 - y1));
