@@ -21,7 +21,7 @@ export const color = (r, g, b, a = 255) => (a << 24) | (b << 16) | (g << 8) | r;
 
 export const makeGradient = (colors, colorSteps = 256) => {
   const gradient = [];
-  for (let i = 0; i < colorSteps; i++) {
+  for (let i = 0; i <= colorSteps; i++) {
     const cIndex = Math.max(
       0,
       Math.min(gradient.length - 1, (i / colorSteps) * (colors.length - 1))
