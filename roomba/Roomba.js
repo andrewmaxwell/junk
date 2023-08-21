@@ -36,7 +36,7 @@ export class Roomba {
         x: this.x,
         y: this.y,
         data: this.data,
-        setTurn: (amt) => (this.angle += amt),
+        turn: (amt) => (this.angle += amt),
       };
       this.moveFunc(api);
     }
@@ -47,4 +47,4 @@ export class Roomba {
 }
 
 export const makeFunction = (code) =>
-  new Function('{isColliding, setTurn, x, y, data}', code);
+  new Function('{isColliding, turn, x, y, data}', code);

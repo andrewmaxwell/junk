@@ -20,18 +20,23 @@ export class Renderer {
 
     this.dinoSprite = new SpriteSheet('dinosaur-walk.png', 24, 480, 240);
     this.asteroidSprite = new SpriteSheet('asteroid.png', 20, 200, 200);
+    // this.translateY = 0;
   }
-  render({dino, asteroids, debris, gameOver, score}) {
+  render({dino, asteroids, debris, gameOver, score, ground}) {
     const {ctx, width, height} = this;
 
     ctx.clearRect(0, 0, width, height);
+
+    ctx.putImageData(ground.imageData, 0, ground.groundLevel);
+
+    ctx.fillStyle = 'red';
+    ctx.fillRect(0, ground.groundLevel, width, 1);
+
     this.drawAsteroids(asteroids);
     this.drawDebris(debris);
+    if (!gameOver) this.drawDino(dino);
 
-    if (gameOver) this.drawGameOver();
-    else this.drawDino(dino);
-
-    this.drawScore(score);
+    this.drawHud(score, gameOver);
   }
   drawDino({x, y, facingRight, w, h, distance}) {
     const {ctx, dinoSprite} = this;
@@ -67,24 +72,25 @@ export class Renderer {
     ctx.beginPath();
     for (const {x, y, xs, ys} of debris) {
       ctx.moveTo(x, y);
-      ctx.lineTo(x - xs, y - ys);
+      ctx.lineTo(x + xs, y + ys);
     }
     ctx.stroke();
   }
-  drawGameOver() {
+  drawHud(score, gameOver) {
     const {ctx, width, height} = this;
-    ctx.fillStyle = 'red';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = '100px sans-serif';
-    ctx.fillText('you dead', width / 2, height / 2);
 
-    ctx.fillStyle = 'white';
-    ctx.font = '32px sans-serif';
-    ctx.fillText('press R to try again', width / 2, height / 2 + 50);
-  }
-  drawScore(score) {
-    const {ctx} = this;
+    if (gameOver) {
+      ctx.fillStyle = 'red';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '100px sans-serif';
+      ctx.fillText('you dead', width / 2, height / 2);
+
+      ctx.fillStyle = 'white';
+      ctx.font = '32px sans-serif';
+      ctx.fillText('press R to try again', width / 2, height / 2 + 50);
+    }
+
     ctx.fillStyle = 'white';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';

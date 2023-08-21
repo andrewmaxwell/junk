@@ -10,8 +10,10 @@ const game = new Game(width, height);
 const controls = new Controls();
 
 const loop = () => {
-  game.tick(controls.pressing);
-  renderer.render(game);
+  if (document.hasFocus()) {
+    game.tick(controls.pressing);
+    renderer.render(game);
+  }
   requestAnimationFrame(loop);
 };
 

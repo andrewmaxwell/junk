@@ -1,4 +1,8 @@
+import {Ground} from './Ground.js';
+
 const gravity = 0.3;
+const jumpPower = 8;
+const moveSpeed = 8;
 
 export class Game {
   constructor(width, height) {
@@ -15,16 +19,16 @@ export class Game {
       ys: 0,
       w: 150,
       h: 100,
+      rad: 50,
       facingRight: true,
-      moveSpeed: 8,
-      jumpPower: 8,
       distance: 0,
     };
     this.asteroids = [];
     this.debris = [];
-    this.ground = [];
     this.score = 0;
     this.gameOver = false;
+
+    this.ground = new Ground(this.width, this.height * 2, this.height - 100);
   }
   tick(pressing) {
     if (Math.random() < this.asteroidProbability) {
@@ -52,50 +56,63 @@ export class Game {
     });
   }
   moveDino(pressing) {
-    const {dino, width, height} = this;
+    const {dino, width, ground} = this;
     dino.ys += gravity;
-    dino.y += dino.ys;
+
+    if (ground.isTouching(dino.x, dino.y + dino.ys, dino.rad)) {
+      if (dino.ys > 0) dino.jumping = false;
+      dino.ys = 0;
+    } else {
+      dino.y += dino.ys;
+    }
+
+    let dx = 0;
     if (pressing.ArrowLeft || pressing.KeyA) {
-      dino.x -= dino.moveSpeed;
+      dx -= moveSpeed;
       dino.facingRight = false;
       dino.distance++;
     }
     if (pressing.ArrowRight || pressing.KeyD) {
-      dino.x += dino.moveSpeed;
+      dx += moveSpeed;
       dino.facingRight = true;
       dino.distance++;
     }
 
-    if (dino.y + dino.h / 2 > height) {
-      dino.y = height - dino.h / 2;
-      dino.ys = 0;
-      dino.jumping = false;
+    if (!ground.isTouching(dino.x + dx, dino.y, dino.rad)) {
+      dino.x += dx;
     }
+
+    // if (dino.y + dino.h / 2 > height) {
+    //   dino.y = height - dino.h / 2;
+    //   dino.ys = 0;
+    //   dino.jumping = false;
+    // }
     if (!dino.jumping && (pressing.ArrowUp || pressing.KeyW)) {
       dino.jumping = true;
-      dino.ys -= dino.jumpPower;
+      dino.ys -= jumpPower;
     }
 
     dino.x = Math.max(dino.w / 2, Math.min(width - dino.w / 2, dino.x));
   }
   moveAsteroids() {
-    const {asteroids, height, debris, dino} = this;
+    const {asteroids, debris, dino, ground} = this;
     for (let i = 0; i < asteroids.length; i++) {
       const a = asteroids[i];
       a.x += a.xs;
       a.y += a.ys;
 
-      if (Math.hypot(a.x - dino.x, a.y - dino.y) < a.rad + dino.h / 2) {
+      if ((a.x - dino.x) ** 2 + (a.y - dino.y) ** 2 < (a.rad + dino.rad) ** 2) {
         this.gameOver = true;
       }
 
-      if (a.y > height) {
+      if (ground.isTouching(a.x, a.y, a.rad / 2)) {
+        ground.destroy(a.x, a.y, a.rad * 1.1);
         for (let i = 0; i < a.rad ** 2; i++) {
-          const speed = 1 + (Math.random() * 3) ** 3;
-          const angle = Math.PI * (1.25 + 0.5 * Math.random());
+          const speed = 2 + Math.random() * 10;
+          const angle = Math.PI * (1 + Math.random());
           debris.push({
             x: a.x + a.rad * (Math.random() - 0.5),
-            y: height,
+            y: a.y + a.rad * (Math.random() - 0.5),
             xs: speed * Math.cos(angle),
             ys: speed * Math.sin(angle),
           });
