@@ -1,6 +1,6 @@
 export class FrameRateDisplay {
   constructor() {
-    this.prev;
+    this.prev = 0;
     this.frames = 0;
     const div = (this.frameRateDiv = document.createElement('div'));
     div.style.position = 'fixed';

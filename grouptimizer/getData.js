@@ -23,8 +23,15 @@ const mirrorWeights = (people) => {
   return people;
 };
 
-const processPeople = (people) =>
-  mirrorWeights(
+const processPeople = (people, attendance) => {
+  const dateIndex = {};
+  for (const {date, ids} of attendance) {
+    for (const id of ids.split(',')) {
+      (dateIndex[id] = dateIndex[id] || []).push(date);
+    }
+  }
+
+  return mirrorWeights(
     people.map((row) => ({
       id: row.id,
       name: row.Name,
@@ -34,16 +41,18 @@ const processPeople = (people) =>
       gender: row.Gender,
       contrib: row.Contrib || 0,
       weights: parseWeights(row.Weights || ''),
+      dates: (dateIndex[row.id] || []).sort((a, b) => a - b),
+      birthday: row.Birthdate,
     }))
   );
+};
 
 export const getData = async () => {
   const response = await fetch(url);
   const data = XLSX.read(await response.arrayBuffer(), {
     cellDates: true,
   }).Sheets;
-  return {
-    attendance: XLSX.utils.sheet_to_json(data.Attendance),
-    people: processPeople(XLSX.utils.sheet_to_json(data.People)),
-  };
+
+  const attendance = XLSX.utils.sheet_to_json(data.Attendance);
+  return processPeople(XLSX.utils.sheet_to_json(data.People), attendance);
 };

@@ -43,7 +43,7 @@ export function Sim(opts) {
 
     sim.ctx = ctx;
 
-    window.addEventListener('resize', function() {
+    window.addEventListener('resize', function () {
       C.width = innerWidth;
       C.height = innerHeight;
     });
@@ -78,7 +78,7 @@ export function Sim(opts) {
 
     // POLYGON
     else if (props.pts) {
-      var points = props.pts.map(function(coord) {
+      var points = props.pts.map(function (coord) {
         return new v(coord[0] * scale, coord[1] * scale);
       });
       fixDef.shape = new b2PolygonShape();
@@ -88,7 +88,7 @@ export function Sim(opts) {
     return fixDef;
   }
 
-  sim.make = function(props) {
+  sim.make = function (props) {
     // MAKE A JOINT
     if (props.a && props.b && !props.pts && !props.radius) {
       // PRISMATIC
@@ -149,7 +149,7 @@ export function Sim(opts) {
 
     // MULTIPLE SHAPES
     if (props.shapes) {
-      props.shapes.forEach(function(shape) {
+      props.shapes.forEach(function (shape) {
         body.CreateFixture(addShape(shape));
       });
     }
@@ -178,7 +178,7 @@ export function Sim(opts) {
     return body;
   };
 
-  sim.applyImpulse = function(body, magnitude, angle) {
+  sim.applyImpulse = function (body, magnitude, angle) {
     body.ApplyImpulse(
       new v(
         scale * magnitude * Math.cos(angle),
@@ -188,19 +188,19 @@ export function Sim(opts) {
     );
     return body;
   };
-  sim.applyTorque = function(body, torque) {
+  sim.applyTorque = function (body, torque) {
     body.ApplyTorque(torque);
     return body;
   };
-  sim.setPosition = function(body, x, y) {
+  sim.setPosition = function (body, x, y) {
     body.SetPosition(new v(x * scale, y * scale));
   };
-  sim.setVelocity = function(body, xs, ys, as) {
+  sim.setVelocity = function (body, xs, ys, as) {
     body.SetLinearVelocity(new v(scale * xs, scale * ys));
     body.SetAngularVelocity(as);
   };
 
-  sim.tick = function() {
+  sim.tick = function () {
     world.Step(opts.timeStep || 1 / 60, 8, 3);
     // world.ClearForces()
 
@@ -211,7 +211,7 @@ export function Sim(opts) {
     // 	}
     // })
   };
-  sim.debugDraw = function() {
+  sim.debugDraw = function () {
     world.DrawDebugData();
 
     if (opts.showBodyData || opts.showJointData) {
@@ -220,14 +220,14 @@ export function Sim(opts) {
       ctx.textBaseline = 'middle';
 
       if (opts.showBodyData) {
-        sim.bodies.forEach(function(b) {
+        sim.bodies.forEach(function (b) {
           var pos = sim.getInfo(b);
           ctx.fillText(opts.showBodyData(b), pos.cx, pos.cy);
         });
       }
 
       if (opts.showJointData) {
-        sim.joints.forEach(function(j) {
+        sim.joints.forEach(function (j) {
           var pos = sim.getInfo(j);
           ctx.fillText(opts.showJointData(j), pos.x, pos.y);
         });
@@ -235,14 +235,14 @@ export function Sim(opts) {
     }
   };
 
-  sim.bodyAt = function(x, y) {
+  sim.bodyAt = function (x, y) {
     var selectedBody;
 
     var aabb = new b2AABB();
     aabb.lowerBound.Set(x, y);
     aabb.upperBound.Set(x, y);
 
-    world.QueryAABB(function(fixture) {
+    world.QueryAABB(function (fixture) {
       if (fixture.GetBody().GetType() != b2Body.b2_staticBody) {
         if (
           fixture
@@ -260,7 +260,7 @@ export function Sim(opts) {
   };
 
   var mouseJoint;
-  sim.makeMouseJoint = function(x, y) {
+  sim.makeMouseJoint = function (x, y) {
     x *= scale;
     y *= scale;
 
@@ -275,23 +275,23 @@ export function Sim(opts) {
     body.SetAwake(true);
     mouseJoint = world.CreateJoint(md);
   };
-  sim.moveMouseJoint = function(x, y) {
+  sim.moveMouseJoint = function (x, y) {
     if (mouseJoint) mouseJoint.SetTarget(new v(x * scale, y * scale));
   };
-  sim.destroyMouseJoint = function() {
+  sim.destroyMouseJoint = function () {
     if (mouseJoint) world.DestroyJoint(mouseJoint);
     mouseJoint = false;
   };
 
-  sim.reset = function() {
-    sim.bodies.forEach(function(ob) {
+  sim.reset = function () {
+    sim.bodies.forEach(function (ob) {
       world.DestroyBody(ob);
     });
     sim.bodies = [];
     sim.joints = [];
   };
 
-  sim.destroy = function(ob) {
+  sim.destroy = function (ob) {
     var bodiesIndex = sim.bodies.indexOf(ob);
     if (bodiesIndex >= 0) {
       sim.bodies.splice(bodiesIndex, 1);
@@ -305,7 +305,7 @@ export function Sim(opts) {
     }
   };
 
-  sim.getInfo = function(ob) {
+  sim.getInfo = function (ob) {
     if (ob.GetPosition) {
       const pos = ob.GetPosition(),
         centroid = ob.GetWorldCenter(),
@@ -319,7 +319,7 @@ export function Sim(opts) {
         xs: lin.x / scale,
         ys: lin.y / scale,
         as: ob.GetAngularVelocity(),
-        mass: ob.GetMass()
+        mass: ob.GetMass(),
       };
     } else if (ob.GetReactionForce) {
       const pos = ob.GetAnchorA();
@@ -332,15 +332,15 @@ export function Sim(opts) {
         y2: pos2.y / scale,
         force:
           Math.sqrt(forceData.x * forceData.x + forceData.y * forceData.y) /
-          scale
+          scale,
       };
     }
   };
 
-  sim.onCollision = function(callback) {
+  sim.onCollision = function (callback) {
     var listener = new Box2D.Dynamics.b2ContactListener();
 
-    listener.PostSolve = function(contact, impulse) {
+    listener.PostSolve = function (contact, impulse) {
       callback(
         contact.GetFixtureA().GetBody(),
         contact.GetFixtureB().GetBody(),
@@ -353,9 +353,9 @@ export function Sim(opts) {
 
   sim.world = world;
 
-  sim.setContactFilter = function(filterFunc) {
+  sim.setContactFilter = function (filterFunc) {
     var filter = new Box2D.Dynamics.b2ContactFilter();
-    filter.ShouldCollide = function(fixtureA, fixtureB) {
+    filter.ShouldCollide = function (fixtureA, fixtureB) {
       return filterFunc(fixtureA, fixtureB);
     };
     world.SetContactFilter(filter);
@@ -363,20 +363,16 @@ export function Sim(opts) {
 
   if (opts.damage) {
     var damageListener = new Box2D.Dynamics.b2ContactListener();
-    damageListener.PostSolve = function(contact, impulse) {
-      contact
-        .GetFixtureA()
-        .GetBody()
-        .GetUserData().damage += impulse.normalImpulses[0] / scale;
-      contact
-        .GetFixtureB()
-        .GetBody()
-        .GetUserData().damage += impulse.normalImpulses[0] / scale;
+    damageListener.PostSolve = function (contact, impulse) {
+      contact.GetFixtureA().GetBody().GetUserData().damage +=
+        impulse.normalImpulses[0] / scale;
+      contact.GetFixtureB().GetBody().GetUserData().damage +=
+        impulse.normalImpulses[0] / scale;
     };
     world.SetContactListener(damageListener);
   }
 
-  sim.setGravity = function(x, y) {
+  sim.setGravity = function (x, y) {
     world.SetGravity(new v(x, y));
   };
 }
@@ -389,11 +385,11 @@ export function animationLoop(func) {
       requestAnimationFrame(loop);
     }
   }
-  return function() {
+  return function () {
     if (!looping) loop();
   };
 }
 
-Array.prototype.contains = function(item) {
+Array.prototype.contains = function (item) {
   return this.indexOf(item) !== -1;
 };

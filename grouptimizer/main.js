@@ -9,7 +9,7 @@ const annealingGraph = stats.addGraph({color: 'red'});
 const temperatureGraph = stats.addGraph({color: 'green', forceMin: 0});
 const solver = makeSolver();
 
-let people, attendanceHistory;
+let people;
 
 const loop = () => {
   for (let i = 0; !solver.isDone && i < 1000; i++) {
@@ -89,28 +89,25 @@ document.querySelectorAll('.go').forEach((button) => {
 
 document.querySelector('#send').addEventListener('click', () => {
   const subject = encodeURIComponent(`Attendance ${new Date().toDateString()}`);
-  const body = encodeURIComponent(makeReport(people, attendanceHistory));
+  const body = encodeURIComponent(makeReport(people));
   open(`mailto:jgovier8@gmail.com?subject=${subject}&body=${body}`);
 });
 
+const numPresentSponsors = (people) =>
+  people.filter((p) => !p.absent && p.sponsor).length;
+
+const numPresentStudents = (people) =>
+  people.filter((p) => !p.absent && !p.sponsor).length;
+
 const init = async () => {
-  const data = await getData();
-  people = data.people;
-  attendanceHistory = data.attendance;
-  document.querySelector('#numGroups').value = people.reduce(
-    (n, p) => n + (!p.absent && p.sponsor ? 1 : 0),
-    0
+  people = await getData();
+
+  document.querySelector('#numGroups').value = Math.min(
+    numPresentSponsors(people),
+    Math.floor(numPresentStudents(people) / 4)
   );
-  document.querySelector('#output').innerText = makeReport(
-    people,
-    attendanceHistory
-  );
+  document.querySelector('#output').innerText = makeReport(people);
   document.querySelector('#attendance').innerHTML = makeAttendanceTable(people);
-  document.querySelector('#recent').innerText = attendanceHistory[
-    attendanceHistory.length - 1
-  ]?.date
-    ?.toDateString()
-    .slice(0, 10);
 };
 
 init();

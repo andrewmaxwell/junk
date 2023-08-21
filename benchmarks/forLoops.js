@@ -1,4 +1,4 @@
-import {benchmark} from './benchmark';
+import {benchmark} from './benchmark.js';
 
 const numbers = [];
 for (let i = 0; i < 1000; i++) numbers[i] = Math.random();
