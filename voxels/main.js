@@ -8,21 +8,26 @@ import {getMaterial} from './getMaterial.js';
 import {putVoxel} from './putVoxel.js';
 import {langton} from './langton.js';
 
-const chunkSize = 32;
+const chunkSize = 32; // a chunk is 32x32x32 voxels
 
 const canvas = document.querySelector('#c');
+
 const camera = getCamera({
   x: 50,
   y: 0,
   z: 0,
 });
+
 const scene = getScene();
+
 const render = getRender({
   canvas,
   camera,
   scene,
 });
+
 const world = makeWorld(chunkSize);
+
 const updateVoxelGeometry = getVoxelGeometryUpdater({
   material: getMaterial(render),
   chunkSize,
@@ -41,8 +46,4 @@ addControls({
     putVoxel({event, camera, world, updateVoxelGeometry, render}),
 });
 
-langton({
-  world,
-  updateVoxelGeometry,
-  render,
-});
+langton({world, updateVoxelGeometry, render});

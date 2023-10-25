@@ -79,7 +79,7 @@ export const getVoxelGeometryUpdater = ({
     }
   };
 
-  // updateVoxelGeometry([{x: 1, y: 1, z: 1}]);
+  updateVoxelGeometry([{x: 1, y: 1, z: 1}]);
 
   return updateVoxelGeometry;
 };
