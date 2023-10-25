@@ -5,7 +5,7 @@ export const makeServer = (onRequest) => {
 
   app.get('*', async (req, res) => {
     try {
-      onRequest(req, res);
+      await onRequest(req, res);
     } catch (e) {
       console.log(e);
       res.status(500).send();
