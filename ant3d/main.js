@@ -10,8 +10,8 @@ const params = {
 };
 
 const colors = [
-  {color: '#333', turn: 1}, // when encountering a #333 cell, turn once (example: from up to forward)
-  {color: 'blue', turn: 2}, // turn twice on blue (example: from up to left)
+  {color: '#333', turn: 1}, // when encountering a #333 cell, turn once (example: from right to up)
+  {color: 'blue', turn: 2}, // turn twice on blue (example: from right to backward)
   {color: 'green', turn: 5},
   {color: '#AAA', turn: 4},
 ];
