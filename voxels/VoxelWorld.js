@@ -89,8 +89,7 @@ export class VoxelWorld {
     const chunkId = this.computeChunkId(x, y, z);
     let chunk = this.chunks[chunkId];
     if (!chunk) {
-      const {chunkSize} = this;
-      chunk = new Uint8Array(chunkSize * chunkSize * chunkSize);
+      chunk = new Uint8Array(this.chunkSize ** 3);
       this.chunks[chunkId] = chunk;
     }
     return chunk;

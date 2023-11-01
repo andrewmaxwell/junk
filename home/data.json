@@ -1,9 +1,9 @@
 [
   {
-    "filePath": "peopleNetwork3D",
-    "title": "3D People Network",
+    "filePath": "voxels",
+    "title": "Langton's Ant in 3D",
     "year": 2023,
-    "desc": "A 3D network showing how similarly people answered a survey."
+    "desc": "Uses Three.js."
   },
   {
     "filePath": "neuralNetwork",
@@ -12,10 +12,28 @@
     "desc": "A visualization of a network learning to predict prime numbers."
   },
   {
+    "filePath": "bz",
+    "title": "Oscillating Reaction",
+    "year": 2023,
+    "desc": "A simple simulation of the Belousov-Zhabotinsky reaction."
+  },
+  {
+    "filePath": "peopleNetwork3D",
+    "title": "People Network 3D",
+    "year": 2023,
+    "desc": "A 3D network showing how similarly people answered a survey."
+  },
+  {
     "filePath": "peopleStats",
     "title": "People Stats",
     "year": 2023,
     "desc": "Who do I know is most similar and most different?"
+  },
+  {
+    "filePath": "reactionDiffusion",
+    "title": "Reaction Diffusion",
+    "year": 2023,
+    "desc": "A work in progress."
   },
   {
     "filePath": "tinyc",

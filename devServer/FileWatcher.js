@@ -1,4 +1,4 @@
-import {watch} from 'fs';
+import {watch, readFileSync} from 'fs';
 
 export class FileWatcher {
   constructor(onChange) {
@@ -9,6 +9,13 @@ export class FileWatcher {
     if (this.watchedPaths.has(filePath)) return;
     this.watchedPaths.add(filePath);
     console.log('watching', filePath);
-    watch(filePath, (x) => this.onChange(filePath, x));
+
+    let prev = readFileSync(filePath, 'utf-8');
+    watch(filePath, (x) => {
+      const curr = readFileSync(filePath, 'utf-8');
+      if (curr === prev) return;
+      prev = curr;
+      this.onChange(filePath, x);
+    });
   }
 }

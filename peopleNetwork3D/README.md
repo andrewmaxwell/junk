@@ -1,1 +1,1 @@
-3D People Network - 2023 - A 3D network showing how similarly people answered a survey.
+People Network 3D - 2023 - A 3D network showing how similarly people answered a survey.

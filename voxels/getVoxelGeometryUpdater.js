@@ -72,6 +72,7 @@ export const getVoxelGeometryUpdater = ({
         const chunkId = world.computeChunkId(ox, oy, oz);
         if (!updatedChunkIds[chunkId]) {
           // console.log('chunkId', chunkId);
+          // console.log('update chunk');
           updatedChunkIds[chunkId] = true;
           updateChunkGeometry(ox, oy, oz);
         }

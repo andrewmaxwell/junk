@@ -34,12 +34,12 @@ makeServer(async (req, res) => {
   if (filePath.endsWith('.html')) {
     res.send(
       `${await readFile(filePath, 'utf-8')}
-      <script>
-        new WebSocket('ws://localhost:${wsPort}').onmessage = (e) => {
-          if (e.data === 'reload') location.reload();
-          else console.log('from websocket', e);
-        };
-      </script>`
+<script>
+  new WebSocket('ws://' + location.hostname + ':${wsPort}').onmessage = (e) => {
+    if (e.data === 'reload') location.reload();
+    else console.log('from websocket', e);
+  };
+</script>`
     );
   } else {
     res.sendFile(filePath);

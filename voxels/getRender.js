@@ -9,7 +9,6 @@ export const getRender = ({canvas, camera, scene}) => {
     if (renderRequested) return;
     renderRequested = true;
     requestAnimationFrame(() => {
-      console.log('render');
       renderRequested = false;
       renderer.render(scene, camera);
     });

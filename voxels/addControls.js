@@ -12,30 +12,32 @@ export const addControls = ({camera, canvas, render, x, y, z, onClick}) => {
     {passive: false}
   );
 
-  const mouse = {x: 0, y: 0};
+  if (onClick) {
+    const mouse = {x: 0, y: 0};
 
-  const recordMovement = ({clientX, clientY}) => {
-    mouse.moveX += Math.abs(mouse.x - clientX);
-    mouse.moveY += Math.abs(mouse.y - clientY);
-  };
+    const recordMovement = ({clientX, clientY}) => {
+      mouse.moveX += Math.abs(mouse.x - clientX);
+      mouse.moveY += Math.abs(mouse.y - clientY);
+    };
 
-  const doThingIfNoMovement = (event) => {
-    if (mouse.moveX < 5 && mouse.moveY < 5) onClick(event);
-    window.removeEventListener('pointermove', recordMovement);
-    window.removeEventListener('pointerup', doThingIfNoMovement);
-  };
+    const doThingIfNoMovement = (event) => {
+      if (mouse.moveX < 5 && mouse.moveY < 5) onClick(event);
+      window.removeEventListener('pointermove', recordMovement);
+      window.removeEventListener('pointerup', doThingIfNoMovement);
+    };
 
-  canvas.addEventListener(
-    'pointerdown',
-    (event) => {
-      event.preventDefault();
-      mouse.x = event.clientX;
-      mouse.y = event.clientY;
-      mouse.moveX = 0;
-      mouse.moveY = 0;
-      window.addEventListener('pointermove', recordMovement);
-      window.addEventListener('pointerup', doThingIfNoMovement);
-    },
-    {passive: false}
-  );
+    canvas.addEventListener(
+      'pointerdown',
+      (event) => {
+        event.preventDefault();
+        mouse.x = event.clientX;
+        mouse.y = event.clientY;
+        mouse.moveX = 0;
+        mouse.moveY = 0;
+        window.addEventListener('pointermove', recordMovement);
+        window.addEventListener('pointerup', doThingIfNoMovement);
+      },
+      {passive: false}
+    );
+  }
 };
