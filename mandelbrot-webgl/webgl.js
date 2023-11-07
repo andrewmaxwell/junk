@@ -1,14 +1,20 @@
-'use strict';
-
-export const makeWebgl = ({canvas, fragmentShader}) => {
+export const makeWebgl = ({
+  canvas,
+  fragmentShader,
+  vertexShader = `
+    attribute vec2 P;
+    void main() {
+      gl_Position = vec4(P,0,1);
+    }`,
+}) => {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  var gl = canvas.getContext('webgl');
-  var program = gl.createProgram();
+  const gl = canvas.getContext('webgl');
+  const program = gl.createProgram();
 
-  var addShader = (type, source) => {
-    var shader = gl.createShader(type);
+  const addShader = (type, source) => {
+    const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     const err = gl.getShaderInfoLog(shader);
@@ -16,27 +22,31 @@ export const makeWebgl = ({canvas, fragmentShader}) => {
     gl.attachShader(program, shader);
   };
 
-  addShader(35633, 'attribute vec2 P;void main(){gl_Position=vec4(P,0,1);}');
-  addShader(35632, fragmentShader);
+  addShader(gl.VERTEX_SHADER, vertexShader);
+  addShader(gl.FRAGMENT_SHADER, fragmentShader);
 
   gl.linkProgram(program);
   gl.useProgram(program);
-  gl.bindBuffer(34962, gl.createBuffer());
-  gl.bufferData(34962, new Int8Array([-3, 1, 1, -3, 1, 1]), 35044);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(
+    gl.ARRAY_BUFFER,
+    new Int8Array([-3, 1, 1, -3, 1, 1]),
+    gl.STATIC_DRAW
+  );
   gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, 5120, 0, 0, 0);
+  gl.vertexAttribPointer(0, 2, gl.BYTE, 0, 0, 0);
 
   return {
-    draw: settings => {
+    draw: (settings) => {
       gl.uniform2f(
         gl.getUniformLocation(program, 'resolution'),
         canvas.width,
         canvas.height
       );
-      for (var key in settings) {
+      for (const key in settings) {
         gl.uniform1f(gl.getUniformLocation(program, key), settings[key]);
       }
       gl.drawArrays(6, 0, 3);
-    }
+    },
   };
 };

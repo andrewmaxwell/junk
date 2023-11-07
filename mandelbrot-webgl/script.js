@@ -1,9 +1,6 @@
-'use strict';
-
 import {makeWebgl} from './webgl.js';
-console.clear();
 
-var fragmentShader = `
+const fragmentShader = `
 precision mediump float;
 uniform float cx;
 uniform float cy;
@@ -42,29 +39,29 @@ void main() {
   gl_FragColor = mix(mix(c0, c1, 0.5), mix(c2, c3, 0.5), 0.5);
 }`;
 
-var current = localStorage.current
+const current = localStorage.current
   ? JSON.parse(localStorage.current)
   : {cx: -0.5, cy: 0, scale: 2.5, max: 100};
 
-var webgl = makeWebgl({
+const webgl = makeWebgl({
   canvas: document.querySelector('canvas'),
-  fragmentShader
+  fragmentShader,
 });
 
-var render = () => {
+const render = () => {
   webgl.draw(current);
   localStorage.current = JSON.stringify(current);
   console.log(current);
 };
 
-window.addEventListener('mousemove', e => {
+window.addEventListener('mousemove', (e) => {
   if (!e.buttons) return;
   current.cx -= (e.movementX / window.innerWidth) * current.scale;
   current.cy += (e.movementY / window.innerHeight) * current.scale;
   render();
 });
 
-window.addEventListener('mousewheel', e => {
+window.addEventListener('mousewheel', (e) => {
   const zoomAmt = Math.pow(1.01, e.deltaY);
   if (e.shiftKey) current.max /= zoomAmt;
   else {
