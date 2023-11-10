@@ -1,4 +1,5 @@
 import {readFile} from 'fs/promises';
+import {existsSync} from 'fs';
 import nodePath from 'path';
 import {FileWatcher} from './FileWatcher.js';
 import {makeServer} from './makeServer.js';
@@ -20,20 +21,21 @@ const fileWatcher = new FileWatcher((filename) => {
   wss.broadcast('reload');
 });
 
-const watchExtensionWhitelist = new Set(['html', 'js', 'css']);
+const getFile = async (filePath) =>
+  existsSync(filePath)
+    ? await readFile(filePath, 'utf-8')
+    : 'Your URL is dumb.';
 
 makeServer(async (req, res) => {
   const filePath =
     nodePath.join(process.env.PWD, '.', req.path) +
     (req.path.endsWith('/') ? 'index.html' : '');
 
-  if (watchExtensionWhitelist.has(filePath.split('.').pop())) {
-    fileWatcher.watchPath(filePath);
-  }
+  fileWatcher.watchPath(filePath);
 
   if (filePath.endsWith('.html')) {
     res.send(
-      `${await readFile(filePath, 'utf-8')}
+      `${await getFile(filePath)}
 <script>
   new WebSocket('ws://' + location.hostname + ':${wsPort}').onmessage = (e) => {
     if (e.data === 'reload') location.reload();
