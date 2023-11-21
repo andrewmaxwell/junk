@@ -71,9 +71,13 @@ const loop = () => {
   requestAnimationFrame(loop);
 };
 
-window.onclick = async () => {
+const start = async () => {
   document.querySelector('h1').remove();
-  window.onclick = null;
+  window.removeEventListener('click', start);
+  window.removeEventListener('touchend', start);
   sound = await loadSound('ding.mp3');
   loop();
 };
+
+window.addEventListener('click', start);
+window.addEventListener('touchend', start);
