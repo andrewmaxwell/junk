@@ -1,41 +1,33 @@
-const get = async (filename) => (await fetch(filename)).text();
+const {XLSX} = window;
+const url =
+  'https://docs.google.com/spreadsheets/d/e/2PACX-1vRNj5GTusTsfQlo7FcTFieaD_x_bhdtKKp9gbfOoyX9q9Kde3UrYI-TehtpwkXfee9MVRI6848NzcO6/pub?output=xlsx';
 
-const convertName = (name) => {
-  const [first, last] = name.split(' ');
-  return `${last}, ${first}`;
-};
+const data = XLSX.read(await (await fetch(url)).arrayBuffer(), {
+  cellDates: true,
+}).Sheets;
+
+for (const sheet in data) {
+  data[sheet] = XLSX.utils.sheet_to_json(data[sheet]);
+}
 
 const peopleIndex = {};
+const getPerson = (personName) =>
+  (peopleIndex[personName] = peopleIndex[personName] || {ministries: []});
 
-const getPerson = (personName) => {
-  if (!peopleIndex[personName]) {
-    peopleIndex[personName] = {ministries: []};
-  }
-  return peopleIndex[personName];
-};
-
-for (const chunk of (await get('ministryOrg.txt')).split('\n\n')) {
-  const [ministryName, ...people] = chunk.split('\n').map((r) => r.trim());
-  for (const p of people) {
-    getPerson(convertName(p)).ministries.push(ministryName);
-  }
+for (const {Name, Ministry} of data.Ministries) {
+  getPerson(Name).ministries.push(Ministry);
 }
-
-for (const row of (await get('members.txt')).split('\n')) {
-  const [memberName, joinDate] = row.split('\t');
-  getPerson(memberName).joinDate = joinDate;
+for (const {Name, 'Member Since': memberSince} of data.Members) {
+  getPerson(Name).memberSince = memberSince.toISOString().slice(0, 10);
 }
-
-for (const personName of (await get('nonMembers.txt')).split('\n')) {
-  getPerson(personName);
+for (const {Name} of data['Non-members']) {
+  getPerson(Name);
 }
-
-console.log(peopleIndex);
 
 const rows = Object.entries(peopleIndex)
-  .map(([name, {ministries, joinDate = ''}]) => [
+  .map(([name, {ministries, memberSince = ''}]) => [
     name,
-    joinDate,
+    memberSince,
     ministries.sort().join(', '),
   ])
   .sort();
