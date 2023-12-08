@@ -12,7 +12,7 @@ const getRows = async () => {
 
   const peopleIndex = Object.fromEntries(
     [...data.Members, ...data.Ministries, ...data['Non-members']].map(
-      ({Name}) => [Name, {ministries: []}]
+      ({Name, Absent}) => [Name, {Absent, ministries: []}]
     )
   );
   for (const {Name, Ministry} of data.Ministries) {
@@ -23,6 +23,7 @@ const getRows = async () => {
   }
 
   return Object.entries(peopleIndex)
+    .filter(([, {Absent}]) => !Absent)
     .map(([name, {ministries, memberSince = ''}]) => [
       name,
       memberSince,
