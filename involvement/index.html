@@ -25,10 +25,41 @@ tr:nth-child(even) {
 tr:hover {
     background-color: #e0e0e0;
 }
+
+input[type="search"] {
+    width: 400px;
+    padding: 10px;
+    margin: 8px 0;
+    box-sizing: border-box;
+    border: 2px solid #ccc;
+    border-radius: 4px;
+}
+
+input[type="search"]:hover {
+    border-color: #888;
+}
+
+input[type="search"]:focus {
+    outline: none;
+    border-color: #005f5f;
+    box-shadow: 0 0 8px 0 rgba(0,95,95,0.5);
+}
+
 </style>
 <body style="font-family: sans-serif;">
-  <p>Still waiting to get volunteers for Children's Ministries and Small Group leaders and attendees.</p>
-  <div id="result"></div>
+  <input id="search" type="search" placeholder="Search"/>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Member Since</th>
+        <th>Ministries</th>
+      </tr>
+    </thead>
+    <tbody id="tbody">
+      <tr><td>Loading...</td></tr>
+    </tbody>
+  </table>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script type="module" src="main.js"></script>
 </body>
