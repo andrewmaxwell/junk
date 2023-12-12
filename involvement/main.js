@@ -1,48 +1,33 @@
-const getRows = async () => {
-  const {XLSX} = window;
-  const url =
-    'https://docs.google.com/spreadsheets/d/e/2PACX-1vRNj5GTusTsfQlo7FcTFieaD_x_bhdtKKp9gbfOoyX9q9Kde3UrYI-TehtpwkXfee9MVRI6848NzcO6/pub?output=xlsx';
-  const data = XLSX.read(await (await fetch(url)).arrayBuffer(), {
-    cellDates: true,
-  }).Sheets;
+import {getData} from './getData.js';
+import {renderTable} from './renderTable.js';
 
-  for (const sheet in data) {
-    data[sheet] = XLSX.utils.sheet_to_json(data[sheet]);
-  }
-
-  const peopleIndex = Object.fromEntries(
-    [...data.Members, ...data.Ministries, ...data['Non-members']].map(
-      ({Name, Absent}) => [Name, {Absent, ministries: []}]
-    )
-  );
-  for (const {Name, Ministry} of data.Ministries) {
-    peopleIndex[Name].ministries.push(Ministry);
-  }
-  for (const {Name, 'Member Since': memberSince} of data.Members) {
-    peopleIndex[Name].memberSince = memberSince.toISOString().slice(0, 10);
-  }
-
-  return Object.entries(peopleIndex)
-    .filter(([, {Absent}]) => !Absent)
-    .map(([name, {ministries, memberSince = ''}]) => [
-      name,
-      memberSince,
-      ministries.sort().join(', '),
-    ])
-    .sort();
+const tableState = {
+  data: await getData(),
+  columns: [
+    {key: 'name', label: 'Name', width: 20},
+    {key: 'memberSince', label: 'Member Since', width: 20},
+    {key: 'ministries', label: 'Ministries', width: 40},
+    {key: 'smallGroups', label: 'Small Groups', width: 20},
+  ],
+  sortCol: 'name',
+  sortDir: 1,
 };
 
-const rows = await getRows();
-
-const render = (searchValue) => {
-  window.tbody.innerHTML = rows
-    .filter((row) => row.join('|').toUpperCase().includes(searchValue))
-    .map((row) => `<tr>${row.map((v) => `<td>${v}</td>`).join('')}</tr>`)
-    .join('');
+const render = () => {
+  window.people.innerHTML = renderTable(tableState);
 };
 
 window.search.addEventListener('input', (e) => {
-  render(e.target.value.toUpperCase());
+  tableState.searchValue = e.target.value;
+  render();
 });
 
-render('');
+document.body.addEventListener('click', (e) => {
+  if (e.target?.tagName !== 'TH') return;
+  const id = e.target.id;
+  tableState.sortDir = id === tableState.sortCol ? -tableState.sortDir : 1;
+  tableState.sortCol = id;
+  render();
+});
+
+render();

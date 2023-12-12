@@ -11,6 +11,11 @@ th {
     background-color: #ddd;
     color: black;
     padding: 10px;
+    cursor: pointer
+}
+
+th:hover {
+  text-decoration: underline;
 }
 
 td {
@@ -48,18 +53,7 @@ input[type="search"]:focus {
 </style>
 <body style="font-family: sans-serif;">
   <input id="search" type="search" placeholder="Search"/>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Member Since</th>
-        <th>Ministries</th>
-      </tr>
-    </thead>
-    <tbody id="tbody">
-      <tr><td>Loading...</td></tr>
-    </tbody>
-  </table>
+  <div id="people">Loading...</div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script type="module" src="main.js"></script>
 </body>
