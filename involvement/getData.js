@@ -35,7 +35,7 @@ export const getData = async () => {
     .map(([name, {ministries, memberSince = '', smallGroups}]) => ({
       name,
       memberSince,
-      ministries: ministries.sort().join(', '),
-      smallGroups: smallGroups.sort().join(', '),
+      ministries: ministries.sort(),
+      smallGroups: smallGroups.sort(),
     }));
 };
