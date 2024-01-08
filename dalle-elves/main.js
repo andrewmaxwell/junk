@@ -1,5 +1,3 @@
-import {initViewer} from './viewer.js';
-
 const types = [
   'forest',
   'river',
@@ -39,13 +37,9 @@ const types = [
   'smart',
 ];
 
-const img = (type, num) => `
-  <a href="#${type}${num}.png">
-    <img class="thumbnail" src="${type}${num}.png" alt="${type} elf" title="${type}"/>
-  </a>`;
+const img = (type, num) =>
+  `<img src="${type}${num}.png" alt="${type} elf" title="${type}"/>`;
 
 document.body.innerHTML += types
   .map((type) => `<h1>${type} Elf</h1>${img(type, 1)}${img(type, 2)}`)
   .join('');
-
-initViewer();
