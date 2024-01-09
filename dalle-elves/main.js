@@ -35,6 +35,17 @@ const types = [
   'noodle',
   'emptyHead',
   'smart',
+  'christmas',
+  'fat',
+  'bubble',
+  'lego',
+  'breakfast',
+  'evil',
+  'disgusted',
+  'rainbow',
+  'tornado',
+  'darthVader',
+  'cicada',
 ];
 
 const img = (type, num) =>

@@ -18,6 +18,13 @@ const save = debounce(({nodes, edges}) => {
     .map((a) => [...new Set(a)].join(';'))
     .join('_');
   isChangeInternal = false;
+
+  console.log(
+    JSON.stringify({
+      nodes: nodes.map(({x, y}) => [x, y]),
+      edges: edges.map(({a, b}) => [nodes.indexOf(a), nodes.indexOf(b)]),
+    })
+  );
 });
 
 const load = () => {
