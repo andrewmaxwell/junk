@@ -16,37 +16,53 @@ export class PriorityQueue {
     return this.heap.length;
   }
   push(value) {
-    this.heap.push(value);
-    let i = this.heap.length - 1;
-    while (i > 0 && this.compare(this.heap[i], this.heap[parent(i)])) {
-      swap(this.heap, i, parent(i));
-      i = parent(i);
-    }
+    const {heap} = this;
+    heap.push(value);
+    this.#siftUp(heap.length - 1);
+    return this;
   }
   pop() {
-    const poppedValue = this.heap[0];
-    const bottom = this.heap.length - 1;
-    if (bottom > 0) swap(this.heap, 0, bottom);
-    this.heap.pop();
-    let i = 0;
-    while (
-      (left(i) < this.heap.length &&
-        this.compare(this.heap[left(i)], this.heap[i])) ||
-      (right(i) < this.heap.length &&
-        this.compare(this.heap[right(i)], this.heap[i]))
-    ) {
-      const maxChild =
-        right(i) < this.heap.length &&
-        this.compare(this.heap[right(i)], this.heap[left(i)])
-          ? right(i)
-          : left(i);
-      swap(this.heap, i, maxChild);
-      i = maxChild;
-    }
+    const {heap} = this;
+    const poppedValue = heap[0];
+    if (heap.length > 1) swap(heap, 0, heap.length - 1);
+    heap.pop();
+    this.#siftDown(0);
     return poppedValue;
   }
   peak() {
     return this.heap[0];
+  }
+  updatePosition(value) {
+    const index = this.heap.indexOf(value);
+    if (index === -1) {
+      throw new Error(`Item not found: ${JSON.stringify(value)}`);
+    }
+    const newIndex = this.#siftUp(index);
+    if (index === newIndex) this.#siftDown(index);
+    return this;
+  }
+  #siftUp(i) {
+    const {heap, compare} = this;
+    while (i > 0 && compare(heap[i], heap[parent(i)])) {
+      swap(heap, i, parent(i));
+      i = parent(i);
+    }
+    return i;
+  }
+  #siftDown(i) {
+    const {heap, compare} = this;
+    while (
+      (left(i) < heap.length && compare(heap[left(i)], heap[i])) ||
+      (right(i) < heap.length && compare(heap[right(i)], heap[i]))
+    ) {
+      const maxChild =
+        right(i) < heap.length && compare(heap[right(i)], heap[left(i)])
+          ? right(i)
+          : left(i);
+      swap(heap, i, maxChild);
+      i = maxChild;
+    }
+    return i;
   }
 }
 
@@ -62,4 +78,20 @@ export class PriorityQueue {
 // Test.assertDeepEquals(
 //   sorted,
 //   shuffled.sort((a, b) => a - b)
+// );
+
+// /////
+// const vals = {a: 4, b: 2, c: 6, d: 1, e: 3};
+// const q = new PriorityQueue((a, b) => vals[a] < vals[b]);
+// q.push('a').push('b').push('c').push('d').push('e');
+
+// vals.d = 5;
+// q.updatePosition('d');
+
+// vals.e = 0;
+// q.updatePosition('e');
+
+// Test.assertDeepEquals(
+//   [q.pop(), q.pop(), q.pop(), q.pop(), q.pop()],
+//   ['e', 'b', 'a', 'd', 'c']
 // );

@@ -3,6 +3,12 @@ import {shuffle} from '../carcassonne/utils.js';
 
 const toMilliseconds = ([s, ns]) => s * 1000 + ns / 1e6;
 
+const getExecutionTime = (func) => {
+  const start = process.hrtime();
+  func();
+  return toMilliseconds(process.hrtime(start));
+};
+
 const median = (arr) => {
   arr.sort((a, b) => a - b);
   return arr.length % 2
@@ -28,47 +34,50 @@ const output = (times) => {
   console.log(result + '\n');
 };
 
-export const benchmark = (funcs, tests) => {
-  const times = {};
-
-  for (const key in funcs) {
-    times[key] = [];
-    for (const args of tests) {
+const checkTests = (funcs, tests) => {
+  const firstFunc = Object.values(funcs)[0];
+  for (const args of tests) {
+    const expected = firstFunc(...args);
+    for (const key in funcs) {
       const actual = funcs[key](...args);
-      const expected = funcs[Object.keys(funcs)[0]](...args);
-      if (!equals(actual, expected)) {
-        throw new Error(
-          `Expected ${key}(${args.join(', ')}) to be ${JSON.stringify(
-            expected
-          )}, got ${JSON.stringify(actual)}`
-        );
-      }
+      if (equals(actual, expected)) continue;
+      throw new Error(
+        `Expected ${key}(${args.join(', ')}) to be ${JSON.stringify(
+          expected
+        )}, got ${JSON.stringify(actual)}`
+      );
     }
   }
+};
 
+const runIterations = (funcs, tests, iterations, showOutput) => {
   const funcArr = Object.entries(funcs);
-
-  const start = process.hrtime();
-  for (let i = 0; i < 10; i++) {
-    for (const [, func] of shuffle(funcArr)) {
-      for (const args of tests) func(...args);
-    }
-  }
-  const iterations = Math.round(3e5 / toMilliseconds(process.hrtime(start)));
-
-  console.log(`${iterations.toLocaleString()} iterations`);
+  const times = {};
+  for (const [key] of funcArr) times[key] = [];
 
   for (let i = 0; i < iterations; i++) {
-    if (i && i % 1000 === 0) {
+    if (showOutput && i && i % 1000 === 0) {
       console.log(Math.round((100 * i) / iterations) + '%');
-      output(times);
+      // output(times);
     }
     for (const [key, func] of shuffle(funcArr)) {
       for (const args of tests) {
-        const start = process.hrtime();
-        func(...args);
-        times[key].push(toMilliseconds(process.hrtime(start)));
+        times[key].push(getExecutionTime(() => func(...args)));
       }
     }
   }
+
+  if (showOutput) output(times);
+};
+
+export const benchmark = (funcs, tests) => {
+  checkTests(funcs, tests);
+
+  const iterations = Math.round(
+    3e5 / getExecutionTime(() => runIterations(funcs, tests, 10, false))
+  );
+
+  console.log(`${iterations.toLocaleString()} iterations`);
+
+  runIterations(funcs, tests, iterations, true);
 };
