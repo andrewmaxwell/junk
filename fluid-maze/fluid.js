@@ -36,7 +36,6 @@ export class Fluid {
 
   moveParticles() {
     const {
-      grid,
       xCoord,
       yCoord,
       xPrev,
@@ -45,9 +44,9 @@ export class Fluid {
       width,
       height,
       vicinityCache,
+      grid,
     } = this;
 
-    grid.clear();
     for (let i = 0; i < this.numParticles; i++) {
       const xVel = xCoord[i] - xPrev[i];
       const yVel = yCoord[i] - yPrev[i] + gravity;
@@ -72,25 +71,6 @@ export class Fluid {
         continue;
       }
 
-      // block collisions
-      for (const b of grid.getCell(xCoord[i], yCoord[i]).blocks) {
-        const left = xCoord[i] - b.x;
-        const right = b.x + b.w - xCoord[i];
-        const top = yCoord[i] - b.y;
-        const bottom = b.y + b.h - yCoord[i];
-        const min = Math.min(left, right, top, bottom);
-
-        if (min === left) {
-          xCoord[i] = xPrev[i] = b.x - Math.random();
-        } else if (min === right) {
-          xCoord[i] = xPrev[i] = b.x + b.w + Math.random();
-        } else if (min === top) {
-          yCoord[i] = yPrev[i] = b.y - Math.random();
-        } else if (min === bottom) {
-          yCoord[i] = yPrev[i] = b.y + b.h + Math.random();
-        }
-      }
-
       vicinityCache[i] = grid.add(xCoord[i], yCoord[i], i);
     }
   }
@@ -107,6 +87,9 @@ export class Fluid {
       neighborX,
       neighborY,
       stiffness,
+      grid,
+      xPrev,
+      yPrev,
     } = this;
 
     const invRad2 = 1 / radius ** 2;
@@ -143,9 +126,30 @@ export class Fluid {
         yCoord[n] += ay;
       }
     }
+
+    for (let i = 0; i < this.numParticles; i++) {
+      for (const b of grid.getCell(xCoord[i], yCoord[i]).blocks) {
+        const left = xCoord[i] - b.x;
+        const right = b.x + b.w - xCoord[i];
+        const top = yCoord[i] - b.y;
+        const bottom = b.y + b.h - yCoord[i];
+        const min = Math.min(left, right, top, bottom);
+
+        if (min === left) {
+          xCoord[i] = xPrev[i] = b.x - Math.random();
+        } else if (min === right) {
+          xCoord[i] = xPrev[i] = b.x + b.w + Math.random();
+        } else if (min === top) {
+          yCoord[i] = yPrev[i] = b.y - Math.random();
+        } else if (min === bottom) {
+          yCoord[i] = yPrev[i] = b.y + b.h + Math.random();
+        }
+      }
+    }
   }
 
   tick() {
+    this.grid.clear();
     this.moveParticles();
     this.interact();
     this.interact();

@@ -5,7 +5,7 @@ import {makeMazeGrid} from './mazeGrid.js';
 const fluid = new Fluid({
   radius: 8,
   gravity: 0.02,
-  stiffness: 64,
+  stiffness: 32,
   blocks: makeMazeGrid({mazeRows: 10, mazeCols: 17, scale: 4}),
 });
 
