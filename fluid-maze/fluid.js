@@ -13,12 +13,9 @@ export class Fluid {
     this.yCoord = new Float32Array(maxParticles);
     this.xPrev = new Float32Array(maxParticles);
     this.yPrev = new Float32Array(maxParticles);
-    this.vicinityCache = new Array(maxParticles);
 
     this.neighborIndex = new Int16Array(maxParticles);
     this.neighborGradient = new Float32Array(maxParticles);
-    this.neighborX = new Float32Array(maxParticles);
-    this.neighborY = new Float32Array(maxParticles);
 
     this.reset();
   }
@@ -35,17 +32,7 @@ export class Fluid {
   }
 
   moveParticles() {
-    const {
-      xCoord,
-      yCoord,
-      xPrev,
-      yPrev,
-      gravity,
-      width,
-      height,
-      vicinityCache,
-      grid,
-    } = this;
+    const {xCoord, yCoord, xPrev, yPrev, gravity, width, height, grid} = this;
 
     for (let i = 0; i < this.numParticles; i++) {
       const xVel = xCoord[i] - xPrev[i];
@@ -71,7 +58,7 @@ export class Fluid {
         continue;
       }
 
-      vicinityCache[i] = grid.add(xCoord[i], yCoord[i], i);
+      grid.add(xCoord[i], yCoord[i], i);
     }
   }
 
@@ -79,13 +66,10 @@ export class Fluid {
     const {
       radius,
       numParticles,
-      vicinityCache,
       xCoord,
       yCoord,
       neighborIndex,
       neighborGradient,
-      neighborX,
-      neighborY,
       stiffness,
       grid,
       xPrev,
@@ -96,7 +80,7 @@ export class Fluid {
     for (let i = 0; i < numParticles; i++) {
       let numNeighbors = 0;
       let nearDensity = 0;
-      for (const n of vicinityCache[i]) {
+      for (const n of grid.getCell(xCoord[i], yCoord[i]).items) {
         if (n === i) continue;
         const dx = xCoord[n] - xCoord[i];
         const dy = yCoord[n] - yCoord[i];
@@ -107,8 +91,6 @@ export class Fluid {
         nearDensity += g * g * g;
         neighborIndex[numNeighbors] = n;
         neighborGradient[numNeighbors] = g;
-        neighborX[numNeighbors] = dx;
-        neighborY[numNeighbors] = dy;
         numNeighbors++;
       }
 
@@ -118,8 +100,8 @@ export class Fluid {
         const n = neighborIndex[k];
         const ng = neighborGradient[k];
         const amt = (nearPressure * ng * ng) / (1 - ng) / radius;
-        const ax = neighborX[k] * amt;
-        const ay = neighborY[k] * amt;
+        const ax = (xCoord[n] - xCoord[i]) * amt;
+        const ay = (yCoord[n] - yCoord[i]) * amt;
         xCoord[i] -= ax;
         yCoord[i] -= ay;
         xCoord[n] += ax;

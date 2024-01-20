@@ -11,7 +11,7 @@ const makeMaze = ({mazeRows, mazeCols}) => {
   const maze = Array.from({length: mazeRows}, (_, y) =>
     Array.from({length: mazeCols}, (_, x) => ({x, y}))
   );
-  const q = [maze[0][0]];
+  const q = [maze[Math.floor(mazeRows / 2)][Math.floor(mazeCols / 2)]];
 
   while (q.length) {
     const curr = q.pop();
@@ -87,17 +87,38 @@ const gridToRects = (grid) => {
   return rects;
 };
 
-export const makeMazeGrid = ({mazeRows, mazeCols, scale}) => {
-  const maze = makeMaze({mazeRows, mazeCols});
-  const grid = mazeToGrid({maze, mazeRows, mazeCols});
+export const makeMazeGrid = ({
+  mazeRows,
+  mazeCols,
+  scale,
+  wallThickness,
+  shiftDown,
+}) => {
+  const grid = mazeToGrid({
+    maze: makeMaze({mazeRows, mazeCols}),
+    mazeRows,
+    mazeCols,
+  });
 
+  grid[0][1] = false; // entrance
   grid[grid.length - 2][grid[0].length - 1] = false; // exit
 
   return gridToRects(grid).map((r) => {
     r.x = r.x * scale;
-    r.y = r.y * scale;
-    if (r.w === 1) r.h = (r.h - 1) * scale + 1;
-    else r.w = (r.w - 1) * scale + 1;
+    r.y = r.y * scale + shiftDown;
+    if (r.w === 1) {
+      r.h = (r.h - 1) * scale + wallThickness;
+      r.w *= wallThickness;
+    } else {
+      r.w = (r.w - 1) * scale + wallThickness;
+      r.h *= wallThickness;
+    }
+
+    // left and right walls
+    if ((r.x === 0 || r.x === scale * (grid[0].length - 1)) && r.w === 1) {
+      r.y -= shiftDown;
+      r.h += shiftDown;
+    }
     return r;
   });
 };

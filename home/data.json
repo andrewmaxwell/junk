@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "fluid-maze",
+    "title": "Particle Fluid Maze",
+    "year": 2024,
+    "desc": "Watch the particles slowly flow through the maze."
+  },
+  {
     "filePath": "voxels",
     "title": "Langton's Ant in 3D",
     "year": 2023,

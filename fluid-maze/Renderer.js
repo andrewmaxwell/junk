@@ -8,7 +8,7 @@ export class Renderer {
     this.canvas.width = innerWidth;
     this.canvas.height = innerHeight;
   }
-  render({numParticles, xCoord, yCoord, xPrev, yPrev, blocks, radius}) {
+  render({numParticles, xCoord, yCoord, xPrev, yPrev, blocks, radius}, time) {
     const {ctx} = this;
     ctx.clearRect(0, 0, innerWidth, innerHeight);
     ctx.lineWidth = 2;
@@ -22,10 +22,12 @@ export class Renderer {
     }
     ctx.stroke();
 
-    ctx.fillStyle = 'white';
+    ctx.fillStyle = '#FFF8';
 
     for (let {x, y, w, h} of blocks) {
       ctx.fillRect(x * radius, y * radius, w * radius, h * radius);
     }
+
+    ctx.fillText(time.toFixed(1), 2, innerHeight - 2);
   }
 }
