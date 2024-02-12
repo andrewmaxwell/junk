@@ -1,39 +1,5 @@
-const {Papa} = window;
-
-const url =
-  'https://docs.google.com/spreadsheets/d/e/2PACX-1vSJVwYZ2gbAbspXeH2zmZE9S5tXw1J7GyPOfuPJ-7hVu7XggltJrZ0i7G-nNhWzCi502wz5qBq4pQ3X/pub?output=csv';
-
-const getData = async () =>
-  Papa.parse(await (await fetch(url)).text(), {header: true}).data.map(
-    (row) => ({
-      time: Date.parse(row.Timestamp),
-      tstamp: row.Timestamp,
-      energy: +row['Energy Level'],
-      anxiety: +row['Anxiety Level'],
-      headache: +row.Headache,
-      mood: +row.Mood,
-      exercise: +row.Exercise,
-      notes: row.Notes,
-    })
-  );
-
-const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2);
-
-const smoothLine = (coords, steps = 16) => {
-  const result = [];
-  for (let i = 0; i < coords.length - 1; i++) {
-    const c = coords[i];
-    const n = coords[i + 1];
-    result.push(c);
-    for (let j = 0; j < steps; j++) {
-      result.push({
-        x: c.x + (j / steps) * (n.x - c.x),
-        y: c.y + ease(j / steps) * (n.y - c.y),
-      });
-    }
-  }
-  return result;
-};
+import {getData} from './getData.js';
+import {smoothLine} from './smoothLine.js';
 
 const graphs = [
   {key: 'overall', color: 'white'},
@@ -42,77 +8,84 @@ const graphs = [
   {key: 'headache', color: 'red'},
   {key: 'mood', color: 'green'},
   {key: 'exercise', color: 'cyan'},
+  {key: 'temperature', color: 'orange'},
+  {key: 'precipitation', color: 'blue'},
+  {key: 'pressure', color: 'black'},
 ];
 
-const canvasHeight = (innerHeight - (graphs.length - 1) * 10) / graphs.length;
+const canvasWidth = 5000;
+const margin = 4;
+const canvasHeight = innerHeight / graphs.length - margin;
 
-const go = async () => {
-  const data = await getData();
+const addChart = ({data, key, color, i, minX, maxX}) => {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
 
+  canvas.width = canvasWidth;
+  canvas.height = canvasHeight;
+  canvas.style.borderBottom = `${margin}px solid black`;
+
+  let minY = Infinity;
+  let maxY = -Infinity;
   for (const ob of data) {
-    ob.overall =
-      (ob.energy +
-        (5 - ob.anxiety) +
-        (5 - ob.headache) +
-        ob.mood +
-        ob.exercise) /
-      5;
+    const val = ob[key];
+    if (isNaN(val)) continue;
+    minY = Math.min(minY, val);
+    maxY = Math.max(maxY, val);
   }
 
-  const minX = data[0].time;
-  const maxX = data[data.length - 1].time;
-  const maxY = 5;
+  console.log(key, minY, maxY);
 
-  for (const {key, color} of graphs) {
-    const canvas = document.createElement('canvas');
-    canvas.width = innerWidth;
-    canvas.height = canvasHeight;
-    const ctx = canvas.getContext('2d');
+  const coords = data.map((ob) => ({
+    x: ((ob.time - minX) / (maxX - minX)) * canvas.width,
+    y: (1 - (ob[key] - minY) / (maxY - minY)) * canvasHeight,
+    ob,
+  }));
 
-    const coords = data.map((ob) => ({
-      x: ((ob.time - minX) / (maxX - minX)) * innerWidth,
-      y: (1 - ob[key] / maxY) * canvasHeight,
-      ob,
-    }));
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (const {x, y} of smoothLine(coords)) ctx.lineTo(x, y);
+  ctx.lineTo(canvas.width, canvasHeight);
+  ctx.lineTo(0, canvasHeight);
+  ctx.fill();
 
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    for (const {x, y} of smoothLine(coords)) {
-      ctx.lineTo(x, y);
-    }
-    ctx.lineTo(innerWidth, canvasHeight);
-    ctx.lineTo(0, canvasHeight);
-    ctx.fill();
+  const label = document.createElement('div');
+  label.innerText = key;
+  Object.assign(label.style, {
+    position: 'fixed',
+    top: i * (canvasHeight + margin) + 'px',
+    left: '3px',
+  });
+  document.body.append(canvas, label);
 
-    ctx.fillStyle = 'white';
-    ctx.globalAlpha = 1;
-    ctx.textBaseline = 'top';
-    ctx.font = '16px sans-serif';
-    ctx.fillText(key, 3, 3);
-    document.body.append(canvas);
-
-    canvas.addEventListener('mousemove', (e) => {
-      let minDist = Infinity;
-      let closest;
-      for (const {x, ob} of coords) {
-        const d = Math.abs(x - e.pageX);
-        if (d < minDist) {
-          minDist = d;
-          closest = ob;
-        }
+  canvas.addEventListener('mousemove', (e) => {
+    let minDist = Infinity;
+    let closest;
+    for (const {x, ob} of coords) {
+      const d = Math.abs(x - e.pageX);
+      if (d < minDist) {
+        minDist = d;
+        closest = ob;
       }
+    }
 
-      canvas.title = [
-        closest.tstamp,
-        ...graphs.map(({key}) => `${key}: ${closest[key]}`),
-        closest.notes ? `Notes: ${closest.notes}` : '',
-      ]
-        .join('\n')
-        .trim();
-    });
-  }
-  console.log(data);
+    canvas.title = [
+      closest.tstamp,
+      ...graphs.map(({key}) => `${key}: ${closest[key]}`),
+      closest.notes ? `Notes: ${closest.notes}` : '',
+    ]
+      .join('\n')
+      .trim();
+  });
 };
 
-go();
+const data = await getData();
+
+const minX = data[0].time;
+const maxX = data[data.length - 1].time;
+
+for (let i = 0; i < graphs.length; i++) {
+  const {key, color} = graphs[i];
+  addChart({data, key, color, i, minX, maxX});
+}
