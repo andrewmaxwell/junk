@@ -55,9 +55,9 @@ export const getData = async () => {
       count++;
       weatherIndex++;
     }
-    if (count) ob.temperature = temperature / count;
-    ob.precipitation = precipitation;
-    if (count) ob.pressure = pressure / count;
+    if (count) ob.temperature = Math.round(temperature / count);
+    ob.precipitation = Math.round(precipitation * 1000) / 1000;
+    if (count) ob.pressure = Math.round(pressure / count);
   }
 
   console.log('data', data);
