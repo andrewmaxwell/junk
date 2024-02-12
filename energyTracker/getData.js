@@ -8,7 +8,7 @@ const getWeatherData = async () => {
     .map((time, i) => ({
       time: Date.parse(time),
       temperature: apparent_temperature[i],
-      precipitation: precipitation[i] /* ? 1 : 0 */,
+      precipitation: precipitation[i],
       pressure: surface_pressure[i],
     }))
     .filter((ob) => ob.pressure);
@@ -35,14 +35,6 @@ export const getData = async () => {
 
   let weatherIndex = 0;
   for (const ob of data) {
-    ob.overall =
-      (ob.energy +
-        (5 - ob.anxiety) +
-        (5 - ob.headache) +
-        ob.mood +
-        ob.exercise) /
-      5;
-
     let count = 0;
     let temperature = 0;
     let precipitation = 0;
@@ -55,9 +47,11 @@ export const getData = async () => {
       count++;
       weatherIndex++;
     }
-    if (count) ob.temperature = Math.round(temperature / count);
-    ob.precipitation = Math.round(precipitation * 1000) / 1000;
-    if (count) ob.pressure = Math.round(pressure / count);
+    if (count) {
+      ob.temperature = Math.round(temperature / count);
+      ob.precipitation = Math.round(precipitation * 1000) / 1000;
+      ob.pressure = Math.round(pressure / count);
+    }
   }
 
   console.log('data', data);
