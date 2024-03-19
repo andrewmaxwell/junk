@@ -1,5 +1,17 @@
 [
   {
+    "filePath": "dalle-elements",
+    "title": "Element Characters",
+    "year": 2024,
+    "desc": "A character for each chemical element created by DALL·E"
+  },
+  {
+    "filePath": "genesis",
+    "title": "Genesis",
+    "year": 2024,
+    "desc": "The beginning of Genesis illustrated by DALL·E 3"
+  },
+  {
     "filePath": "fluid-maze",
     "title": "Particle Fluid Maze",
     "year": 2024,
