@@ -6,9 +6,9 @@ const fail = (msg) => console.log('\x1b[31m%s\x1b[0m', msg);
 const sort = (arr) =>
   arr.sort((a, b) => toString(a).localeCompare(toString(b)));
 
-const assertEquals = (actual, expected, description) => {
+const assertSomething = (eqFunc) => (actual, expected, description) => {
   if (description) console.log(description);
-  if (equals(actual, expected)) pass();
+  if (eqFunc(actual, expected)) pass();
   else {
     fail(`Expected \n${toString(expected)}\nGot \n${toString(actual)}\n\n`);
     // fail(`Expected\n${expected}\nGot\n${actual}\n`);
@@ -20,6 +20,8 @@ const assertEquals = (actual, expected, description) => {
     if (Test.failFast) process.exit(1);
   }
 };
+
+const assertEquals = assertSomething(equals);
 
 export const it = (desc, func) => {
   console.log('\n' + desc);
@@ -51,6 +53,7 @@ export const Test = {
   },
   inspect: toString,
   assertSameMembers: (a, b) => assertEquals(sort(a), sort(b)),
+  assertApproxEquals: assertSomething((a, b) => Math.abs(a - b) <= 1e-6),
 };
 
 export const deepLog = (x) => console.dir(x, {depth: Infinity});

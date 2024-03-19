@@ -41,12 +41,12 @@ const groupBy = (func, arr) => {
   return res;
 };
 
-const scale = 8;
+const scale = 0.5;
 
 const makeBar = (members, titleLabel, color) => {
   const len = members.length * scale;
   const names = members.map((p) => p.name).join('\n');
-  return `<span class="bar" style="width: ${len}px; background: ${color}" title="${titleLabel}:\n${names}"></span>`;
+  return `<span class="bar" style="width: ${len}%; background: ${color}" title="${titleLabel}:\n${names}"></span>`;
 };
 
 const getHistogram = ({data, countFunc, singular, plural}) =>

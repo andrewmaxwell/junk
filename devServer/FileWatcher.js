@@ -6,16 +6,20 @@ export class FileWatcher {
     this.onChange = onChange;
   }
   watchPath(filePath) {
-    if (this.watchedPaths.has(filePath)) return;
-    this.watchedPaths.add(filePath);
-    console.log('watching', filePath);
+    try {
+      if (this.watchedPaths.has(filePath)) return;
+      this.watchedPaths.add(filePath);
+      console.log('watching', filePath);
 
-    let prev = readFileSync(filePath, 'utf-8');
-    watch(filePath, (x) => {
-      const curr = readFileSync(filePath, 'utf-8');
-      if (curr === prev) return;
-      prev = curr;
-      this.onChange(filePath, x);
-    });
+      let prev = readFileSync(filePath, 'utf-8');
+      watch(filePath, (x) => {
+        const curr = readFileSync(filePath, 'utf-8');
+        if (curr === prev) return;
+        prev = curr;
+        this.onChange(filePath, x);
+      });
+    } catch (e) {
+      console.error(`Could not watch ${filePath}: ${e.message}`);
+    }
   }
 }

@@ -9,7 +9,7 @@ const getAllMatches = (regex, str) => {
 
 export const tokenize = (str) =>
   str.split('\n').flatMap((line, lineNum) =>
-    getAllMatches(tokenRegex, line).map((m) => ({
+    getAllMatches(tokenRegex, line.replace(/\/\/.*/, '')).map((m) => ({
       val: m[0],
       loc: lineNum + ':' + m.index,
     }))
