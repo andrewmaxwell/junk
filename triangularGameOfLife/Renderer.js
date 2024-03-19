@@ -27,6 +27,8 @@ export class Renderer {
     ctx.save();
     ctx.scale(size * 0.5, size * Q);
 
+    ctx.fillStyle = 'white';
+
     // background grid
     ctx.globalAlpha = 1 / 32;
     ctx.beginPath();
@@ -56,13 +58,15 @@ export class Renderer {
     ctx.fill();
 
     // mouse
-    ctx.fillStyle = 'rgba(0,0,255,0.5)';
-    ctx.beginPath();
-    const my1 = (cursor.x + cursor.y) % 2;
-    ctx.moveTo(cursor.x, cursor.y + my1);
-    ctx.lineTo(cursor.x + 1, cursor.y + (1 - my1));
-    ctx.lineTo(cursor.x + 2, cursor.y + my1);
-    ctx.fill();
+    if (cursor) {
+      ctx.fillStyle = 'rgba(0,0,255,0.5)';
+      ctx.beginPath();
+      const my1 = (cursor.x + cursor.y) % 2;
+      ctx.moveTo(cursor.x, cursor.y + my1);
+      ctx.lineTo(cursor.x + 1, cursor.y + (1 - my1));
+      ctx.lineTo(cursor.x + 2, cursor.y + my1);
+      ctx.fill();
+    }
 
     ctx.restore();
   }
