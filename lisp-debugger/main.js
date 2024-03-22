@@ -19,7 +19,7 @@ const formatEnv = (env) => {
 };
 
 const update = () => {
-  const {loc, env, stack} = steps[frame % steps.length];
+  const {loc, env, stack} = steps[frame];
   const [row, col] = loc.split(':').map(Number);
 
   const lines = textarea.value.split('\n');
@@ -57,12 +57,12 @@ document.querySelector('#toStart').addEventListener('click', () => {
 });
 
 document.querySelector('#back').addEventListener('click', () => {
-  frame--;
+  frame = (frame - 1 + steps.length) % steps.length;
   update();
 });
 
 document.querySelector('#forward').addEventListener('click', () => {
-  frame++;
+  frame = (frame + 1) % steps.length;
   update();
 });
 
