@@ -6,7 +6,7 @@ const formatOutput = (val) =>
 
 const evaluate = (str) => {
   try {
-    return formatOutput(execute(parse(str)));
+    return formatOutput(execute(parse(str)).result);
   } catch (e) {
     return e.message;
   }

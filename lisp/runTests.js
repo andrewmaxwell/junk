@@ -7,7 +7,7 @@ import {Test} from '../misc/test.js';
 
 const exec = (str) => {
   try {
-    return execute(parse(str));
+    return execute(parse(str).result);
   } catch (e) {
     return e.message;
   }
