@@ -7,8 +7,8 @@ const isAtom = (expr) => !Array.isArray(expr) || !expr.length;
 const toBool = (val) => (val ? 't' : []);
 const fromBool = (val) => val && (!Array.isArray(val) || val.length);
 
-// const toLisp = (expr) =>
-//   Array.isArray(expr) ? `(${expr.map(toLisp).join(' ')})` : expr.val;
+const toLisp = (expr) =>
+  Array.isArray(expr) ? `(${expr.map(toLisp).join(' ')})` : expr.val;
 
 const getVals = (expr) =>
   Array.isArray(expr)
@@ -24,11 +24,19 @@ const evaluate = (expr, env, stack, steps) => {
     if (!car(expr)) throw new Error(`Empty expression${printStack(stack)}`);
 
     const {val, loc} = car(expr);
-    // if (loc) steps.push({...car(expr), env, stack});
     const func = evaluate(car(expr), env, cons(`${val} ${loc}`, stack), steps);
     if (typeof func === 'function') {
       try {
-        return func(cdr(expr), env, cons(`${val} ${loc}`, stack), steps);
+        const result = func(
+          cdr(expr),
+          env,
+          cons(`${val} ${loc}`, stack),
+          steps
+        );
+        if (loc && val !== 'defun' && val !== 'lambda') {
+          steps.push({loc, env, stack, result: `${toLisp(expr)} -> ${result}`});
+        }
+        return result;
       } catch (e) {
         throw new Error(`An error occurred: ${e.message}${printStack(stack)}`);
       }
@@ -42,7 +50,7 @@ const evaluate = (expr, env, stack, steps) => {
 
   if (expr && typeof expr === 'object') {
     const {val, loc} = expr;
-    if (loc) steps.push({...expr, env, stack});
+    if (loc) steps.push({loc, env, stack});
     if (typeof val === 'number') return val;
 
     for (const [key, value] of env) {
@@ -80,9 +88,8 @@ export const defaultEnv = Object.entries({
         return evaluate(expr, env, stack, steps);
     }
   },
-  lambda:
-    ([argList, body], outerEnv) =>
-    (args, innerEnv, stack, steps) => {
+  lambda: ([argList, body], outerEnv) => {
+    const func = (args, innerEnv, stack, steps) => {
       const env = [...innerEnv, ...outerEnv]; // innerEnv doesn't overwrite outerEnv, just supercedes it
       return evaluate(
         body,
@@ -95,7 +102,10 @@ export const defaultEnv = Object.entries({
         stack,
         steps
       );
-    },
+    };
+    func.lisp = toLisp([{val: 'lambda'}, argList, body]);
+    return func;
+  },
   defun: ([{val, loc}, args, body], env, stack, steps) =>
     cons(
       list(
@@ -132,6 +142,8 @@ export const defaultEnv = Object.entries({
   '<=': math((a, b) => a <= b),
   '**': math((a, b) => a ** b),
 });
+
+for (const [name, def] of defaultEnv) def.lisp = name;
 
 // takes an array of expressions, returns the value of the last one. The ones before it can only be defuns of defmacros
 export const execute = (exprs) => {
