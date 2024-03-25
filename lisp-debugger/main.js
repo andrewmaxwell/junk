@@ -12,8 +12,9 @@ const formatEnv = (env) => {
   return Object.entries(envObj)
     .map(([key, val]) => {
       val = typeof val === 'function' ? val.lisp : JSON.stringify(val);
-      return `${key} -> ${val}`;
+      return `• ${key} -> ${val}`;
     })
+    .reverse()
     .join('\n');
 };
 
@@ -50,9 +51,10 @@ const changeCode = () => {
   )}`;
   frame = 0;
   console.log('steps', steps);
+  update();
 };
 
-textarea.addEventListener('input', changeCode);
+textarea.addEventListener('change', changeCode);
 
 document.querySelector('#toStart').addEventListener('click', () => {
   frame = 0;
@@ -76,22 +78,18 @@ document.querySelector('#toEnd').addEventListener('click', () => {
 
 textarea.value = `(defun divisibleBy (x d) (eq 0 (% x d)))
 
-(defun fb (curr) 
+(defun fb (n) 
   (cond
-    ((divisibleBy curr 15) 'FizzBuzz)
-    ((divisibleBy curr 5) 'Buzz)
-    ((divisibleBy curr 3) 'Fizz)
-    ('t curr)
-  )
-)
+    ((divisibleBy n 15) 'FizzBuzz)
+    ((divisibleBy n 5) 'Buzz)
+    ((divisibleBy n 3) 'Fizz)
+    ('t n)))
 
-(defun fizzbuzz (curr max)
+(defun fizzbuzz (n max)
   (cond 
-    ((> curr max) "")
-    ('t (+ (fb curr) " " (fizzbuzz (+ 1 curr) max)))
-  )
-)
+    ((> n max) "")
+    ('t (+ (fb n) " " (fizzbuzz (+ 1 n) max)))))
 
 (fizzbuzz 1 100)`;
+
 changeCode();
-update();
