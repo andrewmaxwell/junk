@@ -8,6 +8,21 @@ i = i * 2;
 printf("the value is %d", i);`,
     expected: 'the value is 224',
   },
+  // {
+  //   description: 'if',
+  //   input: `if (1) printf("a");`,
+  //   expected: 'a',
+  // },
+  // {
+  //   description: 'ifElse',
+  //   input: `if (1 == 2) printf("a"); else printf("b");`,
+  //   expected: 'b',
+  // },
+  // {
+  //   description: 'while',
+  //   input: `i = 0; while (i < 5) { printf("a"); i = i + 1;}`,
+  //   expected: 'aaaaa',
+  // },
   {
     description:
       'While-loops, if-statements, and else-statements are supported along with blocks inside them.',

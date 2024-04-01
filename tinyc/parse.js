@@ -9,16 +9,37 @@ const expectToken = (expectedType, tokens) => {
 };
 
 // different node types have different numbers of static tokens that need to be accounted for when calculating their length
-const typeLengths = Object.fromEntries(
-  [
-    'number string functionCall var', // 0
-    '+ - && || * / % < <= > >= == != not assignment ifStmt whileLoop semicolon expression argument', // 1
-    'ifElse doWhile parenthetical block', // 2
-    '',
-    '',
-    'forLoop', // 5
-  ].flatMap((list, i) => (list ? list.split(' ').map((t) => [t, i]) : []))
-);
+const typeLengths = {
+  number: 0,
+  string: 0,
+  functionCall: 0,
+  var: 0,
+  '+': 1,
+  '-': 1,
+  '&&': 1,
+  '||': 1,
+  '*': 1,
+  '/': 1,
+  '%': 1,
+  '<': 1,
+  '<=': 1,
+  '>': 1,
+  '>=': 1,
+  '==': 1,
+  '!=': 1,
+  not: 1,
+  assignment: 1,
+  ifStmt: 1,
+  whileLoop: 1,
+  semicolon: 1,
+  expression: 1,
+  argument: 1,
+  ifElse: 2,
+  doWhile: 2,
+  parenthetical: 2,
+  block: 2,
+  forLoop: 5,
+};
 
 // takes a node and returns the number of tokens that make it up
 // example: ['+', ['var', 'i'], ['number', 5]] represents i+5, which is 3 tokens

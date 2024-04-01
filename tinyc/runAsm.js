@@ -1,3 +1,8 @@
+const splitIntoTwo = (str) => {
+  const i = str.indexOf(' ');
+  return i === -1 ? [str] : [str.slice(0, i), str.slice(i + 1)];
+};
+
 const binaryOps = {
   ADD: (a, b) => a + b,
   SUB: (a, b) => a - b,
@@ -23,20 +28,22 @@ export const runAsm = (program) => {
   let output = '';
 
   while (pc < program.length) {
-    const op = program[pc++];
+    const [op, argStr] = splitIntoTwo(program[pc++]);
+    const argNum = +argStr;
     if (binaryOps[op]) {
       const b = stack.pop();
       const a = stack.pop();
       stack.push(binaryOps[op](a, b));
-    } else if (op === 'FETCH') stack.push(vars[program[pc++]] || 0);
-    else if (op === 'STORE') vars[program[pc++]] = stack[stack.length - 1];
-    else if (op === 'PUSH') stack.push(program[pc++]);
+    } else if (op === 'FETCH') stack.push(vars[argStr] || 0);
+    else if (op === 'STORE') vars[argStr] = stack[stack.length - 1];
+    else if (op === 'PUSH') stack.push(argNum);
     else if (op === 'POP') stack.pop();
     else if (op === 'NOT') stack.push(stack.pop() ? 0 : 1);
-    else if (op === 'JMP') pc += program[pc];
-    else if (op === 'JZ') pc += stack.pop() ? 1 : program[pc];
-    else if (op === 'JNZ') pc += stack.pop() ? program[pc] : 1;
-    else if (op === 'PRINT') output += stack.pop();
+    else if (op === 'JMP') pc += argNum;
+    else if (op === 'JZ') pc += stack.pop() ? 0 : argNum;
+    else if (op === 'JNZ') pc += stack.pop() ? argNum : 0;
+    else if (op === 'PRINTN') output += stack.pop();
+    else if (op === 'PRINTC') output += String.fromCharCode(argNum);
     else throw new Error(`RUN ERROR: wtf is ${op}`);
   }
   return output;
