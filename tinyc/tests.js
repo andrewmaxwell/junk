@@ -1,7 +1,6 @@
 export const tests = [
   {
-    description:
-      'Use variables to store data and printf to print things. Currently printf is the only supported function.',
+    description: 'Use variables to store data and printf to print things.',
     input: `i = 125;
 i = i - 13;
 i = i * 2;
