@@ -7,14 +7,12 @@ import {tokenize} from './tokenize.js';
 
 Test.failFast = true;
 
-for (const {input, expected} of tests) {
-  try {
-    const asm = toAsm(parse(tokenize(input)));
-    // console.log(asm.map((line, i) => `${i}: ${line}`).join('\n'));
-    Test.assertDeepEquals(runAsm(asm), expected);
-  } catch (e) {
-    console.log(input);
-    throw e;
-  }
+for (const {input, expected, ast, asm} of tests) {
+  const actualAst = parse(tokenize(input));
+  Test.assertDeepEquals(actualAst, ast);
+
+  const actualAsm = toAsm(actualAst);
+  Test.assertDeepEquals(actualAsm, asm);
+
+  Test.assertDeepEquals(runAsm(actualAsm), expected);
 }
-console.log('ALL PASSING');

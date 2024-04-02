@@ -19,32 +19,38 @@ const binaryOps = {
   NEQ: (a, b) => (a != b ? 1 : 0),
 };
 
-// takes an array of assembly tokens (strings) and runs them on a simple, simulated CPU. The values of the variables are returned.
 export const runAsm = (program) => {
-  // console.log('program', program);
-  const vars = {};
+  let vars = {};
+  const callStack = [];
   const stack = [];
   let pc = 0;
   let output = '';
 
-  while (pc < program.length) {
-    const [op, argStr] = splitIntoTwo(program[pc++]);
-    const argNum = +argStr;
+  for (let i = 0; i < 10000 && pc < program.length; i++) {
+    // console.log(program[pc], vars);
+    const [op, arg] = splitIntoTwo(program[pc++].replace(/\/\/.*/, '').trim());
     if (binaryOps[op]) {
       const b = stack.pop();
       const a = stack.pop();
       stack.push(binaryOps[op](a, b));
-    } else if (op === 'FETCH') stack.push(vars[argStr] || 0);
-    else if (op === 'STORE') vars[argStr] = stack[stack.length - 1];
-    else if (op === 'PUSH') stack.push(argNum);
+    } else if (op === 'FETCH') stack.push(vars[arg] || 0);
+    else if (op === 'STORE') vars[arg] = stack[stack.length - 1];
+    else if (op === 'PUSH') stack.push(+arg);
     else if (op === 'POP') stack.pop();
     else if (op === 'NOT') stack.push(stack.pop() ? 0 : 1);
-    else if (op === 'JMP') pc += argNum;
-    else if (op === 'JZ') pc += stack.pop() ? 0 : argNum;
-    else if (op === 'JNZ') pc += stack.pop() ? argNum : 0;
+    else if (op === 'JMP') pc += +arg;
+    else if (op === 'JZ') pc += stack.pop() ? 0 : +arg;
+    else if (op === 'JNZ') pc += stack.pop() ? +arg : 0;
     else if (op === 'PRINTN') output += stack.pop();
-    else if (op === 'PRINTC') output += String.fromCharCode(argNum);
-    else throw new Error(`RUN ERROR: wtf is ${op}`);
+    else if (op === 'PRINTC') output += String.fromCharCode(arg);
+    else if (op === 'CALL') {
+      callStack.push(vars);
+      vars = {_ret: pc};
+      pc += +arg;
+    } else if (op === 'RETURN') {
+      pc = vars._ret;
+      vars = callStack.pop();
+    } else throw new Error(`RUN ERROR: wtf is ${op}`);
   }
   return output;
 };

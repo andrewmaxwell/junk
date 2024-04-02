@@ -1,4 +1,12 @@
-const reservedWords = ['do', 'else', 'if', 'while', 'for'];
+const reservedWords = [
+  'do',
+  'else',
+  'if',
+  'while',
+  'for',
+  'function',
+  'return',
+];
 
 // takes a string and returns an array of tokens.
 // a token looks like {type: ';'} or {type: 'number', value: 51}

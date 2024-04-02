@@ -34,11 +34,13 @@ const typeLengths = {
   semicolon: 1,
   expression: 1,
   argument: 1,
-  ifElse: 2,
-  doWhile: 2,
-  parenthetical: 2,
-  block: 2,
-  forLoop: 5,
+  functionDeclaration: 1,
+  return: 1,
+  ifElse: 2, // if, else
+  doWhile: 2, // do, while
+  parenthetical: 2, // (, )
+  block: 2, // {, }
+  forLoop: 5, // for ( ; ; )
 };
 
 // takes a node and returns the number of tokens that make it up
@@ -194,6 +196,18 @@ const parseForLoop = (tokens) => {
   return ['forLoop', initializer, condition, updater, body];
 };
 
+const parseFunctionDeclaration = (tokens) => {
+  const args = parseParenExpr(tokens.slice(2));
+  return [
+    'functionDeclaration',
+    tokens[1].value,
+    args,
+    parseStatement(tokens.slice(2 + len(args))),
+  ];
+};
+
+const parseReturn = (tokens) => ['return', parseExprStmt(tokens.slice(1))];
+
 // takes an array of tokens and returns the expression at the beginning
 const parseExprStmt = (tokens) => {
   const expr = parseExpr(tokens);
@@ -212,10 +226,14 @@ const parseStatement = (tokens) => {
       return parseDoWhile(tokens);
     case 'for':
       return parseForLoop(tokens);
+    case 'function':
+      return parseFunctionDeclaration(tokens);
     case '{':
       return ['block', ...getStatements(tokens.slice(1))];
     case ';':
       return ['semicolon'];
+    case 'return':
+      return parseReturn(tokens);
     default:
       return parseExprStmt(tokens);
   }
