@@ -100,7 +100,7 @@ const toAsmRec = (node) => {
       return [`JMP ${args.length + c.length}//function:${a}`, ...args, ...c];
     }
     case 'return': {
-      return [...a.slice(0, -1), 'RETURN'];
+      return [...a.slice(0, -1), 'RETURN']; // the slice is to remove the trailing POP so the value stays on the stack
     }
   }
   throw new Error(`ASM ERROR: wtf is ${JSON.stringify(node)}`);
@@ -121,4 +121,17 @@ const resolveFunctionJumps = (asm) => {
     );
 };
 
-export const toAsm = (tokens) => resolveFunctionJumps(toAsmRec(tokens));
+const convertVarsToNums = (asm) => {
+  let counter = 0;
+  const vars = {};
+
+  return asm.map((line) =>
+    line.replace(/^(FETCH|STORE) (.+)/, (_, a, b) => {
+      if (vars[b] === undefined) vars[b] = counter++;
+      return `${a} ${vars[b]}`;
+    })
+  );
+};
+
+export const toAsm = (tokens) =>
+  convertVarsToNums(resolveFunctionJumps(toAsmRec(tokens)));

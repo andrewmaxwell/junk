@@ -1,7 +1,9 @@
-const splitIntoTwo = (str) => {
-  const i = str.indexOf(' ');
-  return i === -1 ? [str] : [str.slice(0, i), str.slice(i + 1)];
-};
+const parseAsm = (program) =>
+  program.map((line) => {
+    const trimmed = line.replace(/\/\/.*/, '').trim();
+    const i = trimmed.indexOf(' ');
+    return i === -1 ? [trimmed] : [trimmed.slice(0, i), +trimmed.slice(i + 1)];
+  });
 
 const binaryOps = {
   ADD: (a, b) => a + b,
@@ -20,37 +22,43 @@ const binaryOps = {
 };
 
 export const runAsm = (program) => {
-  let vars = {};
+  const parsed = parseAsm(program);
+
   const callStack = [];
   const stack = [];
+  let vars = {};
   let pc = 0;
   let output = '';
+  let counter = 0;
 
-  for (let i = 0; i < 10000 && pc < program.length; i++) {
-    // console.log(program[pc], vars);
-    const [op, arg] = splitIntoTwo(program[pc++].replace(/\/\/.*/, '').trim());
+  while (pc < parsed.length) {
+    const [op, arg] = parsed[pc++];
     if (binaryOps[op]) {
       const b = stack.pop();
       const a = stack.pop();
       stack.push(binaryOps[op](a, b));
     } else if (op === 'FETCH') stack.push(vars[arg] || 0);
     else if (op === 'STORE') vars[arg] = stack[stack.length - 1];
-    else if (op === 'PUSH') stack.push(+arg);
+    else if (op === 'PUSH') stack.push(arg);
     else if (op === 'POP') stack.pop();
     else if (op === 'NOT') stack.push(stack.pop() ? 0 : 1);
-    else if (op === 'JMP') pc += +arg;
-    else if (op === 'JZ') pc += stack.pop() ? 0 : +arg;
-    else if (op === 'JNZ') pc += stack.pop() ? +arg : 0;
+    else if (op === 'JMP') pc += arg;
+    else if (op === 'JZ') pc += stack.pop() ? 0 : arg;
+    else if (op === 'JNZ') pc += stack.pop() ? arg : 0;
     else if (op === 'PRINTN') output += stack.pop();
     else if (op === 'PRINTC') output += String.fromCharCode(arg);
     else if (op === 'CALL') {
       callStack.push(vars);
       vars = {_ret: pc};
-      pc += +arg;
+      pc += arg;
     } else if (op === 'RETURN') {
       pc = vars._ret;
       vars = callStack.pop();
     } else throw new Error(`RUN ERROR: wtf is ${op}`);
+    if (counter++ > 1e6) {
+      console.error('RAN TOO LONG', {callStack, stack, vars, pc, output});
+      break;
+    }
   }
   return output;
 };

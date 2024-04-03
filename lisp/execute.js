@@ -50,7 +50,7 @@ const evaluate = (expr, env, stack, steps) => {
 
   if (expr && typeof expr === 'object') {
     const {val, loc} = expr;
-    if (loc) steps.push({loc, env, stack});
+    // if (loc) steps.push({loc, env, stack});
     if (typeof val === 'number') return val;
 
     for (const [key, value] of env) {
