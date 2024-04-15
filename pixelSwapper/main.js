@@ -1,5 +1,13 @@
 const scale = 0.25;
 
+const loadImage = (src) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = src;
+  });
+
 // takes a function and runs it enough times to maintain about 60fps
 const autoSpeed = (func, speed = 1, targetMsPerFrame = 16.667) => {
   setInterval(() => {
@@ -97,26 +105,24 @@ const randomSwapHorizontal = (imgData) => {
   if (cost > 0) swap(imgData, x, y, x + 1, y);
 };
 
-const img = new Image();
-img.addEventListener('load', () => {
-  const canvas = document.querySelector('canvas');
-  const ctx = canvas.getContext('2d');
-  canvas.width = Math.floor(img.width * scale);
-  canvas.height = Math.floor(img.height * scale);
+const img = await loadImage('../genesis/3.webp');
 
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+const canvas = document.querySelector('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = Math.floor(img.width * scale);
+canvas.height = Math.floor(img.height * scale);
 
-  const doManySwaps = autoSpeed(() => {
-    randomSwapHorizontal(imgData);
-    randomSwapVertical(imgData);
-  }, 1000);
+ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-  const loop = () => {
-    doManySwaps();
-    ctx.putImageData(imgData, 0, 0);
-    requestAnimationFrame(loop);
-  };
-  loop();
-});
-img.src = '../genesis/3.webp';
+const doManySwaps = autoSpeed(() => {
+  randomSwapHorizontal(imgData);
+  randomSwapVertical(imgData);
+}, 1000);
+
+const loop = () => {
+  doManySwaps();
+  ctx.putImageData(imgData, 0, 0);
+  requestAnimationFrame(loop);
+};
+loop();
