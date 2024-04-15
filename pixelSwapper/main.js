@@ -97,12 +97,7 @@ const randomSwapHorizontal = (imgData) => {
   if (cost > 0) swap(imgData, x, y, x + 1, y);
 };
 
-const randomSwap = autoSpeed((imgData) => {
-  randomSwapHorizontal(imgData);
-  randomSwapVertical(imgData);
-}, 1000);
-
-const img = document.createElement('img');
+const img = new Image();
 img.addEventListener('load', () => {
   const canvas = document.querySelector('canvas');
   const ctx = canvas.getContext('2d');
@@ -112,8 +107,13 @@ img.addEventListener('load', () => {
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
+  const doManySwaps = autoSpeed(() => {
+    randomSwapHorizontal(imgData);
+    randomSwapVertical(imgData);
+  }, 1000);
+
   const loop = () => {
-    randomSwap(imgData);
+    doManySwaps();
     ctx.putImageData(imgData, 0, 0);
     requestAnimationFrame(loop);
   };
