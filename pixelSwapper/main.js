@@ -1,5 +1,4 @@
-const scale = 0.25;
-
+// takes a url and returns an image
 const loadImage = (src) =>
   new Promise((resolve, reject) => {
     const img = new Image();
@@ -8,10 +7,19 @@ const loadImage = (src) =>
     img.src = src;
   });
 
+// takes a file (from the input) and returns a url
+const readFile = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
 // takes a function and runs it enough times to maintain about 60fps
 const autoSpeed = (func, speed = 1, targetMsPerFrame = 16.667) => {
   setInterval(() => {
-    console.log(`${speed.toLocaleString()} iterations per frame`);
+    console.log(`${Math.floor(speed).toLocaleString()} iterations per frame`);
   }, 1000);
   return (...args) => {
     const start = performance.now();
@@ -105,24 +113,31 @@ const randomSwapHorizontal = (imgData) => {
   if (cost > 0) swap(imgData, x, y, x + 1, y);
 };
 
-const img = await loadImage('../genesis/3.webp');
-
-const canvas = document.querySelector('canvas');
-const ctx = canvas.getContext('2d');
-canvas.width = Math.floor(img.width * scale);
-canvas.height = Math.floor(img.height * scale);
-
-ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-const doManySwaps = autoSpeed(() => {
+const doManySwaps = autoSpeed((imgData) => {
   randomSwapHorizontal(imgData);
   randomSwapVertical(imgData);
 }, 1000);
 
+const canvas = document.querySelector('canvas');
+const ctx = canvas.getContext('2d');
+let imgData;
+
+const reset = (img) => {
+  canvas.height = innerHeight / 2;
+  canvas.width = (canvas.height / img.height) * img.width;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+};
+
 const loop = () => {
-  doManySwaps();
+  doManySwaps(imgData);
   ctx.putImageData(imgData, 0, 0);
   requestAnimationFrame(loop);
 };
+
+reset(await loadImage('../genesis/3.webp'));
 loop();
+
+document.querySelector('input').addEventListener('change', async (e) => {
+  reset(await loadImage(await readFile(e.target.files[0])));
+});
