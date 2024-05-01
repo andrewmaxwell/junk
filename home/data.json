@@ -6,6 +6,12 @@
     "desc": "A character for each chemical element created by DALL·E"
   },
   {
+    "filePath": "fourierDrawing",
+    "title": "Fourier Drawing",
+    "year": 2024,
+    "desc": "Draw a shape and see what happens."
+  },
+  {
     "filePath": "genesis",
     "title": "Genesis",
     "year": 2024,
