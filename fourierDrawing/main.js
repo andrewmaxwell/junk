@@ -5,7 +5,7 @@ import {render} from './render.js';
 
 const canvas = document.querySelector('canvas');
 
-const params = {speed: 0.01, detail: 1};
+const params = {speed: 0.02};
 
 let time = 0;
 let gears = [];
@@ -14,9 +14,9 @@ let points =
     .split(';')
     .map((p) => ({x: +p.split(',')[0], y: +p.split(',')[1]}));
 
-const reset = () => {
-  const allGears = pointsToGears(points);
-  gears = allGears.slice(0, params.detail * allGears.length);
+const restart = () => {
+  // console.log(points);
+  gears = pointsToGears(points);
   time = 0;
 };
 
@@ -26,12 +26,12 @@ const loop = () => {
   requestAnimationFrame(loop);
 };
 
-reset();
+restart();
 loop();
 
 const clear = () => {
   points = [];
-  reset();
+  restart();
 };
 
 const mouseMove = (e) => {
@@ -40,7 +40,7 @@ const mouseMove = (e) => {
   const last = points[points.length - 1];
   if (last && Math.hypot(x - last.x, y - last.y) <= 16) return;
   points.push({x, y});
-  reset();
+  restart();
 };
 
 canvas.onmousedown = canvas.ontouchstart = clear;
@@ -50,6 +50,6 @@ canvas.addEventListener('mousemove', (e) => {
 canvas.addEventListener('touchmove', (e) => mouseMove(e.touches[0]));
 
 const gui = new window.dat.GUI();
-gui.add(params, 'speed', 0, 0.1);
-gui.add(params, 'detail', 0, 1).onChange(reset);
+gui.add(params, 'speed', 0, 1);
+gui.add({restart}, 'restart');
 gui.add({clear}, 'clear');
