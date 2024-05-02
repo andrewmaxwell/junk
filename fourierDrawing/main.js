@@ -34,17 +34,20 @@ const clear = () => {
   reset();
 };
 
-canvas.addEventListener('mousedown', clear);
-canvas.addEventListener('mousemove', (e) => {
-  if (!e.buttons) return;
-  const x = e.x - canvas.width / 2;
-  const y = e.y - canvas.height / 2;
+const mouseMove = (e) => {
+  const x = e.pageX - canvas.width / 2;
+  const y = e.pageY - canvas.height / 2;
   const last = points[points.length - 1];
   if (last && Math.hypot(x - last.x, y - last.y) <= 16) return;
   points.push({x, y});
-  console.log(JSON.stringify(points));
   reset();
+};
+
+canvas.onmousedown = canvas.ontouchstart = clear;
+canvas.addEventListener('mousemove', (e) => {
+  if (e.buttons) mouseMove(e);
 });
+canvas.addEventListener('touchmove', (e) => mouseMove(e.touches[0]));
 
 const gui = new window.dat.GUI();
 gui.add(params, 'speed', 0, 0.1);
