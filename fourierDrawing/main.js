@@ -1,5 +1,6 @@
 // based on https://js1k.com/2018-coins/details/3124
 
+import {debounce} from '../misc/debounce.js';
 import {pointsToGears} from './pointsToGears.js';
 import {render} from './render.js';
 
@@ -14,11 +15,11 @@ let points =
     .split(';')
     .map((p) => ({x: +p.split(',')[0], y: +p.split(',')[1]}));
 
-const restart = () => {
+const restart = debounce(() => {
   // console.log(points);
   gears = pointsToGears(points);
   time = 0;
-};
+});
 
 const loop = () => {
   render(canvas, points, gears, time);
@@ -38,8 +39,9 @@ const mouseMove = (e) => {
   const x = e.pageX - canvas.width / 2;
   const y = e.pageY - canvas.height / 2;
   const last = points[points.length - 1];
-  if (last && Math.hypot(x - last.x, y - last.y) <= 16) return;
+  if (last && Math.hypot(x - last.x, y - last.y) <= 8) return;
   points.push({x, y});
+  gears = [];
   restart();
 };
 
