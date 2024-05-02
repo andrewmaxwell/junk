@@ -33,8 +33,8 @@ export const render = (canvas, points, gears, time) => {
     ctx.stroke();
   }
 
-  const i = gears.length - 1;
-  if (gears[i]) {
+  if (gears.length) {
+    const i = gears.length - 1;
     const hue = (360 * i) / gears.length;
     const numPts = ((time % tau) * gears[i].path.length) / tau;
     ctx.lineWidth = 2;
