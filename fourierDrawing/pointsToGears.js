@@ -10,17 +10,15 @@ const addIntermediate = (points) =>
   });
 
 const fourierTransform = (points) =>
-  points.map((_, i) =>
-    points.reduce(
-      (res, p, j) => {
-        const angle = (i * j * -2 * Math.PI) / points.length;
-        res.re += p.x * Math.cos(angle) - p.y * Math.sin(angle);
-        res.im += p.x * Math.sin(angle) + p.y * Math.cos(angle);
-        return res;
-      },
-      {re: 0, im: 0}
-    )
-  );
+  points.map((_, i) => {
+    let res = {re: 0, im: 0};
+    points.forEach((p, j) => {
+      const angle = (i * j * -2 * Math.PI) / points.length;
+      res.re += p.x * Math.cos(angle) - p.y * Math.sin(angle);
+      res.im += p.x * Math.sin(angle) + p.y * Math.cos(angle);
+    });
+    return res;
+  });
 
 const fourierToGears = (complexNums) =>
   complexNums
@@ -32,6 +30,7 @@ const fourierToGears = (complexNums) =>
         phase: Math.atan2(c.im, c.re),
       };
     })
+    .filter((a) => a.radius > 0.2)
     .sort((a, b) => b.radius - a.radius);
 
 const calculatePaths = (gears) => {
