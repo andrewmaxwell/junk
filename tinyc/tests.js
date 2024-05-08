@@ -886,7 +886,7 @@ printf("%d", add3(7, 11, 19));`,
   if (i) return i + sum(i - 1);
   return 0;
 }
-printf("%d", sum(10));`,
+printf("%d", sum(100));`,
     asm: [
       'JMP 13',
       'STORE 0',
@@ -902,12 +902,12 @@ printf("%d", sum(10));`,
       'RETURN',
       'PUSH 0',
       'RETURN',
-      'PUSH 10',
+      'PUSH 100',
       'CALL -15',
       'PRINTN',
       'POP',
     ],
-    expected: '55',
+    expected: '5050',
     ast: [
       'block',
       [
@@ -951,7 +951,7 @@ printf("%d", sum(10));`,
               [
                 'functionCall',
                 ['var', 'sum'],
-                ['parenthetical', ['number', 10]],
+                ['parenthetical', ['number', 100]],
               ],
             ],
           ],

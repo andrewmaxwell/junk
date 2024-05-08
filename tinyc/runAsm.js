@@ -1,8 +1,7 @@
 const parseAsm = (program) =>
   program.map((line) => {
-    const trimmed = line.replace(/\/\/.*/, '').trim();
-    const i = trimmed.indexOf(' ');
-    return i === -1 ? [trimmed] : [trimmed.slice(0, i), +trimmed.slice(i + 1)];
+    const [op, arg] = line.split(' ');
+    return [op, +arg];
   });
 
 const binaryOps = {
@@ -55,6 +54,7 @@ export const runAsm = (program) => {
       pc = vars._ret;
       vars = callStack.pop();
     } else throw new Error(`RUN ERROR: wtf is ${op}`);
+
     if (counter++ > 1e6) {
       console.error('RAN TOO LONG', {callStack, stack, vars, pc, output});
       break;

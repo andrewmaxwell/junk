@@ -55,7 +55,6 @@ const loop = () => {
     ctx.fill();
   }
 
-  // ctx.strokeStyle = 'white';
   ctx.lineWidth = 0.5;
   ctx.beginPath();
   ctx.moveTo(0, 0);
