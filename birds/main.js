@@ -1,51 +1,37 @@
 /* eslint-disable import/no-unresolved */
-/* eslint-disable import/no-unresolved */
 import * as THREE from 'three';
 import {makeRenderer} from './makeRenderer.js';
 
 const numBirds = 10000;
-const turnSpeed = 0.1; // radians
-const moveSpeed = 0.3;
+const turnSpeed = 0.2;
+const moveSpeed = 0.5;
 
-const {render, addBirdMesh} = makeRenderer();
+const moveBird = (bird, i, birds) => {
+  const targetDirection = new THREE.Vector3()
+    .subVectors(birds[(i + 1) % birds.length].position, bird.position)
+    .normalize();
 
-const birds = [];
-for (let i = 0; i < numBirds; i++) {
-  const b = (birds[i] = addBirdMesh(i / numBirds));
+  bird.userData.direction = bird.userData.direction
+    .lerp(targetDirection, turnSpeed)
+    .normalize();
 
-  b.position.x = Math.random() * 400 - 200;
-  b.position.y = Math.random() * 400 - 200;
-  b.position.z = Math.random() * 400 - 200;
-  b.userData = {
-    direction: new THREE.Vector3(
-      Math.random() - 0.5,
-      Math.random() - 0.5,
-      Math.random() - 0.5
-    ).normalize(),
-  };
-}
+  bird.position.addScaledVector(bird.userData.direction, moveSpeed);
 
-function animate() {
-  requestAnimationFrame(animate);
+  bird.lookAt(
+    bird.position.x + bird.userData.direction.x,
+    bird.position.y + bird.userData.direction.y,
+    bird.position.z + bird.userData.direction.z
+  );
+};
 
-  birds.forEach((bird, i, birds) => {
-    const targetDirection = new THREE.Vector3()
-      .subVectors(birds[(i + 1) % birds.length].position, bird.position)
-      .normalize();
+const {render, addBird} = makeRenderer();
 
-    bird.userData.direction = bird.userData.direction
-      .lerp(targetDirection, turnSpeed)
-      .normalize();
+const birds = Array.from({length: numBirds}, (_, i) => addBird(i / numBirds));
 
-    bird.position.addScaledVector(bird.userData.direction, moveSpeed);
-    bird.lookAt(
-      bird.position.x + bird.userData.direction.x,
-      bird.position.y + bird.userData.direction.y,
-      bird.position.z + bird.userData.direction.z
-    );
-  });
-
+const loop = () => {
+  birds.forEach(moveBird);
   render();
-}
+  requestAnimationFrame(loop);
+};
 
-animate();
+loop();

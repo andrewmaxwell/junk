@@ -2,8 +2,8 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 
-const geometry = new THREE.BufferGeometry();
-geometry.setAttribute(
+const birdGeometry = new THREE.BufferGeometry();
+birdGeometry.setAttribute(
   'position',
   new THREE.BufferAttribute(
     new Float32Array([
@@ -40,9 +40,9 @@ geometry.setAttribute(
     3
   )
 );
-geometry.computeVertexNormals();
+birdGeometry.computeVertexNormals();
 
-export function makeRenderer() {
+export const makeRenderer = () => {
   const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight);
   camera.position.x = -75;
   camera.position.y = 100;
@@ -94,16 +94,26 @@ export function makeRenderer() {
       renderer.render(scene, camera);
       controls.update();
     },
-    addBirdMesh(i) {
+    addBird(i) {
       const material = new THREE.MeshPhongMaterial({
         color: `hsl(${i * 360}, 100%, 75%)`,
         side: THREE.DoubleSide,
       });
-      const bird = new THREE.Mesh(geometry, material);
+      const bird = new THREE.Mesh(birdGeometry, material);
       bird.castShadow = true;
       bird.receiveShadow = true;
+
+      bird.position.x = Math.random() * 400 - 200;
+      bird.position.y = Math.random() * 400 - 200;
+      bird.position.z = Math.random() * 400 - 200;
+      bird.userData.direction = new THREE.Vector3(
+        Math.random() - 0.5,
+        Math.random() - 0.5,
+        Math.random() - 0.5
+      ).normalize();
+
       scene.add(bird);
       return bird;
     },
   };
-}
+};
