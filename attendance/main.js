@@ -36,7 +36,7 @@ const calc = ({people: peopleRows, attendance}) => {
       )
       .sort((a, b) => b.score - a.score)
       .forEach((p, j) => {
-        p.positions.push({x: j, y: i, present: ids.has(p.id)});
+        p.positions.push({x: i, y: j, present: ids.has(p.id)});
       });
   }
 

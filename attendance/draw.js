@@ -1,37 +1,33 @@
 const xSpacing = 50;
-const ySpacing = 50;
+const ySpacing = 20;
 const lineWidth = 16;
 
-const toX = (j) => 100 + j * xSpacing;
+const toX = (j) => 30 + j * xSpacing;
 const toY = (i) => 30 + i * ySpacing;
 
 export const draw = ({people, attendance}) => {
   const canvas = document.querySelector('canvas');
   const ctx = canvas.getContext('2d');
+  canvas.width = toX(attendance.length) + 10;
+  canvas.height = toY(
+    Math.max(...people.flatMap((p) => p.positions.map((p) => p.y))) + 1
+  );
 
-  canvas.width = toX(people.length);
-  canvas.height = toY(attendance.length);
-
-  // alternating background row colors
-  ctx.fillStyle = '#00000010';
-  for (let i = 1; i < attendance.length; i += 2) {
-    ctx.fillRect(0, toY(i - 0.5), canvas.width, ySpacing);
-  }
-
-  ctx.fillStyle = 'black';
-  ctx.textAlign = 'left';
+  ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  // left column dates
+  // top dates
   for (let i = 0; i < attendance.length; i++) {
-    ctx.fillText(attendance[i].date.toISOString().slice(0, 10), 3, toY(i));
+    ctx.fillText(
+      attendance[i].date.toISOString().slice(0, 10),
+      toX(i),
+      i % 2 ? 5 : 15
+    );
   }
 
-  // top and bottom row numbers
-  ctx.textAlign = 'center';
+  // right row numbers
   for (let i = 0; i < people.length; i++) {
-    ctx.fillText(i + 1, toX(i), 10);
-    ctx.fillText(i + 1, toX(i), canvas.height - 5);
+    ctx.fillText(i + 1, canvas.width - 10, toY(i));
   }
 
   // color lines

@@ -1,9 +1,4 @@
-import {
-  calcFrequency,
-  nextMonth,
-  simpleMovingAverage,
-  smooth,
-} from './utils.js';
+import {calcFrequency, nextMonth} from './utils.js';
 
 const dates = (await (await fetch('headaches.txt')).text())
   .split('\n')
