@@ -30,6 +30,12 @@
     "desc": "Watch the particles slowly flow through the maze."
   },
   {
+    "filePath": "slime",
+    "title": "Slime Mold",
+    "year": 2024,
+    "desc": "Lots of parameters to play with."
+  },
+  {
     "filePath": "voxels",
     "title": "Langton's Ant in 3D",
     "year": 2023,

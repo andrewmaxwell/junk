@@ -1,16 +1,17 @@
 import {makeGradient, makeRenderer} from '../sand/makeRenderer.js';
 
+const numCells = 50000;
+
 const params = {
-  numCells: 50000,
   resolution: 0.5,
   sensingDistance: 3,
   sensingRadius: 3,
-  sensingAngle: 0.5,
+  sensingAngle: 0.75,
   moveSpeed: 1,
-  turnSpeed: 0.05,
-  strength: 0.02,
-  fadeSpeed: 0.05,
-  maxStrength: 0.5,
+  turnSpeed: 0.25,
+  strength: 0.04,
+  fadeSpeed: 0.15,
+  maxStrength: 0.2,
   scattering: 0.1,
 };
 
@@ -33,11 +34,11 @@ const reset = () => {
 
   grid = new Float32Array(width * height);
   grid2 = new Float32Array(width * height);
-  xCoords = new Float32Array(params.numCells);
-  yCoords = new Float32Array(params.numCells);
-  angles = new Float32Array(params.numCells);
+  xCoords = new Float32Array(1e6);
+  yCoords = new Float32Array(1e6);
+  angles = new Float32Array(1e6);
 
-  for (let i = 0; i < xCoords.length; i++) {
+  for (let i = 0; i < numCells; i++) {
     xCoords[i] = Math.random() * width;
     yCoords[i] = Math.random() * height;
     angles[i] = Math.random() * 2 * Math.PI;
@@ -96,7 +97,7 @@ const sense = (x, y, angle) => {
 };
 
 const moveCells = () => {
-  for (let i = 0; i < xCoords.length; i++) {
+  for (let i = 0; i < numCells; i++) {
     const forward = sense(xCoords[i], yCoords[i], angles[i]);
     const left = sense(xCoords[i], yCoords[i], angles[i] - params.sensingAngle);
     const right = sense(
@@ -118,7 +119,7 @@ const moveCells = () => {
 };
 
 const dropPheromones = () => {
-  for (let i = 0; i < xCoords.length; i++) {
+  for (let i = 0; i < numCells; i++) {
     const k = Math.round(yCoords[i]) * width + Math.round(xCoords[i]);
     grid[k] = Math.min(1, grid[k] + params.strength);
   }
@@ -148,3 +149,10 @@ gui.add(params, 'maxStrength', 0, 1);
 gui.add(params, 'scattering', 0, 1);
 gui.add({reset}, 'reset');
 window.addEventListener('resize', reset);
+
+window.addEventListener('mousemove', (e) => {
+  if (e.buttons !== 1) return;
+  const x = Math.floor(e.pageX * params.resolution);
+  const y = Math.floor(e.pageY * params.resolution);
+  grid[y * width + x] = 100;
+});
