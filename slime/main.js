@@ -1,42 +1,64 @@
 import {makeGradient, makeRenderer} from '../sand/makeRenderer.js';
 
-const width = innerWidth / 2;
-const height = innerHeight / 2;
-const numCells = 10000;
-const sensingDistance = 4;
-const sensingRadius = 4;
-const sensingAngle = Math.PI / 4;
-const turnSpeed = 0.1;
-const pheromoneStrength = 0.1;
-const fadeSpeed = 0.995;
+const params = {
+  numCells: 50000,
+  resolution: 0.5,
+  sensingDistance: 3,
+  sensingRadius: 3,
+  sensingAngle: 0.5,
+  moveSpeed: 1,
+  turnSpeed: 0.05,
+  strength: 0.02,
+  fadeSpeed: 0.05,
+  maxStrength: 0.5,
+  scattering: 0.1,
+};
 
-const render = makeRenderer(
-  document.querySelector('canvas'),
-  width,
-  height,
-  makeGradient([
-    [0, 0, 0], // black
-    [0, 0, 255], // blue
-    [0, 255, 255], // cyan
-    [0, 255, 0], // green
-    [255, 255, 0], // yellow
-    [255, 0, 0], // red
-    [255, 0, 255], // magenta
-    [255, 255, 255], // white
-  ])
-);
+let width, height, grid, grid2, sensingCoords, render, xCoords, yCoords, angles;
 
-let cells, grid, grid2;
+const calcSensingCoords = () => {
+  sensingCoords = [];
+  const rad = params.sensingRadius;
+  for (let y = -rad; y < rad + 1; y++) {
+    for (let x = -rad; x < rad + 1; x++) {
+      if (Math.hypot(x, y) > rad) continue;
+      sensingCoords.push({x, y});
+    }
+  }
+};
 
 const reset = () => {
-  cells = Array.from({length: numCells}, () => {
-    const x = Math.random() * width;
-    const y = Math.random() * height;
-    const angle = 2 * Math.PI * Math.random();
-    return {x, y, angle};
-  });
-  grid = Array.from({length: width * height}).fill(0);
-  grid2 = Array.from({length: width * height}).fill(0);
+  width = Math.floor(innerWidth * params.resolution);
+  height = Math.floor(innerHeight * params.resolution);
+
+  grid = new Float32Array(width * height);
+  grid2 = new Float32Array(width * height);
+  xCoords = new Float32Array(params.numCells);
+  yCoords = new Float32Array(params.numCells);
+  angles = new Float32Array(params.numCells);
+
+  for (let i = 0; i < xCoords.length; i++) {
+    xCoords[i] = Math.random() * width;
+    yCoords[i] = Math.random() * height;
+    angles[i] = Math.random() * 2 * Math.PI;
+  }
+
+  render = makeRenderer(
+    document.querySelector('canvas'),
+    width,
+    height,
+    makeGradient([
+      [0, 0, 0], // black
+      [0, 0, 255], // blue
+      [0, 255, 255], // cyan
+      [0, 255, 0], // green
+      [255, 255, 0], // yellow
+      [255, 0, 0], // red
+      [255, 0, 255], // magenta
+      [255, 255, 255], // white
+    ])
+  );
+  calcSensingCoords();
 };
 
 const getStrength = (x, y) => grid[y * width + x];
@@ -51,50 +73,54 @@ const dissipate = () => {
           getStrength((x - 1 + width) % width, y) +
           getStrength(x, (y - 1 + height) % height)) /
           5) *
-        fadeSpeed;
+        (1 - params.fadeSpeed);
     }
   }
   [grid, grid2] = [grid2, grid];
 };
 
-// precalculate
-const sensingCoords = [];
-for (let y = -sensingRadius; y <= sensingRadius; y++) {
-  for (let x = -sensingRadius; x <= +sensingRadius; x++) {
-    if (y ** 2 + x ** 2 > sensingRadius ** 2) continue;
-    sensingCoords.push({x, y});
-  }
-}
 const sense = (x, y, angle) => {
-  const cx = Math.round(x + sensingDistance * Math.cos(angle));
-  const cy = Math.round(y + sensingDistance * Math.sin(angle));
-  return sensingCoords.reduce(
-    (total, s) =>
-      total +
-      getStrength((cx + s.x + width) % width, (cy + s.y + height) % height),
-    0
-  );
+  const cx = x + params.sensingDistance * Math.cos(angle);
+  const cy = y + params.sensingDistance * Math.sin(angle);
+  const amt =
+    sensingCoords.reduce(
+      (total, s) =>
+        total +
+        getStrength(
+          Math.floor(cx + s.x + width) % width,
+          Math.floor(cy + s.y + height) % height
+        ),
+      0
+    ) / sensingCoords.length;
+  return amt > params.maxStrength ? -amt : amt;
 };
 
 const moveCells = () => {
-  for (const c of cells) {
-    const forward = sense(c.x, c.y, c.angle);
-    const left = sense(c.x, c.y, c.angle - sensingAngle);
-    const right = sense(c.x, c.y, c.angle + sensingAngle);
+  for (let i = 0; i < xCoords.length; i++) {
+    const forward = sense(xCoords[i], yCoords[i], angles[i]);
+    const left = sense(xCoords[i], yCoords[i], angles[i] - params.sensingAngle);
+    const right = sense(
+      xCoords[i],
+      yCoords[i],
+      angles[i] + params.sensingAngle
+    );
 
     const max = Math.max(forward, left, right);
-    if (left === max) c.angle -= turnSpeed;
-    else if (right === max) c.angle += turnSpeed;
+    if (left === max) angles[i] -= params.turnSpeed;
+    if (right === max) angles[i] += params.turnSpeed;
+    angles[i] += (Math.random() - 0.5) * params.scattering;
 
-    c.x = (c.x + Math.cos(c.angle) + width) % width;
-    c.y = (c.y + Math.sin(c.angle) + height) % height;
+    xCoords[i] =
+      (xCoords[i] + params.moveSpeed * Math.cos(angles[i]) + width) % width;
+    yCoords[i] =
+      (yCoords[i] + params.moveSpeed * Math.sin(angles[i]) + height) % height;
   }
 };
 
 const dropPheromones = () => {
-  for (const c of cells) {
-    const k = Math.round(c.y) * width + Math.round(c.x);
-    grid[k] = Math.min(1, grid[k] + pheromoneStrength);
+  for (let i = 0; i < xCoords.length; i++) {
+    const k = Math.round(yCoords[i]) * width + Math.round(xCoords[i]);
+    grid[k] = Math.min(1, grid[k] + params.strength);
   }
 };
 
@@ -108,3 +134,17 @@ const loop = () => {
 
 reset();
 loop();
+
+const gui = new window.dat.GUI();
+gui.add(params, 'resolution', 0.1, 1).onChange(reset);
+gui.add(params, 'sensingDistance', -10, 10);
+gui.add(params, 'sensingRadius', 0, 10).onChange(calcSensingCoords);
+gui.add(params, 'sensingAngle', 0, Math.PI);
+gui.add(params, 'moveSpeed', 0, 5);
+gui.add(params, 'turnSpeed', -0.2, 1);
+gui.add(params, 'strength', 0, 0.1);
+gui.add(params, 'fadeSpeed', 0, 0.2);
+gui.add(params, 'maxStrength', 0, 1);
+gui.add(params, 'scattering', 0, 1);
+gui.add({reset}, 'reset');
+window.addEventListener('resize', reset);
