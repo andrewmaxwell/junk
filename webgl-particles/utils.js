@@ -43,33 +43,9 @@ const typeMappings = {
   float: 'uniform1f',
 };
 
-export const createProgram = (
-  gl,
-  vertexShaderStr,
-  fragmentShaderStr,
-  attribSize,
-  bufferData,
-  drawType
-) => {
-  const program = gl.createProgram();
-  gl.attachShader(program, loadShader(gl, vertexShaderStr, gl.VERTEX_SHADER));
-  gl.attachShader(
-    program,
-    loadShader(gl, fragmentShaderStr, gl.FRAGMENT_SHADER)
-  );
-  gl.linkProgram(program);
-  const linked = gl.getProgramParameter(program, gl.LINK_STATUS);
-  if (!linked) {
-    const lastError = gl.getProgramInfoLog(program);
-    document.body.innerHTML += `<pre style="position:fixed;top:5px;left:5px">Error in program linking: ${lastError}</pre>`;
-    gl.deleteProgram(program);
-    return null;
-  }
-
-  const combinedCode = vertexShaderStr + '\n' + fragmentShaderStr;
+// returns an object whose keys are the names of uniforms and values are functions for updating them
+const getUniformUpdaters = (gl, program, combinedCode) => {
   const uniformUpdaters = {};
-  const [, attribName] = combinedCode.match(/attribute \w+ (\w+);/);
-  const attribLocation = gl.getAttribLocation(program, attribName);
   for (const [, type, name] of combinedCode.matchAll(/uniform (\w+) (\w+);/g)) {
     const loc = gl.getUniformLocation(program, name);
     if (type === 'sampler2D') {
@@ -84,6 +60,35 @@ export const createProgram = (
       throw new Error(`wtf is ${type}`);
     }
   }
+  return uniformUpdaters;
+};
+
+const getAttribLocation = (gl, program, combinedCode) => {
+  const [, attribName] = combinedCode.match(/attribute \w+ (\w+);/);
+  return gl.getAttribLocation(program, attribName);
+};
+
+const createProgram = (
+  gl,
+  {vertexShaderStr, fragmentShaderStr, attribSize, bufferData, drawType}
+) => {
+  const program = gl.createProgram();
+  gl.attachShader(program, loadShader(gl, vertexShaderStr, gl.VERTEX_SHADER));
+  gl.attachShader(
+    program,
+    loadShader(gl, fragmentShaderStr, gl.FRAGMENT_SHADER)
+  );
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const lastError = gl.getProgramInfoLog(program);
+    document.body.innerHTML += `<pre style="position:fixed;top:5px;left:5px">Error in program linking: ${lastError}</pre>`;
+    gl.deleteProgram(program);
+    return null;
+  }
+
+  const combinedCode = vertexShaderStr + '\n' + fragmentShaderStr;
+  const attribLocation = getAttribLocation(gl, program, combinedCode);
+  const uniformUpdaters = getUniformUpdaters(gl, program, combinedCode);
 
   const buff = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buff);
@@ -106,13 +111,29 @@ export const createProgram = (
       gl.useProgram(program);
 
       for (const key in params) {
-        if (Array.isArray(params[key])) uniformUpdaters[key](...params[key]);
-        else uniformUpdaters[key](params[key]);
+        const val = params[key];
+        if (Array.isArray(val)) uniformUpdaters[key](...val);
+        else uniformUpdaters[key](val);
       }
 
       gl.drawArrays(drawType, 0, bufferData.length / attribSize);
     },
   };
+};
+
+const makeFrame = (gl, {data, width, height}) => {
+  const frameBuffer = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuffer);
+
+  const texture = createTexture(gl, data, width, height);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,
+    texture,
+    0
+  );
+  return {frameBuffer, texture};
 };
 
 export const makeGl = (canvas) => {
@@ -132,7 +153,11 @@ export const makeGl = (canvas) => {
     alert('Can not use textures in vertex shaders');
   }
 
-  return gl;
+  return {
+    gl,
+    createProgram: (params) => createProgram(gl, params),
+    makeFrame: (params) => makeFrame(gl, params),
+  };
 };
 
 export const orthographic = (
@@ -161,21 +186,4 @@ export const orthographic = (
   dst[14] = (near + far) / (near - far);
   dst[15] = 1;
   return dst;
-};
-
-export const getFile = async (filename) => (await fetch(filename)).text();
-
-export const makeFrame = (gl, data, width, height = width) => {
-  const frameBuffer = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuffer);
-
-  const texture = createTexture(gl, data, width, height);
-  gl.framebufferTexture2D(
-    gl.FRAMEBUFFER,
-    gl.COLOR_ATTACHMENT0,
-    gl.TEXTURE_2D,
-    texture,
-    0
-  );
-  return {frameBuffer, texture};
 };
