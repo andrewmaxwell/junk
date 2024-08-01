@@ -1,0 +1,39 @@
+import {sieve} from '../misc/sieve.js';
+
+const nextSteps = [
+  (v) => [v[1], v[0]],
+  (v, l) => [v[0], v[1] + l],
+  (v, l) => [v[0] + l, v[1] + l],
+  (v, l) => [2 * l - 1 - v[1], l - 1 - v[0]],
+];
+
+const hilbert = (index, pow, level = 0, pos = [0, 0]) => {
+  if (level === pow) return pos;
+  const step = nextSteps[Math.floor(index / 4 ** level) % 4];
+  return hilbert(index, pow, level + 1, step(pos, 2 ** level));
+};
+
+const pow = 6;
+const scale = 16;
+
+const canvas = document.querySelector('canvas');
+const ctx = canvas.getContext('2d');
+
+canvas.width = canvas.height = scale * 2 ** pow;
+
+const isPrime = sieve(4 ** pow);
+
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.fillStyle = 'white';
+ctx.strokeStyle = 'gray';
+ctx.beginPath();
+for (let i = 0; i < 4 ** pow; i++) {
+  if (!isPrime[i]) continue;
+  const [x, y] = hilbert(i, pow);
+  // ctx.fillRect(x * scale, y * scale, scale, scale);
+  ctx.lineTo((x + 0.5) * scale, (y + 0.5) * scale);
+  ctx.fillText(i, (x + 0.5) * scale, (y + 0.5) * scale);
+}
+ctx.stroke();
+
+console.log(4 ** pow);
