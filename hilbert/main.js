@@ -21,18 +21,17 @@ const ctx = canvas.getContext('2d');
 
 canvas.width = canvas.height = scale * 2 ** pow;
 
-const isPrime = sieve(4 ** pow);
+const primes = sieve(4 ** pow);
 
 ctx.fillRect(0, 0, canvas.width, canvas.height);
 ctx.fillStyle = 'white';
 ctx.strokeStyle = 'gray';
 ctx.beginPath();
-for (let i = 0; i < 4 ** pow; i++) {
-  if (!isPrime[i]) continue;
-  const [x, y] = hilbert(i, pow);
+for (const p of primes) {
+  const [x, y] = hilbert(p, pow);
   // ctx.fillRect(x * scale, y * scale, scale, scale);
   ctx.lineTo((x + 0.5) * scale, (y + 0.5) * scale);
-  ctx.fillText(i, (x + 0.5) * scale, (y + 0.5) * scale);
+  ctx.fillText(p, (x + 0.5) * scale, (y + 0.5) * scale);
 }
 ctx.stroke();
 

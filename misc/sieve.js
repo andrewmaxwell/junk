@@ -1,9 +1,12 @@
 export const sieve = (limit) => {
-  const isPrime = new Array(limit).fill(1);
-  isPrime[0] = isPrime[1] = 0;
+  const isNotPrime = new Uint16Array(limit);
   for (let p = 2; p * p <= limit; ++p) {
-    if (!isPrime[p]) continue;
-    for (let i = p * p; i <= limit; i += p) isPrime[i] = 0;
+    if (isNotPrime[p]) continue;
+    for (let i = p * p; i <= limit; i += p) isNotPrime[i] = 1;
   }
-  return isPrime;
+  const primes = [];
+  for (let i = 2; i < limit; i++) {
+    if (!isNotPrime[i]) primes.push(i);
+  }
+  return primes;
 };
