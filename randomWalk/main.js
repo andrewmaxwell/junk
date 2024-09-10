@@ -1,13 +1,14 @@
 import {viewer} from '../primeSpiral/viewer.js';
 
-const getClosestPoint = (target, coords) => {
-  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-  return coords.reduce(
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const randomEl = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+const getClosestPoint = (target, coords) =>
+  coords.reduce(
     (res, coord, i) =>
       dist(coord, target) < dist(coords[res], target) ? i : res,
     0
   );
-};
 
 const buildAdjacencyStructure = (paths) => {
   const adj = {};
@@ -24,10 +25,7 @@ const iteratePath = (path, adj) => {
   const curr = path[path.length - 1];
   const prev = path[path.length - 2];
   const neighbors = adj[curr].filter((id) => id !== prev);
-  return [
-    ...path.slice(-20),
-    neighbors[Math.floor(Math.random() * neighbors.length)] || prev,
-  ];
+  return [...path.slice(-20), randomEl(neighbors) || prev];
 };
 
 const {coords, paths} = await (await fetch('paths.json')).json();
