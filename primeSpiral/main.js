@@ -1,19 +1,33 @@
-import {sieve} from '../misc/sieve.js';
+import {getPrimes} from '../misc/getPrimes.js';
+import {viewer} from './viewer.js';
 
-const limit = 2 ** 20;
-const totalRad = Math.sqrt(limit);
-
-const canvas = document.querySelector('canvas');
-canvas.width = canvas.height = 2 * totalRad;
-
-const ctx = canvas.getContext('2d');
-ctx.translate(totalRad, totalRad);
-ctx.fillStyle = 'white';
-
-for (const p of sieve(limit)) {
+const obs = getPrimes(2 ** 16).map((p) => {
   const angle = Math.sqrt(p) * Math.PI * 2;
   const dist = Math.sqrt(p);
   const x = dist * Math.cos(angle);
   const y = dist * Math.sin(angle);
-  ctx.fillRect(x, y, 1, 1);
-}
+  return {p, x, y};
+});
+
+viewer((ctx, camera) => {
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '0.25px sans-serif';
+
+  ctx.fillStyle = 'gray';
+  ctx.beginPath();
+  for (const {x, y} of obs) {
+    if (!camera.isVisible(x, y)) continue;
+    ctx.moveTo(x + 1, y);
+    ctx.arc(x, y, 1, 0, 2 * Math.PI);
+  }
+  ctx.fill();
+
+  if (camera.zoom > 10) {
+    ctx.fillStyle = 'white';
+    for (const {x, y, p} of obs) {
+      if (!camera.isVisible(x, y)) continue;
+      ctx.fillText(p.toLocaleString(), x, y);
+    }
+  }
+});

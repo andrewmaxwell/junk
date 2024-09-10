@@ -5,11 +5,11 @@ const movementThreshold = 1;
 const zoomThreshold = 0.002;
 
 export class Camera {
-  constructor() {
+  constructor(initialView = {}) {
     this.target = {};
-    this.x = this.target.x = 0;
-    this.y = this.target.y = 0;
-    this.zoom = this.targetZoom = 0.6;
+    this.x = this.target.x = initialView.x ?? 0;
+    this.y = this.target.y = initialView.y ?? 0;
+    this.zoom = this.targetZoom = initialView.zoom ?? 0.6;
   }
   move(pressing) {
     if (pressing.left) this.target.x -= moveSpeed / this.zoom;
