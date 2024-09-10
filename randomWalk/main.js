@@ -1,10 +1,10 @@
 import {viewer} from '../primeSpiral/viewer.js';
 
-const getClosestPoint = (coord, coords) => {
+const getClosestPoint = (target, coords) => {
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
   return coords.reduce(
     (res, coord, i) =>
-      dist(coord, coord) < dist(coords[res], coord) ? i : res,
+      dist(coord, target) < dist(coords[res], target) ? i : res,
     0
   );
 };
@@ -33,7 +33,7 @@ const iteratePath = (path, adj) => {
 const {coords, paths} = await (await fetch('paths.json')).json();
 const adj = buildAdjacencyStructure(paths);
 
-let randomPath = [getClosestPoint([64067, 49279], coords)];
+let randomPath = [getClosestPoint([63867, 49079], coords)];
 
 viewer(
   (ctx, camera) => {
