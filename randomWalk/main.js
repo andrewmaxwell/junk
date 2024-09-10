@@ -23,9 +23,8 @@ const buildAdjacencyStructure = (paths) => {
 
 const iteratePath = (path, adj) => {
   const curr = path[path.length - 1];
-  const prev = path[path.length - 2];
-  const neighbors = adj[curr].filter((id) => id !== prev);
-  return [...path.slice(-20), randomEl(neighbors) || prev];
+  const neighbors = adj[curr].filter((id) => !path.includes(id));
+  return [...path.slice(-20), randomEl(neighbors) || path[path.length - 2]];
 };
 
 const {coords, paths} = await (await fetch('paths.json')).json();

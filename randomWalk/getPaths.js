@@ -19,14 +19,20 @@ const normalize = (nodes, resolution) => {
   ]);
 };
 
+const scale = 20037508.34; // degrees to meters
+const mercator = ([lat, lon]) => ({
+  x: Math.round((lon * scale) / 180),
+  y: Math.round(
+    -Math.log(Math.tan((90 + lat) * (Math.PI / 360))) * (scale / Math.PI)
+  ),
+});
+
 const xml = fs.readFileSync('/Users/andrew/Downloads/map.osm', 'utf8');
 const {osm} = await new xml2js.Parser().parseStringPromise(xml);
 
 const nodes = Object.fromEntries(
   osm.node.map((n) => [n.$.id, [+n.$.lat, +n.$.lon]])
 );
-
-const scale = 20037508.34; // degrees to meters
 
 const coords = [];
 const coordIds = {};
@@ -35,13 +41,7 @@ const paths = osm.way
   .filter(({tag}) => !tag || tag.some((t) => t.$.k === 'highway'))
   .map(({nd}) =>
     nd.map((n) => {
-      const [lat, lon] = nodes[n.$.ref];
-      const coord = {
-        x: Math.round((lon * scale) / 180),
-        y: Math.round(
-          -Math.log(Math.tan((90 + lat) * (Math.PI / 360))) * (scale / Math.PI)
-        ),
-      };
+      const coord = mercator(nodes[n.$.ref]);
       return (coordIds[JSON.stringify(coord)] ??= coords.push(coord) - 1);
     })
   );
