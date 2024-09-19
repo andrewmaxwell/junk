@@ -23,10 +23,15 @@ export const makeParticles = (fluidCanvas, getCellIndex) => {
     for (const p of particles) {
       ctx.moveTo(p.x * canvasWidth, p.y * canvasHeight);
       const index = getCellIndex(p);
-      p.x += xVelPrev[index] / dt;
-      p.y += yVelPrev[index] / dt;
+      p.x = Math.max(0, Math.min(1, p.x + xVelPrev[index] / dt));
+      p.y = Math.max(0, Math.min(1, p.y + yVelPrev[index] / dt));
       ctx.lineTo(p.x * canvasWidth, p.y * canvasHeight);
     }
     ctx.stroke();
+
+    // replace randomly
+    const p = particles[Math.floor(Math.random() * particles.length)];
+    p.x = Math.random();
+    p.y = Math.random();
   };
 };

@@ -14,31 +14,29 @@ const startingTemperature = 100;
 
 let xVel = new Float32Array(size);
 let xVelPrev = new Float32Array(size);
-
 let yVel = new Float32Array(size);
 let yVelPrev = new Float32Array(size);
-
 let temp = new Float32Array(size).fill(startingTemperature);
 let tempPrev = new Float32Array(size).fill(startingTemperature);
 
 const iceCubes = [
-  {x: 25, y: 0, width: 6, height: 4},
-  {x: 50, y: 3, width: 16, height: 6},
+  {x: 25, y: 3, width: 3, height: 3},
+  {x: 40, y: 3, width: 3, height: 3},
 ];
 
-const IX = (i, j) => i + (N + 2) * j;
+const ix = (i, j) => i + (N + 2) * j;
 
 function setBoundaries(arr, xMult, yMult) {
   for (let i = 1; i <= N; i++) {
-    arr[IX(0, i)] = xMult * arr[IX(1, i)];
-    arr[IX(N + 1, i)] = xMult * arr[IX(N, i)];
-    arr[IX(i, 0)] = yMult * arr[IX(i, 1)];
-    arr[IX(i, N + 1)] = yMult * arr[IX(i, N)];
+    arr[ix(0, i)] = xMult * arr[ix(1, i)];
+    arr[ix(N + 1, i)] = xMult * arr[ix(N, i)];
+    arr[ix(i, 0)] = yMult * arr[ix(i, 1)];
+    arr[ix(i, N + 1)] = yMult * arr[ix(i, N)];
   }
-  arr[IX(0, 0)] = 0.5 * (arr[IX(1, 0)] + arr[IX(0, 1)]);
-  arr[IX(0, N + 1)] = 0.5 * (arr[IX(1, N + 1)] + arr[IX(0, N)]);
-  arr[IX(N + 1, 0)] = 0.5 * (arr[IX(N, 0)] + arr[IX(N + 1, 1)]);
-  arr[IX(N + 1, N + 1)] = 0.5 * (arr[IX(N, N + 1)] + arr[IX(N + 1, N)]);
+  arr[ix(0, 0)] = 0.5 * (arr[ix(1, 0)] + arr[ix(0, 1)]);
+  arr[ix(0, N + 1)] = 0.5 * (arr[ix(1, N + 1)] + arr[ix(0, N)]);
+  arr[ix(N + 1, 0)] = 0.5 * (arr[ix(N, 0)] + arr[ix(N + 1, 1)]);
+  arr[ix(N + 1, N + 1)] = 0.5 * (arr[ix(N, N + 1)] + arr[ix(N + 1, N)]);
 }
 
 function linearSolve(arr, arrPrev, amount, divisor, xMult, yMult) {
@@ -46,11 +44,11 @@ function linearSolve(arr, arrPrev, amount, divisor, xMult, yMult) {
     for (let i = 1; i <= N; i++) {
       for (let j = 1; j <= N; j++) {
         const neighborSum =
-          arr[IX(i - 1, j)] +
-          arr[IX(i + 1, j)] +
-          arr[IX(i, j - 1)] +
-          arr[IX(i, j + 1)];
-        arr[IX(i, j)] = (arrPrev[IX(i, j)] + amount * neighborSum) / divisor;
+          arr[ix(i - 1, j)] +
+          arr[ix(i + 1, j)] +
+          arr[ix(i, j - 1)] +
+          arr[ix(i, j + 1)];
+        arr[ix(i, j)] = (arrPrev[ix(i, j)] + amount * neighborSum) / divisor;
       }
     }
     setBoundaries(arr, xMult, yMult);
@@ -66,12 +64,12 @@ function project(xVel, yVel, pressure, pressurePrev) {
   for (let i = 1; i <= N; i++) {
     for (let j = 1; j <= N; j++) {
       const neighborPressure =
-        xVel[IX(i - 1, j)] -
-        xVel[IX(i + 1, j)] +
-        yVel[IX(i, j - 1)] -
-        yVel[IX(i, j + 1)];
-      pressurePrev[IX(i, j)] = neighborPressure / N;
-      pressure[IX(i, j)] = 0;
+        xVel[ix(i - 1, j)] -
+        xVel[ix(i + 1, j)] +
+        yVel[ix(i, j - 1)] -
+        yVel[ix(i, j + 1)];
+      pressurePrev[ix(i, j)] = neighborPressure / N;
+      pressure[ix(i, j)] = 0;
     }
   }
   setBoundaries(pressurePrev, 1, 1);
@@ -80,10 +78,10 @@ function project(xVel, yVel, pressure, pressurePrev) {
 
   for (let i = 1; i <= N; i++) {
     for (let j = 1; j <= N; j++) {
-      xVel[IX(i, j)] -=
-        0.5 * N * (pressure[IX(i + 1, j)] - pressure[IX(i - 1, j)]);
-      yVel[IX(i, j)] -=
-        0.5 * N * (pressure[IX(i, j + 1)] - pressure[IX(i, j - 1)]);
+      xVel[ix(i, j)] -=
+        0.5 * N * (pressure[ix(i + 1, j)] - pressure[ix(i - 1, j)]);
+      yVel[ix(i, j)] -=
+        0.5 * N * (pressure[ix(i, j + 1)] - pressure[ix(i, j - 1)]);
     }
   }
   setBoundaries(xVel, -1, 1);
@@ -96,17 +94,17 @@ const bind = (x) => Math.max(0.5, Math.min(N + 0.5, x));
 function advect(arr, arrPrev, xVelPrev, yVelPrev) {
   for (let i = 1; i <= N; i++) {
     for (let j = 1; j <= N; j++) {
-      const x = bind(i - dt * N * xVelPrev[IX(i, j)]);
-      const y = bind(j - dt * N * yVelPrev[IX(i, j)]);
+      const x = bind(i - dt * N * xVelPrev[ix(i, j)]);
+      const y = bind(j - dt * N * yVelPrev[ix(i, j)]);
       const i0 = Math.floor(x);
       const j0 = Math.floor(y);
-      arr[IX(i, j)] =
+      arr[ix(i, j)] =
         (1 - x + i0) *
-          ((1 - y + j0) * arrPrev[IX(i0, j0)] +
-            (y - j0) * arrPrev[IX(i0, j0 + 1)]) +
+          ((1 - y + j0) * arrPrev[ix(i0, j0)] +
+            (y - j0) * arrPrev[ix(i0, j0 + 1)]) +
         (x - i0) *
-          ((1 - y + j0) * arrPrev[IX(i0 + 1, j0)] +
-            (y - j0) * arrPrev[IX(i0 + 1, j0 + 1)]);
+          ((1 - y + j0) * arrPrev[ix(i0 + 1, j0)] +
+            (y - j0) * arrPrev[ix(i0 + 1, j0 + 1)]);
     }
   }
 }
@@ -117,7 +115,7 @@ const getColor = (t) =>
 const renderFluid = makeRenderer(fluidCanvas, N + 2, N + 2, getColor);
 
 const iterateParticles = makeParticles(fluidCanvas, (p) =>
-  IX(Math.floor(p.x * N), Math.floor(p.y * N))
+  ix(Math.floor(p.x * N), Math.floor(p.y * N))
 );
 
 const loop = () => {
@@ -168,7 +166,7 @@ const loop = () => {
   for (const {x, y, width, height} of iceCubes) {
     for (let i = x; i < x + width; i++) {
       for (let j = y; j < y + height; j++) {
-        temp[IX(i, j)] = 0; // Enforce 0°C within the rectangle
+        temp[ix(i, j)] = 0; // Enforce 0°C within the rectangle
       }
     }
   }
