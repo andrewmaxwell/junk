@@ -1,4 +1,4 @@
-export const makeParticles = (fluidCanvas, getCellIndex) => {
+export const makeParticles = (fluidCanvas, getVel) => {
   const particles = [];
   for (let i = 0; i < 1000; i++) {
     particles[i] = {x: Math.random(), y: Math.random()};
@@ -15,16 +15,16 @@ export const makeParticles = (fluidCanvas, getCellIndex) => {
   window.addEventListener('resize', resize);
   resize();
 
-  return (xVelPrev, yVelPrev, dt) => {
+  const iterate = () => {
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
     ctx.strokeStyle = 'white';
     ctx.lineCap = 'round';
     ctx.beginPath();
     for (const p of particles) {
       ctx.moveTo(p.x * canvasWidth, p.y * canvasHeight);
-      const index = getCellIndex(p);
-      p.x = Math.max(0, Math.min(1, p.x + xVelPrev[index] / dt));
-      p.y = Math.max(0, Math.min(1, p.y + yVelPrev[index] / dt));
+      const vel = getVel(p.x, p.y);
+      p.x = Math.max(0, Math.min(1, p.x + vel.x));
+      p.y = Math.max(0, Math.min(1, p.y + vel.y));
       ctx.lineTo(p.x * canvasWidth, p.y * canvasHeight);
     }
     ctx.stroke();
@@ -34,4 +34,6 @@ export const makeParticles = (fluidCanvas, getCellIndex) => {
     p.x = Math.random();
     p.y = Math.random();
   };
+
+  return {iterate};
 };

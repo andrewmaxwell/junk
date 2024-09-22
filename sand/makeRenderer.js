@@ -35,5 +35,8 @@ export const makeGradient = (colors, colorSteps = 256) => {
       c1[2] * (1 - m) + c2[2] * m
     );
   }
-  return (v) => gradient[Math.floor(v * colorSteps)];
+  return (v) =>
+    gradient[
+      Math.max(0, Math.min(colorSteps, Math.floor(v * (colorSteps + 1))))
+    ];
 };

@@ -36,6 +36,12 @@
     "desc": "Lots of parameters to play with."
   },
   {
+    "filePath": "temperatureFluid",
+    "title": "Temperature Fluid",
+    "year": 2024,
+    "desc": "A fluid solver with temperatures"
+  },
+  {
     "filePath": "voxels",
     "title": "Langton's Ant in 3D",
     "year": 2023,
