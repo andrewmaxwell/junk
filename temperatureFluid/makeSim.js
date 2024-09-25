@@ -4,7 +4,7 @@ export const makeSim = ({
   viscosity,
   dt,
   buoyantForce, // includes gravity
-  incompressibility,
+  iterations,
   startingTemperature,
   regions,
 }) => {
@@ -34,7 +34,7 @@ export const makeSim = ({
   }
 
   function linearSolve(arr, arrPrev, amount, divisor, xMult, yMult) {
-    for (let k = 0; k < incompressibility; k++) {
+    for (let k = 0; k < iterations; k++) {
       for (let i = 1; i <= N; i++) {
         for (let j = 1; j <= N; j++) {
           const neighborSum =
@@ -57,96 +57,37 @@ export const makeSim = ({
   function project(xVel, yVel, pressure, pressurePrev) {
     for (let i = 1; i <= N; i++) {
       for (let j = 1; j <= N; j++) {
-        const neighborPressure =
+        pressurePrev[ix(i, j)] =
           xVel[ix(i - 1, j)] -
           xVel[ix(i + 1, j)] +
           yVel[ix(i, j - 1)] -
           yVel[ix(i, j + 1)];
-        pressurePrev[ix(i, j)] = neighborPressure / N;
-        pressure[ix(i, j)] = 0;
       }
     }
-    setBoundaries(pressurePrev, 1, 1);
-    setBoundaries(pressure, 1, 1);
+
+    pressure.fill(0);
     linearSolve(pressure, pressurePrev, 1, 4, 1, 1);
 
     for (let i = 1; i <= N; i++) {
       for (let j = 1; j <= N; j++) {
-        xVel[ix(i, j)] -=
-          0.5 * N * (pressure[ix(i + 1, j)] - pressure[ix(i - 1, j)]);
-        yVel[ix(i, j)] -=
-          0.5 * N * (pressure[ix(i, j + 1)] - pressure[ix(i, j - 1)]);
+        xVel[ix(i, j)] += (pressure[ix(i - 1, j)] - pressure[ix(i + 1, j)]) / 2;
+        yVel[ix(i, j)] += (pressure[ix(i, j - 1)] - pressure[ix(i, j + 1)]) / 2;
       }
     }
     setBoundaries(xVel, -1, 1);
     setBoundaries(yVel, 1, -1);
   }
 
-  const bind = (x) => Math.max(0.5, Math.min(N + 0.5, x));
+  const bind = (x, min, max) => Math.max(min, Math.min(max, x));
 
-  // I still don't know what exactly this is doing
-  function advect(arr, arrPrev, xVelPrev, yVelPrev) {
-    for (let i = 1; i <= N; i++) {
-      for (let j = 1; j <= N; j++) {
-        const x = bind(i - dt * N * xVelPrev[ix(i, j)]);
-        const y = bind(j - dt * N * yVelPrev[ix(i, j)]);
-        const i0 = Math.floor(x);
-        const j0 = Math.floor(y);
-        arr[ix(i, j)] =
-          (1 - x + i0) *
-            ((1 - y + j0) * arrPrev[ix(i0, j0)] +
-              (y - j0) * arrPrev[ix(i0, j0 + 1)]) +
-          (x - i0) *
-            ((1 - y + j0) * arrPrev[ix(i0 + 1, j0)] +
-              (y - j0) * arrPrev[ix(i0 + 1, j0 + 1)]);
-      }
-    }
-  }
+  const swapBuffers = () => {
+    [xVelPrev, xVel] = [xVel, xVelPrev];
+    [yVelPrev, yVel] = [yVel, yVelPrev];
+    [tempPrev, temp] = [temp, tempPrev];
+  };
 
   const iterate = () => {
-    [xVelPrev, xVel] = [xVel, xVelPrev];
-    [yVelPrev, yVel] = [yVel, yVelPrev];
-
-    xVelPrev.fill(0);
-    yVelPrev.fill(0);
-    tempPrev.fill(0);
-
-    // buoyancy
-    for (let i = 0; i < size; i++) {
-      yVelPrev[i] = (temp[i] - startingTemperature) * buoyantForce * dt;
-      yVel[i] += dt * yVelPrev[i];
-    }
-
-    // velocity step
-    [xVelPrev, xVel] = [xVel, xVelPrev];
-    [yVelPrev, yVel] = [yVel, yVelPrev];
-
-    diffuse(xVel, xVelPrev, viscosity, -1, 1);
-    diffuse(yVel, yVelPrev, viscosity, 1, -1);
-
-    project(xVel, yVel, xVelPrev, yVelPrev);
-
-    [xVelPrev, xVel] = [xVel, xVelPrev];
-    [yVelPrev, yVel] = [yVel, yVelPrev];
-    [tempPrev, temp] = [temp, tempPrev];
-
-    advect(xVel, xVelPrev, xVelPrev, yVelPrev);
-    setBoundaries(xVel, -1, 1);
-    advect(yVel, yVelPrev, xVelPrev, yVelPrev);
-    setBoundaries(yVel, 1, -1);
-
-    project(xVel, yVel, xVelPrev, yVelPrev);
-
-    // temperature step
-    diffuse(temp, tempPrev, diffusionRate, 1, 1);
-
-    [tempPrev, temp] = [temp, tempPrev];
-    [xVelPrev, xVel] = [xVel, xVelPrev];
-    [yVelPrev, yVel] = [yVel, yVelPrev];
-
-    advect(temp, tempPrev, xVelPrev, yVelPrev);
-    setBoundaries(temp, 1, 1);
-
+    // heating/cooling regions
     for (const {x, y, width, height, tempDelta} of regions) {
       for (let i = x; i < x + width; i++) {
         for (let j = y; j < y + height; j++) {
@@ -154,6 +95,57 @@ export const makeSim = ({
         }
       }
     }
+
+    // buoyancy
+    for (let i = 0; i < size; i++) {
+      yVelPrev[i] = (temp[i] - startingTemperature) * buoyantForce * dt;
+      yVel[i] += dt * yVelPrev[i];
+    }
+
+    swapBuffers();
+
+    diffuse(xVel, xVelPrev, viscosity, -1, 1);
+    diffuse(yVel, yVelPrev, viscosity, 1, -1);
+    diffuse(temp, tempPrev, diffusionRate, 1, 1);
+
+    project(xVel, yVel, xVelPrev, yVelPrev);
+
+    swapBuffers();
+
+    // advect
+    for (let i = 1; i <= N; i++) {
+      for (let j = 1; j <= N; j++) {
+        const cellIndex = ix(i, j);
+        const x = bind(i - dt * N * xVelPrev[cellIndex], 0.5, N + 0.5);
+        const y = bind(j - dt * N * yVelPrev[cellIndex], 0.5, N + 0.5);
+        const i0 = Math.floor(x);
+        const j0 = Math.floor(y);
+        const x0 = 1 - x + i0;
+        const x1 = x - i0;
+        const y0 = 1 - y + j0;
+        const y1 = y - j0;
+        const upLeftIndex = ix(i0, j0);
+        const downLeftIndex = ix(i0, j0 + 1);
+        const upRightIndex = ix(i0 + 1, j0);
+        const downRight = ix(i0 + 1, j0 + 1);
+
+        xVel[cellIndex] =
+          x0 * (y0 * xVelPrev[upLeftIndex] + y1 * xVelPrev[downLeftIndex]) +
+          x1 * (y0 * xVelPrev[upRightIndex] + y1 * xVelPrev[downRight]);
+        yVel[cellIndex] =
+          x0 * (y0 * yVelPrev[upLeftIndex] + y1 * yVelPrev[downLeftIndex]) +
+          x1 * (y0 * yVelPrev[upRightIndex] + y1 * yVelPrev[downRight]);
+        temp[cellIndex] =
+          x0 * (y0 * tempPrev[upLeftIndex] + y1 * tempPrev[downLeftIndex]) +
+          x1 * (y0 * tempPrev[upRightIndex] + y1 * tempPrev[downRight]);
+      }
+    }
+
+    setBoundaries(xVel, -1, 1);
+    setBoundaries(yVel, 1, -1);
+    setBoundaries(temp, 1, 1);
+
+    project(xVel, yVel, xVelPrev, yVelPrev);
   };
 
   return {
@@ -162,8 +154,8 @@ export const makeSim = ({
     getVel: (x, y) => {
       const index = ix(Math.floor(x * res), Math.floor(y * res));
       return {
-        x: xVelPrev[index] / res / dt / 2,
-        y: yVelPrev[index] / res / dt / 2,
+        x: xVel[index] / res / dt / 2,
+        y: yVel[index] / res / dt / 2,
       };
     },
   };

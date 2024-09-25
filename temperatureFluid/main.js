@@ -11,7 +11,7 @@ const sim = makeSim({
   viscosity: 0.0001,
   dt: 0.1,
   buoyantForce: -0.1,
-  incompressibility: 32,
+  iterations: 32,
   regions: [
     {x: res / 2, y: 3, width: 1, height: 1, tempDelta: -0.1},
     {x: res / 2, y: res - 4, width: 1, height: 1, tempDelta: 0.1},
