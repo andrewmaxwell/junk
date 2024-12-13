@@ -1,4 +1,3 @@
-import {getData} from '../peopleStats/getData.js';
 import {World3D} from './World3D.js';
 
 const worldWidth = 2400;
@@ -6,9 +5,7 @@ const worldHeight = 600;
 const minLen = 50;
 const maxLen = worldHeight;
 
-export const makeWorld = async () => {
-  const data = await getData();
-
+export const makeWorld = (data) => {
   const world = new World3D({
     width: worldWidth,
     height: worldHeight,

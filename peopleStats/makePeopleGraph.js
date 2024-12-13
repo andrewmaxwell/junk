@@ -32,6 +32,7 @@ export const makePeopleGraph = (canvasId, data) => {
 
   for (let i = 1; i < data.length; i++) {
     for (let j = 0; j < i; j++) {
+      if (isNaN(data[i].scores[data[j].name])) continue;
       world.link(
         data[i].point,
         data[j].point,

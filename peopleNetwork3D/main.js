@@ -1,4 +1,6 @@
+import {getData} from '../peopleStats/getData.js';
 import {Renderer} from './Renderer.js';
+
 import {makeWorld} from './makeWorld.js';
 
 const params = {
@@ -13,7 +15,8 @@ const params = {
   lineThickness: 2,
 };
 
-const world = await makeWorld();
+const data = await getData();
+const world = makeWorld(data);
 const renderer = new Renderer(document.querySelector('canvas'));
 
 const loop = () => {

@@ -1,15 +1,21 @@
-const max = 1e7;
+const numWorkers = 32;
+const numIterations = 1e5;
 
-const getNumPrimes = (max) => {
-  const nums = [];
-  let result = 0;
-  for (let c = 2; c < max / 2; ) {
-    result++;
-    for (let i = c * c; i < max; i += c) nums[i] = true;
-    while (nums[++c]);
-  }
-  return result;
-};
+const workers = Array.from(
+  {length: numWorkers},
+  () => new Worker('./worker.js', {type: 'module'})
+);
+
+const run = () =>
+  Promise.all(
+    workers.map(
+      (w) =>
+        new Promise((resolve) => {
+          w.onmessage = resolve;
+          w.postMessage({iterations: numIterations});
+        })
+    )
+  );
 
 const median = (arr) => {
   arr.sort((a, b) => a - b);
@@ -20,14 +26,13 @@ const median = (arr) => {
 
 const times = [];
 
-const loop = () => {
+const loop = async () => {
   const start = performance.now();
-  getNumPrimes(max);
-  times.push(Math.round(performance.now() - start));
+  await run();
+  times.push(performance.now() - start);
 
-  document.querySelector('#result').innerHTML = `${Math.round(
-    median(times)
-  )}ms to find the primes less than ${max.toLocaleString()}`;
+  document.querySelector('#result').innerHTML =
+    Math.round(median(times)) + 'ms';
 
   if (times.length < 1000) requestAnimationFrame(loop);
 };

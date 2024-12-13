@@ -86,7 +86,9 @@ void main() {
 }`,
   fragmentShaderStr: `
 precision highp float;
-void main(){gl_FragColor = vec4(1);}`,
+void main(){
+  gl_FragColor = vec4(1);
+}`,
   attribSize: 1,
   bufferData: [...Array(textureSize ** 2).keys()],
   drawType: gl.POINTS,
@@ -114,11 +116,14 @@ let nextState = makeFrame({
 const frameRateDisplay = new FrameRateDisplay();
 
 const loop = () => {
-  renderer.run({
-    stateTexture: [currentState, 0],
-    textureSize,
-    matrix: [false, projection],
-  });
+  renderer.run(
+    {
+      stateTexture: [currentState, 0],
+      textureSize,
+      matrix: [false, projection],
+    }
+    // renders to screen
+  );
 
   sim.run(
     {

@@ -6,7 +6,7 @@ export class World2D {
     this.height = height;
   }
   addPoint(x, y) {
-    const point = {x, y, px: x, py: y};
+    const point = {x, y};
     this.points.push(point);
     return point;
   }
@@ -29,8 +29,6 @@ export class World2D {
     }
 
     for (const p of points) {
-      p.px = p.x;
-      p.py = p.y;
       p.x = Math.max(0, Math.min(width, p.x));
       p.y = Math.max(0, Math.min(height, p.y));
     }

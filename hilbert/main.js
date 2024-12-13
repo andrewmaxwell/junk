@@ -1,4 +1,4 @@
-import {sieve} from '../misc/sieve.js';
+import {getPrimes} from '../misc/getPrimes.js';
 
 const nextSteps = [
   (v) => [v[1], v[0]],
@@ -7,10 +7,12 @@ const nextSteps = [
   (v, l) => [2 * l - 1 - v[1], l - 1 - v[0]],
 ];
 
-const hilbert = (index, pow, level = 0, pos = [0, 0]) => {
-  if (level === pow) return pos;
-  const step = nextSteps[Math.floor(index / 4 ** level) % 4];
-  return hilbert(index, pow, level + 1, step(pos, 2 ** level));
+const hilbert = (index, pow) => {
+  let pos = [0, 0];
+  for (let i = 0; i < pow; i++) {
+    pos = nextSteps[(index >> (2 * i)) & 3](pos, 2 ** i);
+  }
+  return pos;
 };
 
 const pow = 6;
@@ -21,7 +23,7 @@ const ctx = canvas.getContext('2d');
 
 canvas.width = canvas.height = scale * 2 ** pow;
 
-const primes = sieve(4 ** pow);
+const primes = getPrimes(4 ** pow);
 
 ctx.fillRect(0, 0, canvas.width, canvas.height);
 ctx.fillStyle = 'white';
@@ -34,5 +36,3 @@ for (const p of primes) {
   ctx.fillText(p, (x + 0.5) * scale, (y + 0.5) * scale);
 }
 ctx.stroke();
-
-console.log(4 ** pow);
