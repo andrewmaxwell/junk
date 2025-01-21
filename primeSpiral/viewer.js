@@ -11,7 +11,7 @@ const movementKeys = {
   KeyS: 'down',
 };
 
-export const viewer = (draw, initialView) => {
+export const viewer = (draw, {initialView, onClick, drawStatic} = {}) => {
   const canvas = document.querySelector('canvas');
   const ctx = canvas.getContext('2d');
 
@@ -20,7 +20,9 @@ export const viewer = (draw, initialView) => {
 
   window.addEventListener('click', (e) => {
     // mouse = {...mouse, ...camera.toWorldCoords(e.pageX, e.pageY)};
-    console.log(camera.toWorldCoords(e.pageX, e.pageY));
+    const coords = camera.toWorldCoords(e.pageX, e.pageY);
+    console.log('clicked', coords);
+    onClick?.(coords);
   });
 
   window.addEventListener(
@@ -59,6 +61,7 @@ export const viewer = (draw, initialView) => {
     camera.transform(ctx);
     draw(ctx, camera);
     ctx.restore();
+    drawStatic?.(ctx);
     requestAnimationFrame(loop);
   };
 

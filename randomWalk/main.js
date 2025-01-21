@@ -76,7 +76,7 @@ viewer(
     ctx.stroke();
     // console.log(JSON.stringify({x: camera.x, y: camera.y, zoom: camera.zoom}));
   },
-  {x: 52467, y: 44779, zoom: 0.01}
+  {initialView: {x: 52467, y: 44779, zoom: 0.01}}
 );
 
 // const run = () => {

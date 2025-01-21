@@ -29,24 +29,24 @@ export const calcFrequency = (
   return result;
 };
 
-export const smooth = (arr, iterations = 1) => {
-  for (let i = 0; i < iterations; i++) {
-    arr = arr.map((v, i) => (v + (arr[i + 1] ?? v) + (arr[i - 1] ?? v)) / 3);
-  }
-  return arr;
-};
+// export const smooth = (arr, iterations = 1) => {
+//   for (let i = 0; i < iterations; i++) {
+//     arr = arr.map((v, i) => (v + (arr[i + 1] ?? v) + (arr[i - 1] ?? v)) / 3);
+//   }
+//   return arr;
+// };
 
-export const simpleMovingAverage = (data, windowSize) => {
-  const smoothed = new Array(data.length).fill(0);
-  for (let i = 0; i < data.length; i++) {
-    const start = Math.max(i - Math.floor(windowSize / 2), 0);
-    const end = Math.min(i + Math.floor(windowSize / 2) + 1, data.length);
+// export const simpleMovingAverage = (data, windowSize) => {
+//   const smoothed = new Array(data.length).fill(0);
+//   for (let i = 0; i < data.length; i++) {
+//     const start = Math.max(i - Math.floor(windowSize / 2), 0);
+//     const end = Math.min(i + Math.floor(windowSize / 2) + 1, data.length);
 
-    let sum = 0;
-    for (let j = start; j < end; j++) sum += data[j];
+//     let sum = 0;
+//     for (let j = start; j < end; j++) sum += data[j];
 
-    smoothed[i] = sum / (end - start);
-  }
+//     smoothed[i] = sum / (end - start);
+//   }
 
-  return smoothed;
-};
+//   return smoothed;
+// };

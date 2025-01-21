@@ -45,7 +45,8 @@
     "react/prop-types": "off",
     "no-use-before-define": "warn",
     "react/display-name": "off",
-    "no-prototype-builtins": "off"
+    "no-prototype-builtins": "off",
+    "no-constant-condition": "off"
   },
   "settings": {
     "react": {
