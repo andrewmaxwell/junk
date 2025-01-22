@@ -38,7 +38,9 @@ const reset = () => {
 };
 
 const iterate = () => {
-  for (const item of hashGrid.getAll()) item.act(hashGrid, params);
+  for (const item of hashGrid.getAll()) {
+    item.act(hashGrid, params);
+  }
   if (Math.random() < params.newFoodRate) {
     addFood(hashGrid, params, ...randCoord());
   }
@@ -48,8 +50,9 @@ reset();
 
 viewer((ctx) => {
   iterate();
-  for (let i = 0; params.fastForward && i < 100; i++) iterate();
-
+  if (params.fastForward) {
+    for (let i = 0; i < 100; i++) iterate();
+  }
   render(ctx, params, hashGrid);
 });
 
@@ -68,5 +71,5 @@ gui.add(params, 'newFoodRate', 0, 1);
 gui.add(params, 'foodSpreadProb', 0, 0.1);
 gui.add(params, 'foodEnergy', 0, 1);
 gui.add(params, 'foodRad', 2, 30);
-// gui.add(params, 'pathLength', 0, 500);
+gui.add(params, 'pathLength', 0, 500);
 gui.add(params, 'fastForward');
