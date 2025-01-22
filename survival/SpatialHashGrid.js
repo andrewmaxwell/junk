@@ -74,4 +74,12 @@ export class SpatialHashGrid {
       for (const obj of cell) yield obj;
     }
   }
+  isOccupied(x, y, rad) {
+    for (const item of this.queryRange(x - rad, y - rad, x + rad, y + rad)) {
+      const dx = item.x - x;
+      const dy = item.y - y;
+      if (dx * dx + dy * dy < rad * rad * 4) return true;
+    }
+    return false;
+  }
 }
