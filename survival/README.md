@@ -1,0 +1,1 @@
+Survival of the Fittest - 2025 - Each agent has a neural network which decides how to move using info about its surroundings. The ones that find food survive and reproduce.

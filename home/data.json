@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "survival",
+    "title": "Survival of the Fittest",
+    "year": 2025,
+    "desc": "Each agent has a neural network which decides how to move using info about its surroundings. The ones that find food survive and reproduce."
+  },
+  {
     "filePath": "birds",
     "title": "Birds",
     "year": 2024,
