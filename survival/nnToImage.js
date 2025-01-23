@@ -39,6 +39,7 @@ const drawSectors = (ctx, vals, rad, scale, rotation) => {
 };
 
 export const nnToImage = (nn, rad) => {
+  if (typeof document === 'undefined') return;
   const vals = hashArray(
     nn
       .slice(1)

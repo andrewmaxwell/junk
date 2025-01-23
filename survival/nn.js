@@ -33,32 +33,51 @@ export const run = (layers, input) => {
   return layers[layers.length - 1].values;
 };
 
-export const train = (layers, input, expected, lr = 0.25) => {
+export function train(layers, input, expected, lr = 0.25) {
   run(layers, input);
+
+  // compute deltas on last layer
   const last = layers[layers.length - 1];
-  for (let i = 0; i < last.values.length; i++) {
-    const o = last.values[i];
-    last.deltas[i] = (expected[i] - o) * o * (1 - o);
+  const lastValues = last.values;
+  const lastDeltas = last.deltas;
+  for (let i = 0; i < lastValues.length; i++) {
+    const o = lastValues[i];
+    lastDeltas[i] = (expected[i] - o) * o * (1 - o);
   }
-  for (let i = layers.length - 1; i >= 1; i--) {
-    const curr = layers[i];
-    const prev = layers[i - 1];
-    for (let j = 0; j < prev.values.length; j++) {
-      const err = curr.weights.reduce(
-        (a, w, k) => a + w[j] * curr.deltas[k],
-        0
-      );
-      prev.deltas[j] = err * prev.values[j] * (1 - prev.values[j]);
-    }
-    for (let j = 0; j < curr.weights.length; j++) {
-      const delta = curr.deltas[j];
-      for (let k = 0; k < curr.weights[j].length; k++) {
-        curr.weights[j][k] += delta * prev.values[k] * lr;
+
+  // compute deltas, weights, and biases on other layers, propagating backward
+  for (let l = layers.length - 1; l >= 1; l--) {
+    const curr = layers[l];
+    const prev = layers[l - 1];
+    const currWeights = curr.weights;
+    const currBiases = curr.biases;
+    const currDeltas = curr.deltas;
+    const currLen = currDeltas.length;
+    const prevValues = prev.values;
+    const prevDeltas = prev.deltas;
+    const prevLen = prevValues.length;
+
+    // compute deltas
+    for (let j = 0; j < prevLen; j++) {
+      let err = 0;
+      for (let k = 0; k < currLen; k++) {
+        err += currWeights[k][j] * currDeltas[k];
       }
-      curr.biases[j] += delta * lr;
+      const pv = prevValues[j];
+      prevDeltas[j] = err * pv * (1 - pv);
+    }
+
+    // update weights and biases
+    for (let j = 0; j < currLen; j++) {
+      const delta = currDeltas[j];
+      const weights_j = currWeights[j];
+      for (let k = 0; k < prevLen; k++) {
+        weights_j[k] += delta * prevValues[k] * lr;
+      }
+      currBiases[j] += delta * lr;
     }
   }
-};
+}
 
 // test
 
@@ -93,15 +112,3 @@ export const train = (layers, input, expected, lr = 0.25) => {
 //     break;
 //   }
 // }
-
-// const vals = [];
-// for (let i = 0; i < 100000; i++) {
-//   const nn = makeNeuralNet([4, 20, 1]);
-//   vals.push(run(nn, Array(4).fill(0))[0]);
-// }
-
-// console.log(
-//   Math.min(...vals),
-//   Math.max(...vals),
-//   vals.reduce((a, b) => a + b) / vals.length
-// );

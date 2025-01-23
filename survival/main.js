@@ -6,17 +6,16 @@ import {SpatialHashGrid} from './SpatialHashGrid.js';
 
 const params = {
   energyUse: 0.0002,
-  mutationRate: 0.05,
+  mutationRate: 0.01,
   sightDistance: 100,
-  numSightDirs: 8,
   speedMult: 4,
+  agentRad: 16,
   newFoodRate: 0.01,
   foodEnergy: 0.1,
   foodRad: 8,
-  agentRad: 16,
+  foodSpreadProb: 0.01,
   pathLength: 200,
   fastForward: false,
-  foodSpreadProb: 0.01,
 };
 
 const randCoord = (rad = 600) => {
@@ -27,9 +26,11 @@ const randCoord = (rad = 600) => {
   }
 };
 
-let hashGrid;
+let hashGrid,
+  frameCounter = 0;
 
 const reset = () => {
+  frameCounter = 0;
   hashGrid = new SpatialHashGrid();
   for (let i = 0; i < 100; i++) {
     hashGrid.insert(new Cow(params, ...randCoord()));
@@ -44,23 +45,33 @@ const iterate = () => {
   if (Math.random() < params.newFoodRate) {
     addFood(hashGrid, params, ...randCoord());
   }
+  frameCounter++;
 };
 
 reset();
 
-viewer((ctx) => {
-  iterate();
-  if (params.fastForward) {
-    for (let i = 0; i < 100; i++) iterate();
+viewer(
+  (ctx) => {
+    iterate();
+    if (params.fastForward) {
+      const start = performance.now();
+      while (performance.now() - start < 1000) iterate();
+    }
+    render(ctx, params, hashGrid);
+  },
+  {
+    onClick: ({x, y}) => hashGrid.insert(new Cow(params, x, y)),
+    drawStatic: (ctx) => {
+      ctx.fillStyle = 'black';
+      ctx.fillText(frameCounter.toLocaleString() + ' iterations', 3, 10);
+    },
   }
-  render(ctx, params, hashGrid);
-});
+);
 
 const gui = new window.dat.GUI();
 gui.add(params, 'energyUse', 0, 0.004);
 gui.add(params, 'mutationRate', 0, 1);
 gui.add(params, 'sightDistance', 10, 200);
-gui.add(params, 'numSightDirs', 2, 16, 1).onChange(reset);
 gui.add(params, 'speedMult', 1, 10);
 gui.add(params, 'agentRad', 2, 30).onChange(() => {
   for (const item of hashGrid.getAll()) {

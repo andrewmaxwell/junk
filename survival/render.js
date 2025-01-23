@@ -27,6 +27,7 @@ const drawCows = (ctx, params, cows) => {
   let oldest;
   ctx.fillStyle = 'red';
   for (const item of cows) {
+    ctx.globalAlpha = item.energy;
     ctx.drawImage(
       item.image,
       item.x - params.agentRad,
@@ -34,6 +35,7 @@ const drawCows = (ctx, params, cows) => {
     );
     if (!oldest || item.age > oldest.age) oldest = item;
   }
+  ctx.globalAlpha = 1;
 
   // if (oldest) {
   //   ctx.globalAlpha = 1;

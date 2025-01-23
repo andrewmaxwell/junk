@@ -14,71 +14,88 @@ export class SpatialHashGrid {
     this.cellSize = cellSize;
     this.cells = new Map();
   }
-  _getCellCoords(x, y) {
-    return [Math.floor(x / this.cellSize), Math.floor(y / this.cellSize)];
-  }
-  _cellKey(cellX, cellY) {
-    return `${cellX},${cellY}`;
-  }
+
   insert(obj) {
-    const [cellX, cellY] = this._getCellCoords(obj.x, obj.y);
-    const key = this._cellKey(cellX, cellY);
+    const cellX = Math.floor(obj.x / this.cellSize);
+    const cellY = Math.floor(obj.y / this.cellSize);
+    const key = cellX + ',' + cellY;
 
-    if (!this.cells.has(key)) {
-      this.cells.set(key, []);
+    let cellArray = this.cells.get(key);
+    if (!cellArray) {
+      cellArray = [];
+      this.cells.set(key, cellArray);
     }
-
-    this.cells.get(key).push(obj);
+    cellArray.push(obj);
     obj._gridKey = key;
   }
+
   remove(obj) {
     const key = obj._gridKey;
-    if (key) {
+    if (key !== undefined) {
       const cellArray = this.cells.get(key);
       if (cellArray) {
         const idx = cellArray.indexOf(obj);
         if (idx !== -1) {
           cellArray.splice(idx, 1);
-          if (!cellArray.length) this.cells.delete(key);
+          if (cellArray.length === 0) {
+            this.cells.delete(key);
+          }
         }
       }
-      delete obj._gridKey;
+      obj._gridKey = undefined;
     }
   }
+
   update(obj, newX, newY) {
-    const [oldCellX, oldCellY] = this._getCellCoords(obj.x, obj.y);
-    const [newCellX, newCellY] = this._getCellCoords(newX, newY);
-    if (oldCellX !== newCellX || oldCellY !== newCellY) {
-      this.remove(obj);
+    const oldCellX = Math.floor(obj.x / this.cellSize);
+    const oldCellY = Math.floor(obj.y / this.cellSize);
+    const newCellX = Math.floor(newX / this.cellSize);
+    const newCellY = Math.floor(newY / this.cellSize);
+
+    if (oldCellX === newCellX && oldCellY === newCellY) {
       obj.x = newX;
       obj.y = newY;
-      this.insert(obj);
-    } else {
-      obj.x = newX;
-      obj.y = newY;
+      return;
     }
+    this.remove(obj);
+    obj.x = newX;
+    obj.y = newY;
+    this.insert(obj);
   }
-  *queryRange(minX, minY, maxX, maxY) {
-    const [minCellX, minCellY] = this._getCellCoords(minX, minY);
-    const [maxCellX, maxCellY] = this._getCellCoords(maxX, maxY);
+
+  queryRange(minX, minY, maxX, maxY) {
+    const minCellX = Math.floor(minX / this.cellSize);
+    const minCellY = Math.floor(minY / this.cellSize);
+    const maxCellX = Math.floor(maxX / this.cellSize);
+    const maxCellY = Math.floor(maxY / this.cellSize);
+
+    const results = [];
     for (let cx = minCellX; cx <= maxCellX; cx++) {
       for (let cy = minCellY; cy <= maxCellY; cy++) {
-        const cellArray = this.cells.get(this._cellKey(cx, cy));
+        const key = cx + ',' + cy;
+        const cellArray = this.cells.get(key);
         if (!cellArray) continue;
-        for (let obj of cellArray) yield obj;
+        results.push(...cellArray);
       }
     }
+    return results;
   }
-  *getAll() {
-    for (const cell of this.cells.values()) {
-      for (const obj of cell) yield obj;
-    }
+
+  getAll() {
+    const items = [];
+    for (const arr of this.cells.values()) items.push(...arr);
+    return items;
   }
+
   isOccupied(x, y, rad) {
-    for (const item of this.queryRange(x - rad, y - rad, x + rad, y + rad)) {
+    const nearby = this.queryRange(x - rad, y - rad, x + rad, y + rad);
+    for (const element of nearby) {
+      const item = element;
       const dx = item.x - x;
       const dy = item.y - y;
-      if (dx * dx + dy * dy < rad * rad * 4) return true;
+      if (dx * dx + dy * dy < rad * rad * 4) {
+        return true;
+      }
     }
     return false;
   }
