@@ -14,7 +14,7 @@ const normalize = (vals) => {
 
 const hashArray = (input, outputSize) =>
   splitEvery(Math.floor(input.length / outputSize), normalize(input)).map(
-    (arr) => arr.reduce((a, b) => a + b, 0) % 1
+    (arr) => arr.reduce((a, b) => a + b, 0) % 1,
   );
 
 const numSectors = 6;
@@ -32,7 +32,7 @@ const drawSectors = (ctx, vals, rad, scale, rotation) => {
       rad,
       rad * scale,
       ((i + rotation) / numSectors) * 2 * Math.PI,
-      ((i + rotation + 1) / numSectors) * 2 * Math.PI
+      ((i + rotation + 1) / numSectors) * 2 * Math.PI,
     );
     ctx.fill();
   }
@@ -44,7 +44,7 @@ export const nnToImage = (nn, rad) => {
     nn
       .slice(1)
       .flatMap((l) => [...l.biases, ...l.weights.flatMap((r) => [...r])]),
-    numSectors * 6 // 3 color components * 2 layers of sectors
+    numSectors * 6, // 3 color components * 2 layers of sectors
   );
 
   const canvas = document.createElement('canvas');

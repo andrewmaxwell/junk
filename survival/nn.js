@@ -4,7 +4,7 @@ export const makeNeuralNet = (layerSizes) =>
     if (i) {
       layer.biases = new Float32Array(l).map(() => Math.random() - 0.5);
       layer.weights = Array.from({length: l}, () =>
-        new Float32Array(layerSizes[i - 1]).map(() => Math.random() - 0.5)
+        new Float32Array(layerSizes[i - 1]).map(() => Math.random() - 0.5),
       );
     }
     return layer;
@@ -13,13 +13,10 @@ export const makeNeuralNet = (layerSizes) =>
 export const forward = (layers, input) => {
   layers[0].values.set(input);
   for (let l = 1; l < layers.length; l++) {
-    const curr = layers[l];
+    const {values, weights, biases} = layers[l];
     const prev = layers[l - 1];
-    const currVals = curr.values;
     const prevVals = prev.values;
-    const biases = curr.biases;
-    const weights = curr.weights;
-    const currLen = currVals.length;
+    const currLen = values.length;
     const prevLen = prevVals.length;
     for (let j = 0; j < currLen; j++) {
       const w = weights[j];
@@ -27,7 +24,7 @@ export const forward = (layers, input) => {
       for (let k = 0; k < prevLen; k++) {
         sum += prevVals[k] * w[k];
       }
-      currVals[j] = 1 / (1 + Math.exp(-sum));
+      values[j] = 1 / (1 + Math.exp(-sum));
     }
   }
   return layers[layers.length - 1].values;

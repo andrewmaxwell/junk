@@ -29,7 +29,7 @@ export class Agent {
     hashGrid.update(
       this,
       this.x + params.speedMult * Math.cos(this.angle),
-      this.y + params.speedMult * Math.sin(this.angle)
+      this.y + params.speedMult * Math.sin(this.angle),
     );
     this.energy -= params.energyUse;
     this.path.push({x: this.x, y: this.y});
@@ -62,7 +62,7 @@ export class Agent {
       this.x - sightDistance,
       this.y - sightDistance,
       this.x + sightDistance,
-      this.y + sightDistance
+      this.y + sightDistance,
     )) {
       if (item === this || item.energy <= 0) continue;
       const dx = item.x - this.x;

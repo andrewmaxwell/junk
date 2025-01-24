@@ -31,28 +31,27 @@ const drawAgents = (ctx, params, agents) => {
     ctx.drawImage(
       item.image,
       item.x - params.agentRad,
-      item.y - params.agentRad
+      item.y - params.agentRad,
     );
     if (!oldest || item.age > oldest.age) oldest = item;
   }
   ctx.globalAlpha = 1;
 
-  // if (oldest) {
-  //   ctx.globalAlpha = 1;
-  //   for (let i = 0; i < oldest.inputs.length; i++) {
-  //     if (oldest.inputs[i] === 1) continue;
-  //     ctx.strokeStyle = i % 2 ? 'red' : 'green';
-  //     ctx.beginPath();
-  //     ctx.arc(
-  //       oldest.x,
-  //       oldest.y,
-  //       oldest.inputs[i] * params.sightDistance,
-  //       (Math.floor(i / 2) / params.numSightDirs) * 2 * Math.PI + oldest.angle,
-  //       (Math.floor(i / 2 + 1) / params.numSightDirs) * 2 * Math.PI + oldest.angle
-  //     );
-  //     ctx.stroke();
-  //   }
-  // }
+  if (oldest) {
+    for (let i = 0; i < oldest.inputs.length; i++) {
+      if (oldest.inputs[i] === 1) continue;
+      ctx.strokeStyle = i % 2 ? 'red' : 'green';
+      ctx.beginPath();
+      ctx.arc(
+        oldest.x,
+        oldest.y,
+        oldest.inputs[i] * params.sightDistance,
+        (Math.floor(i / 2) / 5 - 0.5) * 2 * Math.PI + oldest.angle,
+        (Math.floor(i / 2 + 1) / 5 - 0.5) * 2 * Math.PI + oldest.angle,
+      );
+      ctx.stroke();
+    }
+  }
 };
 
 export const render = (ctx, params, hashGrid) => {

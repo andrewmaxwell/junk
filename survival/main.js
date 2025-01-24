@@ -36,7 +36,7 @@ const makeAgent = (x, y) =>
 const reset = () => {
   frameCounter = 0;
   hashGrid = new SpatialHashGrid();
-  makeAgent(0, 0);
+  for (let i = 0; i < 10; i++) makeAgent(...randCoord());
   for (let i = 0; i < 100; i++) {
     addFood(hashGrid, params, ...randCoord());
   }
