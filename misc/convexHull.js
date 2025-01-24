@@ -1,25 +1,28 @@
-const isOuter = ([x1, y1], [x2, y2], points) => {
-  const m = (y2 - y1) / (x2 - x1);
-  let count = 0;
-  for (const [x, y] of points) {
-    count += x2 === x1 ? x >= x1 : y - y1 >= m * (x - x1);
-  }
-  return !count || count === points.length;
+const cross = ([a, b], [c, d], [e, f]) => (c - a) * (f - b) - (d - b) * (e - a);
+const dist = ([a, b], [c, d]) => Math.hypot(a - c, b - d);
+
+const hullMethod = (points) => {
+  const start = points.reduce(([a, b], [c, d]) =>
+    d < b || (d === b && c < a) ? [c, d] : [a, b]
+  );
+
+  return points
+    .sort((a, b) => cross(start, a, b) || dist(start, a) - dist(start, b))
+    .reduce((hull, p) => {
+      while (
+        hull.length > 1 &&
+        cross(hull[hull.length - 2], hull[hull.length - 1], p) >= 0
+      )
+        hull.pop();
+      return [...hull, p];
+    }, []);
 };
 
-function hullMethod(points) {
-  const seen = {};
-  points = points.filter((p) => !seen[p] && (seen[p] = true));
+import {Test} from './test.js';
 
-  const outer = new Set();
-  for (let i = 0; i < points.length; i++) {
-    for (let j = i + 1; j < points.length; j++) {
-      if (isOuter(points[i], points[j], points)) {
-        outer.add(points[i]).add(points[j]);
-      }
-    }
-  }
-  return [...outer];
+function sortingFunction(a, b) {
+  let n = a[0] > b[0] ? 1 : a[0] < b[0] ? -1 : 0;
+  return n ? n : a[1] > b[1] ? 1 : -1;
 }
 
 const expected = [
@@ -27,13 +30,6 @@ const expected = [
   [0, 5],
   [5, 3],
 ];
-
-const {Test} = require('./test');
-
-function sortingFunction(a, b) {
-  let n = a[0] > b[0] ? 1 : a[0] < b[0] ? -1 : 0;
-  return n ? n : a[1] > b[1] ? 1 : -1;
-}
 
 let result = hullMethod([
   [0, 0],

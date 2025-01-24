@@ -4,7 +4,7 @@ const upArrow = (a, b, arrows) => {
   return upArrow(a, upArrow(a, b - 1, arrows), arrows - 1);
 };
 
-const g = (n) => upArrow(3, 3, n ? g(n - 1) : 4);
+const g = (n) => (n ? upArrow(3, 3, g(n - 1)) : 4);
 
 const grahamsNumber = g(64);
 

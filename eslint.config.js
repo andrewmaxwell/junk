@@ -32,7 +32,6 @@ export default [
       'react/prop-types': 'off',
       'no-prototype-builtins': 'off',
       'prefer-destructuring': 'warn',
-      complexity: ['warn', 12],
       'no-nested-ternary': 'warn',
       '@typescript-eslint/no-explicit-any': 'off',
     },

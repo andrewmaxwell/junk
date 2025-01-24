@@ -7,6 +7,6 @@ setTimeout(() => log('C'), 100);
 setTimeout(() => log('D'), 0);
 
 // takes about 500ms
-for (let i = 1e9; i; i--) {}
+for (let i = 1e9; --i; ) {}
 
 log('E');

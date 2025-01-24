@@ -13,10 +13,14 @@ export class FileWatcher {
 
       let prev = readFileSync(filePath, 'utf-8');
       watch(filePath, (x) => {
-        const curr = readFileSync(filePath, 'utf-8');
-        if (curr === prev) return;
-        prev = curr;
-        this.onChange(filePath, x);
+        try {
+          const curr = readFileSync(filePath, 'utf-8');
+          if (curr === prev) return;
+          prev = curr;
+          this.onChange(filePath, x);
+        } catch (e) {
+          console.error(`Could not watch ${filePath}: ${e.message}`);
+        }
       });
     } catch (e) {
       console.error(`Could not watch ${filePath}: ${e.message}`);

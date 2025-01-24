@@ -11,30 +11,33 @@ const rightRotate = (tree) => ({
   right: {...tree, left: tree.left.right},
 });
 
-const doBalance = (tree, value, b) =>
-  b > 1
-    ? rightRotate(
-        value > tree.left.value ? {...tree, left: leftRotate(tree.left)} : tree
-      )
-    : b < -1
-    ? leftRotate(
-        value <= tree.right.value
-          ? {...tree, right: rightRotate(tree.right)}
-          : tree
-      )
-    : tree;
+const doBalance = (tree, value, b) => {
+  if (b > 1) {
+    return rightRotate(
+      value > tree.left.value ? {...tree, left: leftRotate(tree.left)} : tree
+    );
+  }
+  if (b < -1) {
+    return leftRotate(
+      value <= tree.right.value
+        ? {...tree, right: rightRotate(tree.right)}
+        : tree
+    );
+  }
+  return tree;
+};
 
 const balance = (tree, value) =>
   doBalance(tree, value, getHeight(tree.left) - getHeight(tree.right));
 
-const addNode = (tree, value) =>
-  tree
-    ? balance(
-        value <= tree.value
-          ? {...tree, left: addNode(tree.left, value)}
-          : {...tree, right: addNode(tree.right, value)}
-      )
-    : {value};
+const addNode = (tree, value) => {
+  if (!tree) return {value};
+  return balance(
+    value <= tree.value
+      ? {...tree, left: addNode(tree.left, value)}
+      : {...tree, right: addNode(tree.right, value)}
+  );
+};
 
 const buildTreeFromList = (arr) => arr.reduce(addNode, null);
 

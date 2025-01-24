@@ -18,7 +18,7 @@ function getNeighbors(wordList) {
   return neighbors;
 }
 
-function getTransformation(startWord, endWord, wordList) {
+function wordLadder(startWord, endWord, wordList) {
   const neighbors = getNeighbors([startWord, ...wordList]);
   const queue = [[startWord]];
   for (const currentArr of queue) {
@@ -31,7 +31,7 @@ function getTransformation(startWord, endWord, wordList) {
 
 // TEST
 
-const testResult1 = getTransformation(
+const testResult1 = wordLadder(
   'hit',
   'cog',
   ['cog', 'dog', 'dot', 'hot', 'log', 'lot'].reverse()

@@ -5,7 +5,7 @@ import * as R from 'ramda';
 import fs from 'fs';
 
 const csv = Papa.parse(
-  fs.readFileSync('/Users/andrew/Downloads/transactions.csv', 'utf-8'),
+  fs.readFileSync('/Users/andrew/Downloads/transactions2022.csv', 'utf-8'),
   {header: true}
 );
 
@@ -17,11 +17,13 @@ const getAmount = R.pipe(
 );
 
 const result = R.pipe(
-  R.filter(R.prop('Description')),
-  R.groupBy((row) => row.Description.replace(/\d/g, '').trim()),
+  R.filter(
+    R.both(R.prop('Description'), R.propSatisfies(R.endsWith('/2022'), 'Date'))
+  ),
+  R.groupBy((row) => row.Description.replace(/\d/g, '').trim().toLowerCase()),
   R.map(getAmount),
   R.toPairs,
-  R.sortBy((p) => p[1]),
+  R.sortBy((p) => p[0]),
   R.fromPairs
 )(csv.data);
 
@@ -58,4 +60,4 @@ console.log(result);
 //   // R.sum
 // )(csv.data);
 
-fs.writeFileSync('temp.json', JSON.stringify(result, null, 2));
+fs.writeFileSync('money/temp.json', JSON.stringify(result, null, 2));

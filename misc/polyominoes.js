@@ -93,14 +93,14 @@ const getPolyominoes = memoizeWith(
   }
 );
 
-console.time();
-const result = getPolyominoes(2);
-console.log(result.map(stringify).join('\n\n'));
-console.log(result.length);
-console.timeEnd();
+// console.time();
+// const result = getPolyominoes(2);
+// console.log(result.map(stringify).join('\n\n'));
+// console.log(result.length);
+// console.timeEnd();
 
-// console.log(
-//   Array.from({length: 10}, (_, i) => getPolyominoes(i + 1).length).join(', ')
-// );
+console.log(
+  Array.from({length: 10}, (_, i) => getPolyominoes(i + 1).length).join(', ')
+);
 
 //////

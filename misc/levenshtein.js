@@ -2,7 +2,7 @@ const levenshtein = (a, b) => {
   let m = [];
   for (let j = 0; j <= b.length; j++) m[j] = j;
   for (let i = 0; i < a.length; i++) {
-    const n = [i];
+    const n = [i + 1];
     for (let j = 0; j < b.length; j++) {
       n[j + 1] = Math.min(m[j] + (b[j] !== a[i]), n[j] + 1, m[j + 1] + 1);
     }

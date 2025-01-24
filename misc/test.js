@@ -31,6 +31,7 @@ export const it = (desc, func) => {
 export const describe = it;
 
 export const Test = {
+  failFast: true,
   assertEquals,
   assertSimilar: assertEquals,
   assertDeepEquals: assertEquals,
@@ -53,7 +54,9 @@ export const Test = {
   },
   inspect: toString,
   assertSameMembers: (a, b) => assertEquals(sort(a), sort(b)),
-  assertApproxEquals: assertSomething((a, b) => Math.abs(a - b) <= 1e-6),
+  assertApproxEquals: assertSomething(
+    (a, b) => equals(a, b) || Math.abs(a - b) <= 1e-6
+  ),
 };
 
 export const deepLog = (x) => console.dir(x, {depth: Infinity});

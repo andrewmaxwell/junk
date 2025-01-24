@@ -1,25 +1,16 @@
-const isMatchRec = (input, pattern) => {
-  if (pattern[0] === '*') {
-    return (
-      isMatchRec(input, pattern.slice(1)) ||
-      (input.length > 0 && isMatchRec(input.slice(1), pattern))
-    );
-  }
-  return (
-    input === pattern ||
-    ((input[0] === pattern[0] || (pattern[0] === '?' && input.length > 0)) &&
-      isMatchRec(input.slice(1), pattern.slice(1)))
-  );
-};
+const isMatch = (str, pattern) => {
+  let prev = [true];
+  for (let j = 0; pattern[j] === '*'; j++) prev[j + 1] = true;
 
-const isMatch = (input, pattern) => {
-  if (pattern.includes('*')) {
-    pattern = pattern.replace(/\*+/g, '*');
-    const patternEnd = pattern.match(/[^*]*$/)[0];
-    if (patternEnd && !isMatchRec(input.slice(-patternEnd.length), patternEnd))
-      return false;
+  for (const char of str) {
+    const next = [];
+    for (let j = 0; j < pattern.length; j++) {
+      if (char === pattern[j] || pattern[j] === '?') next[j + 1] = prev[j];
+      else if (pattern[j] === '*') next[j + 1] = prev[j + 1] || next[j];
+    }
+    prev = next;
   }
-  return isMatchRec(input, pattern.replace(/\*+/g, '*'));
+  return !!prev[pattern.length];
 };
 
 import {Test} from './test.js';
@@ -50,4 +41,12 @@ Test.assertDeepEquals(
     'b**bb**a**bba*b**a*bbb**aba***babbb*aa****aabb*bbb***a'
   ),
   false
+);
+
+Test.assertDeepEquals(
+  isMatch(
+    'aaaabaaaabbbbaabbbaabbaababbabbaaaababaaabbbbbbaabbbabababbaaabaabaaaaaabbaabbbbaababbababaabbbaababbbba',
+    '*****b*aba***babaa*bbaba***a*aaba*b*aa**a*b**ba***a*a*'
+  ),
+  true
 );

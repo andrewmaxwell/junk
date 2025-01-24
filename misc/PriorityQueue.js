@@ -1,36 +1,29 @@
 const parent = (i) => ((i + 1) >>> 1) - 1;
 const left = (i) => (i << 1) + 1;
 const right = (i) => (i + 1) << 1;
-const swap = (arr, i, j) => {
-  const t = arr[i];
-  arr[i] = arr[j];
-  arr[j] = t;
-};
 
 export class PriorityQueue {
-  constructor(compare) {
-    this.compare = compare;
+  constructor(compareFunc) {
+    this.compareFunc = compareFunc;
     this.heap = [];
+  }
+  peak() {
+    return this.heap[0];
   }
   size() {
     return this.heap.length;
   }
   push(value) {
-    const {heap} = this;
-    heap.push(value);
-    this.#siftUp(heap.length - 1);
+    this.heap.push(value);
+    this.#siftUp(this.size() - 1);
     return this;
   }
   pop() {
-    const {heap} = this;
-    const poppedValue = heap[0];
-    if (heap.length > 1) swap(heap, 0, heap.length - 1);
-    heap.pop();
+    const poppedValue = this.peak();
+    if (this.size()) this.#swap(0, this.size() - 1);
+    this.heap.pop();
     this.#siftDown(0);
     return poppedValue;
-  }
-  peak() {
-    return this.heap[0];
   }
   updatePosition(value) {
     const index = this.heap.indexOf(value);
@@ -41,25 +34,31 @@ export class PriorityQueue {
     if (index === newIndex) this.#siftDown(index);
     return this;
   }
+  #swap(i, j) {
+    const t = this.heap[i];
+    this.heap[i] = this.heap[j];
+    this.heap[j] = t;
+  }
+  #compare(i, j) {
+    return this.compareFunc(this.heap[i], this.heap[j]);
+  }
   #siftUp(i) {
-    const {heap, compare} = this;
-    while (i > 0 && compare(heap[i], heap[parent(i)])) {
-      swap(heap, i, parent(i));
+    while (i > 0 && this.#compare(i, parent(i))) {
+      this.#swap(i, parent(i));
       i = parent(i);
     }
     return i;
   }
   #siftDown(i) {
-    const {heap, compare} = this;
     while (
-      (left(i) < heap.length && compare(heap[left(i)], heap[i])) ||
-      (right(i) < heap.length && compare(heap[right(i)], heap[i]))
+      (left(i) < this.size() && this.#compare(left(i), i)) ||
+      (right(i) < this.size() && this.#compare(right(i), i))
     ) {
       const maxChild =
-        right(i) < heap.length && compare(heap[right(i)], heap[left(i)])
+        right(i) < this.size() && this.#compare(right(i), left(i))
           ? right(i)
           : left(i);
-      swap(heap, i, maxChild);
+      this.#swap(i, maxChild);
       i = maxChild;
     }
     return i;
@@ -68,7 +67,7 @@ export class PriorityQueue {
 
 // import {Test} from './test.js';
 
-// const shuffled = [9, 4, 5, 2, 8, 1, 0, 3, 7, 6];
+// const shuffled = Array.from({length: 1000}, Math.random);
 // const h = new PriorityQueue((a, b) => a < b);
 // for (const x of shuffled) h.push(x);
 
