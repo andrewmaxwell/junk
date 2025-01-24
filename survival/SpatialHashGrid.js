@@ -27,6 +27,7 @@ export class SpatialHashGrid {
     }
     cellArray.push(obj);
     obj._gridKey = key;
+    return obj;
   }
 
   remove(obj) {

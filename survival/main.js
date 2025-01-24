@@ -1,16 +1,17 @@
 import {viewer} from '../primeSpiral/viewer.js';
-import {Cow} from './Cow.js';
+import {Agent} from './Agent.js';
 import {addFood} from './Food.js';
+import {getPretrainedNetwork} from './getPretrainedNetwork.js';
 import {render} from './render.js';
 import {SpatialHashGrid} from './SpatialHashGrid.js';
 
 const params = {
-  energyUse: 0.0002,
-  mutationRate: 0.01,
+  energyUse: 0.001,
+  mutationRate: 0.03,
   sightDistance: 100,
   speedMult: 4,
   agentRad: 16,
-  newFoodRate: 0.01,
+  newFoodRate: 0.2,
   foodEnergy: 0.1,
   foodRad: 8,
   foodSpreadProb: 0.01,
@@ -29,11 +30,14 @@ const randCoord = (rad = 600) => {
 let hashGrid,
   frameCounter = 0;
 
+const makeAgent = (x, y) =>
+  hashGrid.insert(new Agent(params, x, y, getPretrainedNetwork(params)));
+
 const reset = () => {
   frameCounter = 0;
   hashGrid = new SpatialHashGrid();
+  makeAgent(0, 0);
   for (let i = 0; i < 100; i++) {
-    hashGrid.insert(new Cow(params, ...randCoord()));
     addFood(hashGrid, params, ...randCoord());
   }
 };
@@ -60,7 +64,7 @@ viewer(
     render(ctx, params, hashGrid);
   },
   {
-    onClick: ({x, y}) => hashGrid.insert(new Cow(params, x, y)),
+    onClick: ({x, y}) => makeAgent(x, y),
     drawStatic: (ctx) => {
       ctx.fillStyle = 'black';
       ctx.fillText(frameCounter.toLocaleString() + ' iterations', 3, 10);

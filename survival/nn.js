@@ -10,7 +10,7 @@ export const makeNeuralNet = (layerSizes) =>
     return layer;
   });
 
-export const run = (layers, input) => {
+export const forward = (layers, input) => {
   layers[0].values.set(input);
   for (let l = 1; l < layers.length; l++) {
     const curr = layers[l];
@@ -34,7 +34,7 @@ export const run = (layers, input) => {
 };
 
 export function train(layers, input, expected, lr = 0.25) {
-  run(layers, input);
+  forward(layers, input);
 
   // compute deltas on last layer
   const last = layers[layers.length - 1];
@@ -79,36 +79,15 @@ export function train(layers, input, expected, lr = 0.25) {
   }
 }
 
-// test
+// export const getWeightsAndBiases = (layers) =>
+//   layers.slice(1).map(({weights, biases}) => ({
+//     weights: weights.map((w) => [...w]),
+//     biases: [...biases],
+//   }));
 
-// const net = makeNeuralNet([2, 3, 3, 1]);
-
-// const getTrainingData = () => {
-//   const x = Math.random() * 2 - 1;
-//   const y = Math.random() * 2 - 1;
-//   return {
-//     input: [x, y],
-//     expected: [(x - 0.5) ** 2 + (y + 0.5) ** 2 <= 0.0625 ? 1 : 0],
-//   };
+// export const importWeightsAndBiases = (layers, wab) => {
+//   wab.forEach((w, i) => {
+//     layers[i + 1].biases.set(w.biases);
+//     w.weights.forEach((r, j) => layers[i + 1].weights[j].set(r));
+//   });
 // };
-
-// let count = 0;
-// for (let t = 0; t < 1e6; t++) {
-//   for (let i = 0; i < 100; i++) {
-//     const {input, expected} = getTrainingData();
-//     train(net, input, expected);
-//     count++;
-//   }
-
-//   let err = 0;
-//   for (let i = 0; i < 100; i++) {
-//     const {input, expected} = getTrainingData();
-//     const result = run(net, input);
-//     err += Math.abs(result[0] - expected[0]);
-//   }
-
-//   if (err < 1) {
-//     console.log(`It took ${count.toLocaleString()} trainings to learn`);
-//     break;
-//   }
-// }

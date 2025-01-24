@@ -1,28 +1,31 @@
 import {Food} from './Food.js';
-import {makeNeuralNet, run} from './nn.js';
+import {makeNeuralNet, forward} from './nn.js';
 import {nnToImage} from './nnToImage.js';
 
 const numSightDirs = 5; // hard coded so we can use pre-trained data
 
 const mod = (a, b) => ((a % b) + b) % b;
 
-export class Cow {
-  constructor(params, x, y) {
+const mutate = (params) =>
+  Math.random() < params.mutationRate ? Math.random() * 2 - 1 : 1;
+
+export class Agent {
+  constructor(params, x, y, nn) {
     this.x = x;
     this.y = y;
     this.angle = Math.random() * 2 * Math.PI;
     this.energy = 0.5; // die at 0, reproduce at 1
-    this.nn = makeNeuralNet([numSightDirs * 2 + 1, numSightDirs, 1]);
     this.path = [];
     this.age = 0;
+    this.nn = nn || makeNeuralNet([numSightDirs * 2 + 1, numSightDirs, 1]);
     this.updateImage(params);
   }
   act(hashGrid, params) {
     const {inputs, touchingFood} = this.lookAround(hashGrid, params);
-    const [turnAmount] = run(this.nn, [this.energy, ...inputs]);
+    const [turnAmount] = forward(this.nn, [this.energy, ...inputs]);
     this.inputs = inputs;
 
-    this.angle += turnAmount - 0.5;
+    this.angle += 0.5 - turnAmount;
     hashGrid.update(
       this,
       this.x + params.speedMult * Math.cos(this.angle),
@@ -52,7 +55,7 @@ export class Cow {
   lookAround(hashGrid, params) {
     const {sightDistance, agentRad, foodRad} = params;
     const nearestFoodDist = new Array(numSightDirs).fill(Infinity);
-    const nearestCowDist = new Array(numSightDirs).fill(Infinity);
+    const nearestAgentDist = new Array(numSightDirs).fill(Infinity);
     let touchingFood;
 
     for (const item of hashGrid.queryRange(
@@ -67,36 +70,36 @@ export class Cow {
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist > sightDistance) continue;
 
-      let angle = mod(Math.atan2(dy, dx) - this.angle, 2 * Math.PI);
+      let angle = mod(Math.atan2(dy, dx) - this.angle - Math.PI, 2 * Math.PI);
 
       const binIndex = Math.floor((angle / (2 * Math.PI)) * numSightDirs);
 
       if (item instanceof Food && dist < nearestFoodDist[binIndex]) {
         nearestFoodDist[binIndex] = dist;
         if (dist < agentRad + foodRad) touchingFood = item;
-      } else if (item instanceof Cow && dist < nearestCowDist[binIndex]) {
-        nearestCowDist[binIndex] = dist;
+      } else if (item instanceof Agent && dist < nearestAgentDist[binIndex]) {
+        nearestAgentDist[binIndex] = dist;
       }
     }
 
     const inputs = new Array(numSightDirs * 2);
     for (let i = 0; i < numSightDirs; i++) {
       inputs[2 * i] = Math.min(1, nearestFoodDist[i] / sightDistance);
-      inputs[2 * i + 1] = Math.min(1, nearestCowDist[i] / sightDistance);
+      inputs[2 * i + 1] = Math.min(1, nearestAgentDist[i] / sightDistance);
     }
     return {inputs, touchingFood};
   }
   reproduce(params) {
     this.energy = 0.5;
-    const kid = new Cow(params, this.x, this.y);
+    const kid = new Agent(params, this.x, this.y);
     for (let i = 1; i < kid.nn.length; i++) {
       for (let j = 0; j < kid.nn[i].biases.length; j++) {
         if (Math.random() > params.mutationRate) {
-          kid.nn[i].biases[j] = this.nn[i].biases[j];
+          kid.nn[i].biases[j] = this.nn[i].biases[j] * mutate(params);
         }
         for (let k = 0; k < kid.nn[i].weights[j].length; k++) {
           if (Math.random() > params.mutationRate) {
-            kid.nn[i].weights[j][k] = this.nn[i].weights[j][k];
+            kid.nn[i].weights[j][k] = this.nn[i].weights[j][k] * mutate(params);
           }
         }
       }

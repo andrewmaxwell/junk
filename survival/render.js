@@ -1,10 +1,10 @@
 import {Food} from './Food.js';
 
-const drawPaths = (ctx, params, cows) => {
+const drawPaths = (ctx, params, agents) => {
   ctx.globalAlpha = 0.25;
   ctx.strokeStyle = 'black';
   ctx.beginPath();
-  for (const {path} of cows) {
+  for (const {path} of agents) {
     if (!path.length) continue;
     ctx.moveTo(path[0].x, path[0].y);
     for (const {x, y} of path) ctx.lineTo(x, y);
@@ -23,10 +23,10 @@ const drawFood = (ctx, params, food) => {
   ctx.fill();
 };
 
-const drawCows = (ctx, params, cows) => {
+const drawAgents = (ctx, params, agents) => {
   let oldest;
   ctx.fillStyle = 'red';
-  for (const item of cows) {
+  for (const item of agents) {
     ctx.globalAlpha = item.energy;
     ctx.drawImage(
       item.image,
@@ -56,13 +56,13 @@ const drawCows = (ctx, params, cows) => {
 };
 
 export const render = (ctx, params, hashGrid) => {
-  const cows = [];
+  const agents = [];
   const food = [];
   for (const item of hashGrid.getAll()) {
-    (item instanceof Food ? food : cows).push(item);
+    (item instanceof Food ? food : agents).push(item);
   }
 
-  drawPaths(ctx, params, cows);
+  drawPaths(ctx, params, agents);
   drawFood(ctx, params, food);
-  drawCows(ctx, params, cows);
+  drawAgents(ctx, params, agents);
 };
