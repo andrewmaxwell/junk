@@ -10,7 +10,7 @@ const parseWeights = (weights = '') =>
         .split(':')
         .map((s) => s.trim());
       return [person2Name, Number(weight)];
-    })
+    }),
   );
 
 const mirrorWeights = (people) => {
@@ -25,25 +25,25 @@ const mirrorWeights = (people) => {
 
 const processPeople = (people, attendance) => {
   const dateIndex = {};
-  for (const {date, ids} of attendance) {
-    for (const id of ids.split(',')) {
-      (dateIndex[id] = dateIndex[id] || []).push(date);
-    }
-  }
+  attendance.forEach(({date, ids}) =>
+    ids.split(',').forEach((id) => (dateIndex[id] ||= []).push(date)),
+  );
 
   return mirrorWeights(
-    people.map((row) => ({
-      id: row.id,
-      name: row.Name,
-      absent: row.Absent,
-      sponsor: row.Sponsor || 0,
-      grade: row.Grade,
-      gender: row.Gender,
-      contrib: row.Contrib || 0,
-      weights: parseWeights(row.Weights || ''),
-      dates: (dateIndex[row.id] || []).sort((a, b) => a - b),
-      birthday: row.Birthdate,
-    }))
+    people
+      .filter((row) => !row.Hide)
+      .map((row) => ({
+        id: row.id,
+        name: row.Name,
+        absent: row.Absent,
+        sponsor: row.Sponsor || 0,
+        grade: row.Grade,
+        gender: row.Gender,
+        contrib: row.Contrib || 0,
+        weights: parseWeights(row.Weights || ''),
+        dates: (dateIndex[row.id] || []).sort((a, b) => a - b),
+        birthday: row.Birthdate,
+      })),
   );
 };
 
