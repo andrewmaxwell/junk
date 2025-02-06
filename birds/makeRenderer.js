@@ -1,4 +1,3 @@
-/* eslint-disable import/no-unresolved */
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 
@@ -37,8 +36,8 @@ birdGeometry.setAttribute(
       0,
       -1, // tail left
     ]),
-    3
-  )
+    3,
+  ),
 );
 birdGeometry.computeVertexNormals();
 
@@ -82,7 +81,7 @@ export const makeRenderer = () => {
 
   const plane = new THREE.Mesh(
     new THREE.PlaneGeometry(4000, 4000),
-    new THREE.MeshPhongMaterial({color: 0xffffff})
+    new THREE.MeshPhongMaterial({color: 0xffffff}),
   );
   plane.rotation.x = -Math.PI / 2;
   plane.position.y = -200;
@@ -109,7 +108,7 @@ export const makeRenderer = () => {
       bird.userData.direction = new THREE.Vector3(
         Math.random() - 0.5,
         Math.random() - 0.5,
-        Math.random() - 0.5
+        Math.random() - 0.5,
       ).normalize();
 
       scene.add(bird);

@@ -1,4 +1,3 @@
-/* eslint-disable import/no-unresolved */
 import * as THREE from 'three';
 import {makeRenderer} from './makeRenderer.js';
 
@@ -20,7 +19,7 @@ const moveBird = (bird, i, birds) => {
   bird.lookAt(
     bird.position.x + bird.userData.direction.x,
     bird.position.y + bird.userData.direction.y,
-    bird.position.z + bird.userData.direction.z
+    bird.position.z + bird.userData.direction.z,
   );
 };
 
