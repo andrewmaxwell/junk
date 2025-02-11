@@ -12,7 +12,7 @@ export const tokenize = (str) =>
     getAllMatches(tokenRegex, line.replace(/\/\/.*/, '')).map((m) => ({
       val: m[0],
       loc: lineNum + ':' + m.index,
-    }))
+    })),
   );
 
 const nest = (tokens) => {
@@ -23,7 +23,6 @@ const nest = (tokens) => {
     else if (val === ')') {
       if (!indexes.length) throw new Error(`Unexpected ) at ${loc}`);
       result.push(result.splice(indexes.pop())); // am I bad person?
-      // result = [...result.slice(index), [result.slice(index)]] // TODO
     } else result.push({val: isNaN(val) ? val : Number(val), loc});
   }
   if (indexes.length) throw new Error(`Missing ${indexes.length} )`);

@@ -10,12 +10,11 @@ const fromBool = (val) => val && (!Array.isArray(val) || val.length);
 const toLisp = (expr) =>
   Array.isArray(expr) ? `(${expr.map(toLisp).join(' ')})` : expr.val;
 
-const getVals = (expr) =>
-  Array.isArray(expr)
-    ? expr.map(getVals)
-    : expr && typeof expr === 'object'
-    ? expr.val
-    : expr;
+const getVals = (expr) => {
+  if (Array.isArray(expr)) return expr.map(getVals);
+  if (expr && typeof expr === 'object') return expr.val;
+  return expr;
+};
 
 const printStack = (stack) => stack.map((s) => `\n    at ${s}`).join('');
 
@@ -31,7 +30,7 @@ const evaluate = (expr, env, stack, steps) => {
           cdr(expr),
           env,
           cons(`${val} ${loc}`, stack),
-          steps
+          steps,
         );
         if (loc && val !== 'defun' && val !== 'lambda') {
           steps.push({loc, env, stack, result: `${toLisp(expr)} -> ${result}`});
@@ -43,14 +42,13 @@ const evaluate = (expr, env, stack, steps) => {
     }
     throw new Error(
       `${JSON.stringify(getVals(car(expr)))} is not a function${printStack(
-        stack
-      )}`
+        stack,
+      )}`,
     );
   }
 
   if (expr && typeof expr === 'object') {
     const {val, loc} = expr;
-    // if (loc) steps.push({loc, env, stack});
     if (typeof val === 'number') return val;
 
     for (const [key, value] of env) {
@@ -76,7 +74,7 @@ export const defaultEnv = Object.entries({
     toBool(isAtom(evaluate(a, env, stack, steps))),
   eq: ([a, b], env, stack, steps) =>
     toBool(
-      deepEq(evaluate(a, env, stack, steps), evaluate(b, env, stack, steps))
+      deepEq(evaluate(a, env, stack, steps), evaluate(b, env, stack, steps)),
     ),
   car: ([a], env, stack, steps) => car(evaluate(a, env, stack, steps)),
   cdr: ([a], env, stack, steps) => cdr(evaluate(a, env, stack, steps)),
@@ -95,12 +93,12 @@ export const defaultEnv = Object.entries({
         body,
         concat(
           argList.map((arg, i) =>
-            list(arg.val, evaluate(args[i], env, stack, steps))
+            list(arg.val, evaluate(args[i], env, stack, steps)),
           ),
-          env
+          env,
         ),
         stack,
-        steps
+        steps,
       );
     };
     func.lisp = toLisp([{val: 'lambda'}, argList, body]);
@@ -110,9 +108,9 @@ export const defaultEnv = Object.entries({
     cons(
       list(
         val,
-        evaluate([{val: 'lambda', loc}, args, body], env, stack, steps)
+        evaluate([{val: 'lambda', loc}, args, body], env, stack, steps),
       ),
-      env
+      env,
     ),
   list: (args, env, stack, steps) =>
     args.map((a) => evaluate(a, env, stack, steps)),
@@ -126,10 +124,10 @@ export const defaultEnv = Object.entries({
           evaluate(body, cons(list(argName.val, args), env), stack, steps),
           env,
           cons(`defmacro ${loc}`, stack),
-          steps
-        )
+          steps,
+        ),
       ),
-      env
+      env,
     ),
   '+': math((a, b) => a + b),
   '-': math((a, b) => a - b),
@@ -146,12 +144,12 @@ export const defaultEnv = Object.entries({
 for (const [name, def] of defaultEnv) def.lisp = name;
 
 // takes an array of expressions, returns the value of the last one. The ones before it can only be defuns of defmacros
-export const execute = (exprs) => {
+export const execute = (exprs, env = defaultEnv) => {
   const stack = [];
   const steps = [];
   const result = exprs.reduce(
     (env, line) => evaluate(line, env, stack, steps),
-    defaultEnv
+    env,
   );
   return {result, steps};
 };
