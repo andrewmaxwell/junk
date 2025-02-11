@@ -42,11 +42,8 @@ const defaultCode = `(defun getProp (name obj)
     'todos 
     (cons
       (createTodo (getProp 'inputValue state))
-      (getProp 'todos state)
-    )
-    state
-  )
-)
+      (getProp 'todos state))
+    state))
 
 (defun onAdd (state)
   (blankInput (addTodo state)))
@@ -55,9 +52,7 @@ const defaultCode = `(defun getProp (name obj)
   (setProp 
     'completed 
     (not (getProp 'completed todo))
-    todo
-  )
-)
+    todo))
 
 (defun onToggle (state todo)
   (setProp 
@@ -66,14 +61,9 @@ const defaultCode = `(defun getProp (name obj)
       (lambda (t)
         (cond
           ((eq t todo) (toggle t))
-          ('else t)
-        )
-      )
-      (getProp 'todos state)
-    )
-    state
-  )
-)
+          ('else t)))
+      (getProp 'todos state))
+    state))
 
 (defun renderItem (todo)
   (list
@@ -85,50 +75,34 @@ const defaultCode = `(defun getProp (name obj)
           '(tag input)
           '(type checkbox)
           (list 'checked (getProp 'completed todo))
-          (list 'onClick (lambda (state) (onToggle state todo)))
-        )
+          (list 'onClick (lambda (state) (onToggle state todo))))
         (list
           '(tag span)
           (list 'style (list
             (list 'textDecoration (cond
               ((getProp 'completed todo) "line-through")
-              (1 "none")
-            ))
-          ))
-          (list 'textContent (getProp 'text todo))
-        )
-      )
-    )
-  )
-)
+              (1 "none")))))
+          (list 'textContent (getProp 'text todo)))))))
 
 (defun render (state) 
   (list
     '((tag h1) (textContent "Todo List"))
-
     (list
       '(tag input)
       '(placeholder "Enter a todo item")
       '(style ((fontSize 1em) (padding 5px)))
       (list 'value (getProp 'inputValue state))
-      (list 'onChangeValue onChangeInput)
-    )
-
+      (list 'onChangeValue onChangeInput))
     (list
       '(tag button)
       '(style ((fontSize 1em) (padding 5px)))
       '(textContent "Add")
       (list 'disabled (not (getProp 'inputValue state)))
-      (list 'onClick onAdd)
-    )
-
+      (list 'onClick onAdd))
     (list
       '(tag ul)
       '(style ((listStyleType none) (padding 0) (marginTop 20px)))
-      (list 'children (map renderItem (getProp 'todos state)))
-    )
-  )
-)
+      (list 'children (map renderItem (getProp 'todos state))))))
 
 (defun getInitialState () '(
   (inputValue "")
@@ -139,7 +113,6 @@ const defaultCode = `(defun getProp (name obj)
     (
       (text "Add more features")
       (completed 0))))))
-
 `;
 
 const editor = window.ace.edit('editor');
