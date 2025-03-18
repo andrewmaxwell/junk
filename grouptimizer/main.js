@@ -4,7 +4,7 @@ import {makeSolver} from './solver.js';
 import {getData} from './getData.js';
 import {makeAttendanceTable} from './makeAttendanceTable.js';
 
-const stats = new StatGraph(document.getElementById('statCanvas'));
+const stats = new StatGraph(document.querySelector('#statCanvas'));
 const annealingGraph = stats.addGraph({color: 'red'});
 const temperatureGraph = stats.addGraph({color: 'green', forceMin: 0});
 const solver = makeSolver();
@@ -77,7 +77,7 @@ document.querySelectorAll('.go').forEach((button) => {
     solver.init(
       makeInitialState(numGroups, filteredPeople),
       10,
-      10_000 * filteredPeople.length
+      10_000 * filteredPeople.length,
     );
     stats.reset();
 
@@ -104,7 +104,7 @@ const init = async () => {
 
   document.querySelector('#numGroups').value = Math.min(
     numPresentSponsors(people),
-    Math.floor(numPresentStudents(people) / 4)
+    Math.floor(numPresentStudents(people) / 4),
   );
   document.querySelector('#output').innerText = makeReport(people);
   document.querySelector('#attendance').innerHTML = makeAttendanceTable(people);
