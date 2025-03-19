@@ -18,6 +18,7 @@ const temperatureGraph = stats.addGraph({
   forceMin: 0,
 });
 const currentCostGraph = stats.addGraph({label: 'Cost', color: 'cyan'});
+const itsPerFrameGraph = stats.addGraph({label: 'ItsPerFrame', color: 'gray'});
 
 const output = document.querySelector('#output');
 
@@ -40,12 +41,12 @@ async function go() {
   const throttledFunc = throttle((itsPerFrame) => {
     for (let i = 0; i < itsPerFrame; i++) {
       iterate();
+      counter++;
       const {currentCost, temperature} = getResults();
       temperatureGraph(temperature);
       currentCostGraph(currentCost);
-      counter++;
+      itsPerFrameGraph(itsPerFrame);
     }
-
     stats.draw();
   });
 

@@ -2,7 +2,10 @@ import {randEl} from './utils.js';
 
 /** @type {(people: Person[], roleSchedule: RoleSchedule[]) => StateRow[]} */
 export function getInitialState(people, roleSchedule) {
+  /** @type {Record<string, Person[]>} */
   const roleGroups = {};
+
+  /** @type {Record<string, Person>} */
   const peopleIndex = {};
 
   for (const person of people) {

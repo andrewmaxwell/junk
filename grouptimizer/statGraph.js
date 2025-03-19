@@ -86,10 +86,9 @@ export default class StatGraph {
         ctx.strokeStyle = color;
         ctx.beginPath();
 
-        for (let i = 0; i < data.length; i++) {
-          const x = (i / (data.length - 1)) * canvasWidth;
-          const y =
-            canvasHeight - ((data[i] - min) / (max - min)) * canvasHeight;
+        for (let x = 0; x < canvasWidth; x++) {
+          const i = Math.floor((x / canvasWidth) * data.length);
+          const y = canvasHeight * (1 - (data[i] - min) / (max - min));
           ctx.lineTo(x, y);
         }
         ctx.stroke();

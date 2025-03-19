@@ -17,12 +17,14 @@ function tryGetNeighbor(state, roleGroups) {
   )
     return undefined;
 
-  const newState = [...state];
-  newState[weekIndex] = {
-    ...newState[weekIndex],
-    assignments: {...newState[weekIndex].assignments, [role]: [...people]},
-  };
-  newState[weekIndex].assignments[role][personIndex] = newPerson;
+  const newState = state.slice();
+  const newRow = {...newState[weekIndex]};
+  const newAssignments = {...newRow.assignments};
+  const newRolePeople = newAssignments[role].slice();
+  newRolePeople[personIndex] = newPerson;
+  newAssignments[role] = newRolePeople;
+  newRow.assignments = newAssignments;
+  newState[weekIndex] = newRow;
   return newState;
 }
 
