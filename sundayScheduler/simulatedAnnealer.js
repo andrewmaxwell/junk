@@ -36,7 +36,7 @@ export function makeSimulatedAnnealer(
 
   return {
     iterate: () => {
-      if (iterations > maxIterations) return;
+      if (iterations >= maxIterations) return;
 
       const neighbor = generateNeighbor(currentState);
       const neighborCost = getCost(neighbor);

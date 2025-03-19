@@ -93,9 +93,12 @@ export default class StatGraph {
         }
         ctx.stroke();
 
-        const latestValue =
-          (label ? label + ': ' : '') + data[data.length - 1].toLocaleString();
-        ctx.fillText(latestValue, 2, canvasHeight - 12 - 10 * graphIndex);
+        if (data.length) {
+          const latestValue =
+            (label ? label + ': ' : '') +
+            data[data.length - 1].toLocaleString();
+          ctx.fillText(latestValue, 2, canvasHeight - 12 - 10 * graphIndex);
+        }
       });
 
     // Show the total number of data points in the first graph as a simple label

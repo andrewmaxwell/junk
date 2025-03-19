@@ -2,25 +2,10 @@ const conflictPenalty = 100;
 const unavailablePenalty = 100;
 const frequencyMultiplier = 20;
 
-/** @type {(state: StateRow[], debug?: boolean) => {cost: number, details: string}} */
-export const getCost = (state, debug) => {
-  let cost = 0;
-
-  /** @type {Array<string>} */
-  const details = [];
-
+/** @type {(state: StateRow[], log: (date: Date, amount: number, msg: string) => void) => void} */
+const calcCost = (state, log) => {
   /** @type {Record<string, {prev: number, load: number}>} */
   const personRoleLoad = {};
-
-  /** @type {(date: Date, amount: number, msg: string) => void} */
-  const log = (date, amount, msg) => {
-    cost += amount;
-    if (debug) {
-      details.push(
-        `${date.toISOString().slice(0, 10)}: ${msg} = ${Math.round(Math.abs(amount) * 10) / 10} ${amount > 0 ? 'point penalty' : 'point bonus'}`,
-      );
-    }
-  };
 
   for (const {date, assignments, unavailable} of state) {
     const assignedCounts = {};
@@ -75,5 +60,22 @@ export const getCost = (state, debug) => {
       }
     }
   }
-  return {cost, details: details.join('\n')};
+};
+
+/** @type {(state: StateRow[]) => number} */
+export const getCost = (state) => {
+  let cost = 0;
+  calcCost(state, (_, amount) => (cost += amount));
+  return cost;
+};
+
+/** @type {(state: StateRow[]) => string} */
+export const getDetails = (state) => {
+  const details = [];
+  calcCost(state, (date, amount, msg) =>
+    details.push(
+      `${date.toISOString().slice(0, 10)}: ${msg} = ${Math.round(Math.abs(amount) * 10) / 10} ${amount > 0 ? 'point penalty' : 'point bonus'}`,
+    ),
+  );
+  return details.join('\n');
 };
