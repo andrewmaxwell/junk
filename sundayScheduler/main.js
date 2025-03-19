@@ -12,15 +12,15 @@ const maxIterations = 200_000;
 const alpha = 1 - 1 / 10000;
 
 const stats = new StatGraph(document.querySelector('#stats'));
-const temperatureGraph = stats.addGraph({color: 'red', forceMin: 0});
-const currentCostGraph = stats.addGraph({color: 'cyan'});
+const temperatureGraph = stats.addGraph({
+  label: 'Temperature',
+  color: 'red',
+  forceMin: 0,
+});
+const currentCostGraph = stats.addGraph({label: 'Cost', color: 'cyan'});
 
 const output = document.querySelector('#output');
 
-/**
- * Main entry point to run the scheduling + simulated annealing logic.
- * Fetches data, initializes the annealer, and iterates to produce a solution.
- */
 async function go() {
   const {people, roleSchedule} = await getData();
 

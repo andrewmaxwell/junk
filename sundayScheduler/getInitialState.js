@@ -1,16 +1,8 @@
 import {randEl} from './utils.js';
 
-/**
- * Builds an initial solution (state) from the list of people and role schedule.
- *
- * @param {Person[]} people
- * @param {RoleSchedule[]} roleSchedule
- * @returns {StateRow[]}
- */
+/** @type {(people: Person[], roleSchedule: RoleSchedule[]) => StateRow[]} */
 export function getInitialState(people, roleSchedule) {
-  /** @type {Record<string, Person[]>} */
   const roleGroups = {};
-  /** @type {Record<string, Person>} */
   const peopleIndex = {};
 
   for (const person of people) {

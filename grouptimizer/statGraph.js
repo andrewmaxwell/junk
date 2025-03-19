@@ -5,6 +5,7 @@
  * @property {number} min - The minimum observed value among data points
  * @property {number} max - The maximum observed value among data points
  * @property {number} [forceMin] - If defined, overrides the computed minimum
+ * @property {string} [label] - If defined, a label
  */
 
 /**
@@ -30,7 +31,7 @@ export default class StatGraph {
    * Adds a new graph configuration to track and draws/reset as needed.
    * Returns a function you can call to record new data values.
    *
-   * @param {{color: string; forceMin?: number}} graphConfig
+   * @param {{color: string; label?: string; forceMin?: number}} graphConfig
    * @returns {(val: number) => void} A function to push a new data point to this graph.
    */
   addGraph(graphConfig) {
@@ -80,30 +81,32 @@ export default class StatGraph {
 
     this.graphs
       .filter((g) => g.data.length > 0)
-      .forEach((graph, graphIndex) => {
-        const {color, data, min, max} = graph;
-
+      .forEach(({color, label, data, min, max}, graphIndex) => {
         ctx.fillStyle = color;
         ctx.strokeStyle = color;
         ctx.beginPath();
 
         for (let i = 0; i < data.length; i++) {
-          const x = (i / data.length) * canvasWidth;
+          const x = (i / (data.length - 1)) * canvasWidth;
           const y =
             canvasHeight - ((data[i] - min) / (max - min)) * canvasHeight;
           ctx.lineTo(x, y);
         }
         ctx.stroke();
 
-        const latestValue = String(data[data.length - 1]);
-        ctx.fillText(latestValue, 0, canvasHeight - 12 - 10 * graphIndex);
+        const latestValue =
+          (label ? label + ': ' : '') + data[data.length - 1].toLocaleString();
+        ctx.fillText(latestValue, 2, canvasHeight - 12 - 10 * graphIndex);
       });
 
     // Show the total number of data points in the first graph as a simple label
     if (this.graphs.length && this.graphs[0].data) {
       ctx.fillStyle = 'white';
-      const num = String(this.graphs[0].data.length);
-      ctx.fillText(num, 0, canvasHeight - 2);
+      ctx.fillText(
+        'Iterations: ' + this.graphs[0].data.length.toLocaleString(),
+        2,
+        canvasHeight - 2,
+      );
     }
   }
 }

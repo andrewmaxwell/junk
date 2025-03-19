@@ -7,11 +7,7 @@ export const getCost = (state, debug) => {
   let cost = 0;
   const details = [];
 
-  /**
-   * @param {Date} date
-   * @param {number} amount
-   * @param {string} msg
-   */
+  /** @type {(date: Date, amount: number, msg: string) => void} */
   const log = (date, amount, msg) => {
     cost += amount;
     if (debug) {
@@ -21,7 +17,6 @@ export const getCost = (state, debug) => {
     }
   };
 
-  /** @type {Record<string, {prev: Date, load: number}>} */
   const personRoleLoad = {};
 
   for (const {date, assignments, unavailable} of state) {
