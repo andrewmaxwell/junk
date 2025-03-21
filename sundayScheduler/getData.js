@@ -27,10 +27,11 @@ export async function getData() {
   return {
     people: XLSX.utils
       .sheet_to_json(People)
-      .map(({Name, Roles, Weights = ''}) => ({
+      .map(({Name, Roles, Weights = '', ['Helper Only']: helper = ''}) => ({
         name: Name.trim(),
         roles: toObject(Roles, (val) => parseInt(val) / 100),
         weights: toObject(Weights, Number),
+        helper: !!helper.trim(),
       })),
     roleSchedule: XLSX.utils
       .sheet_to_json(Roles)

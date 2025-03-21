@@ -1,7 +1,10 @@
 const conflictPenalty = 100;
 const unavailablePenalty = 100;
+const noTeacherPenalty = 100;
 const frequencyMultiplier = 20;
 const consecutiveWeekPenalty = 20;
+
+const childcareRoles = ['Nursery', '2-preK', 'K-2']; // TODO: this should be in the spreadsheet somehow
 
 /** @type {(state: StateRow[], log: (date: Date, amount: number, msg: string) => void) => void} */
 const calcCost = (state, log) => {
@@ -56,11 +59,18 @@ const calcCost = (state, log) => {
             log(
               date,
               frequencyMultiplier * (r.load - 1) +
-                consecutiveWeekPenalty * +(numWeeks === 1),
+                consecutiveWeekPenalty * (numWeeks === 1 ? 1 : 0),
               `${name} is doing ${role} too often`,
             );
           }
         }
+      }
+    }
+
+    // make sure there is at least one non-helper in each childcare role
+    for (const role of childcareRoles) {
+      if (assignments[role]?.every((p) => p.helper)) {
+        log(date, noTeacherPenalty, `${role} is all helpers`);
       }
     }
   }

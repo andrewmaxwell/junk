@@ -1,4 +1,4 @@
-/** @type {(statCanvas: HTMLCanvasElement | null) => {add: (index: number, val: number) => void, draw: () => void}} */
+/** @type {(statCanvas: HTMLCanvasElement | null) => {add: (index: number, val: number) => void, draw: (progress: number) => void}} */
 export const makeStats = (statCanvas) => {
   const ctx = statCanvas?.getContext('2d');
   if (!ctx) throw new Error('wtf');
@@ -20,8 +20,11 @@ export const makeStats = (statCanvas) => {
     minY = Math.min(minY, val);
   };
 
-  const draw = () => {
+  /** @type (progress: number) => void */
+  const draw = (progress) => {
     ctx.clearRect(0, 0, width, height);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
     for (let i = 0; i < stats.length; i++) {
       if (!stats[i]?.length) continue;
       ctx.fillStyle =
@@ -38,8 +41,18 @@ export const makeStats = (statCanvas) => {
 
       ctx.globalAlpha = 1;
       const lastVal = stats[i][stats[i].length - 1];
-      ctx.fillText(lastVal.toLocaleString(), 2, height - 2 - 10 * i);
+      ctx.fillText(
+        Math.round(lastVal).toLocaleString(),
+        2,
+        height - 2 - 16 * i,
+      );
     }
+
+    ctx.fillStyle = 'white';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.font = '16px sans-serif';
+    ctx.fillText(`${Math.floor(progress)}% complete`, width, 0);
   };
 
   return {add, draw};

@@ -4,6 +4,7 @@
  * @property {Record<string, number>} roles
  * @property {Record<string, number>} weights
  * @property {boolean} [determined]
+ * @property {boolean} helper
  */
 
 /**
