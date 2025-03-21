@@ -1,3 +1,7 @@
+/** @type {(date: Date) => string} */
+const formatDate = (date) =>
+  [date.getMonth() + 1, date.getDate(), date.getFullYear()].join('/');
+
 /** @type {(people: Person[], roleSchedule: RoleSchedule[]) => string[]} */
 export function validateData(people, roleSchedule) {
   const errors = [];
@@ -71,7 +75,7 @@ export function validateData(people, roleSchedule) {
       sched.date.getFullYear() > 2030
     ) {
       errors.push(
-        `Invalid date "${sched.date}". It must be a valid Date between 2020 and 2030.`,
+        `Invalid date "${formatDate(sched.date)}". It must be a valid Date between 2020 and 2030.`,
       );
     }
 
@@ -79,7 +83,7 @@ export function validateData(people, roleSchedule) {
     for (const roleKey of Object.keys(sched.roles)) {
       if (!peopleRoleSet.has(roleKey)) {
         errors.push(
-          `Schedule on ${sched.date} has role "${roleKey}" which is not in people[].roles`,
+          `Schedule on ${formatDate(sched.date)} has role "${roleKey}" which is not in people[].roles`,
         );
       }
 
@@ -87,7 +91,7 @@ export function validateData(people, roleSchedule) {
       for (const assignedName of sched.roles[roleKey]) {
         if (assignedName !== '_' && !allPeopleNames.has(assignedName)) {
           errors.push(
-            `On ${sched.date}, role "${roleKey}" has invalid person "${assignedName}". Must be an existing person name or "_"`,
+            `On ${formatDate(sched.date)}, role "${roleKey}" has invalid person "${assignedName}". Must be an existing person name or "_"`,
           );
         }
       }
@@ -97,7 +101,7 @@ export function validateData(people, roleSchedule) {
     for (const name of sched.unavailable) {
       if (!allPeopleNames.has(name)) {
         errors.push(
-          `On ${sched.date}, "${name}" is listed as unavailable but is not a known person name.`,
+          `On ${formatDate(sched.date)}, "${name}" is listed as unavailable but is not a known person name.`,
         );
       }
     }

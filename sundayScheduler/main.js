@@ -35,6 +35,7 @@ async function go() {
   const errors = validateData(people, roleSchedule);
   if (errors.length && outputContainer) {
     outputContainer.innerHTML = `ERRORS:\n${errors.join('\n')}`;
+    outputContainer.style.display = 'block';
     return;
   }
 
