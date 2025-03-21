@@ -22,7 +22,7 @@ self.onmessage = ({
     alpha,
   );
 
-  for (let i = 0; i <= maxIterations; i++) {
+  for (let i = 0; i < maxIterations; i++) {
     iterate();
     if (i % iterationsPerReport === 0) {
       const {currentCost} = getResults();

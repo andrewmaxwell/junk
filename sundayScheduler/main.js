@@ -12,12 +12,20 @@ const alpha = 1 - 1 / 20_000; // bigger denominator = slower cooldown
 const iterationsPerReport = 100;
 const numWorkers = navigator.hardwareConcurrency;
 
-const stats = makeStats(document.querySelector('#stats'));
+/** @type {HTMLCanvasElement | null} */
+const statCanvas = document.querySelector('#stats');
+
+/** @type {HTMLTextAreaElement | null} */
 const outputContainer = document.querySelector('#output');
+
+/** @type {HTMLHeadingElement | null} */
+const searchingHeader = document.querySelector('#searching');
+
+const stats = makeStats(statCanvas);
 
 let numDone = 0;
 let allBestCost = Infinity;
-let progress = 0;
+let iterationCount = 0;
 
 async function go() {
   const {people, roleSchedule} = await getData();
@@ -37,7 +45,7 @@ async function go() {
       'message',
       ({data: {done, currentCost, bestCost, output}}) => {
         stats.add(i, currentCost);
-        progress++;
+        iterationCount += iterationsPerReport;
         if (!done) return;
 
         if (bestCost < allBestCost && outputContainer) {
@@ -58,11 +66,18 @@ async function go() {
     });
   }
 
+  const totalIterations = numWorkers * maxIterations;
+
   const loop = () => {
-    if (numDone === numWorkers) return;
-    stats.draw(
-      (100 * progress * iterationsPerReport) / numWorkers / maxIterations,
-    );
+    if (numDone === numWorkers) {
+      if (outputContainer) outputContainer.style.display = 'block';
+      if (searchingHeader) searchingHeader.style.display = 'none';
+      if (statCanvas) statCanvas.style.display = 'none';
+      return;
+    }
+
+    const percent = Math.floor(100 * (iterationCount / totalIterations));
+    stats.draw(`${percent}% complete`);
     requestAnimationFrame(loop);
   };
   loop();

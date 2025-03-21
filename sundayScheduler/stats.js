@@ -1,10 +1,11 @@
-/** @type {(statCanvas: HTMLCanvasElement | null) => {add: (index: number, val: number) => void, draw: (progress: number) => void}} */
-export const makeStats = (statCanvas) => {
-  const ctx = statCanvas?.getContext('2d');
+/** @type {(statCanvas: HTMLCanvasElement | null) => {add: (index: number, val: number) => void, draw: (progress: string) => void}} */
+export const makeStats = (canvas) => {
+  if (!canvas) throw new Error('where is the canvas');
+  const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('wtf');
 
-  const width = statCanvas?.clientWidth ?? 800;
-  const height = statCanvas?.clientHeight ?? 200;
+  const width = (canvas.width = innerWidth - 50);
+  const height = (canvas.height = 200);
 
   /** @type Array<Array<number>> */
   const stats = [];
@@ -20,11 +21,13 @@ export const makeStats = (statCanvas) => {
     minY = Math.min(minY, val);
   };
 
-  /** @type (progress: number) => void */
+  /** @type (progress: string) => void */
   const draw = (progress) => {
     ctx.clearRect(0, 0, width, height);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.font = '12px sans-serif';
+
     for (let i = 0; i < stats.length; i++) {
       if (!stats[i]?.length) continue;
       ctx.fillStyle =
@@ -33,26 +36,20 @@ export const makeStats = (statCanvas) => {
       ctx.beginPath();
       for (let x = 0; x < width; x++) {
         const j = Math.floor((x / width) * maxX);
-        if (isNaN(stats[i][j])) continue;
+        if (isNaN(stats[i][j])) break;
         const y = height * (1 - (stats[i][j] - minY) / (maxY - minY));
         ctx.lineTo(x, y);
       }
       ctx.stroke();
 
-      ctx.globalAlpha = 1;
       const lastVal = stats[i][stats[i].length - 1];
-      ctx.fillText(
-        Math.round(lastVal).toLocaleString(),
-        2,
-        height - 2 - 16 * i,
-      );
+      ctx.fillText(Math.round(lastVal).toLocaleString(), width, 12 * (i + 2));
     }
 
-    ctx.fillStyle = 'white';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'top';
+    ctx.globalAlpha = 1;
     ctx.font = '16px sans-serif';
-    ctx.fillText(`${Math.floor(progress)}% complete`, width, 0);
+    ctx.fillStyle = 'white';
+    ctx.fillText(progress, width, 0);
   };
 
   return {add, draw};

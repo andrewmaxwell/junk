@@ -1,6 +1,6 @@
 const conflictPenalty = 100;
 const unavailablePenalty = 100;
-const noTeacherPenalty = 100;
+const noAdultWomanPenalty = 100;
 const frequencyMultiplier = 20;
 const consecutiveWeekPenalty = 20;
 
@@ -67,10 +67,13 @@ const calcCost = (state, log) => {
       }
     }
 
-    // make sure there is at least one non-helper in each childcare role
+    // make sure there is at least one adult woman in each childcare role
     for (const role of childcareRoles) {
-      if (assignments[role]?.every((p) => p.helper)) {
-        log(date, noTeacherPenalty, `${role} is all helpers`);
+      if (
+        assignments[role] &&
+        !assignments[role].some((p) => p.over21 && p.isFemale)
+      ) {
+        log(date, noAdultWomanPenalty, `${role} does not have an adult woman`);
       }
     }
   }

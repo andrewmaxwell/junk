@@ -27,12 +27,21 @@ export async function getData() {
   return {
     people: XLSX.utils
       .sheet_to_json(People)
-      .map(({Name, Roles, Weights = '', ['Helper Only']: helper = ''}) => ({
-        name: Name.trim(),
-        roles: toObject(Roles, (val) => parseInt(val) / 100),
-        weights: toObject(Weights, Number),
-        helper: !!helper.trim(),
-      })),
+      .map(
+        ({
+          Name = '',
+          Roles = '',
+          Weights = '',
+          Gender = '',
+          ['Over 21']: over21 = '',
+        }) => ({
+          name: Name.trim(),
+          roles: toObject(Roles, (val) => parseInt(val) / 100),
+          weights: toObject(Weights, Number),
+          isFemale: Gender.trim() === 'F',
+          over21: over21.trim() === 'Y',
+        }),
+      ),
     roleSchedule: XLSX.utils
       .sheet_to_json(Roles)
       .map(({Date: date, Roles: rolesString, Unavailable = ''}) => ({

@@ -4,7 +4,8 @@
  * @property {Record<string, number>} roles
  * @property {Record<string, number>} weights
  * @property {boolean} [determined]
- * @property {boolean} helper
+ * @property {boolean} isFemale
+ * @property {boolean} over21
  */
 
 /**
