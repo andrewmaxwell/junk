@@ -1,5 +1,6 @@
 import {getData} from './getData.js';
 import {makeStats} from './stats.js';
+import {validateData} from './validateData.js';
 
 const stats = makeStats(document.querySelector('#stats'));
 
@@ -9,12 +10,17 @@ const outputContainer = document.querySelector('#output');
 
 let numDone = 0;
 let allBestCost = Infinity;
-let allBestOutput;
 
 async function go() {
   const {people, roleSchedule} = await getData();
 
   console.log({people, roleSchedule});
+
+  const errors = validateData(people, roleSchedule);
+  if (errors.length && outputContainer) {
+    outputContainer.innerHTML = `ERRORS:\n${errors.join('\n')}`;
+    return;
+  }
 
   for (let i = 0; i < numWorkers; i++) {
     const worker = new Worker('worker.js', {type: 'module'});
@@ -25,15 +31,11 @@ async function go() {
         stats.add(i, currentCost);
         if (!done) return;
 
-        if (bestCost < allBestCost) {
+        if (bestCost < allBestCost && outputContainer) {
           allBestCost = bestCost;
-          allBestOutput = output;
+          outputContainer.innerHTML = output;
         }
-
         numDone++;
-        if (numDone === numWorkers && outputContainer) {
-          outputContainer.innerHTML = allBestOutput;
-        }
       },
     );
 

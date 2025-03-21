@@ -26,6 +26,7 @@ export const makeStats = (statCanvas) => {
       if (!stats[i]?.length) continue;
       ctx.fillStyle =
         ctx.strokeStyle = `hsl(${(i / stats.length) * 360},100%,70%)`;
+      ctx.globalAlpha = 0.5;
       ctx.beginPath();
       for (let x = 0; x < width; x++) {
         const j = Math.floor((x / width) * maxX);
@@ -35,6 +36,7 @@ export const makeStats = (statCanvas) => {
       }
       ctx.stroke();
 
+      ctx.globalAlpha = 1;
       const lastVal = stats[i][stats[i].length - 1];
       ctx.fillText(lastVal.toLocaleString(), 2, height - 2 - 10 * i);
     }

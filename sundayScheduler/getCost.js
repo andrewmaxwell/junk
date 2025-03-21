@@ -1,6 +1,7 @@
 const conflictPenalty = 100;
 const unavailablePenalty = 100;
 const frequencyMultiplier = 20;
+const consecutiveWeekPenalty = 20;
 
 /** @type {(state: StateRow[], log: (date: Date, amount: number, msg: string) => void) => void} */
 const calcCost = (state, log) => {
@@ -46,13 +47,16 @@ const calcCost = (state, log) => {
           personRoleLoad[key] = {prev: date.getTime(), load: 1};
         } else {
           const r = personRoleLoad[key];
-          const numWeeks = (date.getTime() - r.prev) / (7 * 24 * 3600 * 1000);
-          r.load += 1 - numWeeks * roles[role];
+          const numWeeks = Math.round(
+            (date.getTime() - r.prev) / (7 * 24 * 3600 * 1000),
+          );
+          r.load = Math.max(0, r.load - numWeeks * roles[role]) + 1;
           r.prev = date.getTime();
           if (r.load > 1) {
             log(
               date,
-              frequencyMultiplier * (r.load - 1),
+              frequencyMultiplier * (r.load - 1) +
+                consecutiveWeekPenalty * +(numWeeks === 1),
               `${name} is doing ${role} too often`,
             );
           }
