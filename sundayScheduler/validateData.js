@@ -2,71 +2,77 @@
 const formatDate = (date) =>
   [date.getMonth() + 1, date.getDate(), date.getFullYear()].join('/');
 
-/** @type {(people: Person[], roleSchedule: RoleSchedule[]) => string[]} */
-export function validateData(people, roleSchedule) {
+/** @type {(state: State) => string[]} */
+export function validateData({people, schedule, roleInfo}) {
   const errors = [];
-
-  // Collect all person names
-  const allPeopleNames = new Set(people.map((p) => p.name));
 
   // Collect all roles from people
   const peopleRoleSet = new Set();
-  for (const p of people) {
-    for (const r of Object.keys(p.roles)) {
+  for (const name in people) {
+    for (const r in people[name].roles) {
       peopleRoleSet.add(r);
     }
   }
 
   // Collect all roles from the schedule
   const scheduleRoleSet = new Set();
-  for (const sched of roleSchedule) {
+  for (const sched of schedule) {
     for (const r of Object.keys(sched.roles)) {
       scheduleRoleSet.add(r);
     }
   }
 
+  const roleInfoRoleSet = new Set(Object.keys(roleInfo));
+
   // === Validate People ===
-  for (const p of people) {
+  for (const name in people) {
     // 1. Name checks
-    if (!p.name || p.name.includes(',') || p.name.includes(';')) {
+    if (!name || name.includes(',') || name.includes(';')) {
       errors.push(
-        `Invalid person name "${p.name}". Names must not be empty, contain commas, or semicolons.`,
+        `Invalid person name "${name}". Names must not be empty, contain commas, or semicolons.`,
       );
     }
 
-    // 2. Role keys must exist in roleSchedule[].roles
-    for (const roleKey of Object.keys(p.roles)) {
+    const {roles, weights} = people[name];
+    // 2. Role keys must exist in schedule roles
+    for (const roleKey in roles) {
       if (!scheduleRoleSet.has(roleKey)) {
         errors.push(
-          `Person "${p.name}" has role "${roleKey}" which does not appear in any roleSchedule[].roles`,
+          `Person "${name}" has role "${roleKey}" which does not appear in any schedule roles`,
+        );
+      }
+      if (!roleInfoRoleSet.has(roleKey)) {
+        errors.push(
+          `Person "${name}" has role "${roleKey}" which does not appear in any roleInfo roles`,
         );
       }
       // 3. Role values must be 0–1 inclusive
-      const roleVal = p.roles[roleKey];
+      const roleVal = roles[roleKey];
       if (isNaN(roleVal) || roleVal < 0 || roleVal > 1) {
         errors.push(
-          `Invalid role value for ${p.name}.${roleKey}: ${roleVal} (should be between 0 and 1)`,
+          `Invalid role value for ${name}.${roleKey}: ${roleVal} (should be between 0 and 1)`,
         );
       }
     }
 
     // 4. Weight keys should match names of existing people
-    for (const weightKey of Object.keys(p.weights)) {
-      if (!allPeopleNames.has(weightKey)) {
+    for (const weightKey of Object.keys(weights)) {
+      if (!people[weightKey]) {
         errors.push(
-          `Invalid weight key "${weightKey}" for person "${p.name}". It must be another existing person's name.`,
+          `Invalid weight key "${weightKey}" for person "${name}". It must be another existing person's name.`,
         );
       }
-      if (isNaN(p.weights[weightKey])) {
+      const {weight} = weights[weightKey];
+      if (isNaN(weight)) {
         errors.push(
-          `Invalid weight "${p.weights[weightKey]}" for person "${p.name}". It must be a number.`,
+          `Invalid weight "${weight}" for person "${name}". It must be a number.`,
         );
       }
     }
   }
 
   // === Validate RoleSchedule ===
-  for (const sched of roleSchedule) {
+  for (const sched of schedule) {
     // 1. Date between 2020 and 2030
     if (
       !(sched.date instanceof Date) ||
@@ -79,17 +85,22 @@ export function validateData(people, roleSchedule) {
       );
     }
 
-    // 2. Role keys in schedule must appear in people[].roles
+    // 2. Role keys in schedule must appear in people roles
     for (const roleKey of Object.keys(sched.roles)) {
       if (!peopleRoleSet.has(roleKey)) {
         errors.push(
-          `Schedule on ${formatDate(sched.date)} has role "${roleKey}" which is not in people[].roles`,
+          `Schedule on ${formatDate(sched.date)} has role "${roleKey}" which is not in people roles`,
+        );
+      }
+      if (!roleInfoRoleSet.has(roleKey)) {
+        errors.push(
+          `Schedule on ${formatDate(sched.date)} has role "${roleKey}" which is not in roleInfo roles`,
         );
       }
 
       // 3. Role value arrays must contain valid person names or underscores
       for (const assignedName of sched.roles[roleKey]) {
-        if (assignedName !== '_' && !allPeopleNames.has(assignedName)) {
+        if (assignedName !== '_' && !people[assignedName]) {
           errors.push(
             `On ${formatDate(sched.date)}, role "${roleKey}" has invalid person "${assignedName}". Must be an existing person name or "_"`,
           );
@@ -99,7 +110,7 @@ export function validateData(people, roleSchedule) {
 
     // 4. Unavailable names must be valid names of people (can be empty set)
     for (const name of sched.unavailable) {
-      if (!allPeopleNames.has(name)) {
+      if (!people[name]) {
         errors.push(
           `On ${formatDate(sched.date)}, "${name}" is listed as unavailable but is not a known person name.`,
         );

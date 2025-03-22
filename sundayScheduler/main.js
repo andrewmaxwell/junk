@@ -2,10 +2,6 @@ import {getData} from './getData.js';
 import {makeStats} from './stats.js';
 import {validateData} from './validateData.js';
 
-/*
-TODO: weights by name+role
-*/
-
 const startingTemperature = 10_000; // bigger = more random at the beginning
 const maxIterations = 250_000; // bigger = search longer
 const alpha = 1 - 1 / 20_000; // bigger denominator = slower cooldown
@@ -28,11 +24,11 @@ let allBestCost = Infinity;
 let iterationCount = 0;
 
 async function go() {
-  const {people, roleSchedule} = await getData();
+  const state = await getData();
 
-  console.log({people, roleSchedule});
+  console.log(state);
 
-  const errors = validateData(people, roleSchedule);
+  const errors = validateData(state);
   if (errors.length && outputContainer) {
     outputContainer.innerHTML = `ERRORS:\n${errors.join('\n')}`;
     outputContainer.style.display = 'block';
@@ -58,8 +54,7 @@ async function go() {
     );
 
     worker.postMessage({
-      people,
-      roleSchedule,
+      state,
       startingTemperature,
       maxIterations,
       alpha,

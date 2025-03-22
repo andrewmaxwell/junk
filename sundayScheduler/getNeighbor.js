@@ -1,40 +1,40 @@
 import {randEl, randIndex} from './utils.js';
 
-/** @type {(state: StateRow[], roleGroups: Record<string, Person[]>) => StateRow[] | undefined} */
+/** @type {(state: State, roleGroups: Record<string, string[]>) => State | undefined} */
 function tryGetNeighbor(state, roleGroups) {
-  const weekIndex = randIndex(state);
-  const role = randEl(Object.keys(state[weekIndex].assignments));
-  const people = state[weekIndex].assignments[role];
+  const weekIndex = randIndex(state.schedule);
+  const role = randEl(Object.keys(state.schedule[weekIndex].assignments));
+  const people = state.schedule[weekIndex].assignments[role];
   const personIndex = randIndex(people);
   const person = people[personIndex];
-  const newPerson = randEl(roleGroups[role]);
+  const newPersonName = randEl(roleGroups[role]);
 
   if (
     !person ||
-    !newPerson ||
+    !newPersonName ||
     person.determined ||
-    person.name === newPerson.name
+    person.name === newPersonName
   )
     return undefined;
 
-  const newState = state.slice();
-  const newRow = {...newState[weekIndex]};
+  const newSchedule = state.schedule.slice();
+  const newRow = {...newSchedule[weekIndex]};
   const newAssignments = {...newRow.assignments};
   const newRolePeople = newAssignments[role].slice();
-  newRolePeople[personIndex] = newPerson;
+  newRolePeople[personIndex] = {name: newPersonName, determined: false};
   newAssignments[role] = newRolePeople;
   newRow.assignments = newAssignments;
-  newState[weekIndex] = newRow;
-  return newState;
+  newSchedule[weekIndex] = newRow;
+  return {...state, schedule: newSchedule};
 }
 
-/** @type {(people: Person[]) => (state: StateRow[]) => StateRow[]} */
-export const getGetNeighbor = (people) => {
-  /** @type {Record<string, Person[]>} */
+/** @type {(state: State) => (state: State) => State} */
+export const getGetNeighbor = (state) => {
+  /** @type {Record<string, string[]>} */
   const roleGroups = {};
-  for (const person of people) {
-    for (const role in person.roles) {
-      (roleGroups[role] ||= []).push(person);
+  for (const name in state.people) {
+    for (const role in state.people[name].roles) {
+      (roleGroups[role] ||= []).push(name);
     }
   }
 

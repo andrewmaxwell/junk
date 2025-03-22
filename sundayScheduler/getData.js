@@ -17,33 +17,50 @@ const toObject = (str, parseFunc) =>
       }),
   );
 
-/** @type {() => Promise<{people: Person[], roleSchedule: RoleSchedule[]}>} */
+/** @type {() => Promise<State>} */
 export async function getData() {
   const response = await fetch(spreadsheetUrl);
-  const {People, Roles} = XLSX.read(await response.arrayBuffer(), {
+  const {People, Schedule, Roles} = XLSX.read(await response.arrayBuffer(), {
     cellDates: true,
   }).Sheets;
 
   return {
-    people: XLSX.utils
-      .sheet_to_json(People)
-      .map(
-        ({
-          Name = '',
-          Roles = '',
-          Weights = '',
-          Gender = '',
-          ['Over 21']: over21 = '',
-        }) => ({
-          name: Name.trim(),
-          roles: toObject(Roles, (val) => parseInt(val) / 100),
-          weights: toObject(Weights, Number),
-          isFemale: Gender.trim() === 'F',
-          over21: over21.trim() === 'Y',
-        }),
-      ),
-    roleSchedule: XLSX.utils
-      .sheet_to_json(Roles)
+    roleInfo: Object.fromEntries(
+      XLSX.utils.sheet_to_json(Roles).map((r) => [
+        r.Role,
+        {
+          location: r.Location.trim(),
+          isChildren: r['Childrens Ministry'].trim() === 'Y',
+        },
+      ]),
+    ),
+    people: Object.fromEntries(
+      XLSX.utils
+        .sheet_to_json(People)
+        .map(
+          ({
+            Name = '',
+            Roles = '',
+            Weights = '',
+            Gender = '',
+            ['Over 21']: over21 = '',
+          }) => [
+            Name.trim(),
+            {
+              name: Name.trim(),
+              roles: toObject(Roles, (val) => parseInt(val) / 100),
+              weights: toObject(Weights, (val) => ({
+                weight: parseInt(val),
+                anywhere: val.endsWith('*'),
+              })),
+              isFemale: Gender.trim() === 'F',
+              over21: over21.trim() === 'Y',
+            },
+          ],
+        ),
+    ),
+    schedule: XLSX.utils
+      .sheet_to_json(Schedule)
       .map(({Date: date, Roles: rolesString, Unavailable = ''}) => ({
         date,
         roles: toObject(rolesString, (listStr) =>

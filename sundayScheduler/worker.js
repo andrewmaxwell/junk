@@ -4,19 +4,12 @@ import {getGetNeighbor} from './getNeighbor.js';
 import {makeSimulatedAnnealer} from './simulatedAnnealer.js';
 
 self.onmessage = ({
-  data: {
-    people,
-    roleSchedule,
-    startingTemperature,
-    maxIterations,
-    alpha,
-    iterationsPerReport,
-  },
+  data: {state, startingTemperature, maxIterations, alpha, iterationsPerReport},
 }) => {
   const {iterate, getResults} = makeSimulatedAnnealer(
     getCost,
-    getGetNeighbor(people),
-    getInitialState(people, roleSchedule),
+    getGetNeighbor(state),
+    getInitialState(state),
     startingTemperature,
     maxIterations,
     alpha,
@@ -33,7 +26,7 @@ self.onmessage = ({
   const {currentCost, bestCost, bestState} = getResults();
 
   const output =
-    bestState
+    bestState.schedule
       .map(({date, assignments}) => {
         const roles = Object.entries(assignments)
           .map(

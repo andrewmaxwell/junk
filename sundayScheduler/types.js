@@ -1,25 +1,27 @@
 /**
- * @typedef {Object} Person
- * @property {string} name
- * @property {Record<string, number>} roles
- * @property {Record<string, number>} weights
- * @property {boolean} [determined]
- * @property {boolean} isFemale
- * @property {boolean} over21
- */
+@typedef {{
+  name: string,
+  roles: Record<string, number>,
+  weights: Record<string, {weight: number, anywhere: boolean}>,
+  isFemale: boolean,
+  over21: boolean
+}} Person
 
-/**
- * @typedef {Object} RoleSchedule
- * @property {Date} date
- * @property {Record<string, string[]>} roles
- * @property {Set<string>} unavailable
- */
+@typedef {{
+  name: string, 
+  determined: boolean
+}} Assignment
 
-/**
- * A row in the scheduling solution state.
- * @typedef {Object} StateRow
- * @property {Date} date
- * @property {Record<string, string[]>} roles
- * @property {Set<string>} unavailable
- * @property {Record<string, Person[]>} assignments
+@typedef {{
+  date: Date,
+  roles: Record<string, string[]>,
+  unavailable: Set<string>,
+  assignments: Record<string, Assignment[]>
+}} ScheduleRow
+
+@typedef {{
+  people: Record<string, Person>, 
+  schedule: ScheduleRow[], 
+  roleInfo: Record<string, {location: string, isChildren: boolean}>
+}} State
  */

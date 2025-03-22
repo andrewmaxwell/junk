@@ -1,31 +1,30 @@
 import {randEl} from './utils.js';
 
-/** @type {(people: Person[], roleSchedule: RoleSchedule[]) => StateRow[]} */
-export function getInitialState(people, roleSchedule) {
-  /** @type {Record<string, Person[]>} */
+/** @type {(state: State) => State} */
+export function getInitialState(state) {
+  const {people, schedule} = state;
+
+  /** @type {Record<string, string[]>} */
   const roleGroups = {};
-
-  /** @type {Record<string, Person>} */
-  const peopleIndex = {};
-
-  for (const person of people) {
-    peopleIndex[person.name] = person;
-    for (const role in person.roles) {
-      (roleGroups[role] ||= []).push(person);
+  for (const name in people) {
+    for (const role in people[name].roles) {
+      (roleGroups[role] ||= []).push(name);
     }
   }
 
-  return roleSchedule.map((row) => {
-    /** @type {Record<string, Person[]>} */
-    const assignments = {};
+  return {
+    ...state,
+    schedule: schedule.map((row) => {
+      /** @type {Record<string, Assignment[]>} */
+      const assignments = {};
 
-    for (const role in row.roles) {
-      assignments[role] = row.roles[role].map((name) =>
-        name === '_'
-          ? randEl(roleGroups[role])
-          : {...peopleIndex[name], determined: true},
-      );
-    }
-    return {...row, assignments};
-  });
+      for (const role in row.roles) {
+        assignments[role] = row.roles[role].map((name) => ({
+          name: name === '_' ? randEl(roleGroups[role]) : name,
+          determined: name !== '_',
+        }));
+      }
+      return {...row, assignments};
+    }),
+  };
 }
