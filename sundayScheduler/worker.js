@@ -2,6 +2,7 @@ import {getCost, getDetails} from './getCost.js';
 import {getInitialState} from './getInitialState.js';
 import {getGetNeighbor} from './getNeighbor.js';
 import {makeSimulatedAnnealer} from './simulatedAnnealer.js';
+import {formatDate} from './utils.js';
 
 self.onmessage = ({
   data: {state, startingTemperature, maxIterations, alpha, iterationsPerReport},
@@ -34,9 +35,7 @@ self.onmessage = ({
               `${role}: ${people.map((p) => p.name).join(', ')}`,
           )
           .join('; ');
-        return `${
-          date.getMonth() + 1
-        }/${date.getDate()}/${date.getFullYear()}\t${roles}`;
+        return [formatDate(date), roles].join('\t');
       })
       .join('\n') +
     '\n\nScoring Notes:\n' +

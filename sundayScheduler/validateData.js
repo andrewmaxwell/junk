@@ -1,6 +1,4 @@
-/** @type {(date: Date) => string} */
-const formatDate = (date) =>
-  [date.getMonth() + 1, date.getDate(), date.getFullYear()].join('/');
+import {formatDate} from './utils.js';
 
 /** @type {(state: State) => string[]} */
 export function validateData({people, schedule, roleInfo}) {

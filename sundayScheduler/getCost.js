@@ -1,4 +1,5 @@
 import './types.js';
+import {formatDate} from './utils.js';
 
 const conflictPenalty = 100;
 const unavailablePenalty = 100;
@@ -108,7 +109,7 @@ export const getDetails = (state) => {
   const details = [];
   calcCost(state, (date, amount, msg) =>
     details.push(
-      `${date.toISOString().slice(0, 10)}: ${msg} = ${Math.round(Math.abs(amount) * 10) / 10} ${amount > 0 ? 'point penalty' : 'point bonus'}`,
+      `${formatDate(date)}: ${msg} = ${Math.round(Math.abs(amount) * 10) / 10} ${amount > 0 ? 'point penalty' : 'point bonus'}`,
     ),
   );
   return details.join('\n');

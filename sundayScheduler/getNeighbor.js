@@ -1,10 +1,10 @@
 import {randEl, randIndex} from './utils.js';
 
 /** @type {(state: State, roleGroups: Record<string, string[]>) => State | undefined} */
-function tryGetNeighbor(state, roleGroups) {
-  const weekIndex = randIndex(state.schedule);
-  const role = randEl(Object.keys(state.schedule[weekIndex].assignments));
-  const people = state.schedule[weekIndex].assignments[role];
+function tryGetNeighbor({schedule, ...rest}, roleGroups) {
+  const weekIndex = randIndex(schedule);
+  const role = randEl(Object.keys(schedule[weekIndex].assignments));
+  const people = schedule[weekIndex].assignments[role];
   const personIndex = randIndex(people);
   const person = people[personIndex];
   const newPersonName = randEl(roleGroups[role]);
@@ -17,7 +17,7 @@ function tryGetNeighbor(state, roleGroups) {
   )
     return undefined;
 
-  const newSchedule = state.schedule.slice();
+  const newSchedule = schedule.slice();
   const newRow = {...newSchedule[weekIndex]};
   const newAssignments = {...newRow.assignments};
   const newRolePeople = newAssignments[role].slice();
@@ -25,7 +25,7 @@ function tryGetNeighbor(state, roleGroups) {
   newAssignments[role] = newRolePeople;
   newRow.assignments = newAssignments;
   newSchedule[weekIndex] = newRow;
-  return {...state, schedule: newSchedule};
+  return {...rest, schedule: newSchedule};
 }
 
 /** @type {(state: State) => (state: State) => State} */
