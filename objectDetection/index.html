@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Browser Object Detection</title>
+  <!-- Load TensorFlow.js and the COCO-SSD model from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <style>
+    img { max-width: 100%; margin-top: 10px; }
+    body { font-family: Arial, sans-serif; padding: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Object Detection in Your Photo</h1>
+  <input type="file" accept="image/*" id="imageInput">
+  <br>
+  <img id="selectedImage" alt="Your selected photo">
+  <h2>Detected Objects (sorted by estimated prominence)</h2>
+  <ul id="objectList"></ul>
+
+  <script>
+    let model;
+    // Load the COCO-SSD model
+    cocoSsd.load().then(loadedModel => {
+      model = loadedModel;
+      console.log('COCO-SSD model loaded.');
+    });
+
+    // When an image is selected, display it and run detection.
+    document.getElementById('imageInput').addEventListener('change', event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      const img = document.getElementById('selectedImage');
+      img.src = URL.createObjectURL(file);
+      img.onload = () => {
+        // Run detection on the image once it has loaded
+        model.detect(img).then(predictions => {
+          // Sort predictions by bounding box area (width * height) in descending order
+          predictions.sort((a, b) => (b.bbox[2] * b.bbox[3]) - (a.bbox[2] * a.bbox[3]));
+          
+          const objectList = document.getElementById('objectList');
+          objectList.innerHTML = ''; // Clear any previous results
+          
+          predictions.forEach(prediction => {
+            const li = document.createElement('li');
+            li.textContent = `${prediction.class} – Score: ${(prediction.score * 100).toFixed(2)}% (Area: ${(prediction.bbox[2] * prediction.bbox[3]).toFixed(2)})`;
+            objectList.appendChild(li);
+          });
+        }).catch(err => console.error('Detection error:', err));
+      }
+    });
+  </script>
+</body>
+</html>

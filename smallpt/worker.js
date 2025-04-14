@@ -1,277 +1,527 @@
-'use strict';
-
-const Vec = (x = 0, y = 0, z = 0) => ({x, y, z});
-const addMut = (a, b) => {
-  a.x += b.x;
-  a.y += b.y;
-  a.z += b.z;
-  return a;
-};
-const sub = (a, b) => Vec(a.x - b.x, a.y - b.y, a.z - b.z);
-const subMut = (a, b) => {
-  b.x = a.x - b.x;
-  b.y = a.y - b.y;
-  b.z = a.z - b.z;
-  return b;
-};
-const multiply = (a, b) => Vec(a.x * b, a.y * b, a.z * b);
-const multiplyMut = (a, b) => {
-  a.x *= b;
-  a.y *= b;
-  a.z *= b;
-  return a;
-};
-const mult = (a, b) => {
-  a.x *= b.x;
-  a.y *= b.y;
-  a.z *= b.z;
-  return a;
-};
-const norm = (a) => {
-  const m = 1 / Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
-  a.x *= m;
-  a.y *= m;
-  a.z *= m;
-  return a;
-};
-const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
-const cross = (a, b) =>
-  Vec(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
-
-const Ray = (position, direction) => ({position, direction});
-
-const eps = 1e-4;
-
-const sphereIntersect = (s, r) => {
-  const op = sub(s.position, r.position);
-  const b = dot(op, r.direction);
-
-  let det = b ** 2 - dot(op, op) + s.rad ** 2;
-  if (det < 0) return 0;
-  det = Math.sqrt(det);
-
-  let t;
-  return (t = b - det) > eps ? t : (t = b + det) > eps ? t : 0;
-};
-
-const getRayColor = (ray, spheres, depth = 0) => {
-  let obj;
-  let dist = Infinity;
-  for (const s of spheres) {
-    const d = sphereIntersect(s, ray);
-    if (d && d < dist) {
-      dist = d;
-      obj = s;
-    }
+class Vec3 {
+  constructor(x = 0, y = 0, z = 0) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
   }
 
-  if (!obj) return Vec();
-
-  let color = {...obj.color};
-
-  if (++depth > 5) {
-    const p = Math.max(color.x, color.y, color.z);
-    if (Math.random() < p / 2) multiplyMut(color, 1 / p);
-    else return {...obj.emission};
+  /** @type {(a: Vec3, b: Vec3) => Vec3} */
+  static add(a, b) {
+    return new Vec3(a.x + b.x, a.y + b.y, a.z + b.z);
   }
 
-  const pos = addMut(multiplyMut({...ray.direction}, dist), ray.position);
-  const n = norm(sub(pos, obj.position));
+  /** @type {(a: Vec3, b: Vec3) => Vec3} */
+  static sub(a, b) {
+    return new Vec3(a.x - b.x, a.y - b.y, a.z - b.z);
+  }
 
-  switch (obj.material) {
-    case 'matte': {
-      const w = dot(n, ray.direction) < 0 ? n : multiplyMut(n, -1);
-      const r1 = 2 * Math.PI * Math.random();
-      const r2 = Math.random();
-      const r2s = Math.sqrt(r2);
-      const u = norm(cross(Math.abs(w.x) > 0.1 ? Vec(0, 1) : Vec(1), w));
-      const v = cross(w, u);
-      const direction = norm(
-        addMut(
-          addMut(
-            multiplyMut(u, Math.cos(r1) * r2s),
-            multiplyMut(v, Math.sin(r1) * r2s)
-          ),
-          multiplyMut(w, Math.sqrt(1 - r2))
-        )
-      );
-      return addMut(
-        mult(color, getRayColor(Ray(pos, direction), spheres, depth)),
-        obj.emission
-      );
+  /** @type {(a: Vec3, s: number) => Vec3} */
+  static mul(a, s) {
+    return new Vec3(a.x * s, a.y * s, a.z * s);
+  }
+
+  /** @type {(a: Vec3, b: Vec3) => Vec3} */
+  static hadamard(a, b) {
+    return new Vec3(a.x * b.x, a.y * b.y, a.z * b.z);
+  }
+
+  /** @type {(a: Vec3, b: Vec3) => number} */
+  static dot(a, b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+  }
+
+  /** @type {(a: Vec3, b: Vec3) => Vec3} */
+  static cross(a, b) {
+    return new Vec3(
+      a.y * b.z - a.z * b.y,
+      a.z * b.x - a.x * b.z,
+      a.x * b.y - a.y * b.x,
+    );
+  }
+
+  /** @type {(a: Vec3) => Vec3} */
+  static norm(a) {
+    const mag = Math.sqrt(Vec3.dot(a, a));
+    return mag === 0 ? new Vec3() : new Vec3(a.x / mag, a.y / mag, a.z / mag);
+  }
+}
+
+class Ray {
+  /**
+   * @param {Vec3} position
+   * @param {Vec3} direction */
+  constructor(position, direction) {
+    this.position = position;
+    this.direction = direction;
+  }
+}
+
+const EPSILON = 1e-4;
+
+class Material {
+  /** @type {(scene: Scene, shape: Shape, ray: Ray, hitPos: Vec3, normal: Vec3, depth: number) => Vec3} */
+  shade() {
+    // No default logic here
+    return new Vec3();
+  }
+}
+
+class DiffuseMaterial extends Material {
+  /** @type {(scene: Scene, shape: Shape, ray: Ray, hitPos: Vec3, normal: Vec3, depth: number) => Vec3} */
+  shade(scene, shape, ray, hitPos, normal, depth) {
+    const aligned =
+      Vec3.dot(normal, ray.direction) < 0 ? normal : Vec3.mul(normal, -1);
+
+    const r1 = 2 * Math.PI * Math.random();
+    const r2 = Math.random();
+    const r2s = Math.sqrt(r2);
+
+    const u = Vec3.norm(
+      Vec3.cross(
+        Math.abs(aligned.x) > 0.1 ? new Vec3(0, 1, 0) : new Vec3(1, 0, 0),
+        aligned,
+      ),
+    );
+    const v = Vec3.cross(aligned, u);
+
+    let d = Vec3.add(
+      Vec3.add(
+        Vec3.mul(u, Math.cos(r1) * r2s),
+        Vec3.mul(v, Math.sin(r1) * r2s),
+      ),
+      Vec3.mul(aligned, Math.sqrt(1 - r2)),
+    );
+    d = Vec3.norm(d);
+
+    const secondary = new Ray(hitPos, d);
+    const tracedColor = scene.traceRay(secondary, depth);
+
+    return Vec3.add(Vec3.hadamard(shape.color, tracedColor), shape.emission);
+  }
+}
+
+class MirrorMaterial extends Material {
+  /** @type {(scene: Scene, shape: Shape, ray: Ray, hitPos: Vec3, normal: Vec3, depth: number) => Vec3} */
+  shade(scene, shape, ray, hitPos, normal, depth) {
+    const reflectionDir = Vec3.sub(
+      ray.direction,
+      Vec3.mul(normal, 2 * Vec3.dot(normal, ray.direction)),
+    );
+    const reflectionRay = new Ray(hitPos, reflectionDir);
+    const tracedColor = scene.traceRay(reflectionRay, depth);
+
+    return Vec3.add(Vec3.hadamard(shape.color, tracedColor), shape.emission);
+  }
+}
+
+class GlassMaterial extends Material {
+  /** @type {(scene: Scene, shape: Shape, ray: Ray, hitPos: Vec3, normal: Vec3, depth: number) => Vec3} */
+  shade(scene, shape, ray, hitPos, normal, depth) {
+    const aligned =
+      Vec3.dot(normal, ray.direction) < 0 ? normal : Vec3.mul(normal, -1);
+
+    const reflDir = Vec3.sub(
+      ray.direction,
+      Vec3.mul(normal, 2 * Vec3.dot(normal, ray.direction)),
+    );
+    const reflRay = new Ray(hitPos, reflDir);
+
+    const into = Vec3.dot(normal, aligned) > 0;
+    const nnt = into ? 2 / 3 : 1.5;
+    const ddn = Vec3.dot(ray.direction, aligned);
+    const cos2t = 1 - nnt * nnt * (1 - ddn * ddn);
+
+    if (cos2t < 0) {
+      const reflColor = scene.traceRay(reflRay, depth);
+      return Vec3.add(Vec3.hadamard(shape.color, reflColor), shape.emission);
     }
 
-    case 'mirror':
-      return addMut(
-        mult(
-          color,
-          getRayColor(
-            Ray(
-              pos,
-              subMut(ray.direction, multiplyMut(n, 2 * dot(n, ray.direction)))
-            ),
-            spheres,
-            depth
-          )
-        ),
-        obj.emission
-      );
+    const tdir = Vec3.norm(
+      Vec3.sub(
+        Vec3.mul(ray.direction, nnt),
+        Vec3.mul(normal, (into ? 1 : -1) * (ddn * nnt + Math.sqrt(cos2t))),
+      ),
+    );
+    const refrRay = new Ray(hitPos, tdir);
 
-    case 'glass': {
-      const w = dot(n, ray.direction) < 0 ? n : multiply(n, -1);
-      const reflRay = Ray(
-        pos,
-        subMut(ray.direction, multiply(n, 2 * dot(n, ray.direction)))
-      );
-      const into = dot(n, w) > 0;
-      const nnt = into ? 2 / 3 : 1.5;
-      const ddn = dot(ray.direction, w);
-      const cos2t = 1 - nnt * nnt * (1 - ddn * ddn);
+    const reflFactor =
+      0.04 + 0.96 * (1 - (into ? -ddn : Vec3.dot(tdir, normal))) ** 5;
+    const trFactor = 1 - reflFactor;
 
-      if (cos2t < 0) {
-        return addMut(
-          mult(color, getRayColor(reflRay, spheres, depth)),
-          obj.emission
+    const P = 0.25 + 0.5 * reflFactor;
+    const RP = reflFactor / P;
+    const TP = trFactor / (1 - P);
+
+    if (depth > 2) {
+      if (Math.random() < P) {
+        const reflColor = scene.traceRay(reflRay, depth);
+        const c = Vec3.mul(reflColor, RP);
+        return Vec3.add(Vec3.hadamard(shape.color, c), shape.emission);
+      } else {
+        const refrColor = scene.traceRay(refrRay, depth);
+        const c = Vec3.mul(refrColor, TP);
+        return Vec3.add(Vec3.hadamard(shape.color, c), shape.emission);
+      }
+    }
+
+    const reflCol = Vec3.mul(scene.traceRay(reflRay, depth), reflFactor);
+    const refrCol = Vec3.mul(scene.traceRay(refrRay, depth), trFactor);
+    const combined = Vec3.add(reflCol, refrCol);
+    return Vec3.add(Vec3.hadamard(shape.color, combined), shape.emission);
+  }
+}
+
+class Shape {
+  /**
+   * @param {Vec3} color
+   * @param {Vec3} emission
+   * @param {Material} material
+   */
+  constructor(color, emission, material) {
+    this.color = color;
+    this.emission = emission;
+    this.material = material;
+  }
+
+  /** @type {(ray: Ray) => number} */
+  getIntersection() {
+    return 0;
+  }
+
+  /** @type {(pt: Vec3) => Vec3} */
+  getNormal() {
+    return new Vec3();
+  }
+}
+
+class Sphere extends Shape {
+  /**
+   * @param {number} radius
+   * @param {Vec3} center
+   * @param {Vec3} color
+   * @param {Vec3} emission
+   * @param {Material} material */
+  constructor(radius, center, color, emission, material) {
+    super(color, emission, material);
+    this.radius = radius;
+    this.center = center;
+  }
+
+  /** @type {(ray: Ray) => number} */
+  getIntersection(ray) {
+    const op = Vec3.sub(this.center, ray.position);
+    const b = Vec3.dot(op, ray.direction);
+    let det = b * b - Vec3.dot(op, op) + this.radius * this.radius;
+    if (det < 0) return 0;
+    det = Math.sqrt(det);
+    const t1 = b - det;
+    if (t1 > EPSILON) return t1;
+    const t2 = b + det;
+    return t2 > EPSILON ? t2 : 0;
+  }
+
+  /** @type {(pt: Vec3) => Vec3} */
+  getNormal(pt) {
+    return Vec3.norm(Vec3.sub(pt, this.center));
+  }
+}
+
+// class Mandelbox extends Shape {
+//   /**
+//    * @param {number} halfSize
+//    * @param {Vec3} center
+//    * @param {Vec3} color
+//    * @param {Vec3} emission
+//    * @param {Material} material
+//    */
+//   constructor(halfSize, center, color, emission, material) {
+//     super(color, emission, material);
+//     this.halfSize = halfSize;
+//     this.center = center;
+
+//     // Typical Mandelbox parameters; you can tweak these for different fractal shapes
+//     this.scale = -1.5;
+//     this.minRadius = 0.5;
+//     this.fixedRadius = 1.0;
+//     this.iterations = 12;
+//   }
+
+//   /**
+//    * Distance estimator for the Mandelbox fractal at a given point.
+//    * @type {(pos: Vec3) => number}
+//    */
+//   distanceEstimator(pos) {
+//     // Shift point by the center
+//     let z = Vec3.sub(pos, this.center);
+//     const c = new Vec3(z.x, z.y, z.z);
+
+//     let dr = 1.0; // derivative factor
+//     let r = 0.0; // magnitude
+
+//     for (let i = 0; i < this.iterations; i++) {
+//       // Box fold: reflect any component outside [-1,1]
+//       if (z.x > 1) z.x = 2 - z.x;
+//       else if (z.x < -1) z.x = -2 - z.x;
+//       if (z.y > 1) z.y = 2 - z.y;
+//       else if (z.y < -1) z.y = -2 - z.y;
+//       if (z.z > 1) z.z = 2 - z.z;
+//       else if (z.z < -1) z.z = -2 - z.z;
+
+//       // Now compute squared distance
+//       const r2 = Vec3.dot(z, z);
+
+//       // If outside fixedRadius, scale out
+//       if (r2 > this.fixedRadius) {
+//         z = Vec3.mul(z, this.scale);
+//         dr *= Math.abs(this.scale);
+
+//         // If inside minRadius, scale in
+//       } else if (r2 < this.minRadius) {
+//         const mag = Math.sqrt(r2);
+//         z = Vec3.mul(z, (1 / mag) * mag * this.scale); // same as z*(scale)
+//         dr *= Math.abs(1 / this.scale);
+//       }
+
+//       // Translate back
+//       z = Vec3.add(z, c);
+//     }
+
+//     r = Math.sqrt(Vec3.dot(z, z));
+//     // Distance estimation formula for the Mandelbox
+//     return 0.5 * Math.log(r) * (r / Math.abs(dr));
+//   }
+
+//   /** @type {(ray: Ray) => number} */
+//   getIntersection(ray) {
+//     // We implement a ray-marching distance estimator for the Mandelbox.
+//     // Typical approach: step along the ray until distance < EPSILON or max steps.
+
+//     const maxSteps = 100;
+//     const maxDistance = 300; // how far we allow stepping before giving up
+
+//     let totalDist = 0;
+//     let currPos = new Vec3(ray.position.x, ray.position.y, ray.position.z);
+
+//     for (let i = 0; i < maxSteps; i++) {
+//       const distToSurface = this.distanceEstimator(currPos);
+//       if (distToSurface < EPSILON) {
+//         // We hit the fractal surface
+//         return totalDist;
+//       }
+//       if (totalDist > maxDistance) {
+//         // Too far, no intersection
+//         return 0;
+//       }
+//       // Step forward by distToSurface
+//       totalDist += distToSurface;
+//       currPos = Vec3.add(currPos, Vec3.mul(ray.direction, distToSurface));
+//     }
+
+//     // If we exit the loop, we didn't converge
+//     return 0;
+//   }
+
+//   /** @type {(pt: Vec3) => Vec3} */
+//   getNormal(pt) {
+//     // Approximate the normal using the numerical gradient of the distance estimator
+//     const eps = 0.001;
+//     const d = this.distanceEstimator(pt);
+
+//     // Compute partial derivatives via central differences
+//     const dx = this.distanceEstimator(new Vec3(pt.x + eps, pt.y, pt.z)) - d;
+//     const dy = this.distanceEstimator(new Vec3(pt.x, pt.y + eps, pt.z)) - d;
+//     const dz = this.distanceEstimator(new Vec3(pt.x, pt.y, pt.z + eps)) - d;
+
+//     const grad = new Vec3(dx, dy, dz);
+//     return Vec3.norm(grad);
+//   }
+// }
+
+///////////////////////////////
+// Scene
+///////////////////////////////
+
+class Scene {
+  constructor() {
+    this.items = [];
+  }
+
+  /** @type {(shape: Shape) => void} */
+  add(shape) {
+    this.items.push(shape);
+  }
+
+  /** @type {(ray: Ray, depth?: number) => Vec3} */
+  traceRay(ray, depth = 0) {
+    let hitObj = null;
+    let closestDist = Infinity;
+
+    for (const item of this.items) {
+      const d = item.getIntersection(ray);
+      if (d && d < closestDist) {
+        closestDist = d;
+        hitObj = item;
+      }
+    }
+    if (!hitObj) {
+      return new Vec3(); // black
+    }
+
+    let localColor = new Vec3(hitObj.color.x, hitObj.color.y, hitObj.color.z);
+    const newDepth = depth + 1;
+
+    if (newDepth > 5) {
+      const p = Math.max(localColor.x, localColor.y, localColor.z);
+      if (Math.random() < p / 2) {
+        localColor = Vec3.mul(localColor, 1 / p);
+      } else {
+        return new Vec3(
+          hitObj.emission.x,
+          hitObj.emission.y,
+          hitObj.emission.z,
         );
       }
-
-      const tdir = norm(
-        subMut(
-          multiply(ray.direction, nnt),
-          multiply(n, (into ? 1 : -1) * (ddn * nnt + Math.sqrt(cos2t)))
-        )
-      );
-      const Re = 0.04 + 0.96 * (1 - (into ? -ddn : dot(tdir, n))) ** 5,
-        Tr = 1 - Re,
-        P = 0.25 + 0.5 * Re,
-        RP = Re / P,
-        TP = Tr / (1 - P);
-      return addMut(
-        mult(
-          color,
-          depth > 2
-            ? Math.random() < P
-              ? multiplyMut(getRayColor(reflRay, spheres, depth), RP)
-              : multiplyMut(getRayColor(Ray(pos, tdir), spheres, depth), TP)
-            : addMut(
-                multiplyMut(getRayColor(reflRay, spheres, depth), Re),
-                multiplyMut(getRayColor(Ray(pos, tdir), spheres, depth), Tr)
-              )
-        ),
-        obj.emission
-      );
     }
+
+    const hitPos = Vec3.add(ray.position, Vec3.mul(ray.direction, closestDist));
+    const normal = hitObj.getNormal(hitPos);
+    return hitObj.material.shade(this, hitObj, ray, hitPos, normal, newDepth);
   }
-};
+}
+
+///////////////////////////////
+// Setup Scene & Worker
+///////////////////////////////
+
+/** @type {(x: number, y: number, z: number) => Vec3} */
+function V(x, y, z) {
+  return new Vec3(x, y, z);
+}
+
+const scene = new Scene();
+const matte = new DiffuseMaterial();
+const mirror = new MirrorMaterial();
+const glass = new GlassMaterial();
+
+const wallRad = 1e5;
+
+// left wall
+scene.add(
+  new Sphere(
+    wallRad,
+    V(wallRad, 50, 50),
+    V(0.2, 0.8, 0.2), // green
+    V(0, 0, 0),
+    matte,
+  ),
+);
+
+// right wall
+scene.add(
+  new Sphere(
+    wallRad,
+    V(-99901, 50, 50),
+    V(0.2, 0.2, 0.8), // blue
+    V(0, 0, 0),
+    matte,
+  ),
+);
+
+// far wall
+scene.add(
+  new Sphere(
+    wallRad,
+    V(50, 50, wallRad - 150),
+    V(1, 1, 1), // white
+    V(0, 0, 0),
+    matte,
+  ),
+);
+
+// floor
+scene.add(
+  new Sphere(
+    wallRad,
+    V(50, wallRad, 50),
+    V(0.8, 0.2, 0.2), // red
+    V(0, 0, 0),
+    matte,
+  ),
+);
+
+// ceiling
+scene.add(
+  new Sphere(
+    wallRad,
+    V(50, 100 - wallRad, 50),
+    V(0.8, 0.8, 0.2), // yellow
+    V(0, 0, 0),
+    matte,
+  ),
+);
+
+// ceiling light
+const lightRad = 600;
+scene.add(
+  new Sphere(
+    lightRad,
+    V(50, lightRad + 99.5, -20),
+    V(0, 0, 0), // black
+    V(1, 1, 1), // white
+    mirror,
+  ),
+);
+
+// mirror ball
+scene.add(
+  new Sphere(16.5, V(27, 36.5, 47), V(0.9, 0.9, 0.9), V(0, 0, 0), mirror),
+);
+// glass ball
+scene.add(new Sphere(20, V(73, 25, 75), V(0.9, 0.9, 0.9), V(0, 0, 0), glass));
+
+// upper matte ball
+scene.add(new Sphere(10, V(60, 65, 0), V(0.5, 0.5, 0.5), V(0, 0, 0), matte));
+
+// lower left matte ball
+scene.add(new Sphere(16, V(20, 16, 160), V(0.5, 0.5, 0.5), V(0, 0, 0), matte));
 
 const camera = {
-  position: {x: 50, y: 50, z: 295.6},
-  direction: {x: 0, y: -0.042612, z: -1},
+  position: V(50, 50, 350),
+  direction: V(0, -0.05, -1),
   zoom: 0.5,
 };
-const spheres = [
-  {
-    name: 'left wall',
-    rad: 100000,
-    position: {x: 100001, y: 40.8, z: 81.6},
-    emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.2, y: 0.8, z: 0.2},
-    material: 'matte',
-  },
-  {
-    name: 'right wall',
-    rad: 100000,
-    position: {x: -99901, y: 40.8, z: 81.6},
-    emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.2, y: 0.2, z: 0.8},
-    material: 'matte',
-  },
-  {
-    name: 'back wall',
-    rad: 100000,
-    position: {x: 50, y: 40.8, z: 100000},
-    emission: {x: 0, y: 0, z: 0},
-    color: {x: 1, y: 1, z: 1},
-    material: 'matte',
-  },
-  {
-    name: 'front wall',
-    rad: 100000,
-    position: {x: 50, y: 40.8, z: -99830},
-    emission: {x: 0, y: 0, z: 0},
-    color: {x: 0, y: 0, z: 0},
-    material: 'matte',
-  },
-  {
-    name: 'floor',
-    rad: 100000,
-    position: {x: 50, y: 100000, z: 81.6},
-    emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.8, y: 0.2, z: 0.2},
-    material: 'matte',
-  },
-  {
-    name: 'ceiling',
-    rad: 100000,
-    position: {x: 50, y: -99918.4, z: 81.6},
-    emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.8, y: 0.8, z: 0.2},
-    material: 'matte',
-  },
-  {
-    name: 'mirror ball',
-    rad: 16.5,
-    position: {x: 27, y: 36.5, z: 47},
-    emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.999, y: 0.999, z: 0.999},
-    material: 'mirror',
-  },
-  {
-    name: 'glass ball',
-    rad: 20,
-    position: {x: 73, y: 26.5, z: 78},
-    emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.999, y: 0.999, z: 0.999},
-    material: 'glass',
-  },
-  {
-    name: 'matte ball',
-    rad: 10,
-    position: {x: 50, y: 65, z: 85},
-    emission: {x: 0, y: 0, z: 0},
-    color: {x: 0.5, y: 0.5, z: 0.5},
-    material: 'matte',
-  },
-  {
-    name: 'light',
-    rad: 600,
-    position: {x: 50, y: 681.33, z: 81.6},
-    emission: {x: 1, y: 1, z: 1},
-    color: {x: 0, y: 0, z: 0},
-    material: 'matte',
-  },
-];
 
+/** @type {(e: MessageEvent<{width: number, height: number}>) => void} */
 self.onmessage = ({data: {width, height}}) => {
   const res = new Uint8ClampedArray(width * height * 3);
-  const cx = Vec((width * camera.zoom) / height);
-  const cy = multiplyMut(norm(cross(cx, camera.direction)), camera.zoom);
 
+  // Prepare coordinate axes for the image plane
+  const cx = new Vec3((width * camera.zoom) / height, 0, 0);
+  const cy = Vec3.mul(Vec3.norm(Vec3.cross(cx, camera.direction)), camera.zoom);
+
+  // Precompute one ray per pixel
   const rays = [];
   for (let y = height - 1; y >= 0; y--) {
     for (let x = 0; x < width; x++) {
-      const d = addMut(
-        addMut(multiply(cx, x / width - 0.5), multiply(cy, y / height - 0.5)),
-        norm(camera.direction)
+      const d = Vec3.norm(
+        Vec3.add(
+          Vec3.add(
+            Vec3.mul(cx, x / width - 0.5),
+            Vec3.mul(cy, y / height - 0.5),
+          ),
+          Vec3.norm(camera.direction),
+        ),
       );
-      rays.push(Ray(addMut(multiply(d, 140), camera.position), norm(d)));
+      const origin = Vec3.add(camera.position, Vec3.mul(d, 140));
+      rays.push(new Ray(origin, d));
     }
   }
-  // eslint-disable-next-line no-constant-condition
+
+  // Continuously accumulate frames
   while (true) {
     let i = 0;
     for (const r of rays) {
-      const pixel = getRayColor(r, spheres);
+      const pixel = scene.traceRay(r);
       res[i++] = pixel.x * 256;
       res[i++] = pixel.y * 256;
       res[i++] = pixel.z * 256;

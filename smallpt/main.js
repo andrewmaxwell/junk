@@ -6,14 +6,11 @@ const canvas = document.querySelector('canvas');
 
 const start = performance.now();
 let frameCounter = 1;
+
+/** @type {(x: number) => number} */
 const toInt = (x) => Math.min(1, x / 16 / frameCounter) ** 0.4 * 255;
-const render = makeRenderer(
-  canvas,
-  width,
-  height,
-  (v, vals, i) =>
-    color(toInt(vals[i * 3]), toInt(vals[i * 3 + 1]), toInt(vals[i * 3 + 2])),
-  3
+const render = makeRenderer(canvas, width, height, (v, vals, i) =>
+  color(toInt(vals[i * 3]), toInt(vals[i * 3 + 1]), toInt(vals[i * 3 + 2])),
 );
 
 const sums = new Int32Array(width * height * 3);
@@ -24,7 +21,7 @@ const receiveMessage = ({data}) => {
     frameCounter +
       ' frames. ' +
       Math.round((performance.now() - start) / frameCounter) +
-      ' ms/frame average'
+      ' ms/frame average',
   );
   frameCounter++;
   render(sums);
