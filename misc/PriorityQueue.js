@@ -1,67 +1,109 @@
-const parent = (i) => ((i + 1) >>> 1) - 1;
-const left = (i) => (i << 1) + 1;
-const right = (i) => (i + 1) << 1;
-
+/** @template T */
 export class PriorityQueue {
-  constructor(compareFunc) {
-    this.compareFunc = compareFunc;
-    this.heap = [];
+  /** @param {(a:T, b:T)=>boolean} [cmp]  true ⇢ a has *higher* priority than b */
+  constructor(cmp = (a, b) => a < b) {
+    this.#cmp = cmp;
+    this.#heap = [];
+    this.#index = new Map(); // item → current index
+    Object.freeze(this); // make helper props read‑only
   }
-  peak() {
-    return this.heap[0];
-  }
+
+  // ───────────────── public API ──────────────────
   size() {
-    return this.heap.length;
+    return this.#heap.length;
   }
+  peek() {
+    return this.#heap[0];
+  }
+  clear() {
+    this.#heap.length = 0;
+    this.#index.clear();
+  }
+
+  /** @param {T} value */
   push(value) {
-    this.heap.push(value);
-    this.#siftUp(this.size() - 1);
+    const i = this.#heap.length;
+    this.#heap.push(value);
+    this.#index.set(value, i);
+    this.#siftUp(i);
     return this;
   }
+
   pop() {
-    const poppedValue = this.peak();
-    if (this.size()) this.#swap(0, this.size() - 1);
-    this.heap.pop();
-    this.#siftDown(0);
-    return poppedValue;
-  }
-  updatePosition(value) {
-    const index = this.heap.indexOf(value);
-    if (index === -1) {
-      throw new Error(`Item not found: ${JSON.stringify(value)}`);
+    if (!this.#heap.length) return;
+    const top = this.#heap[0];
+    const last = this.#heap.pop(); // remove tail
+    this.#index.delete(top);
+
+    if (this.#heap.length) {
+      // move tail to root, then fix
+      this.#heap[0] = last;
+      this.#index.set(last, 0);
+      this.#siftDown(0);
     }
-    const newIndex = this.#siftUp(index);
-    if (index === newIndex) this.#siftDown(index);
+    return top;
+  }
+
+  /** Tell the queue the priority of *value* has changed. */
+  /** @param {T} value */
+  updatePosition(value) {
+    const i = this.#index.get(value);
+    if (i === undefined) throw new Error('Item not found in PQ');
+    if (!this.#siftUp(i)) this.#siftDown(i);
     return this;
   }
+
+  // ──────────────── private helpers ───────────────
+  /** @type {T[]} */ #heap;
+  /** @type {Map<T,number>} */ #index;
+  /** @type {(a:T,b:T)=>boolean} */ #cmp;
+
+  /** @param {number} i */
+  #parent(i) {
+    return (i - 1) >>> 1;
+  }
+  /** @param {number} i */
+  #left(i) {
+    return (i << 1) + 1;
+  }
+
+  /** @param {number} i, @param {number} j */
   #swap(i, j) {
-    const t = this.heap[i];
-    this.heap[i] = this.heap[j];
-    this.heap[j] = t;
+    const h = this.#heap,
+      idx = this.#index;
+    [h[i], h[j]] = [h[j], h[i]];
+    idx.set(h[i], i);
+    idx.set(h[j], j);
   }
-  #compare(i, j) {
-    return this.compareFunc(this.heap[i], this.heap[j]);
-  }
+
+  /** @param {number} i */
   #siftUp(i) {
-    while (i > 0 && this.#compare(i, parent(i))) {
-      this.#swap(i, parent(i));
-      i = parent(i);
+    let moved = false;
+    while (i > 0) {
+      const p = this.#parent(i);
+      if (!this.#cmp(this.#heap[i], this.#heap[p])) break;
+      this.#swap(i, p);
+      i = p;
+      moved = true;
     }
-    return i;
+    return moved;
   }
+
+  /** @param {number} i */
   #siftDown(i) {
-    while (
-      (left(i) < this.size() && this.#compare(left(i), i)) ||
-      (right(i) < this.size() && this.#compare(right(i), i))
-    ) {
-      const maxChild =
-        right(i) < this.size() && this.#compare(right(i), left(i))
-          ? right(i)
-          : left(i);
-      this.#swap(i, maxChild);
-      i = maxChild;
+    const n = this.#heap.length;
+    while (true) {
+      const l = this.#left(i);
+      const r = l + 1; // right child
+      let best = i;
+
+      if (l < n && this.#cmp(this.#heap[l], this.#heap[best])) best = l;
+      if (r < n && this.#cmp(this.#heap[r], this.#heap[best])) best = r;
+      if (best === i) break;
+
+      this.#swap(i, best);
+      i = best;
     }
-    return i;
   }
 }
 
@@ -76,7 +118,7 @@ export class PriorityQueue {
 
 // Test.assertDeepEquals(
 //   sorted,
-//   shuffled.sort((a, b) => a - b)
+//   shuffled.sort((a, b) => a - b),
 // );
 
 // /////
@@ -92,5 +134,5 @@ export class PriorityQueue {
 
 // Test.assertDeepEquals(
 //   [q.pop(), q.pop(), q.pop(), q.pop(), q.pop()],
-//   ['e', 'b', 'a', 'd', 'c']
+//   ['e', 'b', 'a', 'd', 'c'],
 // );

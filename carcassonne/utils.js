@@ -2,7 +2,7 @@ export const pipe =
   (...funcs) =>
   (data) =>
     funcs.reduce((r, f) => f(r), data);
-export const when = (pred, func) => (data) => pred(data) ? func(data) : data;
+export const when = (pred, func) => (data) => (pred(data) ? func(data) : data);
 export const last = (arr) => arr[arr.length - 1];
 export const repeat = (num, val) => new Array(num).fill(val);
 

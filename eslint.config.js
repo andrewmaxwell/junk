@@ -31,7 +31,6 @@ export default [
       'react/display-name': 'off',
       'react/prop-types': 'off',
       'no-prototype-builtins': 'off',
-      'prefer-destructuring': 'warn',
       'no-nested-ternary': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
     },

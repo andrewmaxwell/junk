@@ -14,6 +14,16 @@ const graphs = [
 
 const data = await getData();
 
+// console.log(
+//   data
+//     .filter((d) => d.time > Date.parse('2024/01/01'))
+//     .map(
+//       (d) =>
+//         `${d.tstamp.split(' ')[0]}: ${d.notes}(energy: ${d.energy}/5, mood: ${d.mood}/5, exercise: ${d.exercise}/5)`,
+//     )
+//     .join('\n'),
+// );
+
 const minX = data[0].time;
 const maxX = data[data.length - 1].time;
 

@@ -11,9 +11,18 @@ const movementKeys = {
   KeyS: 'down',
 };
 
+/**
+ * @param {(ctx: CanvasRenderingContext2D, camera: Camera) => void} draw
+ * @param {{
+ *  initialView?: {x?: number, y?: number, zoom?: number},
+ *  onClick?: (coords: {x: number, y: number}) => void,
+ *  drawStatic?: (ctx: CanvasRenderingContext2D) => void
+ * }} opts
+ */
 export const viewer = (draw, {initialView, onClick, drawStatic} = {}) => {
   const canvas = document.querySelector('canvas');
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas?.getContext('2d');
+  if (!canvas || !ctx) return;
 
   const camera = new Camera(initialView);
   // let mouse = {x: 0, y: 0};
@@ -31,7 +40,7 @@ export const viewer = (draw, {initialView, onClick, drawStatic} = {}) => {
       e.preventDefault();
       camera.changeZoom(e.deltaY);
     },
-    {passive: false}
+    {passive: false},
   );
 
   const pressing = {};
@@ -55,13 +64,15 @@ export const viewer = (draw, {initialView, onClick, drawStatic} = {}) => {
   window.addEventListener('resize', resize);
 
   const loop = () => {
-    camera.move(pressing);
-    ctx.clearRect(0, 0, innerWidth, innerHeight);
-    ctx.save();
-    camera.transform(ctx);
-    draw(ctx, camera);
-    ctx.restore();
-    drawStatic?.(ctx);
+    if (document.hasFocus()) {
+      camera.move(pressing);
+      ctx.clearRect(0, 0, innerWidth, innerHeight);
+      ctx.save();
+      camera.transform(ctx);
+      draw(ctx, camera);
+      ctx.restore();
+      drawStatic?.(ctx);
+    }
     requestAnimationFrame(loop);
   };
 

@@ -1,7 +1,7 @@
 export const getData = async () => {
   const [response] = await Promise.all([
     fetch(
-      'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ03_eRjHaTw-LlfgdomjIuuGo-aCG6-gK6-zivdQaZonq7AmOEIAua6A5GPh3LFMC4VEQykhRLLBDD/pub?output=xlsx'
+      'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ03_eRjHaTw-LlfgdomjIuuGo-aCG6-gK6-zivdQaZonq7AmOEIAua6A5GPh3LFMC4VEQykhRLLBDD/pub?output=xlsx',
     ),
     import(
       // eslint-disable-next-line import/no-unresolved

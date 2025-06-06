@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Micro-Framework Todo Demo</title>
+
+  <style>
+    body      { font-family: system-ui, sans-serif; margin: 2rem; }
+    input[type="text"] { padding:.4rem .6rem; width:14rem; }
+    button    { margin-left:.3rem; padding:.3rem .6rem; }
+    ul        { list-style:none; padding:0; margin-top:1rem; }
+    li        { margin:.2rem 0; }
+    .done     { text-decoration:line-through; color:#777; }
+  </style>
+</head>
+
+<body>
+  <h1>Todos</h1>
+  <div id="root"></div>
+
+  <!-- Only one script tag is needed; todoList.js pulls in the framework. -->
+  <script type="module" src="./todoList.js"></script>
+</body>
+</html>
