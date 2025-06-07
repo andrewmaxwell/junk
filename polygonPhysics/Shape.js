@@ -44,23 +44,26 @@ export class Shape {
     this.invM = 1 / mass;
     this.invI = 1 / (mass * polygonInertia(points));
     this.centroid = polygonCentroid(points);
-    this.contacts = [];
 
     this.minX = 0;
     this.minY = 0;
     this.maxX = 0;
     this.maxY = 0;
     this.updateBoundingBox();
+
+    /** @type {Array<{contact: {x: number, y: number}, force: number}>} */
+    this.contacts = [];
   }
 
-  /** integrates motion
-   * @type {(dt: number, g: number) => void} */
+  /** Integrate motion using semi-implicit Euler.
+   * @param {number} dt - timestep in seconds
+   * @param {number} g  - vertical acceleration
+   */
   step(dt, g) {
     this.contacts.length = 0;
-
     if (this.fixed) return;
 
-    this.vy += g * dt * dt;
+    this.vy += g * dt;
 
     const {x: cx, y: cy} = this.centroid;
     this.centroid.x += this.vx * dt;
@@ -105,7 +108,7 @@ export class Shape {
       p.x += dx;
       p.y += dy;
     }
-    this.updateBoundingBox();
+    // don't bother updating the bounding box, the pairs have already been calculated at this point
   }
 
   /** @type {(ix: number, iy: number, tau: number) => void} */
@@ -142,8 +145,6 @@ export class Shape {
     const μd = (this.friction + B.friction) / 2;
 
     for (const c of contacts) {
-      this.contacts.push(c); // store contacts for rendering
-
       const rAx = c.x - this.centroid.x;
       const rAy = c.y - this.centroid.y;
       const rBx = c.x - B.centroid.x;
@@ -170,6 +171,7 @@ export class Shape {
       const jnx = n.x * jn;
       const jny = n.y * jn;
 
+      this.contacts.push({contact: c, force: jn}); // store contacts for rendering, only need one copy, don't need to push to B.contacts
       this.applyImpulse(-jnx, -jny, -raN * jn);
       B.applyImpulse(jnx, jny, rbN * jn);
 

@@ -27,16 +27,18 @@ for (let i = 0; i < 50; i++) {
 }
 
 world.add(
-  {points: rect(-800, 700, 1500, 200), fixed: true}, // floor
-  {points: rect(-1200, -500, 199, 1200), fixed: true}, // left wall
+  {points: rect(-1200, 700, 2400, 100), fixed: true}, // floor
+  {points: rect(-1200, -500, 100, 1200), fixed: true}, // left wall
 );
 
 viewer(
   (ctx) => {
     world.step();
 
+    ctx.globalAlpha = 0.5;
+
     // shapes
-    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.strokeStyle = 'white';
     ctx.beginPath();
     for (const {points: p} of world.shapes) {
@@ -46,29 +48,15 @@ viewer(
     ctx.stroke();
     ctx.fill();
 
-    // bounding boxes
-    // ctx.strokeStyle = 'green';
-    // for (const {boundingBox: b} of world.shapes) {
-    //   ctx.strokeRect(b.minX, b.minY, b.maxX - b.minX, b.maxY - b.minY);
-    // }
-
     // contact points
     ctx.fillStyle = 'cyan';
     for (const s of world.shapes) {
-      for (const c of s.contacts) {
+      for (const {contact, force} of s.contacts) {
         ctx.beginPath();
-        ctx.arc(c.x, c.y, 2, 0, 2 * Math.PI);
+        ctx.arc(contact.x, contact.y, Math.sqrt(force) / 8, 0, 2 * Math.PI);
         ctx.fill();
       }
     }
-
-    // ctx.strokeStyle = 'red';
-    // ctx.beginPath();
-    // for (const [a, b] of world.pairs) {
-    //   ctx.moveTo(a.centroid.x, a.centroid.y);
-    //   ctx.lineTo(b.centroid.x, b.centroid.y);
-    // }
-    // ctx.stroke();
   },
   {initialView: {zoom: 0.5}},
 );

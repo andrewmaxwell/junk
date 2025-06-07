@@ -5,10 +5,9 @@ export class World {
   constructor() {
     /** @type {Shape[]} */
     this.shapes = [];
-    this.gravity = 1;
+    this.gravity = 0.1;
     this.moveSteps = 4;
-    this.collisionSteps = 4;
-    this.pairs = [];
+    this.collisionSteps = 2;
   }
   /** @param {Array<Partial<Shape> & {points: Array<{x: number, y: number}>}>} newShapes */
   add(...newShapes) {
@@ -29,8 +28,6 @@ export class World {
           a.resolveCollision(b);
         }
       }
-
-      this.pairs = pairs;
     }
   }
 }
