@@ -38,7 +38,6 @@ export class SpatialHashGrid {
     for (const key in this.#grid) {
       const cell = this.#grid[key];
       if (cell.length < 2) continue;
-
       for (let i = 0; i < cell.length; i++) {
         for (let j = i + 1; j < cell.length; j++) {
           const a = cell[i];

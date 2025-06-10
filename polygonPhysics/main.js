@@ -1,5 +1,5 @@
 import {viewer} from '../primeSpiral/viewer.js';
-import {poly, randPoly, rect} from './helpers.js';
+import {poly, randPoly, rect, rgbGradient} from './helpers.js';
 import {World} from './World.js';
 
 const world = new World();
@@ -38,13 +38,19 @@ for (let i = 0; i < 100; i++) {
 }
 
 world.add(
-  {points: rect(-1200, 700, 2400, 100), fixed: true}, // floor
-  {points: rect(-1200, -500, 100, 1200), fixed: true}, // left wall
+  {points: rect(-1000, 700, 2000, 100), fixed: true}, // floor
+  {points: rect(-1200, -300, 100, 800), fixed: true}, // left wall
 );
 
 /** @import {Shape} from './Shape.js' */
 /** @type {Shape | undefined} */
 let dragging;
+
+const getColor = rgbGradient([
+  [255, 255, 255],
+  [255, 0, 0],
+  [0, 0, 0],
+]);
 
 viewer(
   (ctx, _, mouse) => {
@@ -60,8 +66,9 @@ viewer(
 
     // shapes
     ctx.strokeStyle = 'white';
-    ctx.fillStyle = 'white';
     for (const s of world.shapes) {
+      const totalForce = s.contacts.reduce((a, b) => a + b.force, 0);
+      ctx.fillStyle = getColor(totalForce / 1000);
       ctx.beginPath();
       s.points.forEach((p) => ctx.lineTo(p.x, p.y));
       ctx.closePath();
@@ -78,13 +85,19 @@ viewer(
         ctx.fill();
       }
     }
+
+    // pairs
+    // ctx.strokeStyle = 'red';
+    // ctx.beginPath();
+    // for (const [a, b] of world.pairs) {
+    //   ctx.moveTo(a.centroidX, a.centroidY);
+    //   ctx.lineTo(b.centroidX, b.centroidY);
+    // }
+    // ctx.stroke();
   },
   {
     initialView: {zoom: 0.3},
     // onClick: ({x, y}) => world.add(randomPoly(x, y)),
-    onClick: () => {
-      console.log(world.grid);
-    },
     onMouseDown: ({x, y}) => {
       dragging = world.getClosestShape(x, y);
     },

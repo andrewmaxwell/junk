@@ -9,9 +9,9 @@ export class World {
     this.shapes = [];
     this.gravity = 0.1;
     this.moveSteps = 4;
-    this.collisionSteps = 2;
+    this.collisionSteps = 4;
     /** @type {SpatialHashGrid<Shape>} */
-    this.grid = new SpatialHashGrid(200);
+    this.grid = new SpatialHashGrid(150);
   }
   /** @param {Array<Partial<Shape> & {points: Array<{x: number, y: number}>}>} newShapes */
   add(...newShapes) {
@@ -26,20 +26,25 @@ export class World {
       shape.contacts.length = 0;
     }
 
+    const dt = 1 / moveSteps;
+
     for (let m = 0; m < moveSteps; m++) {
       grid.clear();
       for (const shape of shapes) {
-        shape.step(1 / moveSteps, gravity);
+        shape.step(dt, gravity);
         grid.insert(shape);
       }
 
       const pairs = grid.getPotentialPairs();
+      // const pairs = getOverlappingPairs(shapes);
 
       for (let t = 0; t < collisionSteps; t++) {
         for (const [a, b] of pairs) {
           a.resolveCollision(b);
         }
       }
+
+      this.pairs = pairs;
     }
   }
   /** @type {(x: number, y: number) => Shape | undefined} */

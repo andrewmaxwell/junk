@@ -67,34 +67,34 @@ export const rect = (x, y, w, h) => [
   {x, y: y + h},
 ];
 
-// /** @type {<T extends {minX: number, maxX: number, minY: number, maxY: number}>(shapes: T[]) => T[][]} */
-// export function getOverlappingPairs(shapes) {
-//   // shapes.sort((a, b) => a.minX - b.minX);
-//   // insertion sort for speed
-//   for (let i = 1, n = shapes.length; i < n; ++i) {
-//     const curr = shapes[i];
-//     let j = i - 1;
-//     while (j >= 0 && shapes[j].minX > curr.minX) {
-//       shapes[j + 1] = shapes[j];
-//       --j;
-//     }
-//     shapes[j + 1] = curr;
-//   }
+/** @type {<T extends {minX: number, maxX: number, minY: number, maxY: number}>(shapes: T[]) => T[][]} */
+export function getOverlappingPairs(shapes) {
+  // shapes.sort((a, b) => a.minX - b.minX);
+  // insertion sort for speed
+  for (let i = 1, n = shapes.length; i < n; ++i) {
+    const curr = shapes[i];
+    let j = i - 1;
+    while (j >= 0 && shapes[j].minX > curr.minX) {
+      shapes[j + 1] = shapes[j];
+      --j;
+    }
+    shapes[j + 1] = curr;
+  }
 
-//   const pairs = [];
+  const pairs = [];
 
-//   for (let i = 0; i < shapes.length; i++) {
-//     const a = shapes[i];
-//     for (let j = i + 1; j < shapes.length; j++) {
-//       const b = shapes[j];
-//       if (b.minX > a.maxX) break;
-//       if (a.minY <= b.maxY && a.maxY >= b.minY) {
-//         pairs.push([a, b]);
-//       }
-//     }
-//   }
-//   return pairs;
-// }
+  for (let i = 0; i < shapes.length; i++) {
+    const a = shapes[i];
+    for (let j = i + 1; j < shapes.length; j++) {
+      const b = shapes[j];
+      if (b.minX > a.maxX) break;
+      if (a.minY <= b.maxY && a.maxY >= b.minY) {
+        pairs.push([a, b]);
+      }
+    }
+  }
+  return pairs;
+}
 
 /** @type {(a: Point, b: Point) => number} */
 const getAngle = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
@@ -140,3 +140,18 @@ export const randPoly = (x, y, numPts = 8, minRad = 0, maxRad = 150) =>
       return {x: x + dist * Math.cos(angle), y: y + dist * Math.sin(angle)};
     }),
   );
+
+/** @type {(colors: number[][], numSteps?: number) => (val: number) => string} */
+export const rgbGradient = (colors, numSteps = 256) => {
+  const gradient = Array.from({length: numSteps}, (_, i) => {
+    const colorIndex = (i / (numSteps - 1)) * (colors.length - 1);
+    const lowerColor = colors[Math.floor(colorIndex)];
+    const upperColor = colors[Math.ceil(colorIndex)];
+    const remainder = colorIndex % 1;
+    const rgb = lowerColor.map((c, i) =>
+      Math.round(c * (1 - remainder) + upperColor[i] * remainder),
+    );
+    return '#' + rgb.map((c) => c.toString(16).padStart(2, '0')).join('');
+  });
+  return (v) => gradient[Math.max(0, Math.min(numSteps - 1, Math.round(v)))];
+};

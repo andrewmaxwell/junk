@@ -1,5 +1,5 @@
 const cameraSpeed = 0.1;
-const moveSpeed = 30;
+const moveSpeed = 15;
 const zoomSpeed = 1.001;
 const movementThreshold = 1;
 const zoomThreshold = 0.002;
