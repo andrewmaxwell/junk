@@ -1,8 +1,10 @@
-const cameraSpeed = 0.1;
-const moveSpeed = 15;
+const cameraSpeed = 0.01;
+const moveSpeed = 200;
 const zoomSpeed = 1.001;
 const movementThreshold = 1;
 const zoomThreshold = 0.002;
+
+let lastTime = 0;
 
 export class Camera {
   constructor(initialView = {}) {
@@ -12,14 +14,18 @@ export class Camera {
     this.zoom = this.targetZoom = initialView.zoom ?? 0.6;
   }
   move(pressing) {
-    if (pressing.left) this.target.x -= moveSpeed / this.zoom;
-    if (pressing.right) this.target.x += moveSpeed / this.zoom;
-    if (pressing.up) this.target.y -= moveSpeed / this.zoom;
-    if (pressing.down) this.target.y += moveSpeed / this.zoom;
+    const now = performance.now();
+    const amt = cameraSpeed * Math.min(50, now - lastTime);
+    lastTime = now;
 
-    this.x += (this.target.x - this.x) * cameraSpeed;
-    this.y += (this.target.y - this.y) * cameraSpeed;
-    this.zoom += (this.targetZoom - this.zoom) * cameraSpeed;
+    if (pressing.left) this.target.x -= (moveSpeed / this.zoom) * amt;
+    if (pressing.right) this.target.x += (moveSpeed / this.zoom) * amt;
+    if (pressing.up) this.target.y -= (moveSpeed / this.zoom) * amt;
+    if (pressing.down) this.target.y += (moveSpeed / this.zoom) * amt;
+
+    this.x += (this.target.x - this.x) * amt;
+    this.y += (this.target.y - this.y) * amt;
+    this.zoom += (this.targetZoom - this.zoom) * amt;
 
     if (
       Math.abs(this.x - this.target.x) * this.zoom > movementThreshold ||

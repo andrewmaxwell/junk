@@ -145,12 +145,10 @@ export const randPoly = (x, y, numPts = 8, minRad = 0, maxRad = 150) =>
 export const rgbGradient = (colors, numSteps = 256) => {
   const gradient = Array.from({length: numSteps}, (_, i) => {
     const colorIndex = (i / (numSteps - 1)) * (colors.length - 1);
-    const lowerColor = colors[Math.floor(colorIndex)];
-    const upperColor = colors[Math.ceil(colorIndex)];
-    const remainder = colorIndex % 1;
-    const rgb = lowerColor.map((c, i) =>
-      Math.round(c * (1 - remainder) + upperColor[i] * remainder),
-    );
+    const c1 = colors[Math.floor(colorIndex)];
+    const c2 = colors[Math.ceil(colorIndex)];
+    const rem = colorIndex % 1;
+    const rgb = c1.map((c, i) => Math.round(c * (1 - rem) + c2[i] * rem));
     return '#' + rgb.map((c) => c.toString(16).padStart(2, '0')).join('');
   });
   return (v) => gradient[Math.max(0, Math.min(numSteps - 1, Math.round(v)))];

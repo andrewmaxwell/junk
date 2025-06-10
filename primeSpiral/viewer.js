@@ -95,6 +95,7 @@ export const viewer = (
       drawStatic?.(ctx);
     }
     requestAnimationFrame(loop);
+    // setTimeout(loop, 100); // simulate slow frame rate
   };
 
   resize();

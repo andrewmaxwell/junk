@@ -7,9 +7,8 @@ export class World {
   constructor() {
     /** @type {Shape[]} */
     this.shapes = [];
-    this.gravity = 0.1;
-    this.moveSteps = 4;
-    this.collisionSteps = 4;
+    this.gravity = 0.001;
+    this.collisionSteps = 8;
     /** @type {SpatialHashGrid<Shape>} */
     this.grid = new SpatialHashGrid(150);
   }
@@ -19,32 +18,27 @@ export class World {
       ...newShapes.map((s) => new Shape({id: idCounter++, ...s})),
     );
   }
-  step() {
-    const {shapes, collisionSteps, gravity, moveSteps, grid} = this;
+  /** @param {number} dt */
+  step(dt) {
+    const {shapes, collisionSteps, gravity, grid} = this;
 
     for (const shape of shapes) {
       shape.contacts.length = 0;
     }
 
-    const dt = 1 / moveSteps;
+    grid.clear();
+    for (const shape of shapes) {
+      shape.step(dt, gravity);
+      grid.insert(shape);
+    }
 
-    for (let m = 0; m < moveSteps; m++) {
-      grid.clear();
-      for (const shape of shapes) {
-        shape.step(dt, gravity);
-        grid.insert(shape);
+    const pairs = grid.getPotentialPairs();
+    // const pairs = getOverlappingPairs(shapes);
+
+    for (let t = 0; t < collisionSteps; t++) {
+      for (const [a, b] of pairs) {
+        a.resolveCollision(b);
       }
-
-      const pairs = grid.getPotentialPairs();
-      // const pairs = getOverlappingPairs(shapes);
-
-      for (let t = 0; t < collisionSteps; t++) {
-        for (const [a, b] of pairs) {
-          a.resolveCollision(b);
-        }
-      }
-
-      this.pairs = pairs;
     }
   }
   /** @type {(x: number, y: number) => Shape | undefined} */

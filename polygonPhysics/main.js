@@ -52,9 +52,14 @@ const getColor = rgbGradient([
   [0, 0, 0],
 ]);
 
+let lastRenderTime = 0;
+
 viewer(
   (ctx, _, mouse) => {
-    world.step();
+    const now = performance.now();
+    const dt = Math.min(30, now - lastRenderTime);
+    world.step(dt);
+    lastRenderTime = now;
 
     if (dragging) {
       dragging.moveTo(mouse.x, mouse.y);
@@ -68,7 +73,7 @@ viewer(
     ctx.strokeStyle = 'white';
     for (const s of world.shapes) {
       const totalForce = s.contacts.reduce((a, b) => a + b.force, 0);
-      ctx.fillStyle = getColor(totalForce / 1000);
+      ctx.fillStyle = getColor(totalForce / 100);
       ctx.beginPath();
       s.points.forEach((p) => ctx.lineTo(p.x, p.y));
       ctx.closePath();
@@ -81,7 +86,7 @@ viewer(
     for (const s of world.shapes) {
       for (const {contact, force} of s.contacts) {
         ctx.beginPath();
-        ctx.arc(contact.x, contact.y, Math.sqrt(force) / 8, 0, 2 * Math.PI);
+        ctx.arc(contact.x, contact.y, Math.sqrt(force) / 4, 0, 2 * Math.PI);
         ctx.fill();
       }
     }
