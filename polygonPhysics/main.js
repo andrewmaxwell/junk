@@ -1,27 +1,38 @@
 import {viewer} from '../primeSpiral/viewer.js';
-import {poly, rect} from './helpers.js';
+import {poly, randPoly, rect} from './helpers.js';
 import {World} from './World.js';
 
 const world = new World();
 
-for (let i = 0; i < 50; i++) {
+const randomPoly = (x, y) => ({
+  points: randPoly(
+    x,
+    y,
+    3 + Math.floor(Math.random() * 8), // numPts
+    10, // minRad
+    150, // maxRad
+  ),
+});
+
+for (let i = 0; i < 100; i++) {
   world.add(
+    randomPoly((Math.random() - 0.5) * 1000, (Math.random() - 1) * 1500),
     {
       points: poly(
         (Math.random() - 0.5) * 1000, // x
         (Math.random() - 1) * 1500, // y
         10 + Math.random() * 100, // rad
-        Math.floor(3 + Math.random() * 10), // sides
+        16, // sides
       ),
     },
     {
       points: rect(
-        Math.random() * 1500 - 800,
-        Math.random() * 1500 - 1500,
-        10 + Math.random() * 300,
-        10 + Math.random() * 100,
+        Math.random() * 1500 - 800, // x
+        Math.random() * 1500 - 1500, // y
+        10 + Math.random() * 300, // w
+        10 + Math.random() * 100, // h
       ),
-      vx: Math.random(),
+      xVelocity: Math.random(),
     },
   );
 }
@@ -31,22 +42,32 @@ world.add(
   {points: rect(-1200, -500, 100, 1200), fixed: true}, // left wall
 );
 
+/** @import {Shape} from './Shape.js' */
+/** @type {Shape | undefined} */
+let dragging;
+
 viewer(
-  (ctx) => {
+  (ctx, _, mouse) => {
     world.step();
+
+    if (dragging) {
+      dragging.moveTo(mouse.x, mouse.y);
+      dragging.xVelocity = mouse.movementX;
+      dragging.yVelocity = mouse.movementY;
+    }
 
     ctx.globalAlpha = 0.5;
 
     // shapes
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.strokeStyle = 'white';
-    ctx.beginPath();
-    for (const {points: p} of world.shapes) {
-      ctx.moveTo(p[p.length - 1].x, p[p.length - 1].y);
-      p.forEach((p) => ctx.lineTo(p.x, p.y));
+    ctx.fillStyle = 'white';
+    for (const s of world.shapes) {
+      ctx.beginPath();
+      s.points.forEach((p) => ctx.lineTo(p.x, p.y));
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fill();
     }
-    ctx.stroke();
-    ctx.fill();
 
     // contact points
     ctx.fillStyle = 'cyan';
@@ -58,5 +79,15 @@ viewer(
       }
     }
   },
-  {initialView: {zoom: 0.5}},
+  {
+    initialView: {zoom: 0.3},
+    // onClick: ({x, y}) => world.add(randomPoly(x, y)),
+    onClick: () => {
+      console.log(world.grid);
+    },
+    onMouseDown: ({x, y}) => {
+      dragging = world.getClosestShape(x, y);
+    },
+    onMouseUp: () => (dragging = undefined),
+  },
 );

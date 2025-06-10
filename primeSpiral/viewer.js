@@ -12,27 +12,48 @@ const movementKeys = {
 };
 
 /**
- * @param {(ctx: CanvasRenderingContext2D, camera: Camera) => void} draw
+ * @param {(
+ *  ctx: CanvasRenderingContext2D,
+ *  camera: Camera,
+ *  mouse: {x: number, y: number, pageX: number, pageY: number, movementX: number, movementY: number}
+ * ) => void} draw
+ *
  * @param {{
  *  initialView?: {x?: number, y?: number, zoom?: number},
  *  onClick?: (coords: {x: number, y: number}) => void,
+ *  onMouseDown?: (coords: {x: number, y: number}) => void,
+ *  onMouseUp?: (coords: {x: number, y: number}) => void,
+ *  onMouseMove?: (coords: {x: number, y: number}) => void,
  *  drawStatic?: (ctx: CanvasRenderingContext2D) => void
  * }} opts
  */
-export const viewer = (draw, {initialView, onClick, drawStatic} = {}) => {
+export const viewer = (
+  draw,
+  {initialView, onClick, onMouseDown, onMouseUp, onMouseMove, drawStatic} = {},
+) => {
   const canvas = document.querySelector('canvas');
   const ctx = canvas?.getContext('2d');
   if (!canvas || !ctx) return;
 
   const camera = new Camera(initialView);
-  // let mouse = {x: 0, y: 0};
 
-  window.addEventListener('click', (e) => {
-    // mouse = {...mouse, ...camera.toWorldCoords(e.pageX, e.pageY)};
-    const coords = camera.toWorldCoords(e.pageX, e.pageY);
-    console.log('clicked', coords);
-    onClick?.(coords);
-  });
+  const mouse = {x: 0, y: 0, pageX: 0, pageY: 0, movementX: 0, movementY: 0};
+
+  /** @type {(func: ((coords: {x: number, y: number}) => void) | undefined) => (e: MouseEvent) => void} */
+  const handle = (func) => (e) => {
+    const {x, y} = camera.toWorldCoords(e.pageX, e.pageY);
+    mouse.pageX = e.pageX;
+    mouse.pageY = e.pageY;
+    mouse.movementX = e.movementX;
+    mouse.movementY = e.movementY;
+    mouse.x = x;
+    mouse.y = y;
+    func?.(mouse);
+  };
+  window.addEventListener('mousedown', handle(onMouseDown));
+  window.addEventListener('mouseup', handle(onMouseUp));
+  window.addEventListener('mousemove', handle(onMouseMove));
+  window.addEventListener('click', handle(onClick));
 
   window.addEventListener(
     'wheel',
@@ -69,7 +90,7 @@ export const viewer = (draw, {initialView, onClick, drawStatic} = {}) => {
       ctx.clearRect(0, 0, innerWidth, innerHeight);
       ctx.save();
       camera.transform(ctx);
-      draw(ctx, camera);
+      draw(ctx, camera, mouse);
       ctx.restore();
       drawStatic?.(ctx);
     }
