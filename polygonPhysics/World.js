@@ -8,7 +8,6 @@ export class World {
     /** @type {Shape[]} */
     this.shapes = [];
     this.gravity = 0.001;
-    this.collisionSteps = 8;
     /** @type {SpatialHashGrid<Shape>} */
     this.grid = new SpatialHashGrid(150);
   }
@@ -20,10 +19,12 @@ export class World {
   }
   /** @param {number} dt */
   step(dt) {
-    const {shapes, collisionSteps, gravity, grid} = this;
+    const {shapes, gravity, grid} = this;
 
-    for (const shape of shapes) {
-      shape.contacts.length = 0;
+    for (let i = shapes.length - 1; i >= 0; i--) {
+      // delete shapes that fall too far
+      if (shapes[i].centroidY > 10_000) shapes.splice(i, 1);
+      else shapes[i].resetStats();
     }
 
     grid.clear();
@@ -32,10 +33,10 @@ export class World {
       grid.insert(shape);
     }
 
-    const pairs = grid.getPotentialPairs();
+    const pairs = grid.getOverlappingPairs();
     // const pairs = getOverlappingPairs(shapes);
 
-    for (let t = 0; t < collisionSteps; t++) {
+    for (let t = 0; t < 8; t++) {
       for (const [a, b] of pairs) {
         a.resolveCollision(b);
       }

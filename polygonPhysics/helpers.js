@@ -61,25 +61,25 @@ export const poly = (cx, cy, rad, numSides, rotate = 0) =>
 
 /** @type {(x: number, y: number, w: number, h: number) => Point[]} */
 export const rect = (x, y, w, h) => [
-  {x, y},
-  {x: x + w, y},
-  {x: x + w, y: y + h},
-  {x, y: y + h},
+  {x: x - w / 2, y: y - h / 2},
+  {x: x + w / 2, y: y - h / 2},
+  {x: x + w / 2, y: y + h / 2},
+  {x: x - w / 2, y: y + h / 2},
 ];
 
 /** @type {<T extends {minX: number, maxX: number, minY: number, maxY: number}>(shapes: T[]) => T[][]} */
 export function getOverlappingPairs(shapes) {
-  // shapes.sort((a, b) => a.minX - b.minX);
+  shapes.sort((a, b) => a.minX - b.minX);
   // insertion sort for speed
-  for (let i = 1, n = shapes.length; i < n; ++i) {
-    const curr = shapes[i];
-    let j = i - 1;
-    while (j >= 0 && shapes[j].minX > curr.minX) {
-      shapes[j + 1] = shapes[j];
-      --j;
-    }
-    shapes[j + 1] = curr;
-  }
+  // for (let i = 1, n = shapes.length; i < n; ++i) {
+  //   const curr = shapes[i];
+  //   let j = i - 1;
+  //   while (j >= 0 && shapes[j].minX > curr.minX) {
+  //     shapes[j + 1] = shapes[j];
+  //     --j;
+  //   }
+  //   shapes[j + 1] = curr;
+  // }
 
   const pairs = [];
 

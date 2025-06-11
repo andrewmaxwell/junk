@@ -31,7 +31,7 @@ export class SpatialHashGrid {
     }
   }
 
-  getPotentialPairs() {
+  getOverlappingPairs() {
     const pairs = [];
     const checkedPairs = new Set();
 

@@ -10,7 +10,6 @@ export class Shape {
    * @param {number} [cfg.xVelocity=0] - x velocity
    * @param {number} [cfg.yVelocity=0] - y velocity
    * @param {number} [cfg.angularVelocity=0]  - angular velocity (rad/s)
-   * @param {number} [cfg.mass] - overrides area‑based mass (∞ if fixed)
    * @param {number} [cfg.restitution=0.5] - restitution (0–1)
    * @param {number} [cfg.friction=0.3] - friction coefficient
    * @param {boolean} [cfg.fixed=false] - immovable if true
@@ -21,9 +20,8 @@ export class Shape {
     xVelocity = 0,
     yVelocity = 0,
     angularVelocity = 0,
-    mass,
     restitution = 0.5,
-    friction = 0.3,
+    friction = 1,
     fixed = false,
   }) {
     if (!points?.length) throw new Error('Shape needs points');
@@ -37,8 +35,7 @@ export class Shape {
     this.points = points;
     this.fixed = fixed;
 
-    if (fixed) mass = Infinity;
-    mass ??= polygonArea(points); // density = 1
+    const mass = fixed ? Infinity : polygonArea(points); // density = 1
     this.inverseMass = 1 / mass;
     this.inverseInertia = 1 / (mass * polygonInertia(points));
 
@@ -54,6 +51,7 @@ export class Shape {
 
     /** @type {Array<{contact: {x: number, y: number}, force: number}>} */
     this.contacts = [];
+    this.totalForce = 0;
   }
 
   /** Integrate motion using semi-implicit Euler.
@@ -115,12 +113,19 @@ export class Shape {
     // this.#updateBoundingBox(); // not necessary at this point
   }
 
+  resetStats() {
+    this.contacts.length = 0;
+    this.totalForce = 0;
+  }
+
   /** @type {(impulseX: number, impulseY: number, angularImpulse: number) => void} */
   #applyImpulse(impulseX, impulseY, angularImpulse) {
     if (this.fixed) return;
     this.xVelocity += impulseX * this.inverseMass;
     this.yVelocity += impulseY * this.inverseMass;
     this.angularVelocity += angularImpulse * this.inverseInertia;
+    this.totalForce +=
+      Math.abs(impulseX) + Math.abs(impulseY) + Math.abs(angularImpulse / 20);
   }
 
   /** @type {(B: Shape) => void} */

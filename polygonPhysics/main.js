@@ -4,43 +4,40 @@ import {World} from './World.js';
 
 const world = new World();
 
-const randomPoly = (x, y) => ({
-  points: randPoly(
-    x,
-    y,
-    3 + Math.floor(Math.random() * 8), // numPts
-    10, // minRad
-    150, // maxRad
-  ),
-});
-
 for (let i = 0; i < 100; i++) {
+  const y = (Math.random() - 1) * 8000;
   world.add(
-    randomPoly((Math.random() - 0.5) * 1000, (Math.random() - 1) * 1500),
-    {
-      points: poly(
-        (Math.random() - 0.5) * 1000, // x
-        (Math.random() - 1) * 1500, // y
-        10 + Math.random() * 100, // rad
-        16, // sides
-      ),
-    },
-    {
-      points: rect(
-        Math.random() * 1500 - 800, // x
-        Math.random() * 1500 - 1500, // y
-        10 + Math.random() * 300, // w
-        10 + Math.random() * 100, // h
-      ),
-      xVelocity: Math.random(),
-    },
+    {points: randPoly(0, y, 6 + Math.floor(Math.random() * 8), 10, 150)},
+    {points: poly(0, y, 30 + Math.random() * 100, 16)},
+    {points: rect(0, y, 30 + Math.random() * 100, 30 + Math.random() * 500)},
   );
 }
 
-world.add(
-  {points: rect(-1000, 700, 2000, 100), fixed: true}, // floor
-  {points: rect(-1200, -300, 100, 800), fixed: true}, // left wall
-);
+// floor
+// world.add({points: rect(0, 750, 2000, 100), fixed: true});
+
+// bowl
+const num = 16;
+const rad = 2000;
+const bottom = rad / 2 + 100;
+for (let i = 0; i < num; i++) {
+  const angle1 = Math.PI * (1 - i / (num - 1));
+  const angle2 = Math.PI * (1 - (i + 1) / (num - 1));
+  const left = rad * Math.cos(angle1);
+  const right = rad * Math.cos(angle2);
+  if (right - left < 50) continue;
+  const topLeft = rad * (Math.sin(angle1) - 0.5);
+  const topRight = rad * (Math.sin(angle2) - 0.5);
+  world.add({
+    points: [
+      {x: left, y: topLeft},
+      {x: right, y: topRight},
+      {x: right, y: bottom},
+      {x: left, y: bottom},
+    ],
+    fixed: true,
+  });
+}
 
 /** @import {Shape} from './Shape.js' */
 /** @type {Shape | undefined} */
@@ -52,14 +49,17 @@ const getColor = rgbGradient([
   [0, 0, 0],
 ]);
 
+const times = [];
 let lastRenderTime = 0;
+let frame = 0;
 
 viewer(
   (ctx, _, mouse) => {
-    const now = performance.now();
-    const dt = Math.min(30, now - lastRenderTime);
+    const startTime = performance.now();
+    const dt = Math.min(30, startTime - lastRenderTime);
+    lastRenderTime = startTime;
+
     world.step(dt);
-    lastRenderTime = now;
 
     if (dragging) {
       dragging.moveTo(mouse.x, mouse.y);
@@ -72,8 +72,7 @@ viewer(
     // shapes
     ctx.strokeStyle = 'white';
     for (const s of world.shapes) {
-      const totalForce = s.contacts.reduce((a, b) => a + b.force, 0);
-      ctx.fillStyle = getColor(totalForce / 100);
+      ctx.fillStyle = getColor(s.totalForce / 2000);
       ctx.beginPath();
       s.points.forEach((p) => ctx.lineTo(p.x, p.y));
       ctx.closePath();
@@ -99,13 +98,19 @@ viewer(
     //   ctx.lineTo(b.centroidX, b.centroidY);
     // }
     // ctx.stroke();
+
+    times[frame++ % 256] = performance.now() - startTime;
   },
   {
-    initialView: {zoom: 0.3},
-    // onClick: ({x, y}) => world.add(randomPoly(x, y)),
+    initialView: {zoom: 0.2},
     onMouseDown: ({x, y}) => {
       dragging = world.getClosestShape(x, y);
     },
     onMouseUp: () => (dragging = undefined),
+    drawStatic: (ctx) => {
+      ctx.fillStyle = 'white';
+      const avg = times.reduce((a, b) => a + b) / times.length;
+      ctx.fillText(avg.toFixed(2) + ' ms', 3, 12);
+    },
   },
 );
