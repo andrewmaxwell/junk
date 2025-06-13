@@ -1,5 +1,7 @@
+import {detectCollision} from './detectCollision.js';
 import {Shape} from './Shape.js';
 import {SpatialHashGrid} from './SpatialHashGrid.js';
+/** @import {Params} from './Shape.js' */
 
 let idCounter = 0;
 
@@ -7,19 +9,27 @@ export class World {
   constructor() {
     /** @type {Shape[]} */
     this.shapes = [];
-    this.gravity = 0.001;
+
     /** @type {SpatialHashGrid<Shape>} */
     this.grid = new SpatialHashGrid(150);
+
+    /** @type {Shape[][]} */
+    this.pairs = [];
+    this.numCollisions = 0;
+    this.collisionIterations = 8;
   }
   /** @param {Array<Partial<Shape> & {points: Array<{x: number, y: number}>}>} newShapes */
   add(...newShapes) {
     this.shapes.push(
-      ...newShapes.map((s) => new Shape({id: idCounter++, ...s})),
+      ...newShapes.map((s) => new Shape({id: idCounter++, ...s})), // id is used to dedupe collisions
     );
   }
-  /** @param {number} dt */
-  step(dt) {
-    const {shapes, gravity, grid} = this;
+  /**
+   * @param {number} dt
+   * @param {Params} params
+   * */
+  step(dt, params) {
+    const {shapes, grid} = this;
 
     for (let i = shapes.length - 1; i >= 0; i--) {
       // delete shapes that fall too far
@@ -29,16 +39,21 @@ export class World {
 
     grid.clear();
     for (const shape of shapes) {
-      shape.step(dt, gravity);
+      shape.step(dt, params);
       grid.insert(shape);
     }
 
-    const pairs = grid.getOverlappingPairs();
+    this.pairs = grid.getOverlappingPairs();
     // const pairs = getOverlappingPairs(shapes);
 
-    for (let t = 0; t < 8; t++) {
-      for (const [a, b] of pairs) {
-        a.resolveCollision(b);
+    this.numCollisions = 0;
+    for (let t = 0; t < this.collisionIterations; t++) {
+      for (const [a, b] of this.pairs) {
+        const hit = detectCollision(a.points, b.points);
+        if (hit?.contacts.length) {
+          this.numCollisions++;
+          a.resolveCollision(b, hit, params);
+        }
       }
     }
   }

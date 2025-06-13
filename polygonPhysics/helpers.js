@@ -153,3 +153,38 @@ export const rgbGradient = (colors, numSteps = 256) => {
   });
   return (v) => gradient[Math.max(0, Math.min(numSteps - 1, Math.round(v)))];
 };
+
+/** @type {(rad: number, bottomThickness?: number, numSegments?: number) => Point[][]} */
+export const bowl = (rad, bottomThickness = 100, numSegments = 16) => {
+  const shapes = [];
+  for (let i = 0; i < numSegments; i++) {
+    const angle1 = Math.PI * (1 - i / (numSegments - 1));
+    const angle2 = Math.PI * (1 - (i + 1) / (numSegments - 1));
+    const left = rad * Math.cos(angle1);
+    const right = rad * Math.cos(angle2);
+    if (right - left < 50) continue;
+    const topLeft = rad * (Math.sin(angle1) - 0.5);
+    const topRight = rad * (Math.sin(angle2) - 0.5);
+    shapes.push([
+      {x: left, y: topLeft},
+      {x: right, y: topRight},
+      {x: right, y: rad / 2 + bottomThickness},
+      {x: left, y: rad / 2 + bottomThickness},
+    ]);
+  }
+  return shapes;
+};
+
+/** @type {(points: Point[], angle: number) => Point[]} */
+export const rotate = (points, angle) => {
+  const c = polygonCentroid(points);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  points.forEach((p) => {
+    const dx = p.x - c.x;
+    const dy = p.y - c.y;
+    p.x = c.x + dx * cos - dy * sin;
+    p.y = c.y + dx * sin + dy * cos;
+  });
+  return points;
+};

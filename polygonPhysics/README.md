@@ -1,0 +1,1 @@
+Polygon Physics - 2025 - 2D physics with convex polygon collisions, gravity, friction, restitution, and spatial hash optimization

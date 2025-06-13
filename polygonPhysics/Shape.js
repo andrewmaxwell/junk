@@ -1,17 +1,17 @@
-import {detectCollision} from './detectCollision.js';
 import {polygonArea, polygonCentroid, polygonInertia} from './helpers.js';
+/** @import {Point} from './helpers.js' */
+
+/** @typedef {{gravity: number, friction: number, restitution: number}} Params */
 
 /** 2‑D convex rigid body */
 export class Shape {
   /**
    * @param {Object} cfg
    * @param {number} cfg.id
-   * @param {Array<{x:number,y:number}>} cfg.points – world‑space vertices (clockwise)
+   * @param {Point[]} cfg.points – world‑space vertices (clockwise)
    * @param {number} [cfg.xVelocity=0] - x velocity
    * @param {number} [cfg.yVelocity=0] - y velocity
    * @param {number} [cfg.angularVelocity=0]  - angular velocity (rad/s)
-   * @param {number} [cfg.restitution=0.5] - restitution (0–1)
-   * @param {number} [cfg.friction=0.3] - friction coefficient
    * @param {boolean} [cfg.fixed=false] - immovable if true
    */
   constructor({
@@ -20,8 +20,6 @@ export class Shape {
     xVelocity = 0,
     yVelocity = 0,
     angularVelocity = 0,
-    restitution = 0.5,
-    friction = 1,
     fixed = false,
   }) {
     if (!points?.length) throw new Error('Shape needs points');
@@ -30,8 +28,6 @@ export class Shape {
     this.xVelocity = xVelocity;
     this.yVelocity = yVelocity;
     this.angularVelocity = angularVelocity;
-    this.restitution = restitution;
-    this.friction = friction;
     this.points = points;
     this.fixed = fixed;
 
@@ -49,19 +45,19 @@ export class Shape {
     this.maxY = 0;
     this.#updateBoundingBox();
 
-    /** @type {Array<{contact: {x: number, y: number}, force: number}>} */
+    /** @type {Array<{contact: Point, force: number}>} */
     this.contacts = [];
     this.totalForce = 0;
   }
 
   /** Integrate motion using semi-implicit Euler.
    * @param {number} dt - timestep in seconds
-   * @param {number} g  - vertical acceleration
+   * @param {Params} params
    */
-  step(dt, g) {
+  step(dt, params) {
     if (this.fixed) return;
 
-    this.yVelocity += g * dt;
+    this.yVelocity += params.gravity * dt;
 
     const ocx = this.centroidX;
     const ocy = this.centroidY;
@@ -125,16 +121,15 @@ export class Shape {
     this.yVelocity += impulseY * this.inverseMass;
     this.angularVelocity += angularImpulse * this.inverseInertia;
     this.totalForce +=
-      Math.abs(impulseX) + Math.abs(impulseY) + Math.abs(angularImpulse / 20);
+      Math.hypot(impulseX, impulseY) + Math.abs(angularImpulse / 100); // for visualization only
   }
 
-  /** @type {(B: Shape) => void} */
-  resolveCollision(B) {
-    const hit = detectCollision(this.points, B.points);
-    if (!hit || !hit.contacts.length) return;
-
-    const {normalX, normalY, depth, contacts} = hit;
-
+  /**
+   * @param {Shape} B
+   * @param {{normalX: number, normalY: number, depth: number, contacts: Point[]}} hit
+   * @param {Params} params
+   * */
+  resolveCollision(B, {normalX, normalY, depth, contacts}, params) {
     // Baumgarte position correction
     const penetration = Math.max(depth - 0.01, 0);
     const inverseMassSum = this.inverseMass + B.inverseMass;
@@ -151,10 +146,6 @@ export class Shape {
         B.centroidY + dy * B.inverseMass,
       );
     }
-
-    const e = Math.min(this.restitution, B.restitution);
-    const μs = Math.max(this.friction, B.friction);
-    const μd = (this.friction + B.friction) / 2;
 
     for (const c of contacts) {
       const rAx = c.x - this.centroidX;
@@ -182,7 +173,7 @@ export class Shape {
         rbN * rbN * B.inverseInertia;
       if (!kN) continue; // don't divide by 0
 
-      const jn = (-(1 + e) * vn) / kN;
+      const jn = (-(1 + params.restitution) * vn) / kN;
       const jnx = normalX * jn;
       const jny = normalY * jn;
 
@@ -216,10 +207,10 @@ export class Shape {
         rbT * rbT * B.inverseInertia;
       if (!kT) continue; // don't divide by 0
 
-      let jt = -vt / kT;
-      const maxStatic = μs * jn;
-      if (Math.abs(jt) > maxStatic) jt = Math.sign(jt) * μd * jn;
-
+      const jt = Math.max(
+        -params.friction * jn,
+        Math.min(params.friction * jn, -vt / kT),
+      );
       const jtx = tx * jt;
       const jty = ty * jt;
       this.#applyImpulse(-jtx, -jty, -raT * jt);

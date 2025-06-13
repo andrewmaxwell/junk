@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "polygonPhysics",
+    "title": "Polygon Physics",
+    "year": 2025,
+    "desc": "2D physics with convex polygon collisions, gravity, friction, restitution, and spatial hash optimization"
+  },
+  {
     "filePath": "survival",
     "title": "Survival of the Fittest",
     "year": 2025,
@@ -12,22 +18,10 @@
     "desc": "10,000 birds following each other in 3D"
   },
   {
-    "filePath": "dalle-elements",
-    "title": "Element Characters",
-    "year": 2024,
-    "desc": "A character for each chemical element created by DALL·E"
-  },
-  {
     "filePath": "fourierDrawing",
     "title": "Fourier Drawing",
     "year": 2024,
     "desc": "Draw a shape and see what happens."
-  },
-  {
-    "filePath": "genesis",
-    "title": "Genesis",
-    "year": 2024,
-    "desc": "The beginning of Genesis illustrated by DALL·E 3"
   },
   {
     "filePath": "fluid-maze",

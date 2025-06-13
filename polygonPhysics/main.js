@@ -1,45 +1,18 @@
 import {viewer} from '../primeSpiral/viewer.js';
-import {poly, randPoly, rect, rgbGradient} from './helpers.js';
+import {poly, randPoly, rect, rgbGradient, rotate} from './helpers.js';
+import {drawStats, Stat, timeFunc} from './Stats.js';
 import {World} from './World.js';
-
-const world = new World();
-
-for (let i = 0; i < 100; i++) {
-  const y = (Math.random() - 1) * 8000;
-  world.add(
-    {points: randPoly(0, y, 6 + Math.floor(Math.random() * 8), 10, 150)},
-    {points: poly(0, y, 30 + Math.random() * 100, 16)},
-    {points: rect(0, y, 30 + Math.random() * 100, 30 + Math.random() * 500)},
-  );
-}
-
-// floor
-// world.add({points: rect(0, 750, 2000, 100), fixed: true});
-
-// bowl
-const num = 16;
-const rad = 2000;
-const bottom = rad / 2 + 100;
-for (let i = 0; i < num; i++) {
-  const angle1 = Math.PI * (1 - i / (num - 1));
-  const angle2 = Math.PI * (1 - (i + 1) / (num - 1));
-  const left = rad * Math.cos(angle1);
-  const right = rad * Math.cos(angle2);
-  if (right - left < 50) continue;
-  const topLeft = rad * (Math.sin(angle1) - 0.5);
-  const topRight = rad * (Math.sin(angle2) - 0.5);
-  world.add({
-    points: [
-      {x: left, y: topLeft},
-      {x: right, y: topRight},
-      {x: right, y: bottom},
-      {x: left, y: bottom},
-    ],
-    fixed: true,
-  });
-}
-
 /** @import {Shape} from './Shape.js' */
+
+const params = {
+  gravity: 0.001,
+  restitution: 0.2,
+  friction: 0.5,
+};
+
+/** @type {World} */
+let world;
+
 /** @type {Shape | undefined} */
 let dragging;
 
@@ -49,68 +22,121 @@ const getColor = rgbGradient([
   [0, 0, 0],
 ]);
 
-const times = [];
 let lastRenderTime = 0;
 let frame = 0;
 
+function reset() {
+  world = new World();
+
+  // floor
+  // world.add({points: rect(0, 400, 2000, 100), fixed: true});
+
+  // bowl
+  // world.add(...bowl(1000).map((points) => ({points, fixed: true})));
+
+  // ramps
+  const x = -300;
+  const w = 1000;
+  const h = 50;
+  const a = 0.4;
+  const hSpace = 400;
+  const vSpace = 800;
+  [...Array(6).keys()]
+    .flatMap((_, i) => [
+      rotate(rect(-hSpace, x + vSpace * i, w, h), a),
+      rotate(rect(hSpace, x + vSpace * (i + 0.5), w, h), -a),
+    ])
+    .forEach((points) => world.add({points, fixed: true}));
+}
+
+const randShape = () => {
+  const x = -300;
+  const y = -3000;
+  const r = Math.floor(Math.random() * 3);
+  if (r === 0) return randPoly(x, y, 6 + Math.floor(Math.random() * 8), 3, 50);
+  if (r === 1) return poly(x, y, 15 + Math.random() * 25, 16);
+  return rect(x, y, 20 + Math.random() * 30, 20 + Math.random() * 200);
+};
+
+function step() {
+  if (frame % 4 === 0) world.add({points: randShape()});
+
+  const startTime = performance.now();
+  const dt = Math.min(30, startTime - lastRenderTime);
+  lastRenderTime = startTime;
+
+  world.step(dt, params);
+}
+
+/** @param {CanvasRenderingContext2D} ctx */
+function draw(ctx) {
+  ctx.globalAlpha = 0.5;
+
+  // shapes
+  ctx.strokeStyle = 'white';
+  for (const s of world.shapes) {
+    ctx.fillStyle = s.fixed ? 'black' : getColor(s.totalForce / 200);
+    ctx.beginPath();
+    s.points.forEach((p) => ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fill();
+  }
+
+  // contact points
+  ctx.fillStyle = 'cyan';
+  for (const s of world.shapes) {
+    for (const {contact, force} of s.contacts) {
+      ctx.beginPath();
+      ctx.arc(contact.x, contact.y, Math.sqrt(force) / 4, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+}
+
+reset();
+
+const simStat = new Stat('ms to simulate', 'red');
+const drawStat = new Stat('ms to render', 'cyan');
+const overlapStat = new Stat('BB overlaps', 'lime');
+const collisionStat = new Stat('collisions', 'yellow');
+const shapeStat = new Stat('shapes', 'magenta');
+
 viewer(
   (ctx, _, mouse) => {
-    const startTime = performance.now();
-    const dt = Math.min(30, startTime - lastRenderTime);
-    lastRenderTime = startTime;
-
-    world.step(dt);
-
     if (dragging) {
       dragging.moveTo(mouse.x, mouse.y);
       dragging.xVelocity = mouse.movementX;
       dragging.yVelocity = mouse.movementY;
     }
 
-    ctx.globalAlpha = 0.5;
+    simStat.push(timeFunc(step));
+    drawStat.push(timeFunc(() => draw(ctx)));
+    simStat.syncMax(drawStat);
 
-    // shapes
-    ctx.strokeStyle = 'white';
-    for (const s of world.shapes) {
-      ctx.fillStyle = getColor(s.totalForce / 2000);
-      ctx.beginPath();
-      s.points.forEach((p) => ctx.lineTo(p.x, p.y));
-      ctx.closePath();
-      ctx.stroke();
-      ctx.fill();
-    }
+    overlapStat.push(world.pairs.length);
+    collisionStat.push(world.numCollisions / world.collisionIterations);
+    overlapStat.syncMax(collisionStat);
 
-    // contact points
-    ctx.fillStyle = 'cyan';
-    for (const s of world.shapes) {
-      for (const {contact, force} of s.contacts) {
-        ctx.beginPath();
-        ctx.arc(contact.x, contact.y, Math.sqrt(force) / 4, 0, 2 * Math.PI);
-        ctx.fill();
-      }
-    }
+    shapeStat.push(world.shapes.length);
 
-    // pairs
-    // ctx.strokeStyle = 'red';
-    // ctx.beginPath();
-    // for (const [a, b] of world.pairs) {
-    //   ctx.moveTo(a.centroidX, a.centroidY);
-    //   ctx.lineTo(b.centroidX, b.centroidY);
-    // }
-    // ctx.stroke();
-
-    times[frame++ % 256] = performance.now() - startTime;
+    frame++;
   },
   {
-    initialView: {zoom: 0.2},
+    initialView: {zoom: 0.5},
     onMouseDown: ({x, y}) => {
       dragging = world.getClosestShape(x, y);
     },
     onMouseUp: () => (dragging = undefined),
-    drawStatic: (ctx) => {
-      ctx.fillStyle = 'white';
-      const avg = times.reduce((a, b) => a + b) / times.length;
-      ctx.fillText(avg.toFixed(2) + ' ms', 3, 12);
-    },
+    drawStatic: (ctx) =>
+      drawStats(ctx, simStat, drawStat, overlapStat, collisionStat, shapeStat),
   },
 );
+
+// @ts-expect-error lil
+const gui = new window.lil.GUI();
+gui.add(params, 'gravity', -0.01, 0.01);
+gui.add(params, 'restitution', 0, 1);
+gui.add(params, 'friction', 0, 2);
+gui.add({reset}, 'reset');
+gui.close();
