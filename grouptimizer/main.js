@@ -1,14 +1,26 @@
 import StatGraph from './statGraph.js';
 import {makeReport} from './makeReport.js';
-import {makeSolver} from './solver.js';
+import {getGroupStats, makeSolver} from './solver.js';
 import {getData} from './getData.js';
 import {makeAttendanceTable} from './makeAttendanceTable.js';
+
+/** @type {HTMLDivElement | null} */
+const outputDiv = document.querySelector('#output');
+/** @type {HTMLInputElement | null} */
+const numGroupsInput = document.querySelector('#numGroups');
+const sendButton = document.querySelector('#send');
+const attendanceTable = document.querySelector('#attendance');
 
 const stats = new StatGraph(document.querySelector('#statCanvas'));
 const annealingGraph = stats.addGraph({color: 'red'});
 const temperatureGraph = stats.addGraph({color: 'green', forceMin: 0});
-const solver = makeSolver();
 
+/** @import SimulatedAnnealer from './SimulatedAnnealer.js' */
+/** @import {Person} from './solver.js' */
+/** @type {SimulatedAnnealer<Person[][]>} */
+let solver;
+
+/** @type {Person[]} */
 let people;
 
 const loop = () => {
@@ -16,25 +28,32 @@ const loop = () => {
     solver.iterate();
   }
 
-  if (solver.isDone) {
+  if (solver.isDone && solver.bestState !== undefined) {
     const groups = solver.bestState.map((g) => ({
       list: g
-        .sort((a, b) => a.sponsor - b.sponsor || a.contrib - b.contrib)
+        .sort(
+          (a, b) =>
+            Number(a.sponsor) - Number(b.sponsor) || a.contrib - b.contrib,
+        )
         .map((p) => p.name)
         .join(', '),
-      stats: Object.entries(g.stats)
+      stats: Object.entries(getGroupStats(g))
         .map(([k, v]) => k + ': ' + Math.round(v * 100) / 100)
         .join(', '),
     }));
 
-    document.querySelector('#output').innerHTML = groups
-      .map((g) => `${g.list}<br>${g.stats}`)
-      .join('<br><br>');
     console.log(solver.minCost);
+    if (outputDiv) {
+      outputDiv.innerHTML = groups
+        .map((g) => `${g.list}<br>${g.stats}`)
+        .join('<br><br>');
+    }
   } else {
     requestAnimationFrame(loop);
     annealingGraph(solver.currentCost);
-    temperatureGraph(solver.temperature);
+    if (solver.temperature !== undefined) {
+      temperatureGraph(solver.temperature);
+    }
     stats.draw();
   }
 };
@@ -45,69 +64,53 @@ const resize = () => {
 window.addEventListener('resize', resize);
 resize();
 
-const makeInitialState = (numGroups, people) => {
-  const res = [];
-  for (let i = 0; i < numGroups; i++) res[i] = [];
-
-  people
-    .filter((p) => p.sponsor)
-    .forEach((p, i) => {
-      res[i % numGroups].push(p);
-    });
-
-  people
-    .filter((p) => !p.sponsor)
-    .forEach((p, i) => {
-      res[i % numGroups].push(p);
-    });
-  return res;
-};
-
 document.querySelectorAll('.go').forEach((button) => {
   button.addEventListener('click', async function () {
-    const numGroups =
-      parseFloat(document.querySelector('#numGroups').value) || 4;
-
-    const gender = button.dataset?.gender;
-
+    if (!numGroupsInput) return;
+    const numGroups = Number(numGroupsInput.value) || 4;
+    const gender = button.getAttribute('data-gender');
     const filteredPeople = people
       .filter((p) => !p.absent && (!gender || p.gender === gender))
       .sort((a, b) => b.contrib - a.contrib);
 
-    solver.init(
-      makeInitialState(numGroups, filteredPeople),
-      10,
-      10_000 * filteredPeople.length,
-    );
+    solver = makeSolver(numGroups, filteredPeople);
     stats.reset();
-
-    console.log('>>>', solver.minCost);
 
     loop();
   });
 });
 
-document.querySelector('#send').addEventListener('click', () => {
-  const subject = encodeURIComponent(`Attendance ${new Date().toDateString()}`);
-  const body = encodeURIComponent(makeReport(people));
-  open(`mailto:jgovier8@gmail.com?subject=${subject}&body=${body}`);
-});
+if (sendButton) {
+  sendButton.addEventListener('click', () => {
+    const subject = encodeURIComponent(
+      `Attendance ${new Date().toDateString()}`,
+    );
+    const body = encodeURIComponent(makeReport(people));
+    open(`mailto:jgovier8@gmail.com?subject=${subject}&body=${body}`);
+  });
+}
 
+/** @param {Person[]} people */
 const numPresentSponsors = (people) =>
   people.filter((p) => !p.absent && p.sponsor).length;
 
+/** @param {Person[]} people */
 const numPresentStudents = (people) =>
   people.filter((p) => !p.absent && !p.sponsor).length;
 
 const init = async () => {
   people = await getData();
 
-  document.querySelector('#numGroups').value = Math.min(
-    numPresentSponsors(people),
-    Math.floor(numPresentStudents(people) / 4),
-  );
-  document.querySelector('#output').innerText = makeReport(people);
-  document.querySelector('#attendance').innerHTML = makeAttendanceTable(people);
+  if (numGroupsInput) {
+    numGroupsInput.value = String(
+      Math.min(
+        numPresentSponsors(people),
+        Math.floor(numPresentStudents(people) / 4),
+      ),
+    );
+  }
+  if (outputDiv) outputDiv.innerText = makeReport(people);
+  if (attendanceTable) attendanceTable.innerHTML = makeAttendanceTable(people);
 };
 
 init();

@@ -1,56 +1,98 @@
 import SimulatedAnnealer from './SimulatedAnnealer.js';
-import {rand, standardDeviation, randWhere} from './utils.js';
+import {rand, randWhere} from './utils.js';
 
-const getGroupStats = (group) => {
-  let genderTotal = 0;
-  let contribTotal = 0;
-  let numStudents = 0;
+/**
+ * @typedef {{
+ *  name: string,
+ *  sponsor: boolean,
+ *  gender: 'm' | 'f',
+ *  contrib: number,
+ *  weights: Record<string, number>,
+ *  dates: Date[],
+ *  birthday: Date,
+ *  score: number,
+ *  absent: boolean,
+ *  grade: number,
+ * }} Person
+ * */
+
+/** @type {(numGroups: number, people: Person[]) => Person[][]} */
+const makeInitialState = (numGroups, people) => {
+  /** @type {Person[][]} */
+  const groups = Array.from({length: numGroups}, () => []);
+
+  [
+    ...people.filter((p) => p.sponsor),
+    ...people.filter((p) => !p.sponsor),
+  ].forEach((person, i) => {
+    groups[i % numGroups].push(person);
+  });
+
+  return groups;
+};
+
+/** @param {Person[]} group */
+export const getGroupStats = (group) => {
+  let female = 0;
+  let contrib = 0;
+  let students = 0;
   let weightSum = 0;
 
-  // for each person
-  for (let j = 0; j < group.length; j++) {
-    const {sponsor, gender, contrib, weights} = group[j];
-
-    if (!sponsor) {
-      genderTotal += gender === 'f';
-      contribTotal += contrib;
-      numStudents++;
+  for (let i = 0; i < group.length; i++) {
+    const p = group[i];
+    if (!p.sponsor) {
+      students++;
+      female += p.gender === 'f' ? 1 : 0;
+      contrib += p.contrib;
     }
-
-    // for each person after the current person in the group, so we get each pair
-    for (let k = 0; k < j; k++) {
-      weightSum += weights[group[k].name] || 0;
+    for (let k = 0; k < i; k++) {
+      weightSum += p.weights[group[k].name] ?? 0;
     }
   }
 
   return {
-    genderRatio: genderTotal / numStudents,
-    contribAverage: contribTotal / numStudents,
+    genderRatio: students ? female / students : 0,
+    contribAverage: students ? contrib / students : 0,
     weightSum,
   };
 };
 
-export const makeSolver = () =>
+/** @param {Person[]} people */
+const makeCostFn = (people, wPair = 4, wContrib = 2, wGender = 1) => {
+  const students = people.filter((p) => !p.sponsor);
+  const avgContrib =
+    students.reduce((s, p) => s + p.contrib, 0) / students.length;
+  const globalFemaleRatio =
+    students.filter((s) => s.gender === 'f').length / students.length;
+
+  /** @param {Person[][]} groups */
+  return (groups) => {
+    let pairBenefit = 0;
+    let contribSqErr = 0;
+    let genderSqErr = 0;
+
+    for (const g of groups) {
+      const {contribAverage, genderRatio, weightSum} = getGroupStats(g);
+      pairBenefit += weightSum;
+      contribSqErr += (contribAverage - avgContrib) ** 2;
+      genderSqErr += (genderRatio - globalFemaleRatio) ** 2;
+    }
+
+    const contribSpread = Math.sqrt(contribSqErr / groups.length);
+    const genderSpread = Math.sqrt(genderSqErr / groups.length);
+    return (
+      wContrib * contribSpread + wGender * genderSpread - wPair * pairBenefit
+    );
+  };
+};
+
+/**
+ * @param {number} numGroups
+ * @param {Person[]} filteredPeople */
+export const makeSolver = (numGroups, filteredPeople) =>
   new SimulatedAnnealer({
-    getCost: (grouping) => {
-      const genderRatios = []; // we want the genders to be balanced
-      const contribAverages = []; // we want each group to have a similar average contrib
-      let weightCost = 0;
-
-      // for each group
-      for (let i = 0; i < grouping.length; i++) {
-        const g = grouping[i];
-        const stats = getGroupStats(g);
-        genderRatios[i] = stats.genderRatio;
-        contribAverages[i] = stats.contribAverage;
-        weightCost += stats.weightSum;
-        g.stats = stats;
-      }
-
-      const genderSD = standardDeviation(genderRatios);
-      const avContribSD = standardDeviation(contribAverages);
-      return genderSD + avContribSD - weightCost + 2;
-    },
+    getCost: makeCostFn(filteredPeople),
+    /** @param {Person[][]} grouping */
     generateNeighbor: (grouping) => {
       // pick two random groups and swap a random person from each
       const newGrouping = grouping.slice(0);
@@ -58,7 +100,7 @@ export const makeSolver = () =>
       const groupIndex1 = rand(newGrouping.length);
       const groupIndex2 = randWhere(
         newGrouping.length,
-        (r) => r === groupIndex1
+        (r) => r === groupIndex1,
       );
 
       const group1 = (newGrouping[groupIndex1] =
@@ -69,7 +111,7 @@ export const makeSolver = () =>
       const personIndex1 = rand(group1.length);
       const personIndex2 = randWhere(
         group2.length,
-        (r) => group1[personIndex1].sponsor !== group2[r].sponsor
+        (r) => group1[personIndex1].sponsor !== group2[r].sponsor,
       );
 
       const temp = group1[personIndex1];
@@ -78,4 +120,7 @@ export const makeSolver = () =>
 
       return newGrouping;
     },
+    initialState: makeInitialState(numGroups, filteredPeople),
+    initialTemperature: 10,
+    maxIterations: 10_000 * filteredPeople.length,
   });

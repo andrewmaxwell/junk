@@ -1,22 +1,35 @@
+/** @template State */
 export default class SimulatedAnnealer {
-  constructor({getCost, generateNeighbor}) {
+  /**
+   * @param {{
+   *  getCost: (state: State) => number,
+   *  generateNeighbor: (state: State) => State,
+   *  initialState: State,
+   *  initialTemperature?: number,
+   *  maxIterations?: number
+   * }} opts
+   */
+  constructor({
+    getCost,
+    generateNeighbor,
+    initialState,
+    initialTemperature = 1,
+    maxIterations = 1_000,
+  }) {
     this.getCost = getCost;
     this.generateNeighbor = generateNeighbor;
-  }
-  init(initialState, initialTemperature, maxIterations) {
     this.initialTemperature = initialTemperature;
     this.maxIterations = maxIterations;
     this.currentState = this.bestState = initialState;
-    this.minCost =
-      this.maxCost =
-      this.currentCost =
-        this.getCost(this.currentState);
+    this.currentCost = this.minCost = this.maxCost = this.getCost(initialState);
     this.iterations = 0;
     this.isDone = false;
   }
-  easing(t) {
-    return -(--t * t * t);
-  }
+
+  /**
+   * Run one annealing step.
+   * Call repeatedly until `isDone` is true.
+   */
   iterate() {
     if (this.isDone) return;
 
@@ -24,9 +37,8 @@ export default class SimulatedAnnealer {
     const neighborCost = this.getCost(neighbor);
     const costDelta = neighborCost - this.currentCost;
 
-    this.temperature =
-      this.initialTemperature *
-      this.easing(this.iterations / this.maxIterations);
+    const progress = this.iterations / this.maxIterations;
+    this.temperature = this.initialTemperature * (1 - progress) ** 3;
 
     if (
       costDelta <= 0 ||
@@ -34,13 +46,15 @@ export default class SimulatedAnnealer {
     ) {
       this.currentState = neighbor;
       this.currentCost = neighborCost;
-      if (this.currentCost < this.minCost) {
-        this.bestState = this.currentState;
-        this.minCost = this.currentCost;
+
+      if (neighborCost < this.minCost) {
+        this.bestState = neighbor;
+        this.minCost = neighborCost;
       }
-      this.maxCost = Math.max(this.maxCost, this.currentCost);
+      this.maxCost = Math.max(this.maxCost, neighborCost);
     }
-    this.iterations++;
+
+    this.iterations += 1;
     this.isDone = this.iterations >= this.maxIterations;
   }
 }

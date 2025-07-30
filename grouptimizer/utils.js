@@ -1,3 +1,4 @@
+/** @type {(nums: number[]) => number} */
 const average = (nums) => {
   let sum = 0;
   for (let i = 0; i < nums.length; i++) {
@@ -6,6 +7,7 @@ const average = (nums) => {
   return sum / nums.length;
 };
 
+/** @type {(nums: number[]) => number} */
 export const variance = (nums) => {
   const avg = average(nums);
   let squareDiffSum = 0;
@@ -15,6 +17,7 @@ export const variance = (nums) => {
   return squareDiffSum / nums.length;
 };
 
+/** @type {(min: number, max?: number) => number} */
 export const rand = (min, max) => {
   if (max === undefined) {
     max = min;
@@ -23,6 +26,7 @@ export const rand = (min, max) => {
   return min + Math.floor(Math.random() * (max - min));
 };
 
+/** @type {(max: number, func: (number) => boolean) => number} */
 export const randWhere = (max, func) => {
   let res;
   let limit = 100;
@@ -34,5 +38,3 @@ export const randWhere = (max, func) => {
   }
   return res;
 };
-
-export const standardDeviation = (nums) => Math.sqrt(variance(nums));

@@ -13,6 +13,8 @@ const parseWeights = (weights = '') =>
     }),
   );
 
+/** @import {Person} from './solver.js' */
+/** @param {Person[]} people */
 const mirrorWeights = (people) => {
   for (const {weights, name} of people) {
     for (const person2Name in weights) {
