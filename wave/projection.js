@@ -1,3 +1,20 @@
+/**
+ * @type {(
+ *  cameraX: number,
+ *  cameraY: number,
+ *  cameraZ: number,
+ *  rotationX: number,
+ *  rotationY: number,
+ *  rotationZ: number,
+ *  pointAtX: number,
+ *  pointAtY: number,
+ *  zoom: number
+ * ) => (px: number, py: number, pz: number) => ({
+ *  x: number,
+ *  y: number,
+ *  z: number
+ * })}
+ * */
 export const projection = (
   cameraX,
   cameraY,
@@ -7,7 +24,7 @@ export const projection = (
   rotationZ,
   pointAtX,
   pointAtY,
-  zoom
+  zoom,
 ) => {
   const sinx = Math.sin(rotationX);
   const cosx = Math.cos(rotationX);
