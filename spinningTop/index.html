@@ -1,7 +1,120 @@
 <!doctype html>
 <html lang="en">
-<meta charset="utf-8" />
-<body>
-  <script type="module" src="main.js"></script>
-</body>
+  <meta charset="utf-8" />
+  <title>Spin-Top Simulator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      background: #0b1220;
+      color: #e2e8f0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter,
+                   "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 12px;
+      padding: 12px;
+    }
+    /* Renderer output */
+    #output {
+      margin: 0;
+      line-height: 1.0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      background: #0f172a;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      padding: 8px 10px;
+      white-space: pre;
+      overflow: auto;
+    }
+    /* Controls below the output */
+    .controls {
+      display: grid;
+      gap: 12px;
+      background: #0f172a;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(160px, 220px)) auto;
+      column-gap: 28px; /* make sure inputs never touch Go! */
+      align-items: end;
+    }
+    .row--examples {
+      grid-template-columns: minmax(240px, 460px);
+      align-items: start;
+    }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    select, textarea, input[type="number"] {
+      width: 100%;
+      background: #0b1220;
+      color: #e5e7eb;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    textarea {
+      resize: vertical;
+      line-height: 1.1;
+    }
+    input[type="number"] { font-family: inherit; }
+    #goBtn {
+      padding: 10px 14px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      justify-self: start;
+      margin-left: 16px; /* extra nudge so it never collides with inputs */
+    }
+    #goBtn:hover { background: #1d4ed8; }
+  </style>
+
+  <body>
+    <!-- Renderer output goes here; passed into Renderer via main.js -->
+    <pre id="output"></pre>
+
+    <div class="controls">
+      <div class="row row--examples">
+        <label>
+          Examples
+          <select id="exampleSelect"></select>
+        </label>
+      </div>
+
+      <label>
+        Shape (ASCII)
+        <textarea id="shapeInput" rows="32" spellcheck="false"></textarea>
+      </label>
+
+      <div class="row">
+        <label>
+          Initial RPM
+          <input id="rpmInput" type="number" step="100" />
+        </label>
+
+        <label>
+          Initial Tilt (deg)
+          <input id="tiltInput" type="number" step="1" />
+        </label>
+
+        <button id="goBtn">Go!</button>
+      </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
 </html>

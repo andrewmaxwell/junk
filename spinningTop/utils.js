@@ -66,16 +66,16 @@ export function qScale(a, s) {
   return qMul(a, qNew(0, 0, 0, s));
 }
 
-/** @param {number} x */
-export function newtonSqrtRet(x) {
-  let h = 99;
-  for (let iter = 99; iter; iter--) h = (x / h + h) / 2;
-  return h;
-}
-
+/** Normalize like the C code; zero-safe to avoid NaNs when the vector is 0. */
 /** @param {Q} a */
 export function qUnit(a) {
-  const len = newtonSqrtRet(qDot(a, a));
+  const n2 = qDot(a, a);
+  if (n2 === 0 || !Number.isFinite(n2)) {
+    // Matches the C behavior when scaling a zero vector: returns zero vector.
+    return qNew(0, 0, 0, 0);
+  }
+  const len = Math.sqrt(n2);
+  if (!Number.isFinite(len) || len === 0) return qNew(0, 0, 0, 0);
   const inv = 1 / +len;
   return qScale(a, inv);
 }

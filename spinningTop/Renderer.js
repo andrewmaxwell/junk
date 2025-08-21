@@ -3,12 +3,12 @@
 
 /** @import {Sim} from './Sim.js' */
 
-import {qDot, newtonSqrtRet, X, Y, Z} from './utils.js';
+import {qDot, X, Y, Z} from './utils.js';
 
 const RPM_SCALE = 36476;
 
 export class Renderer {
-  constructor(width, height) {
+  constructor(width, height, preEl) {
     this.W = width;
     this.H = height;
 
@@ -18,12 +18,8 @@ export class Renderer {
     // Camera lives here
     this.cam = 0;
 
-    this.pre = document.createElement('pre');
-    this.pre.style.margin = '0';
-    this.pre.style.lineHeight = '1.0';
-    this.pre.style.fontFamily =
-      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
-    document.body.appendChild(this.pre);
+    this.pre = preEl || document.createElement('pre');
+    if (!preEl) document.body.appendChild(this.pre); // fallback, if needed
   }
 
   #clearWithCurrentCam() {
@@ -93,7 +89,7 @@ export class Renderer {
     }
 
     // 3) RPM line from current spin (same math the C prints)
-    const rpmValue = newtonSqrtRet(qDot(sim.spin, sim.spin) * RPM_SCALE);
+    const rpmValue = Math.sqrt(qDot(sim.spin, sim.spin) * RPM_SCALE);
 
     // 4) Camera smoothing (update for next frame)
     this.cam += (sim.acc.a[Y] - this.cam) / 50;

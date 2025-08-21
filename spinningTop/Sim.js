@@ -1,6 +1,7 @@
 // Sim.js
 // Simulation core — no rendering or screen-size concerns.
 
+/** @import {Particle} from './utils.js' */
 import {
   qNew,
   copyInto,
@@ -11,10 +12,8 @@ import {
   qUnit,
   accumSeriesFrom,
   X,
-  W,
+  W, // only what we use
 } from './utils.js';
-
-/** @import {Particle} from './utils.js' */
 
 const SUBSTEPS = 20;
 
@@ -70,7 +69,7 @@ export class Sim {
 
           this.mass -= mLocal /= ch % 2 ? 2 : 2000;
 
-          // First component, then series into x.a[Y], x.a[Z] using the seeded h
+          // First component, then series into x.a[1], x.a[2] using the seeded h
           node.x.a[X] = rowBias | 0;
           accumSeriesFrom(zSumForLine, node.x.a, 1, initialH);
 
@@ -189,7 +188,7 @@ export class Sim {
       );
       this.acc = qAdd(this.acc, qScale(this.impulseAcc, dt));
 
-      // Angular update
+      // Angular update (uses accumulated torque)
       for (let j = 3; j--; )
         vComponents[j] = qDot(this.inertia[j], torqueAccum) * dt;
       this.spin = qAdd(this.spin, vImpulse);

@@ -66,7 +66,7 @@ for (let i = 1; i <= numBottles; i++) sum += verseLength(i);
 console.log(
   sum / syllablesPerSecond / 60 / 60 / 24 / 365.25,
   'years to get to',
-  numBottles.toLocaleString()
+  numBottles.toLocaleString(),
 );
 
 console.log(verseLength(777777777), 'syllables');
