@@ -4,12 +4,18 @@ import {getGroupStats, makeSolver} from './solver.js';
 import {getData} from './getData.js';
 import {makeAttendanceTable} from './makeAttendanceTable.js';
 
-/** @type {HTMLDivElement | null} */
-const outputDiv = document.querySelector('#output');
-/** @type {HTMLInputElement | null} */
-const numGroupsInput = document.querySelector('#numGroups');
-const sendButton = document.querySelector('#send');
-const attendanceTable = document.querySelector('#attendance');
+const outputDiv = /** @type {HTMLDivElement} */ (
+  document.querySelector('#output')
+);
+const numGroupsInput = /** @type {HTMLInputElement} */ (
+  document.querySelector('#numGroups')
+);
+const emailLink = /** @type {HTMLAnchorElement} */ (
+  document.querySelector('#email')
+);
+const attendanceTable = /** @type {HTMLTableElement} */ (
+  document.querySelector('#attendance')
+);
 
 const stats = new StatGraph(document.querySelector('#statCanvas'));
 const annealingGraph = stats.addGraph({color: 'red'});
@@ -20,8 +26,7 @@ const temperatureGraph = stats.addGraph({color: 'green', forceMin: 0});
 /** @type {SimulatedAnnealer<Person[][]>} */
 let solver;
 
-/** @type {Person[]} */
-let people;
+const people = await getData();
 
 const loop = () => {
   for (let i = 0; !solver.isDone && i < 1000; i++) {
@@ -43,11 +48,9 @@ const loop = () => {
     }));
 
     console.log(solver.minCost);
-    if (outputDiv) {
-      outputDiv.innerHTML = groups
-        .map((g) => `${g.list}<br>${g.stats}`)
-        .join('<br><br>');
-    }
+    outputDiv.innerHTML = groups
+      .map((g) => `${g.list}<br>${g.stats}`)
+      .join('<br><br>');
   } else {
     requestAnimationFrame(loop);
     annealingGraph(solver.currentCost);
@@ -66,7 +69,6 @@ resize();
 
 document.querySelectorAll('.go').forEach((button) => {
   button.addEventListener('click', async function () {
-    if (!numGroupsInput) return;
     const numGroups = Number(numGroupsInput.value) || 4;
     const gender = button.getAttribute('data-gender');
     const filteredPeople = people
@@ -80,37 +82,16 @@ document.querySelectorAll('.go').forEach((button) => {
   });
 });
 
-if (sendButton) {
-  sendButton.addEventListener('click', () => {
-    const subject = encodeURIComponent(
-      `Attendance ${new Date().toDateString()}`,
-    );
-    const body = encodeURIComponent(makeReport(people));
-    open(`mailto:jgovier8@gmail.com?subject=${subject}&body=${body}`);
-  });
-}
+numGroupsInput.value = String(
+  Math.min(
+    people.filter((p) => !p.absent && p.sponsor).length,
+    Math.floor(people.filter((p) => !p.absent && !p.sponsor).length / 4),
+  ),
+);
 
-/** @param {Person[]} people */
-const numPresentSponsors = (people) =>
-  people.filter((p) => !p.absent && p.sponsor).length;
+outputDiv.innerText = makeReport(people);
+attendanceTable.innerHTML = makeAttendanceTable(people);
 
-/** @param {Person[]} people */
-const numPresentStudents = (people) =>
-  people.filter((p) => !p.absent && !p.sponsor).length;
-
-const init = async () => {
-  people = await getData();
-
-  if (numGroupsInput) {
-    numGroupsInput.value = String(
-      Math.min(
-        numPresentSponsors(people),
-        Math.floor(numPresentStudents(people) / 4),
-      ),
-    );
-  }
-  if (outputDiv) outputDiv.innerText = makeReport(people);
-  if (attendanceTable) attendanceTable.innerHTML = makeAttendanceTable(people);
-};
-
-init();
+const subject = encodeURIComponent(`Attendance ${new Date().toDateString()}`);
+const body = encodeURIComponent(makeReport(people));
+emailLink.href = `mailto:jgovier8@gmail.com,kalypokoquette@gmail.com,panameny@gmail.com,kryscurnutt@gmail.com,Brennan.seliabuss@gmail.com,roserichards2003@gmail.com?subject=${subject}&body=${body}`;
