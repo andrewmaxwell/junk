@@ -1,3 +1,4 @@
+/** @param {Date} date */
 export const nextMonth = (date) => {
   const newDate = new Date(date);
   newDate.setMonth(newDate.getMonth() + 1);
@@ -5,19 +6,27 @@ export const nextMonth = (date) => {
   return newDate;
 };
 
+/**
+ * Calculate frequency of data points over a sliding window.
+ * @param {Date[]} dates - Array of Date objects (assumed sorted).
+ * @param {number} freqPeriod - Size of the sliding window (in milliseconds).
+ * @param {number} resultLength - Length of the output array.
+ * @param {(v: number) => number} [func] - Weighting function for distance from center (default is constant).
+ * @returns {number[]} - Array representing frequency counts.
+ */
 export const calcFrequency = (
-  data,
+  dates,
   freqPeriod,
   resultLength,
-  func = () => 1
+  func = () => 1,
 ) => {
-  const min = data[0];
-  const range = data[data.length - 1] - min;
+  const min = dates[0];
+  const range = dates[dates.length - 1].getTime() - min.getTime();
   const winRad = (freqPeriod / range) * resultLength * 0.5;
   const result = new Array(resultLength).fill(0);
 
-  for (const val of data) {
-    const x = ((val - min) / range) * resultLength;
+  for (const val of dates) {
+    const x = ((val.getTime() - min.getTime()) / range) * resultLength;
     for (
       let i = Math.max(0, Math.floor(x - winRad));
       i <= Math.min(resultLength - 1, x + winRad);

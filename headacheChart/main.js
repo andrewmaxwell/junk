@@ -1,27 +1,37 @@
 import {calcFrequency, nextMonth} from './utils.js';
 
+const twoYearsAgo = new Date();
+twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+
 const dates = (await (await fetch('headaches.txt')).text())
   .split('\n')
-  .map((d) => Date.parse(d));
+  .map((d) => new Date(d))
+  .filter((d) => d > twoYearsAgo);
 
-const baseLine = innerHeight - 30;
+const chartHeight = innerHeight - 30;
 
-const canvas = document.querySelector('canvas');
+const canvas = /** @type {HTMLCanvasElement} */ (
+  document.querySelector('canvas')
+);
 canvas.width = innerWidth;
 canvas.height = innerHeight;
-const ctx = canvas.getContext('2d');
+const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
 
 const minDate = new Date(dates[0]);
-const maxDate = dates[dates.length - 1];
+const maxDate = new Date(dates[dates.length - 1]);
 
-const dateToX = (date) => ((date - minDate) / (maxDate - minDate)) * innerWidth;
+/** @param {Date} date */
+const dateToX = (date) =>
+  ((date.getTime() - minDate.getTime()) /
+    (maxDate.getTime() - minDate.getTime())) *
+  innerWidth;
 
 const draw = (windowSize) => {
   ctx.clearRect(0, 0, innerWidth, innerHeight);
 
   // draw dots
   for (const date of dates) {
-    ctx.fillRect(dateToX(date), baseLine, 1, 10);
+    ctx.fillRect(dateToX(date), chartHeight, 1, 10);
   }
 
   // vertical lines and months
@@ -40,28 +50,28 @@ const draw = (windowSize) => {
     ctx.fillText(
       date.getMonth() + 1 + '/' + (date.getFullYear() % 100),
       x,
-      innerHeight - 5
+      innerHeight - 5,
     );
   }
 
   // calculations
   const roughPoints = calcFrequency(dates, windowSize, innerWidth);
-  const smoothPoints = calcFrequency(
-    dates,
-    windowSize,
-    innerWidth,
-    (v) => 2 * (1 - Math.abs(v))
-    // (v) => (Math.sqrt(1 - v * v) / Math.PI) * 4
-  );
-  const spacing = baseLine / (1.1 * Math.max(...roughPoints));
+  // const smoothPoints = calcFrequency(
+  //   dates,
+  //   windowSize,
+  //   innerWidth,
+  //   (v) => 2 * (1 - Math.abs(v)),
+  //   // (v) => (Math.sqrt(1 - v * v) / Math.PI) * 4
+  // );
+  const spacing = chartHeight / (1.1 * Math.max(...roughPoints));
 
   // horizontal lines and counts
   ctx.textAlign = 'left';
-  for (let i = 0; baseLine - i * spacing > 0; i++) {
-    const y = baseLine - i * spacing;
+  for (let i = 0; chartHeight - i * spacing > 0; i++) {
+    const y = chartHeight - i * spacing;
     ctx.moveTo(0, y);
     ctx.lineTo(innerWidth, y);
-    ctx.fillText(i, 7, y - 2);
+    ctx.fillText(String(i), 7, y - 2);
   }
   ctx.stroke();
 
@@ -72,13 +82,23 @@ const draw = (windowSize) => {
     ctx.strokeStyle = color;
     ctx.beginPath();
     for (let i = 0; i < points.length; i++) {
-      ctx.lineTo(i, baseLine - points[i] * spacing);
+      ctx.lineTo(i, chartHeight - points[i] * spacing);
     }
     ctx.stroke();
   };
 
-  drawLine(roughPoints, 'rgba(0,0,0,0.1)', 4);
-  drawLine(smoothPoints, 'blue', 2);
+  drawLine(roughPoints, 'blue', 2);
+  // drawLine(smoothPoints, 'blue', 2);
+
+  // ctx.beginPath();
+  // ctx.strokeStyle = 'green';
+  // ctx.lineWidth = 1;
+  // for (let i = 0; i < dates.length; i++) {
+  //   const x = dateToX(dates[i]);
+  //   const y = chartHeight * (1 - i / dates.length);
+  //   ctx.lineTo(x, y);
+  // }
+  // ctx.stroke();
   // drawLine(simpleMovingAverage(roughPoints, 15), 'red');
 };
 
