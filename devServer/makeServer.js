@@ -3,7 +3,7 @@ import express from 'express';
 export const makeServer = (onRequest) => {
   const app = express();
 
-  app.get('*', async (req, res) => {
+  app.use(async (req, res) => {
     try {
       await onRequest(req, res);
     } catch (e) {

@@ -4,23 +4,23 @@
   "description": "my side projects",
   "type": "module",
   "dependencies": {
-    "express": "^4.18.2",
-    "node-fetch": "^3.3.1",
-    "papaparse": "^5.4.1",
-    "ramda": "^0.30.1",
-    "ws": "^8.13.0",
+    "express": "^5.1.0",
+    "node-fetch": "^3.3.2",
+    "papaparse": "^5.5.3",
+    "ramda": "^0.32.0",
+    "ws": "^8.18.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
-    "eslint": "^9.18.0",
-    "eslint-config-prettier": "^10.0.1",
-    "eslint-plugin-prettier": "^5.2.3",
-    "eslint-plugin-react-refresh": "^0.4.18",
-    "globals": "^15.14.0",
-    "prettier": "^3.4.2",
-    "typescript": "^5.7.3",
-    "typescript-eslint": "^8.21.0"
+    "eslint": "^9.37.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-react-refresh": "^0.4.23",
+    "globals": "^16.4.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.1"
   },
   "scripts": {
     "dev": "npm i && npm run gen && open http://localhost:3000 && node devServer",
