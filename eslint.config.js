@@ -27,7 +27,6 @@ export default [
       'quote-props': ['warn', 'as-needed'],
       'arrow-body-style': ['warn', 'as-needed'],
       'object-shorthand': 'warn',
-      'no-use-before-define': 'warn',
       'react/display-name': 'off',
       'react/prop-types': 'off',
       'no-prototype-builtins': 'off',

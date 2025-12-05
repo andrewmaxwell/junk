@@ -3,7 +3,7 @@
 import fs from 'fs';
 
 const data = fs.readFileSync(
-  '/Users/andrew.maxwell/Downloads/emailandrewmaxwell@gmail.com.ical/emailandrewmaxwell@gmail.com.ics',
+  '/Users/andrew/Downloads/emailandrewmaxwell@gmail.com.ical/emailandrewmaxwell@gmail.com.ics',
   'utf-8',
 );
 

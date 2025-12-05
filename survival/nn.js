@@ -1,16 +1,21 @@
-export const makeNeuralNet = (layerSizes) =>
-  layerSizes.map((l, i) => {
-    const layer = {values: new Float32Array(l), deltas: new Float32Array(l)};
-    if (i) {
-      layer.biases = new Float32Array(l).map(() => Math.random() - 0.5);
-      layer.weights = Array.from({length: l}, () =>
-        new Float32Array(layerSizes[i - 1]).map(() => Math.random() - 0.5),
-      );
-    }
-    return layer;
-  });
+export const makeNeuralNet = (/** @type {number[]} */ layerSizes) =>
+  layerSizes.map((l, i) => ({
+    values: new Float32Array(l),
+    deltas: new Float32Array(l),
+    biases: i
+      ? new Float32Array(l).map(() => Math.random() - 0.5)
+      : new Float32Array(0),
+    weights: i
+      ? Array.from({length: l}, () =>
+          new Float32Array(layerSizes[i - 1]).map(() => Math.random() - 0.5),
+        )
+      : [],
+  }));
 
-export const forward = (layers, input) => {
+export const forward = (
+  /** @type {ReturnType<typeof makeNeuralNet>} */ layers,
+  /** @type {number[]} */ input,
+) => {
   layers[0].values.set(input);
   for (let l = 1; l < layers.length; l++) {
     const {values, weights, biases} = layers[l];
@@ -30,7 +35,12 @@ export const forward = (layers, input) => {
   return layers[layers.length - 1].values;
 };
 
-export function train(layers, input, expected, lr = 0.25) {
+export function train(
+  /** @type {ReturnType<typeof makeNeuralNet>} */ layers,
+  /** @type {number[]} */ input,
+  /** @type {number[]} */ expected,
+  lr = 0.25,
+) {
   forward(layers, input);
 
   // compute deltas on last layer

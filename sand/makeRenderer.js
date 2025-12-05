@@ -1,4 +1,4 @@
-/** @type {<T>(canvas: HTMLCanvasElement | null, width: number, height: number, toColor: (val: T, vals: T[], i: number) => number) => (vals: T[]) => void} */
+/** @type {<T>(canvas: HTMLCanvasElement, width: number, height: number, toColor: (val: T, vals: T[], i: number) => number) => (vals: T[]) => void} */
 export const makeRenderer = (canvas, width, height, toColor) => {
   canvas.width = width;
   canvas.height = height;
@@ -24,7 +24,7 @@ export const color = (r, g, b, a = 255) => (a << 24) | (b << 16) | (g << 8) | r;
 
 /** @type {(colors: number[][], colorSteps?: number) => (v: number) => number} */
 export const makeGradient = (colors, colorSteps = 256) => {
-  const gradient = [];
+  const gradient = /** @type {number[]} */ (new Array(colorSteps));
   for (let i = 0; i <= colorSteps; i++) {
     const cIndex = Math.max(
       0,
