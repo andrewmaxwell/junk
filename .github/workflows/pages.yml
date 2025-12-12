@@ -1,0 +1,63 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: languageModel/package-lock.json
+
+      - name: Install
+        working-directory: languageModel
+        run: npm ci
+
+      - name: Build
+        working-directory: languageModel
+        run: npm run build
+
+      - name: Assemble site (repo + built app)
+        run: |
+          rm -rf _site
+          mkdir -p _site
+
+          # Copy EVERYTHING from the repo into _site (so it stays browsable),
+          # but exclude stuff you definitely don't want to publish / that is huge.
+          rsync -a \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            --exclude "_site/" \
+            --exclude "**/node_modules/" \
+            . _site/
+
+          # Overlay the Vite build into /languageModel/
+          mkdir -p _site/languageModel
+          rm -rf _site/languageModel/assets
+          cp -a languageModel/dist/. _site/languageModel/
+
+          # Optional: disable Jekyll processing (safer for files/folders starting with _)
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - uses: actions/deploy-pages@v4

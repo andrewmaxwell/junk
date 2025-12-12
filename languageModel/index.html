@@ -4,9 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WebGPU Language Model</title>
+    <style>
+      label {display:block; opacity: 0.25}
+      #input, #log, #output {width: 600px; background: transparent; color: inherit; border: none; margin: 0 0 10px 0; background: rgba(255,255,255,0.05)}
+      #input, #go {font-size: 2em}
+    </style>
   </head>
   <body style="font-family: monospace; background: #111; color: #eee">
-    <textarea id="output" style="width: 400px; height: 600px; background: rgba(255,255,255,0.1); color: white"></textarea>    
+    <label>Prompt</label>
+    <input id="input" type="text" value="Thus saith the LORD" />
+    <button id="go">Go</button>
+    <label>Generated Text</label>
+    <div id="output" style="height: 100px"></div>
+    <label>Training Log</label>
+    <textarea id="log" style="height: 300px; font-size: 0.8em; opacity: 0.5"></textarea>    
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

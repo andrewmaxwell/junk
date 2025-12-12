@@ -197,7 +197,7 @@ export class GPT {
         // If we are generating, 'indices' is just the NEW token (seqLen 1).
         // The position index is the length of the cache.
         const startPos =
-          cache && cache.length > 0 ? cache[0].k.shape[1] ?? 0 : 0;
+          cache && cache.length > 0 ? (cache[0].k.shape[1] ?? 0) : 0;
         posEmb = this.positionEmbedding
           .slice([startPos, 0], [seqLen, -1])
           .expandDims(0); // [1, 1, dModel]
@@ -330,6 +330,7 @@ export class GPT {
     const nextInput = tf.tensor2d([startIds], [1, startIds.length], 'int32');
 
     // Within a tidy, we get the first logits and the initial cache
+    // eslint-disable-next-line prefer-const
     let {nextTokenId, newCache} = tf.tidy(() => {
       const {logits, newCache} = this.forward(nextInput, false, undefined);
       // Take the very last token's logits
@@ -581,10 +582,20 @@ export class ModelRunner {
     this.model = new GPT(config);
   }
 
-  uploadCorpus(tokens: number[]) {
+  async uploadCorpus(tokenPath: string) {
     if (this.gpuData) this.gpuData.dispose();
-    // Keep as int32 for gathering
-    this.gpuData = tf.tensor1d(Int32Array.from(tokens), 'int32');
+    const response = await fetch(tokenPath);
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch corpus at ${tokenPath} (${response.status})`,
+      );
+    }
+
+    const buffer = await response.arrayBuffer();
+    // Convert stored uint16 tokens into int32 tensor for TFJS
+    const tokens16 = new Uint16Array(buffer);
+    const tokens32 = Int32Array.from(tokens16);
+    this.gpuData = tf.tensor1d(tokens32, 'int32');
   }
 
   async trainStep(batchSize: number, maxLen: number) {
