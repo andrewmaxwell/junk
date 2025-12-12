@@ -8,14 +8,18 @@
       label {display:block; opacity: 0.25}
       #input, #log, #output {width: 600px; background: transparent; color: inherit; border: none; margin: 0 0 10px 0; background: rgba(255,255,255,0.05)}
       #input, #go {font-size: 2em}
+      #output {white-space: pre-wrap}
+      #output span:nth-child(3n + 1) {background: rgba(255,0,0,0.1)}
+      #output span:nth-child(3n + 2) {background: rgba(0,255,0,0.1)}
+      #output span:nth-child(3n + 3) {background: rgba(0,0,255,0.1)}
     </style>
   </head>
   <body style="font-family: monospace; background: #111; color: #eee">
     <label>Prompt</label>
-    <input id="input" type="text" value="Thus saith the LORD" />
-    <button id="go">Go</button>
+    <input id="input" type="text" value="In the beginning" />
+    <button id="go" disabled>Go</button>
     <label>Generated Text</label>
-    <div id="output" style="height: 100px"></div>
+    <pre id="output"></pre>
     <label>Training Log</label>
     <textarea id="log" style="height: 300px; font-size: 0.8em; opacity: 0.5"></textarea>    
     <script type="module" src="/src/main.ts"></script>

@@ -1,7 +1,7 @@
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgpu';
 
-export interface GPTConfig {
+interface GPTConfig {
   vocabSize: number;
   dModel: number;
   nHeads: number;
@@ -12,7 +12,7 @@ export interface GPTConfig {
   maxGradNorm: number;
 }
 
-export interface GenerationConfig {
+interface GenerationConfig {
   generateLength: number;
   temperature: number;
   penaltyLookback: number;
@@ -44,13 +44,12 @@ type TransformerBlock = {
   mlp: MlpWeights;
 };
 
-export class GPT {
+class GPT {
   private config: GPTConfig;
   private tokenEmbedding!: tf.Variable;
   private positionEmbedding!: tf.Variable;
   public blocks: TransformerBlock[];
   private ln_f!: NormParams;
-  private head!: tf.Variable;
   private optimizer: tf.Optimizer;
   private maskCache: Map<number, tf.Tensor2D>;
   private trainableVars: tf.Variable[];
@@ -64,19 +63,12 @@ export class GPT {
     this.maskCache = new Map();
     this.trainableVars = [];
     this.initWeights();
-    // AdamW is usually preferred, but Adam with weight decay is fine.
-    // Using a slightly lower LR for stability.
     this.optimizer = tf.train.adam(this.config.learningRate);
   }
-
-  // --- Initialization (Improved) ---
   private initWeights() {
     const {vocabSize, dModel, nLayers, maxLen} = this.config;
-
-    // GPT-2 style scaling for residual projections
     const std = 0.02;
     const projStd = 0.02 / Math.sqrt(2 * nLayers);
-
     this.tokenEmbedding = tf.variable(
       tf.randomNormal([vocabSize, dModel], 0, std),
       true,
@@ -121,7 +113,6 @@ export class GPT {
           ),
         },
         mlp: {
-          // 4x expansion standard for GPT
           W1: tf.variable(
             tf.randomNormal([dModel, 4 * dModel], 0, std),
             true,
@@ -142,13 +133,6 @@ export class GPT {
       g: tf.variable(tf.ones([dModel]), true, 'ln_f_g'),
       b: tf.variable(tf.zeros([dModel]), true, 'ln_f_b'),
     };
-    this.head = tf.variable(
-      tf.randomNormal([dModel, vocabSize], 0, std),
-      true,
-      'head',
-    );
-
-    // Collect all trainable variables automatically
     this.refreshTrainables();
   }
 
@@ -156,7 +140,6 @@ export class GPT {
     this.trainableVars = [
       this.tokenEmbedding,
       this.positionEmbedding,
-      this.head,
       this.ln_f.g,
       this.ln_f.b,
     ];
@@ -178,7 +161,6 @@ export class GPT {
     }
   }
 
-  // --- Forward Pass (Supports KV Caching) ---
   forward(
     indices: tf.Tensor2D,
     training = false,
@@ -187,20 +169,19 @@ export class GPT {
     return tf.tidy(() => {
       const batchSize = indices.shape[0];
       const seqLen = indices.shape[1];
-
-      // 1. Embeddings
       const tokEmb = tf.gather(this.tokenEmbedding, indices);
 
-      // Handle positional embeddings logic for Inference (cache exists) vs Training
       let posEmb: tf.Tensor;
       if (cache) {
-        // If we are generating, 'indices' is just the NEW token (seqLen 1).
-        // The position index is the length of the cache.
-        const startPos =
-          cache && cache.length > 0 ? (cache[0].k.shape[1] ?? 0) : 0;
+        const startPos = cache?.[0]?.k.shape[2] ?? 0;
+        if (startPos + seqLen > this.config.maxLen) {
+          throw new Error(
+            `Context overflow: pos ${startPos}+${seqLen} > maxLen ${this.config.maxLen}`,
+          );
+        }
         posEmb = this.positionEmbedding
           .slice([startPos, 0], [seqLen, -1])
-          .expandDims(0); // [1, 1, dModel]
+          .expandDims(0);
       } else {
         posEmb = this.positionEmbedding.slice([0, 0], [seqLen, -1]);
       }
@@ -213,38 +194,28 @@ export class GPT {
       // 2. Transformer Blocks
       for (let i = 0; i < this.blocks.length; i++) {
         const block = this.blocks[i];
-
-        // --- Attention Sub-Block ---
         const ln1 = this.layerNorm(x, block.ln1);
-
-        // Pass existing cache for this layer if available
         const layerCache = cache ? cache[i] : undefined;
         const {
           out: attn,
           k,
           v,
-        } = this.selfAttention(ln1, block, seqLen, layerCache);
+        } = this.selfAttention(ln1, block, seqLen, training, layerCache);
 
-        if (cache) newCache.push({k, v}); // Store new K/V for next step
+        if (cache) newCache.push({k, v});
 
         const attnOut = this.maybeDropout(attn, training);
         x = x.add(attnOut);
 
-        // --- MLP Sub-Block ---
         const ln2 = this.layerNorm(x, block.ln2);
         let ff = this.feedForward(ln2, block);
         ff = this.maybeDropout(ff, training);
         x = x.add(ff);
       }
 
-      // 3. Final Head
       x = this.layerNorm(x, this.ln_f);
-
-      // If training or prefill, we compute logits for all tokens.
-      // If inference (cached), usually we only care about the last token,
-      // but 'x' here is already just the new tokens if we passed a slice.
       const x2d = x.reshape([-1, this.config.dModel]);
-      const logits2d = tf.matMul(x2d, this.head);
+      const logits2d = tf.matMul(x2d, this.tokenEmbedding, false, true);
       const logits = logits2d.reshape([
         batchSize,
         seqLen,
@@ -255,19 +226,22 @@ export class GPT {
     });
   }
 
-  // --- Training Step ---
   trainStep(x: tf.Tensor2D, y: tf.Tensor2D): tf.Scalar {
     const trainFn = (): tf.Scalar =>
       tf.tidy(() => {
         const {logits} = this.forward(x, true);
         const logits2d = logits.reshape([-1, this.config.vocabSize]);
         const targetsFlat = y.reshape([-1]).toInt();
-
-        // Manual sparse cross-entropy: -log softmax at target positions
+        const V = this.config.vocabSize;
+        const N = targetsFlat.size;
         const logProbs = tf.logSoftmax(logits2d);
-        const oneHot = tf.oneHot(targetsFlat, this.config.vocabSize);
-        const nll = tf.sum(logProbs.mul(oneHot), 1).neg();
-        return tf.mean(nll) as tf.Scalar;
+        const flatLogProbs = logProbs.reshape([N * V]);
+        const rowOffsets = tf
+          .range(0, N, 1, 'int32')
+          .mul(tf.scalar(V, 'int32'));
+        const flatIdx = rowOffsets.add(targetsFlat);
+        const targetLogProbs = tf.gather(flatLogProbs, flatIdx);
+        return tf.neg(tf.mean(targetLogProbs)) as tf.Scalar;
       });
 
     const {value, grads} = this.optimizer.computeGradients(
@@ -275,7 +249,6 @@ export class GPT {
       this.trainableVars,
     );
 
-    // Filter null grads (unused vars)
     const validGrads: {name: string; tensor: tf.Tensor}[] = [];
     const varsToUpdate: tf.Variable[] = [];
 
@@ -300,15 +273,11 @@ export class GPT {
     }
 
     this.optimizer.applyGradients(gradientMap);
-
-    // Cleanup
     tf.dispose(grads);
     tf.dispose(clipped);
-
-    return value as tf.Scalar;
+    return value;
   }
 
-  // --- Inference with KV Cache ---
   async generate(
     startIds: number[],
     {
@@ -321,33 +290,22 @@ export class GPT {
     }: GenerationConfig,
   ): Promise<number[]> {
     const currentIds = [...startIds];
-
-    // We keep 'cache' on the GPU. It starts undefined.
     let cache: KVCache | undefined = undefined;
-
-    // First, Process the Prompt (Prefill)
-    // We run the whole prompt once to generate the initial KV Cache
     const nextInput = tf.tensor2d([startIds], [1, startIds.length], 'int32');
 
-    // Within a tidy, we get the first logits and the initial cache
     // eslint-disable-next-line prefer-const
     let {nextTokenId, newCache} = tf.tidy(() => {
-      const {logits, newCache} = this.forward(nextInput, false, undefined);
-      // Take the very last token's logits
+      const {logits, newCache} = this.forward(nextInput, false, []);
       const lastLogit = logits
         .slice([0, logits.shape[1] - 1, 0], [1, 1, -1])
         .squeeze();
       return {nextTokenId: lastLogit, newCache};
     });
 
-    // We can dispose the input tensor now
     nextInput.dispose();
-    cache = newCache; // Keep this alive! Do not dispose yet.
+    cache = newCache;
 
-    // Generation Loop
     for (let i = 0; i < generateLength; i++) {
-      // 1. Sampling (CPU side mostly, but minimal transfer)
-      // We kept 'nextTokenId' as a tensor from the previous block
       const lookback = Math.min(penaltyLookback, currentIds.length);
       const recentIds = currentIds.slice(-lookback);
       const safeTemp = Math.max(1e-4, temperature);
@@ -387,29 +345,27 @@ export class GPT {
       indices.dispose();
       nextTokenId.dispose();
 
-      const sampledId = sampleTopPFromTopK(
+      const filtered = filterTokenFromTopK(
         topVals as Float32Array,
         topIdx as Int32Array,
+        0, // <unk> is always id 0 in our tokenizer
+      );
+
+      const sampledId = sampleTopPFromTopK(
+        filtered.values,
+        filtered.indices,
         topP,
       );
       currentIds.push(sampledId);
-
-      // Stop if needed (optional EoS check here)
-
-      // 2. Prepare next step (Optimized)
-      // We only feed the *single new token* into the model
       const inputTensor = tf.tensor2d([[sampledId]], [1, 1], 'int32');
-
       const nextStep = tf.tidy(() => {
         const {logits, newCache} = this.forward(inputTensor, false, cache);
-        // logits shape is [1, 1, vocab]
         const nextLogits = logits.squeeze([0, 1]);
         return {logits: nextLogits, cache: newCache};
       });
 
       inputTensor.dispose();
 
-      // Dispose old cache tensors! Important to prevent memory leak
       if (cache) {
         cache.forEach((c) => {
           c.k.dispose();
@@ -423,7 +379,6 @@ export class GPT {
       if (i % 5 === 0) await tf.nextFrame();
     }
 
-    // Cleanup final tensors
     if (nextTokenId) nextTokenId.dispose();
     if (cache)
       cache.forEach((c) => {
@@ -433,8 +388,6 @@ export class GPT {
 
     return currentIds;
   }
-
-  // --- Sub-layers ---
 
   private layerNorm(x: tf.Tensor, norm: NormParams): tf.Tensor {
     const moments = tf.moments(x, -1, true);
@@ -449,58 +402,48 @@ export class GPT {
     x: tf.Tensor,
     block: TransformerBlock,
     seqLen: number,
+    training: boolean,
     layerCache?: {k: tf.Tensor; v: tf.Tensor},
   ): {out: tf.Tensor; k: tf.Tensor; v: tf.Tensor} {
     const {dModel, nHeads} = this.config;
     const headSize = dModel / nHeads;
     const batchSize = x.shape[0];
 
-    // Q, K, V Projections
-    // x shape: [batch, seqLen (could be 1 during gen), dModel]
     const x2d = x.reshape([-1, dModel]);
-
     const qRaw = tf.matMul(x2d, block.attn.Wq);
     const kRaw = tf.matMul(x2d, block.attn.Wk);
     const vRaw = tf.matMul(x2d, block.attn.Wv);
+    const qLen = seqLen;
+    const oldLen = layerCache ? layerCache.k.shape[2]! : 0;
+    const kLen = oldLen + qLen;
 
     const splitHeads = (t: tf.Tensor, len: number) =>
       t.reshape([batchSize, len, nHeads, headSize]).transpose([0, 2, 1, 3]);
 
-    const Q = splitHeads(qRaw, seqLen); // [B, nHeads, seqLen, headSize]
+    const Q = splitHeads(qRaw, seqLen);
     let K = splitHeads(kRaw, seqLen);
     let V = splitHeads(vRaw, seqLen);
-
-    // KV Cache Concatenation
     if (layerCache) {
-      // Concatenate along the sequence dimension (axis 2)
-      // Cache: [B, nHeads, oldSeqLen, headSize]
       K = tf.concat([layerCache.k, K], 2);
       V = tf.concat([layerCache.v, V], 2);
     }
 
-    // Scaled Dot-Product Attention
-    // Q: [B, H, qLen, D], KT: [B, H, D, kLen] -> Scores: [B, H, qLen, kLen]
     let scores = tf.matMul(Q, K, false, true).div(Math.sqrt(headSize));
-
-    // Causal Masking
-    // We only need to mask if we are processing more than 1 token at once (training or prefill)
-    // If qLen (seqLen) == 1 and we have cache, we are attending to the past, which is all valid.
-    if (seqLen > 1) {
-      const mask = this.getCausalMask(seqLen);
+    if (kLen > 1) {
+      const full = this.getCausalMask(kLen); // [kLen, kLen]
+      const mask = full.slice([oldLen, 0], [qLen, kLen]); // [qLen, kLen]
       scores = scores.add(mask);
     }
-
-    const attention = tf.matMul(tf.softmax(scores), V); // [B, H, qLen, D]
-
+    let att = tf.softmax(scores);
+    att = this.maybeDropout(att, training);
+    const attention = tf.matMul(att, V);
     const merged = attention
-      .transpose([0, 2, 1, 3]) // [B, qLen, H, D]
+      .transpose([0, 2, 1, 3])
       .reshape([batchSize, seqLen, dModel]);
-
     const merged2d = merged.reshape([-1, dModel]);
     const out = tf
       .matMul(merged2d, block.attn.Wo)
       .reshape([batchSize, seqLen, dModel]);
-
     return {out, k: K, v: V};
   }
 
@@ -508,15 +451,10 @@ export class GPT {
     const {dModel} = this.config;
     const xShp = x.shape;
     const x2d = x.reshape([-1, dModel]);
-
-    // Use GELU instead of ReLU for modern GPT performance
     const h = gelu(tf.matMul(x2d, block.mlp.W1).add(block.mlp.b1));
     const out2d = tf.matMul(h, block.mlp.W2).add(block.mlp.b2);
-
     return out2d.reshape(xShp);
   }
-
-  // --- Utilities ---
 
   private getCausalMask(seqLen: number): tf.Tensor2D {
     const maxLen = this.config.maxLen;
@@ -532,11 +470,9 @@ export class GPT {
 
     const mask = tf.tidy(() => {
       const ones = tf.ones([maxLen, maxLen]);
-      // Lower triangular part is kept (set to 0 for adding), upper is -1e9
       const lower = tf.linalg.bandPart(ones, -1, 0);
       return tf.scalar(-1e9).mul(ones.sub(lower));
     }) as tf.Tensor2D;
-
     const kept = tf.keep(mask);
     this.maskCache.set(maxLen, kept);
     return seqLen === maxLen ? kept : kept.slice([0, 0], [seqLen, seqLen]);
@@ -560,7 +496,6 @@ export class GPT {
   }
 
   dispose() {
-    // Dispose all variables
     this.trainableVars.forEach((v) => v.dispose());
     this.maskCache.forEach((m) => m.dispose());
     this.optimizer.dispose();
@@ -592,7 +527,6 @@ export class ModelRunner {
     }
 
     const buffer = await response.arrayBuffer();
-    // Convert stored uint16 tokens into int32 tensor for TFJS
     const tokens16 = new Uint16Array(buffer);
     const tokens32 = Int32Array.from(tokens16);
     this.gpuData = tf.tensor1d(tokens32, 'int32');
@@ -609,19 +543,15 @@ export class ModelRunner {
         } tokens, have ${dataLen}.`,
       );
     }
-
-    // PERFORMANCE FIX:
-    // Calculate indices entirely on GPU to prevent CPU-GPU sync/upload bottleneck.
     const {xs, ys} = tf.tidy(() => {
       const maxOffset = dataLen - maxLen - 1;
-
-      // 1. Generate random start positions on GPU
-      const startIndices = tf.randomUniform([batchSize], 0, maxOffset, 'int32');
-
-      // 2. Create offsets [0, 1, ... maxLen-1]
+      const startIndices = tf.randomUniform(
+        [batchSize],
+        0,
+        maxOffset + 1,
+        'int32',
+      );
       const offsets = tf.range(0, maxLen, 1, 'int32');
-
-      // 3. Broadcast add: [Batch, 1] + [1, Len] = [Batch, Len]
       const gatherIndices = startIndices
         .expandDims(1)
         .add(offsets.expandDims(0));
@@ -640,14 +570,9 @@ export class ModelRunner {
 
       return {xs, ys};
     });
-
     const lossTensor = model.trainStep(xs, ys);
-
-    // Dispose batch tensors
     xs.dispose();
     ys.dispose();
-
-    // Async data download so we don't block the UI thread completely
     const lossVal = (await lossTensor.data())[0];
     lossTensor.dispose();
     return lossVal;
@@ -677,8 +602,6 @@ function sampleTopPFromTopK(
   if (values.length === 0 || indices.length === 0) {
     throw new Error('No logits provided for sampling');
   }
-
-  // Convert to probabilities with standard softmax trick on the top-k slice.
   const maxLogit = values[0];
   const expVals = new Float32Array(values.length);
   let totalExp = 0;
@@ -687,8 +610,6 @@ function sampleTopPFromTopK(
     expVals[i] = val;
     totalExp += val;
   }
-
-  // Apply nucleus cutoff
   const probs = expVals.map((v) => v / totalExp);
   let cumulative = 0;
   let cutoff = probs.length;
@@ -709,6 +630,33 @@ function sampleTopPFromTopK(
   }
 
   return indices[cutoff - 1];
+}
+
+function filterTokenFromTopK(
+  values: Float32Array,
+  indices: Int32Array,
+  bannedId: number,
+): {values: Float32Array; indices: Int32Array} {
+  if (values.length !== indices.length) {
+    throw new Error('TopK values/indices length mismatch');
+  }
+
+  let keepCount = 0;
+  for (let i = 0; i < indices.length; i++) {
+    if (indices[i] !== bannedId) keepCount++;
+  }
+  if (keepCount === indices.length || keepCount === 0) return {values, indices};
+
+  const filteredValues = new Float32Array(keepCount);
+  const filteredIndices = new Int32Array(keepCount);
+  let w = 0;
+  for (let i = 0; i < indices.length; i++) {
+    if (indices[i] === bannedId) continue;
+    filteredValues[w] = values[i];
+    filteredIndices[w] = indices[i];
+    w++;
+  }
+  return {values: filteredValues, indices: filteredIndices};
 }
 
 // Approximate GELU used by GPT-style MLPs

@@ -1,28 +1,6 @@
+import {ModelRunner} from './Model';
+import {generationConfig, modelConfig} from './config';
 import {Tokenizer} from './Tokenizer';
-import {ModelRunner, type GPTConfig, type GenerationConfig} from './Model';
-
-// --- Config & State ---
-const batchSize = 32;
-
-const modelConfig: GPTConfig = {
-  vocabSize: 4096, // MUST MATCH IN scripts/tokenize.ts
-  dModel: 128, // Embedding dim
-  nHeads: 8, // Attention heads
-  nLayers: 8, // Transformer blocks
-  maxLen: 256, // Context window
-  dropout: 0.02,
-  learningRate: 3e-4,
-  maxGradNorm: 1.0,
-};
-
-const generationConfig: GenerationConfig = {
-  generateLength: 100, // tokens
-  temperature: 0.8,
-  penaltyLookback: 32,
-  repetitionPenalty: 1.05,
-  topK: 40,
-  topP: 0.95,
-};
 
 const inputElement = document.getElementById('input') as HTMLInputElement;
 const outputElement = document.getElementById('output') as HTMLPreElement;
@@ -46,8 +24,7 @@ function log(str: string) {
 const modelRunner = new ModelRunner();
 log(`Backend loaded: ${await modelRunner.initBackend()}`);
 
-const tokenizer = new Tokenizer();
-await tokenizer.load('tokenizer.json');
+const tokenizer = await Tokenizer.loadFromUrl('tokenizer.json');
 
 log('Uploading data to GPU and initializing model');
 await modelRunner.uploadCorpus('train.bin');
@@ -55,17 +32,25 @@ modelRunner.createModel(modelConfig);
 
 log('Starting training loop');
 
-let promptReady = '';
+let promptReady = inputElement.value;
 let step = 0;
 async function loop() {
-  const lossVal = await modelRunner.trainStep(batchSize, modelConfig.maxLen);
+  const lossVal = await modelRunner.trainStep(
+    modelConfig.batchSize,
+    modelConfig.maxLen,
+  );
   if (step % 10 === 0) {
     const ppl = Math.exp(lossVal).toFixed(2);
     log(`step=${step} loss=${lossVal.toFixed(2)} ppl=${ppl}`);
     if (promptReady) {
       const startIds = tokenizer.encode(promptReady);
       const genIds = await modelRunner.generate(startIds, generationConfig);
-      outputElement.innerText = tokenizer.decode(genIds);
+      outputElement.innerHTML = '';
+      tokenizer.decode(genIds).forEach((str) => {
+        const token = document.createElement('span');
+        token.innerText = str;
+        outputElement.append(token);
+      });
       goButton.disabled = false;
       promptReady = '';
     }
