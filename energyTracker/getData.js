@@ -22,16 +22,21 @@ export const getData = async () => {
     getWeatherData(),
   ]);
 
-  const data = window.Papa.parse(text, {header: true}).data.map((row) => ({
-    time: Date.parse(row.Timestamp),
-    tstamp: row.Timestamp,
-    energy: +row['Energy Level'],
-    anxiety: +row['Anxiety Level'],
-    headache: +row.Headache,
-    mood: +row.Mood,
-    exercise: +row.Exercise,
-    notes: row.Notes,
-  }));
+  const data = window.Papa.parse(text, {header: true})
+    .data.map((row) => ({
+      time: Date.parse(row.Timestamp),
+      tstamp: row.Timestamp,
+      energy: +row['Energy Level'],
+      anxiety: +row['Anxiety Level'],
+      headache: +row.Headache,
+      mood: +row.Mood,
+      exercise: +row.Exercise,
+      notes: row.Notes,
+      temperature: 0,
+      precipitation: 0,
+      pressure: 0,
+    }))
+    .sort((a, b) => a.time - b.time);
 
   let weatherIndex = 0;
   for (const ob of data) {

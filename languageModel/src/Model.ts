@@ -1,7 +1,8 @@
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgpu';
+import {filterTokenFromTopK, gelu, sampleTopPFromTopK} from './modelUtils';
 
-interface GPTConfig {
+export interface GPTConfig {
   vocabSize: number;
   dModel: number;
   nHeads: number;
@@ -12,14 +13,14 @@ interface GPTConfig {
   maxGradNorm: number;
 }
 
-interface GenerationConfig {
+export interface GenerationConfig {
   generateLength: number;
   temperature: number;
-  penaltyLookback: number;
-  repetitionPenalty: number;
   topK: number;
   topP: number;
 }
+
+type CheckpointNamedTensor = {name: string; tensor: tf.Tensor};
 
 // KV Cache Type: Array of [Key, Value] tensors per layer
 type KVCache = {k: tf.Tensor; v: tf.Tensor}[];
@@ -44,7 +45,7 @@ type TransformerBlock = {
   mlp: MlpWeights;
 };
 
-class GPT {
+export class GPT {
   private config: GPTConfig;
   private tokenEmbedding!: tf.Variable;
   private positionEmbedding!: tf.Variable;
@@ -55,7 +56,16 @@ class GPT {
   private trainableVars: tf.Variable[];
 
   constructor(config: GPTConfig) {
-    this.config = config;
+    this.config = {
+      vocabSize: config.vocabSize,
+      dModel: config.dModel,
+      nHeads: config.nHeads,
+      nLayers: config.nLayers,
+      maxLen: config.maxLen,
+      dropout: config.dropout,
+      learningRate: config.learningRate,
+      maxGradNorm: config.maxGradNorm,
+    };
     if (config.dModel % config.nHeads !== 0) {
       throw new Error('dModel must be divisible by nHeads');
     }
@@ -267,12 +277,11 @@ class GPT {
     const gradTensors = validGrads.map((g) => g.tensor);
     const clipped = this.clipGradients(gradTensors, this.config.maxGradNorm);
 
-    const gradientMap: any = {};
-    for (let i = 0; i < varsToUpdate.length; i++) {
-      gradientMap[varsToUpdate[i].name] = clipped[i];
-    }
-
-    this.optimizer.applyGradients(gradientMap);
+    const namedClipped = varsToUpdate.map((v, i) => ({
+      name: v.name,
+      tensor: clipped[i],
+    }));
+    this.optimizer.applyGradients(namedClipped);
     tf.dispose(grads);
     tf.dispose(clipped);
     return value;
@@ -280,14 +289,7 @@ class GPT {
 
   async generate(
     startIds: number[],
-    {
-      generateLength,
-      temperature,
-      topK,
-      topP,
-      penaltyLookback,
-      repetitionPenalty,
-    }: GenerationConfig,
+    {generateLength, temperature, topK, topP}: GenerationConfig,
   ): Promise<number[]> {
     const currentIds = [...startIds];
     let cache: KVCache | undefined = undefined;
@@ -306,34 +308,12 @@ class GPT {
     cache = newCache;
 
     for (let i = 0; i < generateLength; i++) {
-      const lookback = Math.min(penaltyLookback, currentIds.length);
-      const recentIds = currentIds.slice(-lookback);
       const safeTemp = Math.max(1e-4, temperature);
       const vocabSize = nextTokenId.shape[0];
       const actualK = Math.max(1, Math.min(topK, vocabSize));
 
       const {values, indices} = tf.tidy(() => {
-        let logits = nextTokenId;
-        if (recentIds.length > 0) {
-          const penaltyUpdates = tf.fill(
-            [recentIds.length],
-            repetitionPenalty,
-            'float32',
-          );
-          const penaltyIndices = tf.tensor2d(
-            recentIds,
-            [recentIds.length, 1],
-            'int32',
-          );
-          const penaltyMask = tf.scatterND(
-            penaltyIndices,
-            penaltyUpdates,
-            logits.shape,
-          );
-          logits = logits.sub(penaltyMask);
-        }
-
-        const scaled = logits.div(safeTemp);
+        const scaled = nextTokenId.div(safeTemp);
         return tf.topk(scaled, actualK, true);
       });
 
@@ -500,175 +480,28 @@ class GPT {
     this.maskCache.forEach((m) => m.dispose());
     this.optimizer.dispose();
   }
-}
 
-export class ModelRunner {
-  private gpuData: tf.Tensor1D | null = null;
-  private model: GPT | null = null;
-
-  async initBackend() {
-    await tf.setBackend('webgpu');
-    await tf.ready();
-    return tf.getBackend();
+  getConfig(): GPTConfig {
+    return {...this.config};
   }
 
-  createModel(config: GPTConfig) {
-    if (this.model) this.model.dispose();
-    this.model = new GPT(config);
+  getModelWeights(): CheckpointNamedTensor[] {
+    return this.trainableVars.map((v) => ({name: v.name, tensor: v}));
   }
 
-  async uploadCorpus(tokenPath: string) {
-    if (this.gpuData) this.gpuData.dispose();
-    const response = await fetch(tokenPath);
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch corpus at ${tokenPath} (${response.status})`,
-      );
-    }
-
-    const buffer = await response.arrayBuffer();
-    const tokens16 = new Uint16Array(buffer);
-    const tokens32 = Int32Array.from(tokens16);
-    this.gpuData = tf.tensor1d(tokens32, 'int32');
-  }
-
-  async trainStep(batchSize: number, maxLen: number) {
-    const model = this.requireModel();
-    const data = this.requireCorpus();
-    const dataLen = data.shape[0];
-    if (dataLen <= maxLen + 1) {
-      throw new Error(
-        `Corpus too small for a maxLen of ${maxLen}. Need at least ${
-          maxLen + 2
-        } tokens, have ${dataLen}.`,
-      );
-    }
-    const {xs, ys} = tf.tidy(() => {
-      const maxOffset = dataLen - maxLen - 1;
-      const startIndices = tf.randomUniform(
-        [batchSize],
-        0,
-        maxOffset + 1,
-        'int32',
-      );
-      const offsets = tf.range(0, maxLen, 1, 'int32');
-      const gatherIndices = startIndices
-        .expandDims(1)
-        .add(offsets.expandDims(0));
-
-      const xFlat = data.gather(
-        gatherIndices.reshape([batchSize * maxLen]) as tf.Tensor1D,
-      );
-      const xs = xFlat.reshape([batchSize, maxLen]) as tf.Tensor2D;
-
-      const yFlat = data.gather(
-        gatherIndices
-          .add(tf.scalar(1, 'int32'))
-          .reshape([batchSize * maxLen]) as tf.Tensor1D,
-      );
-      const ys = yFlat.reshape([batchSize, maxLen]) as tf.Tensor2D;
-
-      return {xs, ys};
-    });
-    const lossTensor = model.trainStep(xs, ys);
-    xs.dispose();
-    ys.dispose();
-    const lossVal = (await lossTensor.data())[0];
-    lossTensor.dispose();
-    return lossVal;
-  }
-
-  async generate(startIds: number[], generation: GenerationConfig) {
-    return this.requireModel().generate(startIds, generation);
-  }
-
-  private requireModel(): GPT {
-    if (!this.model) throw new Error('Model not initialized');
-    return this.model;
-  }
-
-  private requireCorpus(): tf.Tensor1D {
-    if (!this.gpuData) throw new Error('No corpus');
-    return this.gpuData;
-  }
-}
-
-function sampleTopPFromTopK(
-  values: Float32Array,
-  indices: Int32Array,
-  topP: number,
-): number {
-  const nucleus = Math.min(1, Math.max(1e-6, topP));
-  if (values.length === 0 || indices.length === 0) {
-    throw new Error('No logits provided for sampling');
-  }
-  const maxLogit = values[0];
-  const expVals = new Float32Array(values.length);
-  let totalExp = 0;
-  for (let i = 0; i < values.length; i++) {
-    const val = Math.exp(values[i] - maxLogit);
-    expVals[i] = val;
-    totalExp += val;
-  }
-  const probs = expVals.map((v) => v / totalExp);
-  let cumulative = 0;
-  let cutoff = probs.length;
-  for (let i = 0; i < probs.length; i++) {
-    cumulative += probs[i];
-    if (cumulative >= nucleus) {
-      cutoff = i + 1;
-      break;
+  setModelWeights(weights: tf.NamedTensorMap): void {
+    for (const v of this.trainableVars) {
+      const t = weights[v.name];
+      if (!t) throw new Error(`Missing model weight: ${v.name}`);
+      v.assign(t);
     }
   }
 
-  const mass = probs.slice(0, cutoff).reduce((a, b) => a + b, 0);
-  const r = Math.random() * mass;
-  let acc = 0;
-  for (let i = 0; i < cutoff; i++) {
-    acc += probs[i];
-    if (r <= acc) return indices[i];
+  async getOptimizerWeights(): Promise<CheckpointNamedTensor[]> {
+    return (await this.optimizer.getWeights()) as CheckpointNamedTensor[];
   }
 
-  return indices[cutoff - 1];
-}
-
-function filterTokenFromTopK(
-  values: Float32Array,
-  indices: Int32Array,
-  bannedId: number,
-): {values: Float32Array; indices: Int32Array} {
-  if (values.length !== indices.length) {
-    throw new Error('TopK values/indices length mismatch');
+  async setOptimizerWeights(weights: CheckpointNamedTensor[]): Promise<void> {
+    await this.optimizer.setWeights(weights);
   }
-
-  let keepCount = 0;
-  for (let i = 0; i < indices.length; i++) {
-    if (indices[i] !== bannedId) keepCount++;
-  }
-  if (keepCount === indices.length || keepCount === 0) return {values, indices};
-
-  const filteredValues = new Float32Array(keepCount);
-  const filteredIndices = new Int32Array(keepCount);
-  let w = 0;
-  for (let i = 0; i < indices.length; i++) {
-    if (indices[i] === bannedId) continue;
-    filteredValues[w] = values[i];
-    filteredIndices[w] = indices[i];
-    w++;
-  }
-  return {values: filteredValues, indices: filteredIndices};
-}
-
-// Approximate GELU used by GPT-style MLPs
-function gelu(x: tf.Tensor): tf.Tensor {
-  // 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 x^3)))
-  return tf.tidy(() => {
-    const c = tf.scalar(0.044715);
-    const sqrtTwoOverPi = tf.scalar(Math.sqrt(2 / Math.PI));
-    const x3 = x.mul(x).mul(x);
-    const inner = x.add(c.mul(x3)).mul(sqrtTwoOverPi);
-    const t = tf.tanh(inner);
-    const one = tf.scalar(1);
-    return x.mul(0.5).mul(one.add(t));
-  });
 }

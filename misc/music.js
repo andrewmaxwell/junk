@@ -1,4 +1,72 @@
-const input = `I Don't Write About Girls (feat. Ichika Nito)
+// https://music.youtube.com/playlist?list=LM
+// console.log(document.querySelector('#content').innerText)
+
+const input = `Angel (feat. Horace Andy)
+Massive Attack
+Mezzanine
+ 
+6:20
+Paralyzed
+Roosevelt
+Paralyzed
+ 
+3:48
+Esperanza
+Hermanos Gutiérrez
+Esperanza
+ 
+5:29
+HOW MUSIC WORKS (instrumental)
+Marcin
+HOW MUSIC WORKS
+ 
+2:41
+Franny
+Magic City Hippies
+Heard Well Collection Vol. 5
+ 
+3:16
+Track & Field
+Arc De Soleil
+Track & Field
+ 
+2:52
+So American
+Portugal. The Man
+In the Mountain in the Cloud
+ 
+3:36
+Vampire Bat
+Glass Animals
+Vampire Bat
+ 
+3:27
+What We Wanna
+Magic City Hippies
+What We Wanna
+ 
+4:19
+Water Your Garden (feat. maye)
+Magic City Hippies
+Water Your Garden
+ 
+2:50
+Champagne On The Rider
+Magic City Hippies
+Champagne On The Rider
+ 
+4:04
+Can’t Get It Right
+BowAsWell
+Can’t Get It Right
+ 
+3:58
+Classic (feat. POWERS)
+The Knocks
+So Classic EP
+ 
+4:09
+I Don't Write About Girls (feat. Ichika Nito)
 Marcin
 Dragon in Harmony
  
@@ -10,14 +78,9 @@ Parcels
 3:58
 Intro
 The xx
-xx
+xx (Deluxe)
  
 2:08
-Mad IQs
-I DONT KNOW HOW BUT THEY FOUND ME
-RAZZMATAZZ
- 
-3:03
 Drown (feat. Mateus Asato)
 Polyphia
 New Levels New Devils
@@ -29,7 +92,9 @@ Enemies
  
 3:17
 CHERIE
-Darius & Darianna Everett
+Darius
+ & 
+Darianna Everett
 OASIS
  
 4:33
@@ -59,7 +124,9 @@ Vapor
  
 4:04
 Sunshine & Milkshakes
-Best Frenz & Joywave
+Best Frenz
+ & 
+Joywave
 The Mall
  
 2:58
@@ -109,7 +176,9 @@ River Road
  
 3:09
 Art of Guitar
-Marcin & RJ Pasin
+Marcin
+ & 
+RJ Pasin
 Art of Guitar
  
 2:02
@@ -118,6 +187,14 @@ LEISURE
 Side B
  
 3:19
+【前衛古箏】Playing God - 43根弦也不夠我造的 @Polyphia
+Mo Yun
+ 
+3:28
+Playing God
+Polyphia
+ 
+3:26
 Brnt (feat. The EMEFE Horns)
 Magic City Hippies
 Hippie Castle
@@ -129,7 +206,9 @@ Weezer (Teal Album)
  
 4:05
 Bombs Over Brooklyn
-Big Data & Joywave
+Big Data
+ & 
+Joywave
 1.0
  
 3:43
@@ -160,7 +239,6 @@ Low Season
 3:37
 Dang! How Deep Is Your Glimmering Chanel
 Ambrose Reed
-Album
  
 6:04
 Back Pocket
@@ -238,11 +316,6 @@ LEISURE
 Side B
  
 3:49
-Cloudburst
-SunSquabi
-Cloudburst
- 
-3:40
 A Night on the Town
 The Dear Hunter
 A Night on the Town
@@ -328,16 +401,6 @@ Glass Animals
 I Love You So F***ing Much
  
 3:24
-Dexter's Day Out
-SunSquabi
-Instinct
- 
-5:16
-Footsteps In The Dark (Originally Performed By The Isley Brothers)
-Cannons
-Covers by Cannons
- 
-3:26
 The Sun And The Moon
 mewithoutYou
 Brother, Sister
@@ -368,11 +431,6 @@ Alfie Templeman
 Happiness in Liquid Form
  
 3:22
-Cinnamon (feat. Late Night Radio)
-SunSquabi
-Deluxe EP
- 
-3:15
 jupiter
 almost monday
 DIVE
@@ -425,7 +483,6 @@ Sound Vagabond
 3:05
 HALF HORSE HALF MAN | OFFICIAL VIDEO
 OCT
-Album
  
 3:51
 Hideout
@@ -479,12 +536,16 @@ Hypotheticals, Vol. 5
  
 3:51
 This Girl (Kungs Vs. Cookin' On 3 Burners) (Kungs Vs. Cookin' On 3 Burners)
-Kungs & Cookin' On 3 Burners
+Kungs
+ & 
+Cookin' On 3 Burners
 Layers
  
 3:16
 Let It Be (feat. Veela)
-Blackmill & Veela
+Blackmill
+ & 
+Veela
 Miracle
  
 6:04
@@ -508,11 +569,6 @@ Cage The Elephant
 Neon Pill
  
 3:16
-Complainer
-Cold War Kids
-Complainer / 4th of July
- 
-3:40
 Flower
 Moby
 Play: The Complete Recordings
@@ -579,7 +635,9 @@ Boot Scootin' Boogie
  
 4:55
 I Pray
-Shwayze & Ripe
+Shwayze
+ & 
+Ripe
 I Pray
  
 2:30
@@ -639,7 +697,9 @@ Roosevelt
  
 4:20
 Guitar 2.0
-Manuel Gardner Fernandes & LEVY
+Manuel Gardner Fernandes
+ & 
+LEVY
 Volume II
  
 2:54
@@ -809,7 +869,9 @@ Amerika
  
 4:01
 Dangerous
-Big Data & Joywave
+Big Data
+ & 
+Joywave
 1.0
  
 4:41
@@ -878,11 +940,6 @@ Franc Moody
 Dream in Colour
  
 4:26
-Mr. Know-It-All
-Young the Giant
-Home of the Strange
- 
-3:12
 Flesh and Blood
 Franc Moody
 Dream in Colour
@@ -893,11 +950,6 @@ America
 Homecoming
  
 3:32
-She's Too Good for Me
-Franc Moody
-She's Too Good for Me
- 
-4:02
 Neon Pill
 Cage The Elephant
 Neon Pill
@@ -1004,7 +1056,9 @@ Remember That You Will Die
  
 3:26
 Not My Girl (Yuksek Remix)
-Ishi & Yuksek
+Ishi
+ & 
+Yuksek
 Not My Girl (Yuksek Remix)
  
 3:54
@@ -1019,12 +1073,14 @@ Hidden Gems
  
 3:43
 Up into the Ether
-I Built The Sky
+I Built the Sky
 Up into the Ether
  
 5:02
 Open Market
-Jean Tonique & Pink Flamingo Rhythm Revue
+Jean Tonique
+ & 
+Pink Flamingo Rhythm Revue
 Electro Chill: Take a Deep Breath and Relax with the Ultimate Electronic Selection
  
 3:35
@@ -1059,7 +1115,11 @@ Handmade Cities
  
 3:41
 Palm Reader
-DREAMERS, Big Boi & UPSAHL
+DREAMERS
+, 
+Big Boi
+ & 
+UPSAHL
 Palm Reader
  
 3:01
@@ -1069,7 +1129,9 @@ Cerebral Eclipse
  
 4:40
 Beautiful Mind
-Tom Cardy & Brian David Gilbert
+Tom Cardy
+ & 
+Brian David Gilbert
 Beautiful Mind
  
 2:57
@@ -1114,7 +1176,9 @@ Friday Pilots Club
  
 3:54
 Sing To Me
-MISSIO & Death Stranding: Timefall
+MISSIO
+ & 
+Death Stranding: Timefall
 DEATH STRANDING: Timefall (Original Music from the World of Death Stranding)
  
 3:10
@@ -1174,7 +1238,9 @@ Coloratura
  
 4:57
 JOLTEON
-Ben Rosett & Ando San
+Ben Rosett
+ & 
+Ando San
 JOLTEON
  
 3:21
@@ -1310,12 +1376,10 @@ You Are Here
 3:53
 'Have you ever had a dream?' goes METAL!
 Andre Antunes
-album
  
 0:22
 If Blink 182 Wrote 'Single Ladies (Put A Ring On It)'
 Alex Melton
-album
  
 3:50
 Traveling at the Speed of Light
@@ -1329,7 +1393,9 @@ Sir Sly
  
 3:37
 Dissolve
-Absofacto & NITESHIFT
+Absofacto
+ & 
+NITESHIFT
 Thousand Peaces
  
 3:45
@@ -1404,7 +1470,9 @@ Skin and Bones
  
 3:14
 Night Running
-Cage The Elephant & Beck
+Cage The Elephant
+ & 
+Beck
 Social Cues
  
 3:29
@@ -1444,7 +1512,11 @@ Comfort Eagle
  
 3:08
 October
-Broken Bells, Danger Mouse & James Mercer
+Broken Bells
+, 
+Danger Mouse
+ & 
+James Mercer
 Broken Bells
  
 3:39
@@ -1610,7 +1682,6 @@ An Awesome Wave
 3:38
 alt-J: Tiny Desk Concert
 NPR Music
-album
  
 17:06
 Skin and Bones
@@ -1738,9 +1809,11 @@ Tom Cardy
 Artificial Intelligence
  
 3:58
-Dayum!
-The Gregory Brothers & Daym Drops
-Dayum!
+Oh My Dayum!
+The Gregory Brothers
+ & 
+Daym Drops
+Oh My Dayum!
  
 2:23
 Africa
@@ -1774,7 +1847,9 @@ The Essentials: The Meters
  
 3:06
 The Ghost Inside
-Broken Bells, Danger Mouse & James Mercer
+Broken Bells
+ & 
+Danger Mouse
 Broken Bells
  
 3:19
@@ -1873,11 +1948,6 @@ Weezer
 Weezer (Teal Album)
  
 3:59
-Pork And Beans
-Weezer
-Weezer (Red Album)
- 
-3:10
 Undone - The Sweater Song
 Weezer
 Weezer (Blue Album)
@@ -1899,7 +1969,9 @@ ZABA
  
 4:09
 Tokyo Drifting
-Glass Animals & Denzel Curry
+Glass Animals
+ & 
+Denzel Curry
 Dreamland
  
 3:37
@@ -2048,11 +2120,6 @@ Glass Animals
 How To Be A Human Being
  
 4:14
-Youth
-Glass Animals
-How To Be A Human Being
- 
-3:51
 Season 2 Episode 3
 Glass Animals
 How To Be A Human Being
@@ -2119,7 +2186,11 @@ Now, Not Yet
  
 5:36
 The High Road
-Broken Bells, Danger Mouse & James Mercer
+Broken Bells
+, 
+Danger Mouse
+ & 
+James Mercer
 Broken Bells
  
 3:53
@@ -2205,7 +2276,6 @@ Stayin' Alive
 2:57
 Pink Yesterday
 Too Many Zooz
-album
  
 3:51
 Eternal Recurrence
@@ -2289,7 +2359,9 @@ This Is All Yours
  
 2:54
 Dangerous
-Big Data & Joywave
+Big Data
+ & 
+Joywave
 2.0
  
 4:41
@@ -2325,22 +2397,18 @@ Hurry Up We're Dreaming
 4:04
 Slow Down the World / AMBROSE
 Ambrose Reed
-album
  
 3:38
 Marvin Gaye - I Heard It Through the Grapevine by Naudo
 Juan & Naudo
-album
  
 4:08
 Sweet Child o'mine - Guns and Roses ( by Naudo)
 Juan & Naudo
-album
  
 2:50
 Staying Alive ( Bee Gees ) Naudo Guitar Solo
 Juan & Naudo
-album
  
 2:46
 Hanging On
@@ -2370,7 +2438,6 @@ Söngvakeppnin 2020
 2:54
 Moon Hooch - Traffic Cone Traffic Jam
 Moon Hooch
-album
  
 2:14
 Tightrope
@@ -2439,19 +2506,29 @@ Summer Pack
  
 4:58`;
 
-const lines = input.split('\n');
-const songs = /** @type {{ [artist: string]: string[] }} */ ({});
+const songs = input
+  .replaceAll(/\n & \n/g, ' ')
+  .replaceAll(/ \n[\d:]+/g, '')
+  .trim()
+  .split('\n\n')
+  .map((l) => l.split('\n').map((s) => s.trim()))
+  .reduce((acc, [title, artist]) => {
+    (acc[artist] ??= []).push(title);
+    return acc;
+  }, /** @type {{ [artist: string]: string[] }} */ ({}));
 
-for (let i = 0; i < lines.length; i += 5) {
-  const title = lines[i]?.trim();
-  const artist = lines[i + 1]?.trim();
-  if (lines[i + 3]?.trim() !== '')
-    throw new Error('WHAT\n' + lines.slice(i - 10, i).join('\n'));
-  if (!title || !artist) continue;
-  (songs[artist] ??= []).push(title);
-}
+// const songs = /** @type {{ [artist: string]: string[] }} */ ({});
 
-const result = Object.entries(songs)
+// for (let i = 0; i < lines.length; i += 5) {
+//   const title = lines[i]?.trim();
+//   const artist = lines[i + 1]?.trim();
+//   if (lines[i + 3]?.trim() !== '')
+//     throw new Error('WHAT\n' + lines.slice(i - 10, i).join('\n'));
+//   if (!title || !artist) continue;
+//   (songs[artist] ??= []).push(title);
+// }
+
+const results = Object.entries(songs)
   .sort((a, b) => b[1].length - a[1].length)
   .map(
     ([artist, titles]) =>
@@ -2459,4 +2536,4 @@ const result = Object.entries(songs)
   )
   .join('\n');
 
-console.log(result);
+console.log(results);

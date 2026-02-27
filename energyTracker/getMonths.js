@@ -1,3 +1,8 @@
+/**
+ * @param {number|Date} minX
+ * @param {number|Date} maxX
+ * @returns {Date[]}
+ */
 export const getMonths = (minX, maxX) => {
   const result = [];
   let currDate = new Date(minX);

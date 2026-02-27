@@ -1,11 +1,44 @@
 import {getMonths} from './getMonths.js';
-import {smoothLine} from './smoothLine.js';
 
-const margin = 4;
+/**
+ * @typedef {Object} DataPoint
+ * @property {number} time
+ * @property {string} tstamp
+ * @property {string} [notes]
+ * @property {number} [energy]
+ * @property {number} [anxiety]
+ * @property {number} [headache]
+ * @property {number} [mood]
+ * @property {number} [exercise]
+ * @property {number} [temperature]
+ * @property {number} [precipitation]
+ * @property {number} [pressure]
+ */
 
-export const addChart = ({data, key, color, i, minX, maxX, graphs}) => {
+/**
+ * @typedef {Object} GraphSpec
+ * @property {keyof DataPoint} key
+ * @property {string} color
+ */
+
+/**
+ * @typedef {Object} ChartOptions
+ * @property {DataPoint[]} data
+ * @property {keyof DataPoint} key
+ * @property {string} color
+ * @property {number} minX
+ * @property {number} maxX
+ * @property {GraphSpec[]} graphs
+ * @property {number} margin
+ */
+
+/**
+ * @param {ChartOptions} options
+ * @returns {HTMLCanvasElement}
+ */
+export const makeChart = ({data, key, color, minX, maxX, graphs, margin}) => {
   const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
+  const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
 
   canvas.width = 6000;
   canvas.height = innerHeight / graphs.length - margin;
@@ -14,17 +47,18 @@ export const addChart = ({data, key, color, i, minX, maxX, graphs}) => {
   let minY = Infinity;
   let maxY = -Infinity;
   for (const ob of data) {
-    const val = ob[key];
+    const val = Number(ob[key]);
     if (isNaN(val)) continue;
     minY = Math.min(minY, val);
     maxY = Math.max(maxY, val);
   }
 
+  /** @param {number} time */
   const toX = (time) => ((time - minX) / (maxX - minX)) * canvas.width;
 
   const coords = data.map((ob) => ({
     x: toX(ob.time),
-    y: (1 - (ob[key] - minY) / (maxY - minY)) * canvas.height,
+    y: (1 - (Number(ob[key]) - minY) / (maxY - minY)) * canvas.height,
     ob,
   }));
 
@@ -32,7 +66,7 @@ export const addChart = ({data, key, color, i, minX, maxX, graphs}) => {
   ctx.globalAlpha = 0.5;
   ctx.fillStyle = color;
   ctx.beginPath();
-  for (const {x, y} of smoothLine(coords)) ctx.lineTo(x, y);
+  for (const {x, y} of coords) ctx.lineTo(x, y);
   ctx.lineTo(canvas.width, canvas.height);
   ctx.lineTo(0, canvas.height);
   ctx.fill();
@@ -41,30 +75,27 @@ export const addChart = ({data, key, color, i, minX, maxX, graphs}) => {
   ctx.strokeStyle = ctx.fillStyle = 'white';
   ctx.beginPath();
   for (const date of getMonths(minX, maxX)) {
-    const x = toX(date);
+    const x = toX(date.getTime());
     ctx.moveTo(x, 0);
     ctx.lineTo(x, canvas.height);
     ctx.fillText(
       date.getMonth() + 1 + '/' + (date.getFullYear() % 100),
       x + 2,
-      canvas.height - 2
+      canvas.height - 2,
     );
   }
   ctx.stroke();
 
-  // chart label
-  const label = document.createElement('div');
-  label.innerText = key;
-  Object.assign(label.style, {
-    position: 'fixed',
-    top: i * (canvas.height + margin) + 'px',
-    left: '3px',
-  });
-  document.querySelector('#container').append(canvas, label);
+  // smoother curve
+  // ctx.beginPath();
+  // for (const {x, y} of smootherLineGaussian(coords, canvas.width, 32)) {
+  //   ctx.lineTo(x, y);
+  // }
+  // ctx.stroke();
 
   canvas.addEventListener('mousemove', (e) => {
     let minDist = Infinity;
-    let closest;
+    let closest = coords[0].ob;
     for (const {x, ob} of coords) {
       const d = Math.abs(x - e.pageX);
       if (d < minDist) {
@@ -81,4 +112,6 @@ export const addChart = ({data, key, color, i, minX, maxX, graphs}) => {
       .join('\n')
       .trim();
   });
+
+  return canvas;
 };

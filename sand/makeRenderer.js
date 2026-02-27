@@ -1,4 +1,4 @@
-/** @type {<T>(canvas: HTMLCanvasElement, width: number, height: number, toColor: (val: T, vals: T[], i: number) => number) => (vals: T[]) => void} */
+/** @type {<T>(canvas: HTMLCanvasElement, width: number, height: number, toColor: (val: T, vals: ArrayLike<T>, i: number) => number) => (vals: ArrayLike<T>) => void} */
 export const makeRenderer = (canvas, width, height, toColor) => {
   canvas.width = width;
   canvas.height = height;

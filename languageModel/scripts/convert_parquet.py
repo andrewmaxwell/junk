@@ -2,7 +2,8 @@ import pyarrow.parquet as pq
 import string
 
 # Path to your downloaded parquet shard
-parquet_path = "/Users/andrew/Downloads/train-00000-of-00035-740989fcf50600a6.parquet"
+parquet_path = "/Users/andrew/Downloads/train-00000-of-00002.parquet"
+out_path = "/Users/andrew/Desktop/wiki.txt"
 
 table = pq.read_table(parquet_path)
 print("Columns:", table.column_names)
@@ -15,7 +16,6 @@ if TEXT_COL not in col_names:
 
 texts = table.column(TEXT_COL).to_pylist()
 
-out_path = "newCorpus.txt"
 
 # Characters available on a standard US keyboard
 allowed_chars = set(
@@ -25,7 +25,7 @@ allowed_chars = set(
     " "                     # space
 )
 
-MAX_BYTES = 20 * 1024 * 1024  # ~20 MB
+MAX_BYTES = 100 * 1024 * 1024
 
 with open(out_path, "w", encoding="utf-8") as f:
     kept = 0

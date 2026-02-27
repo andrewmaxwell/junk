@@ -1,6 +1,9 @@
-import {addChart} from './addChart.js';
+import {makeChart} from './addChart.js';
 import {getData} from './getData.js';
 
+const margin = 4;
+
+/** @type {Array<{key: keyof import('./addChart.js').DataPoint, color: string}>} */
 const graphs = [
   {key: 'energy', color: 'yellow'},
   {key: 'anxiety', color: 'magenta'},
@@ -14,24 +17,26 @@ const graphs = [
 
 const data = await getData();
 
-// console.log(
-//   data
-//     .filter((d) => d.time > Date.parse('2024/01/01'))
-//     .map(
-//       (d) =>
-//         `${d.tstamp.split(' ')[0]}: ${d.notes}(energy: ${d.energy}/5, mood: ${d.mood}/5, exercise: ${d.exercise}/5)`,
-//     )
-//     .join('\n'),
-// );
-
 const minX = data[0].time;
 const maxX = data[data.length - 1].time;
+const container = /** @type {HTMLDivElement} */ (
+  document.querySelector('#container')
+);
 
 const render = () => {
-  document.querySelector('#container').innerHTML = '';
+  container.innerHTML = '';
   for (let i = 0; i < graphs.length; i++) {
     const {key, color} = graphs[i];
-    addChart({data, key, color, i, minX, maxX, graphs});
+    const canvas = makeChart({data, key, color, minX, maxX, graphs, margin});
+
+    const label = document.createElement('div');
+    label.innerText = key;
+    Object.assign(label.style, {
+      position: 'fixed',
+      top: i * (canvas.height + margin) + 'px',
+      left: '3px',
+    });
+    container.append(canvas, label);
   }
 };
 
