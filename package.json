@@ -27,7 +27,6 @@
   "scripts": {
     "dev": "npm i && npm run gen && open http://localhost:3000 && node devServer",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "lint": "eslint .",
     "gen": "node generateHome.js"
   },
   "repository": {

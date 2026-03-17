@@ -1,5 +1,5 @@
-import {makeChart} from './addChart.js';
-import {getData} from './getData.js';
+import { makeChart } from './addChart.js';
+import { getData } from './getData.js';
 
 const margin = 4;
 
@@ -16,6 +16,7 @@ const graphs = [
 ];
 
 const data = await getData();
+const width = 4 * data.length;
 
 const minX = data[0].time;
 const maxX = data[data.length - 1].time;
@@ -25,9 +26,19 @@ const container = /** @type {HTMLDivElement} */ (
 
 const render = () => {
   container.innerHTML = '';
+  const fragment = document.createDocumentFragment();
   for (let i = 0; i < graphs.length; i++) {
     const {key, color} = graphs[i];
-    const canvas = makeChart({data, key, color, minX, maxX, graphs, margin});
+    const canvas = makeChart({
+      data,
+      key,
+      color,
+      minX,
+      maxX,
+      graphs,
+      margin,
+      width,
+    });
 
     const label = document.createElement('div');
     label.innerText = key;
@@ -36,8 +47,12 @@ const render = () => {
       top: i * (canvas.height + margin) + 'px',
       left: '3px',
     });
-    container.append(canvas, label);
+    fragment.append(canvas, label);
   }
+  container.appendChild(fragment);
+
+  // scroll all the way to the right
+  window.scrollTo(100000, 0);
 };
 
 render();

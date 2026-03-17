@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cuaca: St. Louis vs Gunungsitoli</title>
+  <style>
+    :root {
+      --text-main: #1f2937;
+      --text-muted: #6b7280;
+      --border-color: #e5e7eb;
+      --bg-main: #f3f4f6;
+      --bg-card: #ffffff;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-main);
+      padding: 15px;
+      /* Reduced body padding */
+      display: flex;
+      justify-content: center;
+      color: var(--text-main);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .dashboard {
+      background: var(--bg-card);
+      padding: 20px;
+      /* Reduced dashboard padding */
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      /* Tighter gap between tables */
+      max-width: 850px;
+    }
+
+    .table-section h2 {
+      margin: 0 0 8px 0;
+      /* Tighter header margin */
+      font-size: 16px;
+      /* Slightly smaller header */
+      font-weight: 700;
+      color: var(--text-main);
+      text-align: center;
+    }
+
+    table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+      font-size: 13px;
+      /* Slightly smaller text */
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      padding: 6px 10px;
+      /* Drastically reduced cell padding */
+      text-align: center;
+      white-space: nowrap;
+      border-bottom: 1px solid var(--border-color);
+      border-right: 1px solid var(--border-color);
+    }
+
+    th:last-child,
+    td:last-child {
+      border-right: none;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    th {
+      background-color: #f9fafb;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+    }
+
+    td strong {
+      font-weight: 600;
+    }
+
+    .legend-container {
+      display: flex;
+      justify-content: space-between;
+      padding-top: 10px;
+      /* Tighter legend padding */
+      border-top: 1px solid var(--border-color);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .gradient-bar {
+      height: 10px;
+      width: 120px;
+      border-radius: 5px;
+      background: linear-gradient(to right, hsl(240, 65%, 85%), hsl(120, 65%, 85%), hsl(0, 65%, 85%));
+    }
+
+    .rain-bar {
+      height: 10px;
+      width: 80px;
+      border-radius: 5px;
+      background: linear-gradient(to right, hsl(210, 50%, 95%), hsl(210, 60%, 65%));
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="dashboard" id="dashboard">
+    <div class="legend-container">
+      <div class="legend-item">
+        <span>Dingin (-15°C)</span>
+        <div class="gradient-bar"></div>
+        <span>Panas (40°C)</span>
+      </div>
+      <div class="legend-item">
+        <span>Kering</span>
+        <div class="rain-bar"></div>
+        <span>Basah</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const headers = ["Bulan", "Terendah", "Rendah", "Tinggi", "Tertinggi", "Titik Embun", "Hari Hujan Deras"];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
+
+    const stLouisData = [
+      [-15, -4, 4, 18, -5, 2],
+      [-12, -2, 7, 22, -3, 1],
+      [-8, 3, 13, 26, 1, 2],
+      [0, 8, 20, 30, 6, 3],
+      [6, 14, 25, 32, 12, 3],
+      [13, 20, 30, 35, 17, 3],
+      [16, 22, 32, 37, 19, 3],
+      [16, 21, 31, 37, 18, 2],
+      [8, 16, 27, 34, 14, 2],
+      [1, 9, 21, 31, 8, 2],
+      [-6, 3, 13, 24, 2, 2],
+      [-12, -2, 7, 19, -3, 1]
+    ];
+
+    const gunungsitoliData = [
+      [22, 23, 30, 32, 24, 6],
+      [22, 23, 30, 32, 24, 5],
+      [22, 23, 30, 32, 24, 7],
+      [22, 23, 30, 32, 24, 7],
+      [22, 23, 30, 32, 24, 6],
+      [22, 23, 30, 31, 24, 5],
+      [21, 23, 29, 31, 24, 6],
+      [21, 23, 29, 31, 24, 7],
+      [21, 23, 29, 31, 24, 9],
+      [22, 23, 29, 31, 24, 11],
+      [22, 23, 29, 31, 24, 12],
+      [22, 23, 29, 31, 24, 9]
+    ];
+
+    function getTempColor(temp) {
+      const minTemp = -15;
+      const maxTemp = 40;
+      const clampedTemp = Math.max(minTemp, Math.min(maxTemp, temp));
+      const percent = (clampedTemp - minTemp) / (maxTemp - minTemp);
+
+      const hue = 240 * (1 - percent);
+      return `hsl(${hue}, 65%, 85%)`;
+    }
+
+    function getRainColor(days) {
+      const maxRain = 14;
+      const clampedDays = Math.max(0, Math.min(maxRain, days));
+      const percent = clampedDays / maxRain;
+
+      const lightness = 95 - (percent * 35);
+      return `hsl(210, 60%, ${lightness}%)`;
+    }
+
+    function createTableHTML(title, data) {
+      let html = `<div class="table-section"><h2>${title}</h2><table><thead><tr>`;
+
+      headers.forEach(header => {
+        html += `<th>${header}</th>`;
+      });
+      html += `</tr></thead><tbody>`;
+
+      data.forEach((row, rowIndex) => {
+        html += `<tr><td style="background-color: #ffffff;"><strong>${months[rowIndex]}</strong></td>`;
+
+        row.forEach((value, colIndex) => {
+          let bgColor = colIndex < 5 ? getTempColor(value) : getRainColor(value);
+          let displayValue = colIndex < 5 ? `${value}°C` : value;
+          html += `<td style="background-color: ${bgColor};">${displayValue}</td>`;
+        });
+
+        html += `</tr>`;
+      });
+
+      html += `</tbody></table></div>`;
+      return html;
+    }
+
+    const dashboard = document.getElementById('dashboard');
+    const legend = document.querySelector('.legend-container');
+
+    legend.insertAdjacentHTML('beforebegin', createTableHTML('Cuaca St. Louis, Missouri', stLouisData));
+    legend.insertAdjacentHTML('beforebegin', createTableHTML('Cuaca Kota Gunungsitoli, Nias', gunungsitoliData));
+
+  </script>
+</body>
+
+</html>

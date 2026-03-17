@@ -1,4 +1,5 @@
-import {getMonths} from './getMonths.js';
+import { getMonths } from './getMonths.js';
+import { smootherLineGaussian } from './smoothLine.js';
 
 /**
  * @typedef {Object} DataPoint
@@ -30,17 +31,27 @@ import {getMonths} from './getMonths.js';
  * @property {number} maxX
  * @property {GraphSpec[]} graphs
  * @property {number} margin
+ * @property {number} width
  */
 
 /**
  * @param {ChartOptions} options
  * @returns {HTMLCanvasElement}
  */
-export const makeChart = ({data, key, color, minX, maxX, graphs, margin}) => {
+export const makeChart = ({
+  data,
+  key,
+  color,
+  minX,
+  maxX,
+  graphs,
+  margin,
+  width,
+}) => {
   const canvas = document.createElement('canvas');
   const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
 
-  canvas.width = 6000;
+  canvas.width = width;
   canvas.height = innerHeight / graphs.length - margin;
   canvas.style.borderBottom = `${margin}px solid black`;
 
@@ -56,11 +67,17 @@ export const makeChart = ({data, key, color, minX, maxX, graphs, margin}) => {
   /** @param {number} time */
   const toX = (time) => ((time - minX) / (maxX - minX)) * canvas.width;
 
-  const coords = data.map((ob) => ({
-    x: toX(ob.time),
-    y: (1 - (Number(ob[key]) - minY) / (maxY - minY)) * canvas.height,
-    ob,
-  }));
+  /** @type {Array<{x: number, y: number, ob: DataPoint}>} */
+  const coords = [];
+  for (const ob of data) {
+    const val = Number(ob[key]);
+    if (isNaN(val)) continue;
+    coords.push({
+      x: toX(ob.time),
+      y: (1 - (val - minY) / (maxY - minY)) * canvas.height,
+      ob,
+    });
+  }
 
   // curves
   ctx.globalAlpha = 0.5;
@@ -87,11 +104,11 @@ export const makeChart = ({data, key, color, minX, maxX, graphs, margin}) => {
   ctx.stroke();
 
   // smoother curve
-  // ctx.beginPath();
-  // for (const {x, y} of smootherLineGaussian(coords, canvas.width, 32)) {
-  //   ctx.lineTo(x, y);
-  // }
-  // ctx.stroke();
+  ctx.beginPath();
+  for (const {x, y} of smootherLineGaussian(coords, canvas.width, 32)) {
+    ctx.lineTo(x, y);
+  }
+  ctx.stroke();
 
   canvas.addEventListener('mousemove', (e) => {
     let minDist = Infinity;
