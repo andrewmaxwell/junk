@@ -1,4 +1,4 @@
-import { color } from '../sand/makeRenderer.js';
+import {color} from '../sand/makeRenderer.js';
 
 export const M_EMPTY = 0;
 export const M_WIRE = 1;

@@ -1,4 +1,4 @@
-import { makeRenderer } from '../sand/makeRenderer.js';
+import {makeRenderer} from '../sand/makeRenderer.js';
 import {
   CHARGE_GND,
   CHARGE_VCC,
@@ -18,8 +18,8 @@ import {
   materialColors,
   materialDefs,
 } from './constants.js';
-import { compressGrid, expandGrid, requestSave } from './persistence.js';
-import { Simulator } from './simulation.js';
+import {compressGrid, expandGrid, requestSave} from './persistence.js';
+import {Simulator} from './simulation.js';
 
 const simulator = new Simulator(WIDTH, HEIGHT);
 const canvas = /** @type {HTMLCanvasElement} */ (
@@ -62,6 +62,17 @@ const NOT_TEMPLATE = [
   'W.D.', // Y=4: GND sink
 ];
 
+const SR_LATCH_TEMPLATE = [
+  'W..V..W.W..V..W.',
+  'WWGP..W.WWGP..W.',
+  'W..PGWW.W..PGWW.',
+  'W..W..W.W..W..W.',
+  'W.WWWWBWW.WWWWBW',
+  'W.W.W.W.W.W.W.W.',
+  'WGN.NGW.WGN.NGW.',
+  'W.D.D.W.W.D.D.W.',
+];
+
 /**
  * @param {number} startX
  * @param {number} startY
@@ -101,6 +112,7 @@ function loadFromHash() {
     pasteTemplate(16, 26, NAND_TEMPLATE);
     pasteTemplate(28, 26, NOR_TEMPLATE);
     pasteTemplate(40, 26, NOT_TEMPLATE);
+    pasteTemplate(16, 36, SR_LATCH_TEMPLATE);
     // Overwrite the hash initially without triggering history
     history.replaceState(null, '', '#' + compressGrid(simulator));
   }
@@ -141,10 +153,14 @@ canvas.addEventListener('mousedown', handleDraw);
 canvas.addEventListener('mousemove', handleDraw);
 const controlsDiv = document.getElementById('controls');
 if (controlsDiv) {
+  const resetButton = document.getElementById('reset-button');
+  const clearButton = document.getElementById('clear-button');
+  const exportButton = document.getElementById('export-button');
+
   const header = document.createElement('h3');
   header.style.marginTop = '0';
   header.textContent = 'Material';
-  controlsDiv.appendChild(header);
+  controlsDiv.insertBefore(header, resetButton);
 
   materialDefs.forEach((def) => {
     const label = document.createElement('label');
@@ -173,8 +189,74 @@ if (controlsDiv) {
       document.createTextNode(` ${def.name} (${def.description})`),
     );
 
-    controlsDiv.appendChild(label);
+    controlsDiv.insertBefore(label, resetButton);
   });
+
+  if (resetButton) {
+    resetButton.addEventListener('click', () => {
+      location.hash = '';
+      loadFromHash();
+      render(simulator.materialGrid);
+    });
+  }
+
+  if (clearButton) {
+    clearButton.addEventListener('click', () => {
+      simulator.materialGrid.fill(M_EMPTY);
+      requestSave(simulator);
+      render(simulator.materialGrid);
+    });
+  }
+
+  if (exportButton) {
+    exportButton.addEventListener('click', () => {
+      let minX = WIDTH,
+        minY = HEIGHT,
+        maxX = -1,
+        maxY = -1;
+
+      for (let y = 0; y < HEIGHT; y++) {
+        for (let x = 0; x < WIDTH; x++) {
+          const idx = simulator.getIndex(x, y);
+          if (simulator.materialGrid[idx] !== M_EMPTY) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+
+      if (maxX < minX || maxY < minY) {
+        console.log('Grid is empty!');
+        return;
+      }
+
+      /** @type {Record<number, string>} */
+      const reverseCharMap = {
+        [M_WIRE]: 'W',
+        [M_PTYPE]: 'P',
+        [M_NTYPE]: 'N',
+        [M_GATE]: 'G',
+        [M_VCC]: 'V',
+        [M_GND]: 'D',
+        [M_BRIDGE]: 'B',
+      };
+
+      const lines = [];
+      for (let y = minY; y <= maxY; y++) {
+        let line = "  '";
+        for (let x = minX; x <= maxX; x++) {
+          const mat = simulator.materialGrid[simulator.getIndex(x, y)];
+          line += reverseCharMap[mat] || '.';
+        }
+        line += "'";
+        lines.push(line);
+      }
+
+      console.log('const EXPORTED_TEMPLATE = [\n' + lines.join(',\n') + '\n];');
+    });
+  }
 }
 
 loop();
