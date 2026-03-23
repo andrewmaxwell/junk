@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@types/node": "^24.9.1",
+    "edfjs": "^0.6.0",
     "express": "^5.1.0",
     "h5wasm": "^0.8.7",
     "node-fetch": "^3.3.2",
