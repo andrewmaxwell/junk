@@ -57,14 +57,26 @@
 <body>
 
   <div class="box">
-    <h1>Total Compute Estimator</h1>
-    <p>Running automated hardware benchmarks...</p>
-
+    <div class="header" style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px;">
+      <div style="flex: 1;">
+        <h1>Total Compute Estimator</h1>
+        <p style="color: #aaa; font-family: monospace; margin: 0;" id="status-text">Running automated hardware benchmarks...</p>
+      </div>
+      <button id="btn-run" style="padding: 10px 20px; background: #1e3a5f; color: #fff; border: 1px solid #4ec9b0; border-radius: 6px; font-weight: bold; cursor: not-allowed; opacity: 0.5; transition: all 0.2s ease; margin-bottom: 15px;" disabled>
+        Running...
+      </button>
+    </div>
     <div style="margin-top: 20px;">
       <div class="result-row"><span>Single-Core CPU:</span> <span id="res-single" class="val">Queued...</span></div>
       <div class="result-row"><span>All Cores CPU (<span id="core-count">?</span> Threads):</span> <span id="res-multi"
           class="val">Queued...</span></div>
       <div class="result-row"><span>GPU (WebGL2):</span> <span id="res-gpu" class="val">Queued...</span></div>
+      <div class="result-row"><span>System RAM (Memcopy):</span> <span id="res-mem" class="val">Queued...</span></div>
+
+      <div style="margin-top: 25px; text-align: center; padding: 25px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+        <div style="font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px;">Unified Compute Score</div>
+        <div id="res-score" style="font-size: 48px; font-weight: 800; color: #4ec9b0; text-shadow: 0 0 20px rgba(78, 201, 176, 0.4); font-variant-numeric: tabular-nums;">Calculating...</div>
+      </div>
     </div>
 
     <div class="note" id="log">Logs:<br></div>
@@ -72,7 +84,7 @@
     <div class="note" style="margin-top: 30px; border-top: 1px dashed #444; padding-top: 15px; color: #666;">
       <strong>Disclaimer:</strong> This is a synthetic browser-based benchmark that measures peak Fused Multiply-Add (FMA) floating-point throughput entirely within CPU registers. 
       <br><br>
-      Unlike traditional native benchmarks (e.g., Cinebench, Geekbench), this tool <strong>does not</strong> test memory bandwidth (RAM), complex branching, or sustained thermal throttling. Because it executes entirely within the browser's JavaScript environment and WebGL sandbox, <em>your score reflects the efficiency of your browser's JIT compiler just as much as your raw hardware capabilities</em>.
+      Unlike traditional native benchmarks (e.g., Cinebench, Geekbench), the CPU/GPU tests <strong>do not</strong> test complex branching or sustained thermal throttling, mapping directly to your browser's JIT Compiler engine efficiency. The System RAM test directly exhausts physical memory bandwidth.
     </div>
   </div>
 

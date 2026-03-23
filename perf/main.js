@@ -17,12 +17,35 @@ document.addEventListener('DOMContentLoaded', async () => {
   const yieldToBrowser = () =>
     new Promise((resolve) => setTimeout(resolve, 50));
 
-  // --- CPU Test Logic Generator ---
-  // We generate the benchmark string dynamically to inject into Web Workers.
-  // It calibrates the loop size and then runs for a target duration.
-  /** @param {number} durationMs */
-  const getCpuBenchmarkString = (durationMs) => `
-    function calculateFlops() {
+  // --- UI Formatting Utility ---
+  /**
+   * @param {string} elementId
+   * @param {number} value
+   * @param {number} maxValue
+   * @param {string} [unit]
+   */
+  function updateScore(elementId, value, maxValue, unit = 'GFLOPS') {
+    const el = /** @type {HTMLElement} */ (document.getElementById(elementId));
+    if (!el) return;
+    el.innerText = `${value.toFixed(2)} ${unit}`;
+    if (el.parentElement) {
+      el.parentElement.style.setProperty(
+        '--pct',
+        Math.min((value / maxValue) * 100, 100) + '%',
+      );
+    }
+  }
+
+  // --- CPU Benchmark Generation ---
+  // Programmatically generate unrolled loop to keep code extremely clean
+  // 4 statements x 2 ops = 8 ops per line. 16 lines = 128 ops per loop.
+  const UNROLL_CPU = 16;
+  const cpuFmaLine =
+    'v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;\n          ';
+  const cpuMathCore = Array(UNROLL_CPU).fill(cpuFmaLine).join('');
+
+  const getWorkerScript = () => `
+    function calculateFlops(durationMs) {
       // Prevent static analysis optimizations by using dynamic seed.
       // We use oscillating stable FMA values to prevent Infinity and CPU FPU power-gating.
       const startV = (Date.now() % 10) * 0.00001; 
@@ -35,23 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       while(true) {
         let t0 = performance.now();
         for(let i = 0; i < N; i++) {
-          // 4 statements x 2 ops = 8 ops per line. 16 lines = 128 ops per loop.
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
+          ${cpuMathCore}
         }
         let t1 = performance.now();
         elapsed = t1 - t0;
@@ -62,28 +69,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Measurement Phase
       let totalTime = 0;
       let totalOps = 0;
-      let baseOps = N * 128; // 128 ops per inner loop iteration
+      const baseOps = N * ${UNROLL_CPU * 8};
       
-      let startTest = performance.now();
-      while(performance.now() - startTest < ${durationMs}) {
+      const startTest = performance.now();
+      while(performance.now() - startTest < durationMs) {
         let t0 = performance.now();
         for(let i = 0; i < N; i++) {
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
+          ${cpuMathCore}
         }
         let t1 = performance.now();
         totalTime += (t1 - t0);
@@ -92,69 +84,58 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       return { timeInSeconds: totalTime / 1000, ops: totalOps, sanity: v1 + v2 + v3 + v4 };
     }
+
+    self.onmessage = function(e) {
+      self.postMessage(calculateFlops(e.data));
+    };
   `;
+
+  // Create worker pool URL once to reduce memory and GC fragmentation
+  const cpuWorkerBlob = new Blob([getWorkerScript()], {
+    type: 'application/javascript',
+  });
+  const cpuWorkerUrl = URL.createObjectURL(cpuWorkerBlob);
 
   /** @param {number} durationMs */
   function runInWorker(durationMs) {
     return new Promise((resolve) => {
-      const workerCode = `
-        ${getCpuBenchmarkString(durationMs)}
-        self.onmessage = function() {
-          const result = calculateFlops();
-          self.postMessage(result);
-        };
-      `;
-      const blob = new Blob([workerCode], {type: 'application/javascript'});
-      const workerUrl = URL.createObjectURL(blob);
-      const worker = new Worker(workerUrl);
-
+      const worker = new Worker(cpuWorkerUrl);
       worker.onmessage = function (e) {
-        URL.revokeObjectURL(workerUrl);
         worker.terminate();
         resolve(e.data);
       };
-      worker.postMessage('start');
+      // Pass the target duration dynamically to avoid evaluating the Blob string multiple times
+      worker.postMessage(durationMs);
     });
   }
 
   // --- 1. SINGLE CORE CPU (FP64) ---
   async function runSingleCore() {
-    /** @type {HTMLElement} */ (
+    const el = /** @type {HTMLElement} */ (
       document.getElementById('res-single')
-    ).innerText = 'Calculating...';
+    );
+    el.innerText = 'Calculating...';
     await yieldToBrowser();
 
     // Run for 1.5 seconds in a worker to keep UI responsive and get accurate measurement
     const result = await runInWorker(1500);
-
     const gflops = result.ops / result.timeInSeconds / 1e9;
-    const el = document.getElementById('res-single');
-    if (el) {
-      el.innerText = `${gflops.toFixed(2)} GFLOPS`;
-      if (el.parentElement) {
-        el.parentElement.style.setProperty(
-          '--pct',
-          Math.min((gflops / 10) * 100, 100) + '%',
-        );
-      }
-    }
+
+    updateScore('res-single', gflops, 10);
     log(`✓ Single-Core complete. (Sanity check: ${result.sanity})`);
   }
 
   // --- 2. MULTI-CORE CPU (FP64) ---
   async function runMultiCore() {
-    /** @type {HTMLElement} */ (
+    const el = /** @type {HTMLElement} */ (
       document.getElementById('res-multi')
-    ).innerText = 'Calculating...';
+    );
+    el.innerText = 'Calculating...';
     await yieldToBrowser();
 
-    const promises = [];
     // We run for 2.5 seconds to ensure all workers definitely overlap during their
     // performance.now() window, pushing thermal limits and concurrent capability.
-    for (let i = 0; i < logicalCores; i++) {
-      promises.push(runInWorker(2500));
-    }
-
+    const promises = Array(logicalCores).fill(2500).map(runInWorker);
     const results = await Promise.all(promises);
 
     let combinedOpsPerSec = 0;
@@ -165,41 +146,35 @@ document.addEventListener('DOMContentLoaded', async () => {
       combinedSanity += res.sanity;
     }
 
-    const gflops = combinedOpsPerSec / 1e9;
-    const el = document.getElementById('res-multi');
-    if (el) {
-      el.innerText = `${gflops.toFixed(2)} GFLOPS`;
-      if (el.parentElement) {
-        el.parentElement.style.setProperty(
-          '--pct',
-          Math.min((gflops / 60) * 100, 100) + '%',
-        );
-      }
-    }
+    updateScore('res-multi', combinedOpsPerSec / 1e9, 60);
     log(`✓ Multi-Core complete. (Combined sanity: ${combinedSanity})`);
   }
 
   // --- 3. GPU (FP32) via WebGL2 ---
   async function runGPU() {
-    /** @type {HTMLElement} */ (document.getElementById('res-gpu')).innerText =
-      'Calculating...';
+    const el = /** @type {HTMLElement} */ (document.getElementById('res-gpu'));
+    el.innerText = 'Calculating...';
     await yieldToBrowser();
 
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 512;
+
     // Request high-performance GPU if multiple exist (e.g. integrated vs discrete)
     const gl = canvas.getContext('webgl2', {
       powerPreference: 'high-performance',
     });
 
     if (!gl) {
-      /** @type {HTMLElement} */ (
-        document.getElementById('res-gpu')
-      ).innerText = 'WebGL2 Not Supported';
+      el.innerText = 'WebGL2 Not Supported';
       log('✗ GPU benchmark skipped (WebGL2 not available).');
       return;
     }
+
+    const UNROLL_GPU = 10;
+    const gpuFmaLine =
+      'v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;\n        ';
+    const gpuMathCore = Array(UNROLL_GPU).fill(gpuFmaLine).join('');
 
     const vsSource = `#version 300 es
       in vec4 a_position;
@@ -221,16 +196,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         float b = 2.5 + (gl_FragCoord.y * 0.0000001);
         
         for(int i = 0; i < u_loops; i++) {
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
-          v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;
+          ${gpuMathCore}
         }
         
         // Output depends on all variables so the loop isn't dead-code eliminated
@@ -287,9 +253,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // readPixels again forces a sync, giving us precise execution time of the draw call
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-      let t1 = performance.now();
 
-      timeMs = t1 - t0;
+      timeMs = performance.now() - t0;
       if (timeMs > 30) break; // found a good stable chunk
 
       loops *= 4;
@@ -300,13 +265,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Scale chunk length to ~250ms for the actual benchmark
-    let targetLoops = Math.floor(loops * (250 / Math.max(timeMs, 1)));
-    if (targetLoops > 500000) targetLoops = 500000;
-    if (targetLoops < 1) targetLoops = 1;
+    const targetLoops = Math.max(
+      1,
+      Math.min(500000, Math.floor(loops * (250 / Math.max(timeMs, 1)))),
+    );
 
     let totalTime = 0;
     let totalOps = 0;
     const testFrames = 6; // 6 * 250ms = 1.5 seconds total runtime
+    const opsPerPixel = targetLoops * UNROLL_GPU * 8;
+    const canvasPixels = 512 * 512;
 
     for (let i = 0; i < testFrames; i++) {
       gl.uniform1i(u_loops_loc, targetLoops);
@@ -315,46 +283,136 @@ document.addEventListener('DOMContentLoaded', async () => {
       let t0 = performance.now();
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-      let t1 = performance.now();
 
-      totalTime += t1 - t0;
-
-      // 512x512 pixels = 262144
-      // targetLoops * 10 lines * 4 statements * 2 ops = targetLoops * 80 ops per pixel
-      totalOps += 262144 * targetLoops * 80;
+      totalTime += performance.now() - t0;
+      totalOps += canvasPixels * opsPerPixel;
 
       await yieldToBrowser();
     }
 
-    const gflops = totalOps / (totalTime / 1000) / 1e9;
-    const resGpu = document.getElementById('res-gpu');
-    if (resGpu) {
-      resGpu.innerText = `${gflops.toFixed(2)} GFLOPS`;
-      if (resGpu.parentElement) {
-        resGpu.parentElement.style.setProperty(
-          '--pct',
-          Math.min((gflops / 10000) * 100, 100) + '%',
-        );
-      }
-    }
+    // Cleanup WebGL resources cleanly
+    gl.deleteProgram(program);
+    gl.deleteBuffer(positionBuffer);
+
+    updateScore('res-gpu', totalOps / (totalTime / 1000) / 1e9, 10000);
     log(`✓ GPU complete. (Sanity check: rgba(${pixel.join(',')}))`);
   }
 
+  // --- 4. MEMORY BANDWIDTH (RAM) ---
+  async function runMemory() {
+    const el = /** @type {HTMLElement} */ (document.getElementById('res-mem'));
+    el.innerText = 'Calculating...';
+    await yieldToBrowser();
+
+    // 16 Million Float64s = 128 MB. Massively exceeds L3 Cache to force RAM bottleneck.
+    const sizeElements = 16 * 1024 * 1024;
+    const src = new Float64Array(sizeElements);
+    const dst = new Float64Array(sizeElements);
+
+    // Prevent clever page-fault zero-fill optimizations by dirtying the source
+    for (let i = 0; i < sizeElements; i += 4096) {
+      src[i] = Math.random();
+    }
+
+    // Warmup JIT & OS memory paging
+    for (let i = 0; i < 3; i++) {
+      dst.set(src);
+    }
+
+    let totalTime = 0;
+    let totalBytesMoved = 0;
+    const testDuration = 1500; // 1.5 seconds
+
+    const startTest = performance.now();
+    while (performance.now() - startTest < testDuration) {
+      let t0 = performance.now();
+      for (let i = 0; i < 5; i++) {
+        // .set() maps natively to fast memcpy/memmove inside V8/JSC
+        dst.set(src);
+        src[0] = performance.now(); // Mutate slightly
+      }
+      let t1 = performance.now();
+
+      totalTime += t1 - t0;
+      // Reading 128MB, writing 128MB = 256MB moved per copy * 5 copies
+      totalBytesMoved += sizeElements * 8 * 2 * 5;
+
+      await yieldToBrowser();
+    }
+
+    const gbPerSec = totalBytesMoved / 1e9 / (totalTime / 1000);
+    updateScore('res-mem', gbPerSec, 100, 'GB/s');
+    log(
+      `✓ Memory bandwidth complete. (${(totalBytesMoved / 1e9).toFixed(1)} GB moved)`,
+    );
+  }
+
   // --- Orchestrator ---
+  let isRunning = false;
   async function runAllBenchmarks() {
+    if (isRunning) return;
+    isRunning = true;
+
+    // Reset UI for consecutive runs
+    const btn = /** @type {HTMLButtonElement} */ (
+      document.getElementById('btn-run')
+    );
+    const statusText = document.getElementById('status-text');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = 'Running...';
+      btn.style.opacity = '0.5';
+      btn.style.cursor = 'not-allowed';
+    }
+    if (statusText)
+      statusText.innerText = 'Running automated hardware benchmarks...';
+
+    ['res-single', 'res-multi', 'res-gpu', 'res-mem'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.innerText = 'Queued...';
+        if (el.parentElement) el.parentElement.style.setProperty('--pct', '0%');
+      }
+    });
+
+    const sEl = document.getElementById('res-score');
+    if (sEl) sEl.innerText = 'Calculating...';
+
+    logElement.innerHTML = 'Logs:<br>';
+
     await runSingleCore();
     await yieldToBrowser();
     await runMultiCore();
     await yieldToBrowser();
     await runGPU();
+    await yieldToBrowser();
+    await runMemory();
     log('<br><b>All benchmarks finished.</b>');
 
     // Hardware Context Guessing
+    const singleEl = document.getElementById('res-single');
     const multiEl = document.getElementById('res-multi');
     const gpuEl = document.getElementById('res-gpu');
+    const memEl = document.getElementById('res-mem');
 
+    const single = singleEl ? parseFloat(singleEl.innerText) || 0 : 0;
     const multi = multiEl ? parseFloat(multiEl.innerText) || 0 : 0;
     const gpu = gpuEl ? parseFloat(gpuEl.innerText) || 0 : 0;
+    const mem = memEl ? parseFloat(memEl.innerText) || 0 : 0;
+
+    // Weighting the Compute Index
+    // Single-Core governs browser UI responsiveness
+    // Multi-Core measures raw concurrent parallel throughput
+    // GPU outputs huge relative GFLOPS; normalized (0.25) to prevent dwarfing CPU metrics
+    // RAM Bandwidth mitigates physical L3 cache starvation limits
+    const computeIndex = Math.round(
+      single * 50 + multi * 10 + gpu * 0.25 + mem * 10,
+    );
+
+    const scoreEl = document.getElementById('res-score');
+    if (scoreEl) {
+      scoreEl.innerText = computeIndex.toLocaleString();
+    }
 
     let cpuMatch = 'Entry-level CPU';
     if (multi > 10) cpuMatch = 'Mid-range Desktop/Laptop CPU';
@@ -368,10 +426,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (gpu > 7000) gpuMatch = 'High-end GPU (e.g. RTX 3060 / Apple M2 Max)';
     if (gpu > 15000) gpuMatch = 'Enthusiast GPU (e.g. RTX 3080 / RTX 4090)';
 
+    let ramMatch = 'Standard DDR3 / Single-Channel';
+    if (mem > 20) ramMatch = 'Dual-Channel DDR4 / LPDDR4';
+    if (mem > 45) ramMatch = 'High-performance DDR5 / LPDDR5';
+    if (mem > 90) ramMatch = 'Unified Memory (e.g. Apple M-Series Max/Pro)';
+    if (mem > 200) ramMatch = 'Ultra-Unified workstation memory';
+
     log(`<span style="color: #4ec9b0">↳ CPU Class: ${cpuMatch}</span>`);
     if (gpu > 0)
       log(`<span style="color: #4ec9b0">↳ GPU Class: ${gpuMatch}</span>`);
+    if (mem > 0)
+      log(`<span style="color: #4ec9b0">↳ RAM Class: ${ramMatch}</span>`);
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = 'Run Again';
+      btn.style.opacity = '1';
+      btn.style.cursor = 'pointer';
+    }
+    if (statusText) statusText.innerText = 'Ready.';
+    isRunning = false;
   }
+
+  const runBtn = document.getElementById('btn-run');
+  if (runBtn) runBtn.addEventListener('click', runAllBenchmarks);
 
   // Start immediately
   runAllBenchmarks();
