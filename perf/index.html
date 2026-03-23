@@ -59,7 +59,7 @@
   <div class="box">
     <div class="header" style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px;">
       <div style="flex: 1;">
-        <h1>Total Compute Estimator</h1>
+        <h1 style="border-bottom: none; padding-bottom: 0; margin-bottom: 5px;">Total Compute Estimator</h1>
         <p style="color: #aaa; font-family: monospace; margin: 0;" id="status-text">Running automated hardware benchmarks...</p>
       </div>
       <button id="btn-run" style="padding: 10px 20px; background: #1e3a5f; color: #fff; border: 1px solid #4ec9b0; border-radius: 6px; font-weight: bold; cursor: not-allowed; opacity: 0.5; transition: all 0.2s ease; margin-bottom: 15px;" disabled>
@@ -76,6 +76,7 @@
       <div style="margin-top: 25px; text-align: center; padding: 25px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
         <div style="font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px;">Unified Compute Score</div>
         <div id="res-score" style="font-size: 48px; font-weight: 800; color: #4ec9b0; text-shadow: 0 0 20px rgba(78, 201, 176, 0.4); font-variant-numeric: tabular-nums;">Calculating...</div>
+        <div id="sys-info" style="margin-top: 15px; color: #61afef; font-family: monospace; font-size: 13px; font-weight: bold;">Detecting system environment...</div>
       </div>
     </div>
 
@@ -88,7 +89,7 @@
     </div>
   </div>
 
-  <script src="main.js"></script>
+  <script type="module" src="main.js"></script>
 </body>
 
 </html>
