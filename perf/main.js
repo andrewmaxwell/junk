@@ -84,10 +84,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const dom = domEl ? parseFloat(domEl.innerText) || 0 : 0;
     const mem = memEl ? parseFloat(memEl.innerText) || 0 : 0;
 
-    // Weight DOM at 2x. E.g. 150 K-Ops/s * 2 = 300 compute score mapping.
-    const computeIndex = Math.round(
-      single * 50 + multi * 10 + gpu * 0.25 + dom * 2 + mem * 10,
+    // Calculate the Geometric Mean. This is the mathematically perfect industry standard (used by SPEC/Geekbench)
+    // for normalizing vastly different numerical ranges so no single test can arbitrarily dominate the final score.
+    const gMean = Math.pow(
+      Math.max(single, 1) *
+        Math.max(multi, 1) *
+        Math.max(gpu, 1) *
+        Math.max(dom, 1) *
+        Math.max(mem, 1),
+      1 / 5,
     );
+
+    // Scale the raw geometric mean (usually ~80-90 for high-end) by 30 to cosmetically map to a 4-digit UI score
+    const computeIndex = Math.round(gMean * 30);
 
     if (sEl) sEl.innerText = computeIndex.toLocaleString();
 
