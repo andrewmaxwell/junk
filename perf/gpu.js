@@ -59,10 +59,19 @@ export async function runGPU() {
   };
 
   const program = gl.createProgram();
-  gl.attachShader(program, compile(gl.VERTEX_SHADER, vsSource));
-  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fsSource));
+  if (!program) throw new Error('Could not create program');
+
+  const vsShader = compile(gl.VERTEX_SHADER, vsSource);
+  const fsShader = compile(gl.FRAGMENT_SHADER, fsSource);
+
+  gl.attachShader(program, vsShader);
+  gl.attachShader(program, fsShader);
   gl.linkProgram(program);
   gl.useProgram(program);
+
+  // Automatically queue attached GLSL strings for garbage collection explicitly natively
+  gl.deleteShader(vsShader);
+  gl.deleteShader(fsShader);
 
   const positionBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
@@ -106,16 +115,19 @@ export async function runGPU() {
 
   let totalTime = 0;
   let totalOps = 0;
-  const testFrames = 6;
+  const testDuration = 1500;
   const opsPerPixel = targetLoops * UNROLL_GPU * 8;
   const canvasPixels = 512 * 512;
+  const startTest = performance.now();
 
-  for (let i = 0; i < testFrames; i++) {
+  while (performance.now() - startTest < testDuration) {
     gl.uniform1i(u_loops_loc, targetLoops);
+    // Block CPU until VRAM layout synchronizes
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
 
     let t0 = performance.now();
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+    // Block CPU until execution pipeline renders
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
 
     totalTime += performance.now() - t0;
@@ -126,6 +138,10 @@ export async function runGPU() {
 
   gl.deleteProgram(program);
   gl.deleteBuffer(positionBuffer);
+
+  // Safely release context bounds immediately dropping 256MB+ canvas caches
+  const ext = gl.getExtension('WEBGL_lose_context');
+  if (ext) ext.loseContext();
 
   updateScore('res-gpu', totalOps / (totalTime / 1000) / 1e9, 10000);
   log(`✓ GPU complete. (Sanity check: rgba(${pixel.join(',')}))`);

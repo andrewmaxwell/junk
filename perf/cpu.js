@@ -82,7 +82,12 @@ export async function runMultiCore() {
   if (el) el.innerText = 'Calculating...';
   await yieldToBrowser();
 
-  const promises = Array(logicalCores).fill(2500).map(runInWorker);
+  // If logicalCores is null (obfuscated by privacy browsers), spawn 8 concurrent workers.
+  // This is a safe brute-force fallback that will saturate typical mobile/laptop CPUs
+  // without heavily overwhelming the OS scheduler on older dual-core machines.
+  const threadsToSpawn = logicalCores || 8;
+
+  const promises = Array(threadsToSpawn).fill(2500).map(runInWorker);
   const results = await Promise.all(promises);
 
   let combinedOpsPerSec = 0;

@@ -3,10 +3,15 @@ import {getSystemInfo, logicalCores} from './telemetry.js';
 import {runSingleCore, runMultiCore} from './cpu.js';
 import {runGPU} from './gpu.js';
 import {runMemory} from './memory.js';
+import {runDOM} from './dom.js';
 
 document.addEventListener('DOMContentLoaded', () => {
-  const coreCountEl = document.getElementById('core-count');
-  if (coreCountEl) coreCountEl.innerText = logicalCores.toString();
+  const multiLabelEl = document.getElementById('multi-label');
+  if (multiLabelEl) {
+    multiLabelEl.innerText = logicalCores
+      ? `All Cores CPU (${logicalCores} Threads):`
+      : 'All Cores CPU (Unknown Threads):';
+  }
 
   const infoEl = document.getElementById('sys-info');
   if (infoEl) infoEl.innerText = getSystemInfo();
@@ -22,6 +27,13 @@ document.addEventListener('DOMContentLoaded', () => {
     );
     const statusText = document.getElementById('status-text');
 
+    const shareBtn = document.getElementById('btn-share');
+    if (shareBtn) {
+      shareBtn.style.opacity = '0';
+      shareBtn.style.pointerEvents = 'none';
+      shareBtn.innerText = '📋 Copy Results to Clipboard';
+    }
+
     if (btn) {
       btn.disabled = true;
       btn.innerText = 'Running...';
@@ -33,13 +45,16 @@ document.addEventListener('DOMContentLoaded', () => {
       statusText.innerText = 'Running automated hardware benchmarks...';
     }
 
-    ['res-single', 'res-multi', 'res-gpu', 'res-mem'].forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) {
-        el.innerText = 'Queued...';
-        if (el.parentElement) el.parentElement.style.setProperty('--pct', '0%');
-      }
-    });
+    ['res-single', 'res-multi', 'res-gpu', 'res-dom', 'res-mem'].forEach(
+      (id) => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.innerText = 'Queued...';
+          if (el.parentElement)
+            el.parentElement.style.setProperty('--pct', '0%');
+        }
+      },
+    );
 
     const sEl = document.getElementById('res-score');
     if (sEl) sEl.innerText = 'Calculating...';
@@ -52,21 +67,26 @@ document.addEventListener('DOMContentLoaded', () => {
     await yieldToBrowser();
     await runGPU();
     await yieldToBrowser();
+    await runDOM();
+    await yieldToBrowser();
     await runMemory();
     log('<br><b>All benchmarks finished.</b>');
 
     const singleEl = document.getElementById('res-single');
     const multiEl = document.getElementById('res-multi');
     const gpuEl = document.getElementById('res-gpu');
+    const domEl = document.getElementById('res-dom');
     const memEl = document.getElementById('res-mem');
 
     const single = singleEl ? parseFloat(singleEl.innerText) || 0 : 0;
     const multi = multiEl ? parseFloat(multiEl.innerText) || 0 : 0;
     const gpu = gpuEl ? parseFloat(gpuEl.innerText) || 0 : 0;
+    const dom = domEl ? parseFloat(domEl.innerText) || 0 : 0;
     const mem = memEl ? parseFloat(memEl.innerText) || 0 : 0;
 
+    // Weight DOM at 2x. E.g. 150 K-Ops/s * 2 = 300 compute score mapping.
     const computeIndex = Math.round(
-      single * 50 + multi * 10 + gpu * 0.25 + mem * 10,
+      single * 50 + multi * 10 + gpu * 0.25 + dom * 2 + mem * 10,
     );
 
     if (sEl) sEl.innerText = computeIndex.toLocaleString();
@@ -94,6 +114,29 @@ document.addEventListener('DOMContentLoaded', () => {
       log(`<span style="color: #4ec9b0">↳ GPU Class: ${gpuMatch}</span>`);
     if (mem > 0)
       log(`<span style="color: #4ec9b0">↳ RAM Class: ${ramMatch}</span>`);
+
+    if (shareBtn) {
+      shareBtn.style.opacity = '1';
+      shareBtn.style.pointerEvents = 'auto';
+
+      shareBtn.onclick = () => {
+        const info = infoEl ? infoEl.innerText : '';
+        const textToCopy = `Total Compute Estimator Score: ${computeIndex.toLocaleString()}
+${info}
+
+Single-Core: ${single.toFixed(2)} GFLOPS
+Multi-Core: ${multi.toFixed(2)} GFLOPS
+GPU Compute: ${gpu.toFixed(2)} GFLOPS
+DOM Rendering: ${dom.toFixed(2)} K-Ops/s
+System RAM: ${mem.toFixed(2)} GB/s`;
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          shareBtn.innerText = '✅ Copied to Clipboard!';
+          setTimeout(() => {
+            shareBtn.innerText = '📋 Copy Results to Clipboard';
+          }, 2000);
+        });
+      };
+    }
 
     if (btn) {
       btn.disabled = false;
