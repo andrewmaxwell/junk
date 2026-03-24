@@ -1,9 +1,9 @@
-import {log, clearLog, yieldToBrowser} from './ui.js';
-import {getSystemInfo, logicalCores} from './telemetry.js';
-import {runSingleCore, runMultiCore} from './cpu.js';
-import {runGPU} from './gpu.js';
-import {runMemory} from './memory.js';
-import {runDOM} from './dom.js';
+import { runMultiCore, runSingleCore } from './cpu.js';
+import { runDOM } from './dom.js';
+import { runGPU } from './gpu.js';
+import { runMemory } from './memory.js';
+import { getSystemInfo, logicalCores } from './telemetry.js';
+import { clearLog, log, yieldToBrowser } from './ui.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   const multiLabelEl = document.getElementById('multi-label');
@@ -130,14 +130,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
       shareBtn.onclick = () => {
         const info = infoEl ? infoEl.innerText : '';
-        const textToCopy = `Total Compute Estimator Score: ${computeIndex.toLocaleString()}
-${info}
+        const multiLabel = multiLabelEl
+          ? multiLabelEl.innerText
+          : 'All Cores CPU:';
 
-Single-Core: ${single.toFixed(2)} GFLOPS
-Multi-Core: ${multi.toFixed(2)} GFLOPS
-GPU Compute: ${gpu.toFixed(2)} GFLOPS
-DOM Rendering: ${dom.toFixed(2)} K-Ops/s
-System RAM: ${mem.toFixed(2)} GB/s`;
+        const textToCopy = `${info}
+Single-Core CPU: ${single.toFixed(2)} GFLOPS
+${multiLabel} ${multi.toFixed(2)} GFLOPS
+GPU (WebGL2): ${gpu.toFixed(2)} GFLOPS
+DOM & UI Rendering: ${dom.toFixed(2)} K-Ops/s
+System RAM (Memcopy): ${mem.toFixed(2)} GB/s
+Unified Compute Score: ${computeIndex.toLocaleString()}`;
+
         navigator.clipboard.writeText(textToCopy).then(() => {
           shareBtn.innerText = '✅ Copied to Clipboard!';
           setTimeout(() => {
