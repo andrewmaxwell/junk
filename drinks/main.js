@@ -352,7 +352,7 @@ function renderNode(nodeId, orderState, isGoingBack = false) {
   if (nodeId === 'start') {
     html += `
       <div class="animate-in" style="font-size: 3.5rem; margin-bottom: 8px;">✨</div>
-      <div class="animate-in" style="animation-delay: 0.05s; color: var(--text-muted); font-size: 1rem; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 4px;">Welcome to</div>
+      <div class="animate-in" style="animation-delay: 0.05s; color: var(--text-muted); font-size: 1rem; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 4px;">You've regretfully arrived at</div>
       <h1 class="highlight animate-in" style="animation-delay: 0.1s; font-size: 2.8rem; margin-bottom: 12px; line-height: 1.1; cursor: pointer;">Andrew's<br>Coffee Bar</h1>
       <p class="animate-in" style="animation-delay: 0.15s; margin-bottom: 32px; font-size: 1.1rem;">${node.question}</p>
     `;
@@ -434,8 +434,7 @@ function renderEndpoint(nodeData, orderState, isGoingBack = false) {
   if (!appContainer) return;
   appContainer.innerHTML = `
     <div class="animate-in" style="font-size: 3.5rem; margin-bottom: 8px;">✨</div>
-    <h2>Great choice!</h2>
-    <p>We are spinning up a:</p>
+    <h2>A truly terrible choice.</h2>
     <h1 class="highlight animate-in" style="margin-bottom: 16px;">${finalDrinkName}</h1>
     <p class="animate-in" style="animation-delay: 0.1s"><em>(${finalRecipe})</em></p>
 
