@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "drinks",
+    "title": "Barista Bot",
+    "year": 2026,
+    "desc": "A web app that helps you figure out what to drink at my house."
+  },
+  {
     "filePath": "polygonPhysics",
     "title": "Polygon Physics",
     "year": 2025,

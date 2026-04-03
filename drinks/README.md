@@ -1,0 +1,1 @@
+Barista Bot - 2026 - A web app that helps you figure out what to drink at my house.
