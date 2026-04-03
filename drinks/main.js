@@ -87,7 +87,11 @@ function validateMenu() {
     if (node.options) {
       node.options.forEach(
         (/** @type {any} */ opt, /** @type {number} */ idx) => {
-          if (opt.next && !(/** @type {any} */ (menuData)[opt.next])) {
+          if (
+            opt.next &&
+            opt.next !== 'surprise_handler' &&
+            !(/** @type {any} */ (menuData)[opt.next])
+          ) {
             console.error(
               `VALIDATION ERROR: Node '${key}' option ${idx} points to non-existent next node '${opt.next}'.`,
             );
@@ -377,7 +381,7 @@ function renderNode(nodeId, orderState, isGoingBack = false) {
 
   let actionBarHtml = '';
   if (nodeId !== 'start') {
-    actionBarHtml += `<button type="button" class="btn btn-secondary animate-in" style="animation-delay: ${node.options ? node.options.length * 0.05 : 0}s" id="back-btn">Undo</button>`;
+    actionBarHtml += `<button type="button" class="btn btn-secondary animate-in" style="animation-delay: ${node.options ? node.options.length * 0.05 : 0}s" id="back-btn">Undo 🙂‍↔️</button>`;
     actionBarHtml += `<button type="button" class="btn btn-danger animate-in" style="animation-delay: ${node.options ? (node.options.length + 1) * 0.05 : 0.05}s" id="restart-btn">Start over</button>`;
   }
 
@@ -439,8 +443,8 @@ function renderEndpoint(nodeData, orderState, isGoingBack = false) {
     <p class="animate-in" style="animation-delay: 0.1s"><em>(${finalRecipe})</em></p>
 
     <div class="action-bar animate-in" style="animation-delay: 0.2s;">
-      <button type="button" class="btn btn-secondary" id="back-btn">Undo</button>
-      <button type="button" class="btn" id="order-btn">Send it</button>
+      <button type="button" class="btn btn-secondary" id="back-btn">Undo 🙂‍↔️</button>
+      <button type="button" class="btn" id="order-btn">Send it 🚀</button>
     </div>
   `;
 }

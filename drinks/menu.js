@@ -3,7 +3,9 @@ const getMilkOptions = (next) =>
   [
     'Whole Milk',
     'Oat Milk',
-    'Half & Half' /* 'Almond Milk', 'Soy Milk', 'Coconut Milk' */,
+    // 'Almond Milk',
+    // 'Soy Milk',
+    // 'Coconut Milk',
   ].map((milk) => ({label: milk, modifierValue: milk, next}));
 
 export const menuData = {
@@ -11,9 +13,9 @@ export const menuData = {
     question: 'Select the liquid that keeps you tethered to this mortal plane:',
     options: [
       {label: 'Bean Soup (Espresso) ☕', next: 'espresso_temp'},
-      {label: 'Leaf Soup (Tea & Matcha) 🍵', next: 'tea_category_choice'},
+      {label: 'Leaf Soup (Tea) 🍵', next: 'tea_category_choice'},
       {label: 'Misc Coping Mechanisms 🧊', next: 'other_drinks'},
-      {label: 'Make It Hurt (Surprise Me) 🎲', next: 'surprise_handler'},
+      {label: 'Surprise Me! 🎲', next: 'surprise_handler'},
     ],
   },
 
@@ -21,27 +23,27 @@ export const menuData = {
     question: 'No caffeine, no problem. What are we drinking?',
     options: [
       {
-        label: "Hot Choccy (I'm baby)",
+        label: "Hot Choccy (I'm baby) 👶",
         next: 'milk_choice_cocoa',
         pendingEndpoint: 'endpoint_hot_chocolate',
       },
       {
-        label: 'Vanilla Steamer (Kid friendly)',
+        label: 'Vanilla Steamer (Kid friendly) 🍼',
         next: 'milk_choice_cocoa',
         pendingEndpoint: 'endpoint_steamer',
       },
       {
-        label: 'A Cold Glass of Milk',
+        label: 'A Cold Glass of Milk 🥛',
         next: 'milk_choice_short',
         pendingEndpoint: 'endpoint_glass_of_milk',
       },
       {
-        label: 'Sparkling Seltzer Water',
+        label: 'Sparkling Seltzer Water 🫧',
         next: 'flavor_sweetener_choice_simple',
         pendingEndpoint: 'endpoint_seltzer',
       },
       {
-        label: 'Ice Water (POAC)',
+        label: 'Ice Water (POAC) 🚰',
         inlineEndpoint: {
           isEndpoint: true,
           drinkName: 'Ice Water',
@@ -55,10 +57,10 @@ export const menuData = {
   tea_category_choice: {
     question: 'Hot leaf juice. Pick your plant:',
     options: [
-      {label: 'Matcha Latte', next: 'temp_choice_matcha'},
-      {label: 'Chai Latte', next: 'temp_choice_chai'},
-      {label: 'Dirty Chai', next: 'temp_choice_dirty_chai'},
-      {label: 'Traditional Teas', next: 'tea_temp_choice'},
+      {label: 'Matcha Latte 🍵', next: 'temp_choice_matcha'},
+      {label: 'Chai Latte ☕', next: 'temp_choice_chai'},
+      {label: 'Dirty Chai ☕', next: 'temp_choice_dirty_chai'},
+      {label: 'Traditional Teas 🍵', next: 'tea_temp_choice'},
     ],
   },
 
@@ -66,8 +68,8 @@ export const menuData = {
     question: 'Select your thermal preference:',
     isModifier: true,
     options: [
-      {label: 'Hot & Cozy', modifierValue: 'Hot', next: 'tea_caffeine'},
-      {label: 'Crisp & Iced', modifierValue: 'Iced', next: 'tea_caffeine'},
+      {label: 'Hot & Cozy 🔥', modifierValue: 'Hot', next: 'tea_caffeine'},
+      {label: 'Crisp & Iced 🧊', modifierValue: 'Iced', next: 'tea_caffeine'},
     ],
   },
 
@@ -76,12 +78,12 @@ export const menuData = {
     question: 'Select your thermal preference:',
     options: [
       {
-        label: 'Hot & Cozy',
+        label: 'Hot & Cozy 🔥',
         next: 'caffeine_choice_dirty_chai',
         pendingEndpoint: 'endpoint_hot_dirty_chai',
       },
       {
-        label: 'Crisp & Iced',
+        label: 'Crisp & Iced 🧊',
         next: 'caffeine_choice_dirty_chai',
         pendingEndpoint: 'endpoint_iced_dirty_chai',
       },
@@ -91,12 +93,12 @@ export const menuData = {
     question: 'Select your thermal preference:',
     options: [
       {
-        label: 'Hot & Cozy',
+        label: 'Hot & Cozy 🔥',
         next: 'milk_choice_short',
         pendingEndpoint: 'endpoint_hot_matcha',
       },
       {
-        label: 'Crisp & Iced',
+        label: 'Crisp & Iced 🧊',
         next: 'milk_choice_short',
         pendingEndpoint: 'endpoint_iced_matcha',
       },
@@ -106,12 +108,12 @@ export const menuData = {
     question: 'Select your thermal preference:',
     options: [
       {
-        label: 'Hot & Cozy',
+        label: 'Hot & Cozy 🔥',
         next: 'milk_choice_short',
         pendingEndpoint: 'endpoint_hot_chai',
       },
       {
-        label: 'Crisp & Iced',
+        label: 'Crisp & Iced 🧊',
         next: 'milk_choice_short',
         pendingEndpoint: 'endpoint_iced_chai',
       },
@@ -125,7 +127,7 @@ export const menuData = {
       {label: 'Hot & Searing 🔥', next: 'espresso_hot_style'},
       {label: 'Cold & Emotionally Distant 🧊', next: 'espresso_iced_style'},
       {
-        label: 'Aggressively Blended 🌪️',
+        label: 'Like a Milkshake 🌪️',
         next: 'caffeine_choice_frappe',
         pendingEndpoint: 'endpoint_frappe',
       },
@@ -135,24 +137,24 @@ export const menuData = {
     question: 'How do you want your hot liquid anxiety distributed?',
     options: [
       {
-        label: 'Straight Shot (Pure Pain)',
-        next: 'caffeine_choice_espresso',
-        pendingEndpoint: 'endpoint_espresso',
+        label: 'Smooth & Milky (Latte) 🍼',
+        next: 'caffeine_choice_latte',
+        pendingEndpoint: 'endpoint_hot_latte',
       },
       {
-        label: 'Strong & Black (Existential Dread)',
-        next: 'caffeine_choice_americano',
-        pendingEndpoint: 'endpoint_hot_americano',
-      },
-      {
-        label: 'A little milk (Cortado)',
+        label: 'A little milk (Cortado) 🎩',
         next: 'caffeine_choice_cortado',
         pendingEndpoint: 'endpoint_cortado',
       },
       {
-        label: 'Smooth & Milky (Adult Baby)',
-        next: 'caffeine_choice_latte',
-        pendingEndpoint: 'endpoint_hot_latte',
+        label: 'Strong & Black (Americano) 😨',
+        next: 'caffeine_choice_americano',
+        pendingEndpoint: 'endpoint_hot_americano',
+      },
+      {
+        label: 'Straight Shot (Espresso) 💀',
+        next: 'caffeine_choice_espresso',
+        pendingEndpoint: 'endpoint_espresso',
       },
     ],
   },
@@ -160,32 +162,32 @@ export const menuData = {
     question: 'How do you want your chilled anxiety distributed?',
     options: [
       {
-        label: 'Straight over ice (Psychopath)',
+        label: 'Straight over ice (Psychopath) 🧊',
         next: 'caffeine_choice_espresso',
         pendingEndpoint: 'endpoint_iced_espresso',
       },
       {
-        label: 'Black over ice (Americano)',
+        label: 'Black over ice (Americano) 😨',
         next: 'caffeine_choice_americano',
         pendingEndpoint: 'endpoint_iced_americano',
       },
       {
-        label: 'A little milk (Iced Cortado)',
+        label: 'A little milk (Iced Cortado) 🎩',
         next: 'caffeine_choice_cortado',
         pendingEndpoint: 'endpoint_iced_cortado',
       },
       {
-        label: 'Creamy iced latte',
+        label: 'Creamy iced latte 🐄',
         next: 'caffeine_choice_latte',
         pendingEndpoint: 'endpoint_iced_latte',
       },
       {
-        label: 'Shaken with a splash of milk',
+        label: 'Shaken with a splash of milk 🌪️',
         next: 'caffeine_choice_latte',
         pendingEndpoint: 'endpoint_shaken_espresso',
       },
       {
-        label: 'Espresso Tonic (Hipster nonsense)',
+        label: 'Espresso Tonic (Hipster nonsense) 🩲',
         next: 'caffeine_choice_espresso',
         pendingEndpoint: 'endpoint_espresso_tonic',
       },
@@ -198,17 +200,17 @@ export const menuData = {
     isModifier: true,
     options: [
       {
-        label: 'Standard Issue Jitters',
+        label: 'Standard Issue Jitters 🫨',
         modifierValue: 'Regular',
         next: 'flavor_sweetener_choice',
       },
       {
-        label: 'Half-Caf (Commitment Issues)',
+        label: 'Half-Caf (Commitment Issues) 🤨',
         modifierValue: 'Half-Caf',
         next: 'flavor_sweetener_choice',
       },
       {
-        label: 'Decaf (A waste of time)',
+        label: 'Decaf (A waste of time) 😒',
         modifierValue: 'Decaf',
         next: 'flavor_sweetener_choice',
       },
@@ -219,12 +221,12 @@ export const menuData = {
     isModifier: true,
     options: [
       {
-        label: 'Regular Doubleshot',
+        label: 'Regular Doubleshot 🫨',
         modifierValue: 'Regular Doubleshot',
         next: 'milk_choice_short',
       },
       {
-        label: 'Decaf Doubleshot (Chai still has caffeine!)',
+        label: 'Decaf Doubleshot (Chai still has caffeine!) 😒',
         modifierValue: 'Decaf Doubleshot',
         next: 'milk_choice_short',
       },
@@ -235,17 +237,17 @@ export const menuData = {
     isModifier: true,
     options: [
       {
-        label: 'Regular (Standard Issue)',
+        label: 'Regular (Standard Issue) 🫨',
         modifierValue: 'Regular',
         next: 'tea_milk_optional',
       },
       {
-        label: 'Half-Caf (Trust Issues)',
+        label: 'Half-Caf (Trust Issues) 🤨',
         modifierValue: 'Half-Caf',
         next: 'tea_milk_optional',
       },
       {
-        label: 'Decaf (Why are we even here?)',
+        label: 'Decaf (Why are we even here?) 😒',
         modifierValue: 'Decaf',
         next: 'tea_milk_optional',
       },
@@ -256,17 +258,17 @@ export const menuData = {
     isModifier: true,
     options: [
       {
-        label: 'Regular (Standard Issue)',
+        label: 'Regular (Standard Issue) 🫨',
         modifierValue: 'Regular',
         next: 'milk_choice_short',
       },
       {
-        label: 'Half-Caf (Trust Issues)',
+        label: 'Half-Caf (Trust Issues) 🤨',
         modifierValue: 'Half-Caf',
         next: 'milk_choice_short',
       },
       {
-        label: 'Decaf (Why are we even here?)',
+        label: 'Decaf (Why are we even here?) 😒',
         modifierValue: 'Decaf',
         next: 'milk_choice_short',
       },
@@ -277,17 +279,17 @@ export const menuData = {
     isModifier: true,
     options: [
       {
-        label: 'Regular (Standard Issue)',
+        label: 'Regular (Standard Issue) 🫨',
         modifierValue: 'Regular',
         next: 'milk_choice_short',
       },
       {
-        label: 'Half-Caf (Trust Issues)',
+        label: 'Half-Caf (Trust Issues) 🤨',
         modifierValue: 'Half-Caf',
         next: 'milk_choice_short',
       },
       {
-        label: 'Decaf (Why are we even here?)',
+        label: 'Decaf (Why are we even here?) 😒',
         modifierValue: 'Decaf',
         next: 'milk_choice_short',
       },
@@ -298,17 +300,17 @@ export const menuData = {
     isModifier: true,
     options: [
       {
-        label: 'Regular (Standard Issue)',
+        label: 'Regular (Standard Issue) 🫨',
         modifierValue: 'Regular',
         next: 'milk_choice_short',
       },
       {
-        label: 'Half-Caf (Trust Issues)',
+        label: 'Half-Caf (Trust Issues) 🤨',
         modifierValue: 'Half-Caf',
         next: 'milk_choice_short',
       },
       {
-        label: 'Decaf (Why are we even here?)',
+        label: 'Decaf (Why are we even here?) 😒',
         modifierValue: 'Decaf',
         next: 'milk_choice_short',
       },
@@ -381,15 +383,15 @@ export const menuData = {
   tea_caffeine: {
     question: 'Do you require artificial energy?',
     options: [
-      {label: 'Yes, caffeinate me', next: 'tea_caf_type'},
-      {label: 'No, keep it herbal/decaf', next: 'tea_decaf_list'},
+      {label: 'Yes, caffeinate me 🫨', next: 'tea_caf_type'},
+      {label: 'No, keep it herbal/decaf 😒', next: 'tea_decaf_list'},
     ],
   },
   tea_caf_type: {
     question: 'Black tea or Green tea?',
     options: [
-      {label: 'Bold Black Teas', next: 'tea_caf_black_list'},
-      {label: 'Bright Green Teas', next: 'tea_caf_green_list'},
+      {label: 'Bold Black Teas ☕', next: 'tea_caf_black_list'},
+      {label: 'Bright Green Teas 🍵', next: 'tea_caf_green_list'},
     ],
   },
 
@@ -581,7 +583,7 @@ export const menuData = {
     isEndpoint: true,
     drinkName: 'Hot Latte',
     recipe:
-      'Mashed up roasted beans disguised by an ocean of warm cow or nut extract.',
+      'Mashed up roasted beans disguised by an ocean of warm mammal or plant extract.',
   },
   endpoint_iced_americano: {
     isEndpoint: true,
