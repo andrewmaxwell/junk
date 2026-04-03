@@ -1,3 +1,11 @@
+/** @param {string} next */
+const getMilkOptions = (next) =>
+  [
+    'Whole Milk',
+    'Oat Milk',
+    'Half & Half' /* 'Almond Milk', 'Soy Milk', 'Coconut Milk' */,
+  ].map((milk) => ({label: milk, modifierValue: milk, next}));
+
 export const menuData = {
   start: {
     question: 'Select the liquid that keeps you tethered to this mortal plane:',
@@ -211,18 +219,13 @@ export const menuData = {
     isModifier: true,
     options: [
       {
-        label: '1 Shot Regular',
-        modifierValue: '1 Shot Regular',
+        label: 'Regular Doubleshot',
+        modifierValue: 'Regular Doubleshot',
         next: 'milk_choice_short',
       },
       {
-        label: '2 Shots Regular',
-        modifierValue: '2 Shots Regular',
-        next: 'milk_choice_short',
-      },
-      {
-        label: '1 Shot Decaf Espresso (Chai still has caffeine!)',
-        modifierValue: '1 Shot Decaf',
+        label: 'Decaf Doubleshot (Chai still has caffeine!)',
+        modifierValue: 'Decaf Doubleshot',
         next: 'milk_choice_short',
       },
     ],
@@ -316,33 +319,7 @@ export const menuData = {
   milk_choice_short: {
     question: 'Choose your preferred dilution liquid:',
     isModifier: true,
-    options: [
-      {
-        label: 'Whole Milk',
-        modifierValue: 'Whole Milk',
-        next: 'flavor_sweetener_choice',
-      },
-      {
-        label: 'Oat Milk',
-        modifierValue: 'Oat Milk',
-        next: 'flavor_sweetener_choice',
-      },
-      {
-        label: 'Almond Milk',
-        modifierValue: 'Almond Milk',
-        next: 'flavor_sweetener_choice',
-      },
-      {
-        label: 'Soy Milk',
-        modifierValue: 'Soy Milk',
-        next: 'flavor_sweetener_choice',
-      },
-      {
-        label: 'Coconut Milk',
-        modifierValue: 'Coconut Milk',
-        next: 'flavor_sweetener_choice',
-      },
-    ],
+    options: getMilkOptions('flavor_sweetener_choice'),
   },
 
   // Special quick flavor screen for basic beverages (skips toppings)
@@ -351,9 +328,9 @@ export const menuData = {
     multiSelect: true,
     multiSelectNext: null,
     options: [
-      {label: 'Vanilla', modifierValue: 'Vanilla', next: null},
-      {label: 'Caramel', modifierValue: 'Caramel', next: null},
-      {label: 'White Sugar', modifierValue: 'White Sugar', next: null},
+      {label: 'Vanilla Syrup', modifierValue: 'Vanilla Syrup', next: null},
+      {label: 'Caramel Syrup', modifierValue: 'Caramel Syrup', next: null},
+      {label: 'Sugar', modifierValue: 'Sugar', next: null},
     ],
   },
 
@@ -363,12 +340,11 @@ export const menuData = {
     multiSelect: true,
     multiSelectNext: 'topping_choice',
     options: [
-      {label: 'Vanilla', modifierValue: 'Vanilla', next: null},
-      {label: 'Caramel', modifierValue: 'Caramel', next: null},
-      {label: 'Mocha', modifierValue: 'Mocha', next: null},
-
-      {label: 'Brown Sugar', modifierValue: 'Brown Sugar', next: null},
-      {label: 'White Sugar', modifierValue: 'White Sugar', next: null},
+      {label: 'Vanilla Syrup', modifierValue: 'Vanilla Syrup', next: null},
+      {label: 'Caramel Syrup', modifierValue: 'Caramel Syrup', next: null},
+      // {label: 'Mocha', modifierValue: 'Mocha', next: null},
+      // {label: 'Brown Sugar', modifierValue: 'Brown Sugar', next: null},
+      {label: 'Sugar', modifierValue: 'Sugar', next: null},
       {label: 'Stevia', modifierValue: 'Stevia', next: null},
       {label: 'Honey', modifierValue: 'Honey', next: null},
     ],
@@ -377,20 +353,7 @@ export const menuData = {
   milk_choice_cocoa: {
     question: 'Select your preferred udder or nut extract:',
     isModifier: true,
-    options: [
-      {
-        label: 'Whole Milk',
-        modifierValue: 'Whole Milk',
-        next: 'topping_choice',
-      },
-      {label: 'Oat Milk', modifierValue: 'Oat Milk', next: 'topping_choice'},
-      {
-        label: 'Almond Milk',
-        modifierValue: 'Almond Milk',
-        next: 'topping_choice',
-      },
-      {label: 'Soy Milk', modifierValue: 'Soy Milk', next: 'topping_choice'},
-    ],
+    options: getMilkOptions('topping_choice'),
   },
 
   tea_milk_optional: {
@@ -398,31 +361,7 @@ export const menuData = {
     isModifier: true,
     options: [
       {label: 'No, keep it clear', next: 'flavor_sweetener_choice'},
-      {
-        label: 'Whole Milk',
-        modifierValue: 'Whole Milk',
-        next: 'flavor_sweetener_choice',
-      },
-      {
-        label: 'Oat Milk',
-        modifierValue: 'Oat Milk',
-        next: 'flavor_sweetener_choice',
-      },
-      {
-        label: 'Almond Milk',
-        modifierValue: 'Almond Milk',
-        next: 'flavor_sweetener_choice',
-      },
-      {
-        label: 'Soy Milk',
-        modifierValue: 'Soy Milk',
-        next: 'flavor_sweetener_choice',
-      },
-      {
-        label: 'Coconut Milk',
-        modifierValue: 'Coconut Milk',
-        next: 'flavor_sweetener_choice',
-      },
+      ...getMilkOptions('flavor_sweetener_choice'),
     ],
   },
 
