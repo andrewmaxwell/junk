@@ -37,7 +37,7 @@ export const menuData = {
         inlineEndpoint: {
           isEndpoint: true,
           drinkName: 'Ice Water',
-          recipe: 'Purified water over ice. Crisp.',
+          recipe: 'For turning into pee.',
         },
       },
     ],
