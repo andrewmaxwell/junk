@@ -2,7 +2,7 @@ export const menuData = {
   start: {
     question: 'Select the liquid that keeps you tethered to this mortal plane:',
     options: [
-      {label: 'Coffee (Anti-Sleep Juice) ☕', next: 'espresso_temp'},
+      {label: 'Anxiety Juice (Espresso) ☕', next: 'espresso_temp'},
       {label: 'Leaf Soup (Tea & Matcha) 🍵', next: 'tea_category_choice'},
       {label: 'Misc Coping Mechanisms 🧊', next: 'other_drinks'},
       {label: 'Make It Hurt (Surprise Me) 🎲', next: 'surprise_handler'},
