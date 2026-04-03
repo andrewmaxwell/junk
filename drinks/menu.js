@@ -2,15 +2,15 @@ export const menuData = {
   start: {
     question: 'Select the liquid that keeps you tethered to this mortal plane:',
     options: [
-      {label: 'Coffee ☕', next: 'espresso_temp'},
-      {label: 'Tea, Matcha, & Chai 🍵', next: 'tea_category_choice'},
-      {label: 'Cocoa & Steamers 🍼', next: 'cocoa_and_steamers'},
-      {label: 'I fear nothing (Surprise Me) 🎲', next: 'surprise_handler'},
+      {label: 'Coffee (Anti-Sleep Sauce) ☕', next: 'espresso_temp'},
+      {label: 'Leaf Soup (Tea & Matcha) 🍵', next: 'tea_category_choice'},
+      {label: 'Misc Coping Mechanisms 🧊', next: 'other_drinks'},
+      {label: 'Make It Hurt (Surprise Me) 🎲', next: 'surprise_handler'},
     ],
   },
 
-  cocoa_and_steamers: {
-    question: 'Select your emotional support beverage:',
+  other_drinks: {
+    question: 'No caffeine, no problem. What are we drinking?',
     options: [
       {
         label: "Hot Choccy (I'm baby)",
@@ -22,12 +22,30 @@ export const menuData = {
         next: 'milk_choice_cocoa',
         pendingEndpoint: 'endpoint_steamer',
       },
+      {
+        label: 'A Cold Glass of Milk',
+        next: 'milk_choice_short',
+        pendingEndpoint: 'endpoint_glass_of_milk',
+      },
+      {
+        label: 'Sparkling Seltzer Water',
+        next: 'flavor_sweetener_choice_simple',
+        pendingEndpoint: 'endpoint_seltzer',
+      },
+      {
+        label: 'Ice Water (POAC)',
+        inlineEndpoint: {
+          isEndpoint: true,
+          drinkName: 'Ice Water',
+          recipe: 'Purified water over ice. Crisp.',
+        },
+      },
     ],
   },
 
   // --- TEA/MATCHA ROUTING ---
   tea_category_choice: {
-    question: 'Leaves steeped in hot water. Choose your leaf:',
+    question: 'Hot leaf juice. Pick your plant:',
     options: [
       {label: 'Matcha Latte', next: 'temp_choice_matcha'},
       {label: 'Chai Latte', next: 'temp_choice_chai'},
@@ -94,27 +112,27 @@ export const menuData = {
 
   // --- ESPRESSO BRANCH ---
   espresso_temp: {
-    question: 'Select your thermal preference:',
+    question: 'What climate are we simulating today?',
     options: [
-      {label: 'Hot & Cozy', next: 'espresso_hot_style'},
-      {label: 'Crisp & Iced', next: 'espresso_iced_style'},
+      {label: 'Hot & Searing 🔥', next: 'espresso_hot_style'},
+      {label: 'Cold & Emotionally Distant 🧊', next: 'espresso_iced_style'},
       {
-        label: 'Blended Frappé',
+        label: 'Aggressively Blended 🌪️',
         next: 'caffeine_choice_frappe',
         pendingEndpoint: 'endpoint_frappe',
       },
     ],
   },
   espresso_hot_style: {
-    question: 'How do you want your hot bean juice distributed?',
+    question: 'How do you want your hot liquid anxiety distributed?',
     options: [
       {
-        label: 'Straight Shot (Espresso)',
+        label: 'Straight Shot (Pure Pain)',
         next: 'caffeine_choice_espresso',
         pendingEndpoint: 'endpoint_espresso',
       },
       {
-        label: 'Strong & Black (Americano)',
+        label: 'Strong & Black (Existential Dread)',
         next: 'caffeine_choice_americano',
         pendingEndpoint: 'endpoint_hot_americano',
       },
@@ -124,17 +142,17 @@ export const menuData = {
         pendingEndpoint: 'endpoint_cortado',
       },
       {
-        label: 'Smooth & Milky (Latte)',
+        label: 'Smooth & Milky (Adult Baby)',
         next: 'caffeine_choice_latte',
         pendingEndpoint: 'endpoint_hot_latte',
       },
     ],
   },
   espresso_iced_style: {
-    question: 'How do you want your cold bean juice distributed?',
+    question: 'How do you want your chilled anxiety distributed?',
     options: [
       {
-        label: 'Straight over ice (Espresso)',
+        label: 'Straight over ice (Psychopath)',
         next: 'caffeine_choice_espresso',
         pendingEndpoint: 'endpoint_iced_espresso',
       },
@@ -142,6 +160,11 @@ export const menuData = {
         label: 'Black over ice (Americano)',
         next: 'caffeine_choice_americano',
         pendingEndpoint: 'endpoint_iced_americano',
+      },
+      {
+        label: 'A little milk (Iced Cortado)',
+        next: 'caffeine_choice_cortado',
+        pendingEndpoint: 'endpoint_iced_cortado',
       },
       {
         label: 'Creamy iced latte',
@@ -153,26 +176,31 @@ export const menuData = {
         next: 'caffeine_choice_latte',
         pendingEndpoint: 'endpoint_shaken_espresso',
       },
+      {
+        label: 'Espresso Tonic (Hipster nonsense)',
+        next: 'caffeine_choice_espresso',
+        pendingEndpoint: 'endpoint_espresso_tonic',
+      },
     ],
   },
 
   // --- CAFFEINE ROUTING ---
   caffeine_choice_espresso: {
-    question: 'How severely do you need your nervous system stimulated?',
+    question: 'How violently should we attack your nervous system?',
     isModifier: true,
     options: [
       {
-        label: 'Regular (Standard Issue)',
+        label: 'Standard Issue Jitters',
         modifierValue: 'Regular',
         next: 'flavor_sweetener_choice',
       },
       {
-        label: 'Half-Caf (Trust Issues)',
+        label: 'Half-Caf (Commitment Issues)',
         modifierValue: 'Half-Caf',
         next: 'flavor_sweetener_choice',
       },
       {
-        label: 'Decaf (Why are we even here?)',
+        label: 'Decaf (A waste of time)',
         modifierValue: 'Decaf',
         next: 'flavor_sweetener_choice',
       },
@@ -193,7 +221,7 @@ export const menuData = {
         next: 'milk_choice_short',
       },
       {
-        label: '1 Shot Decaf',
+        label: '1 Shot Decaf Espresso (Chai still has caffeine!)',
         modifierValue: '1 Shot Decaf',
         next: 'milk_choice_short',
       },
@@ -286,7 +314,7 @@ export const menuData = {
 
   // --- MODIFIERS CHAIN ---
   milk_choice_short: {
-    question: 'Select your preferred udder or nut extract:',
+    question: 'Choose your preferred dilution liquid:',
     isModifier: true,
     options: [
       {
@@ -317,8 +345,20 @@ export const menuData = {
     ],
   },
 
-  flavor_sweetener_choice: {
+  // Special quick flavor screen for basic beverages (skips toppings)
+  flavor_sweetener_choice_simple: {
     question: 'Any sugary coping mechanisms?',
+    multiSelect: true,
+    multiSelectNext: null,
+    options: [
+      {label: 'Vanilla', modifierValue: 'Vanilla', next: null},
+      {label: 'Caramel', modifierValue: 'Caramel', next: null},
+      {label: 'White Sugar', modifierValue: 'White Sugar', next: null},
+    ],
+  },
+
+  flavor_sweetener_choice: {
+    question: 'Select your artificial joy (Syrups/Sweeteners):',
     isModifier: true,
     multiSelect: true,
     multiSelectNext: 'topping_choice',
@@ -326,7 +366,7 @@ export const menuData = {
       {label: 'Vanilla', modifierValue: 'Vanilla', next: null},
       {label: 'Caramel', modifierValue: 'Caramel', next: null},
       {label: 'Mocha', modifierValue: 'Mocha', next: null},
-      {label: 'Hazelnut', modifierValue: 'Hazelnut', next: null},
+
       {label: 'Brown Sugar', modifierValue: 'Brown Sugar', next: null},
       {label: 'White Sugar', modifierValue: 'White Sugar', next: null},
       {label: 'Stevia', modifierValue: 'Stevia', next: null},
@@ -387,7 +427,7 @@ export const menuData = {
   },
 
   topping_choice: {
-    question: 'Any frivolous aesthetic garnishes?',
+    question: 'Any frivolous garnishes to distract from reality?',
     isModifier: true,
     multiSelect: true,
     options: [
@@ -400,7 +440,7 @@ export const menuData = {
 
   // --- TEA BRANCH ---
   tea_caffeine: {
-    question: 'Looking to artificially enhance your energy?',
+    question: 'Do you require artificial energy?',
     options: [
       {label: 'Yes, caffeinate me', next: 'tea_caf_type'},
       {label: 'No, keep it herbal/decaf', next: 'tea_decaf_list'},
@@ -585,243 +625,307 @@ export const menuData = {
   endpoint_espresso: {
     isEndpoint: true,
     drinkName: 'Straight Espresso',
-    recipe: 'Double shot.',
+    recipe: 'Two shots of pure, undiluted chaos. Good luck.',
   },
   endpoint_hot_americano: {
     isEndpoint: true,
     drinkName: 'Hot Americano',
-    recipe: 'Double shot over hot water.',
+    recipe: 'Watered-down anxiety for people who fear flavor.',
   },
   endpoint_cortado: {
     isEndpoint: true,
     drinkName: 'Cortado',
-    recipe: 'Double shot with equal parts warm milk.',
+    recipe:
+      'For when you want to look sophisticated but actually just want a tiny latte.',
   },
   endpoint_hot_latte: {
     isEndpoint: true,
     drinkName: 'Hot Latte',
-    recipe: 'Double shot, steamed milk.',
+    recipe:
+      'Mashed up roasted beans disguised by an ocean of warm cow or nut extract.',
   },
   endpoint_iced_americano: {
     isEndpoint: true,
     drinkName: 'Iced Americano',
-    recipe: 'Double shot over ice and water.',
+    recipe: 'Cold, watery, and emotionally distant. Just like my ex.',
   },
   endpoint_iced_espresso: {
     isEndpoint: true,
     drinkName: 'Straight Iced Espresso',
-    recipe: 'Double shot poured raw over ice.',
+    recipe: 'A violent shock to your system. Cold and completely unforgiving.',
   },
   endpoint_shaken_espresso: {
     isEndpoint: true,
     drinkName: 'Iced Shaken Espresso',
     recipe:
-      'Double shot shaken violently with ice & syrup, topped with a splash of milk.',
+      'Shaken so violently that the espresso questions its life choices. Splashed with milk to hide the bruising.',
   },
   endpoint_hot_dirty_chai: {
     isEndpoint: true,
     drinkName: 'Hot Dirty Chai',
-    recipe: 'Chai concentrate mixed with steamed milk and fresh espresso.',
+    recipe:
+      'Sweet, spicy goodness deliberately ruined by aggressive bean juice.',
   },
   endpoint_iced_dirty_chai: {
     isEndpoint: true,
     drinkName: 'Iced Dirty Chai',
-    recipe: 'Chai concentrate mixed with cold milk, ice, and fresh espresso.',
+    recipe: 'A confused icy beverage going through a severe identity crisis.',
   },
   endpoint_steamer: {
     isEndpoint: true,
     drinkName: 'Steamer',
-    recipe: 'Warm, gently steamed milk.',
+    recipe: 'Literally just hot milk. Are you a Victorian child with a cold?',
   },
   endpoint_iced_latte: {
     isEndpoint: true,
     drinkName: 'Iced Latte',
-    recipe: 'Double shot, cold milk, ice.',
+    recipe: 'The basic lifeline. 80% ice, 20% personality.',
   },
   endpoint_frappe: {
     isEndpoint: true,
     drinkName: 'Espresso Frappé',
     recipe:
-      'Double espresso, ice, milk, simple syrup, pinch of xanthan gum, blended.',
+      'A noisy blender apocalypse serving liquid diabetes with a hint of coffee.',
   },
 
   // Matcha & Chai
   endpoint_hot_matcha: {
     isEndpoint: true,
     drinkName: 'Hot Matcha Latte',
-    recipe: 'Whisked matcha poured over steamed milk.',
+    recipe: 'Fancy green swamp water, gently heated.',
   },
   endpoint_iced_matcha: {
     isEndpoint: true,
     drinkName: 'Iced Matcha Latte',
-    recipe: 'Whisked matcha poured over cold milk and ice.',
+    recipe: 'Cold, mathematically whisked green sludge.',
   },
   endpoint_hot_chai: {
     isEndpoint: true,
     drinkName: 'Hot Chai Latte',
-    recipe: 'Chai concentrate mixed with steamed milk.',
+    recipe: "Spicy milk that thinks it's better than you.",
   },
   endpoint_iced_chai: {
     isEndpoint: true,
     drinkName: 'Iced Chai Latte',
-    recipe: 'Chai concentrate mixed with cold milk and ice.',
+    recipe: 'Cold spicy milk. Basically a liquid candle.',
   },
 
   // Hot Chocolate
   endpoint_hot_chocolate: {
     isEndpoint: true,
     drinkName: 'Hot Chocolate',
-    recipe: 'Rich cocoa steamed with milk.',
+    recipe: 'Melted chocolate masquerading as a morning routine.',
   },
 
   // Tea Endpoints
   endpoint_tea_chinese_black: {
     isEndpoint: true,
     drinkName: 'Chinese Loose Black Tea',
-    recipe: 'Steep hot for 3-5 mins.',
+    recipe:
+      'Submerge dead foliage in boiling water for 3 to 5 minutes or until you feel something.',
   },
   endpoint_tea_english_breakfast: {
     isEndpoint: true,
     drinkName: 'English Breakfast Tea',
-    recipe: 'Steep hot for 4 mins.',
+    recipe:
+      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
   },
   endpoint_tea_constant_comment: {
     isEndpoint: true,
     drinkName: 'Constant Comment Black Tea',
-    recipe: 'Steep hot for 3-5 mins.',
+    recipe:
+      'Submerge dead foliage in boiling water for 3 to 5 minutes or until you feel something.',
   },
   endpoint_tea_old_world_spice: {
     isEndpoint: true,
     drinkName: 'Old World Spice Black Tea',
-    recipe: 'Steep hot for 4 mins.',
+    recipe:
+      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
   },
 
   endpoint_tea_green: {
     isEndpoint: true,
     drinkName: 'Green Tea',
-    recipe: 'Steep hot for 3 mins.',
+    recipe:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
   },
   endpoint_tea_orange_green: {
     isEndpoint: true,
     drinkName: 'Orange Spice Green Tea',
-    recipe: 'Steep hot for 3 mins.',
+    recipe:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
   },
   endpoint_tea_honey_ginseng: {
     isEndpoint: true,
     drinkName: 'Honey Lemon Ginseng Green Tea',
-    recipe: 'Steep hot for 3 mins.',
+    recipe:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
   },
 
   endpoint_tea_lemon_ginger: {
     isEndpoint: true,
     drinkName: 'Lemon Ginger Herbal Tea',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
   },
   endpoint_tea_bengal_spice: {
     isEndpoint: true,
     drinkName: 'Bengal Spice Herbal Tea',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
   },
   endpoint_tea_honey_chamomile: {
     isEndpoint: true,
     drinkName: 'Honey Vanilla Chamomile',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
   },
   endpoint_tea_sleepytime_vanilla: {
     isEndpoint: true,
     drinkName: 'Sleepytime Vanilla Herbal Tea',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
   },
   endpoint_tea_peach: {
     isEndpoint: true,
     drinkName: 'Peach Herbal Tea',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
   },
   endpoint_tea_tension_tamer: {
     isEndpoint: true,
     drinkName: 'Tension Tamer Herbal Tea',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
   },
   endpoint_tea_mugwort: {
     isEndpoint: true,
     drinkName: 'Mugwort Tea',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
   },
   endpoint_tea_reishi: {
     isEndpoint: true,
     drinkName: 'Reishi Eleuthero Tea',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
   },
   endpoint_tea_decaf_earl_gray: {
     isEndpoint: true,
     drinkName: 'Decaf Earl Gray',
-    recipe: 'Steep hot for 4 mins.',
+    recipe:
+      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
   },
 
   // NEW TEAS
   endpoint_tea_earl_gray_black: {
     isEndpoint: true,
     drinkName: 'Earl Gray Black Tea',
-    recipe: 'Steep hot for 4 mins.',
+    recipe:
+      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
   },
   endpoint_tea_ginger_peach_black: {
     isEndpoint: true,
     drinkName: 'Ginger Peach Black Tea',
-    recipe: 'Steep hot for 4 mins.',
+    recipe:
+      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
   },
   endpoint_tea_orange_spice_black: {
     isEndpoint: true,
     drinkName: 'Orange Spice Black Tea',
-    recipe: 'Steep hot for 4 mins.',
+    recipe:
+      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
   },
   endpoint_tea_acai_berry_green: {
     isEndpoint: true,
     drinkName: 'Acai Berry Green Tea',
-    recipe: 'Steep hot for 3 mins.',
+    recipe:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
   },
   endpoint_tea_lemon_ginger_green: {
     isEndpoint: true,
     drinkName: 'Lemon Ginger Green Tea',
-    recipe: 'Steep hot for 3 mins.',
+    recipe:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
   },
   endpoint_tea_mango_green: {
     isEndpoint: true,
     drinkName: 'Mango Green Tea',
-    recipe: 'Steep hot for 3 mins.',
+    recipe:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
   },
   endpoint_tea_moroccan_mint: {
     isEndpoint: true,
     drinkName: 'Moroccan Mint Green Tea',
-    recipe: 'Steep hot for 3 mins.',
+    recipe:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
   },
   endpoint_tea_organic_green: {
     isEndpoint: true,
     drinkName: 'Organic Green Tea',
-    recipe: 'Steep hot for 3 mins.',
+    recipe:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
   },
   endpoint_tea_peach_green: {
     isEndpoint: true,
     drinkName: 'Peach Green Tea',
-    recipe: 'Steep hot for 3 mins.',
+    recipe:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
   },
   endpoint_tea_pomegranate_green: {
     isEndpoint: true,
     drinkName: 'Pomegranate Green Tea',
-    recipe: 'Steep hot for 3 mins.',
+    recipe:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
   },
   endpoint_tea_lipton_peach_mango: {
     isEndpoint: true,
     drinkName: 'Lipton Peach Mango Herbal Tea',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
   },
   endpoint_tea_mushroom_delight: {
     isEndpoint: true,
     drinkName: 'Mushroom Delight Tea',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
   },
   endpoint_tea_orange_ginger_mint: {
     isEndpoint: true,
     drinkName: 'Orange Ginger Mint Herbal Tea',
-    recipe: 'Steep hot for 5 mins.',
+    recipe:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
+  },
+
+  // Custom Ice Requests
+  endpoint_iced_cortado: {
+    isEndpoint: true,
+    drinkName: 'Iced Cortado',
+    recipe: 'Double shot with equal parts cold milk over ice.',
+  },
+  endpoint_espresso_tonic: {
+    isEndpoint: true,
+    drinkName: 'Espresso Tonic',
+    recipe: 'Double shot poured over iced seltzer water.',
+  },
+
+  // Simple Beverages
+  endpoint_glass_of_milk: {
+    isEndpoint: true,
+    drinkName: 'Glass of Milk',
+    recipe: 'Cold milk poured directly into a glass. Classic.',
+  },
+  endpoint_seltzer: {
+    isEndpoint: true,
+    drinkName: 'Seltzer Water',
+    recipe: 'Bubbly seltzer water over ice.',
+  },
+
+  // Secret Menu
+  endpoint_secret_menu: {
+    isEndpoint: true,
+    drinkName: 'The Intrusive Thought',
+    recipe:
+      'A feral mixture of fresh espresso and raw matcha powder, violently dry-shaken until it forms a gritty paste, then topped with carbonated seltzer. Tastes like a Tuesday afternoon panic attack.',
   },
 };

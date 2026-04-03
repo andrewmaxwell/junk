@@ -1,4 +1,12 @@
-import {menuData} from './menu.js';
+import { menuData } from './menu.js';
+import { parseStateFromUrl, pushStateToUrl } from './router.js';
+import {
+  bindGlobalHaptics,
+  bindMouseTracking,
+  getIsTransitioning,
+  transition,
+  unleashConfetti,
+} from './ui.js';
 
 /**
  * @typedef {Object} OrderState
@@ -9,44 +17,67 @@ import {menuData} from './menu.js';
 // --- State ---
 /** @type {HTMLElement | null} */
 let appContainer = null;
-
-/** @type {Array<{nodeId: string, orderState: OrderState}>} */
-let historyStack = [];
-
 /** @type {OrderState | null} */
 let currentOrderState = null;
-
 /** @type {any} */
 let currentNodeData = null;
-
-// Global Haptic Feedback Engine
-document.addEventListener('click', (e) => {
-  const target = /** @type {HTMLElement} */ (e.target);
-  if (target && target.closest('.btn')) {
-    if (typeof navigator.vibrate === 'function') {
-      navigator.vibrate(40); // 40ms spin up for linear resonant actuators
-    }
-  }
-});
-
 /** @type {Set<number>} */
 let currentMultiSelections = new Set();
-
 /** @type {string} */
 let currentEndpointName = '';
-
 /** @type {string} */
 let currentEndpointRecipe = '';
 
-/** @type {boolean} */
-let isTransitioning = false;
+let secretClicks = 0;
+/** @type {any} */
+let secretTimer = null;
 
 // --- Initialization ---
 function initApp() {
   appContainer = document.getElementById('app-container');
   validateMenu();
   bindEvents();
-  renderNode('start', {modifiers: [], pendingEndpoint: null});
+  bindMouseTracking();
+  bindGlobalHaptics();
+
+  window.addEventListener('popstate', (event) => {
+    if (event.state && event.state.nodeId) {
+      transition(appContainer, () => {
+        currentOrderState = event.state.orderState;
+        currentNodeData = /** @type {any} */ (menuData)[event.state.nodeId];
+        const node = currentNodeData;
+        if (node && node.isEndpoint) {
+          renderEndpoint(node, event.state.orderState, true);
+        } else {
+          renderNode(event.state.nodeId, event.state.orderState, true);
+        }
+      });
+    } else {
+      loadStateFromUrl();
+    }
+  });
+
+  loadStateFromUrl();
+}
+
+function loadStateFromUrl() {
+  const {nodeId, state} = parseStateFromUrl();
+  const node = /** @type {any} */ (menuData)[nodeId];
+
+  if (nodeId === 'surprise_handler') {
+    handleSurprise();
+    return;
+  }
+
+  transition(appContainer, () => {
+    if (node && node.isEndpoint) {
+      renderEndpoint(node, state, true);
+    } else if (node) {
+      renderNode(nodeId, state, true);
+    } else {
+      renderNode('start', {modifiers: [], pendingEndpoint: null}, true);
+    }
+  });
 }
 
 function validateMenu() {
@@ -75,63 +106,41 @@ function validateMenu() {
   });
 }
 
-// --- Transitions & UI State ---
-/**
- * @param {Function} renderFn
- */
-async function transition(renderFn) {
-  if (!appContainer || isTransitioning) return;
-  isTransitioning = true;
-  appContainer.classList.add('fade-out');
-  await new Promise((resolve) => setTimeout(resolve, 150));
-
-  renderFn();
-
-  appContainer.classList.remove('fade-out');
-  appContainer.classList.add('fade-in');
-
-  setTimeout(() => {
-    if (appContainer) appContainer.classList.remove('fade-in');
-    isTransitioning = false;
-  }, 150);
-}
-
 // --- Event Handlers ---
 function bindEvents() {
   if (!appContainer) return;
 
-  // Mouse/Touch Tracking for Background Blobs
-  const updateMouseVars = (
-    /** @type {number} */ x,
-    /** @type {number} */ y,
-  ) => {
-    // Normalize to roughly -0.5 to 0.5
-    const normX = x / window.innerWidth - 0.5;
-    const normY = y / window.innerHeight - 0.5;
-    // Set custom CSS variables for transforms
-    document.body.style.setProperty('--mouse-x', `${normX * 80}px`);
-    document.body.style.setProperty('--mouse-y', `${normY * 80}px`);
-  };
-
-  window.addEventListener('mousemove', (e) =>
-    updateMouseVars(e.clientX, e.clientY),
-  );
-  window.addEventListener('touchmove', (e) => {
-    if (e.touches && e.touches.length > 0) {
-      updateMouseVars(e.touches[0].clientX, e.touches[0].clientY);
-    }
-  });
-
-  // Global Event Delegation
   appContainer.addEventListener('click', (/** @type {Event} */ e) => {
-    if (isTransitioning) return;
+    if (getIsTransitioning()) return;
     const target = /** @type {HTMLElement} */ (e.target);
     if (!target) return;
 
-    if (target.matches('.option-btn')) {
-      handleOptionClick(target);
-    } else if (target.matches('.toggle-btn')) {
-      handleToggleClick(target);
+    if (target.matches('h1')) {
+      secretClicks++;
+      if (secretTimer) clearTimeout(secretTimer);
+      secretTimer = setTimeout(() => (secretClicks = 0), 1000);
+
+      if (secretClicks === 7) {
+        secretClicks = 0;
+        transition(appContainer, () => {
+          const state = {modifiers: [], pendingEndpoint: null};
+          renderEndpoint(
+            /** @type {any} */ (menuData).endpoint_secret_menu,
+            state,
+          );
+        });
+      }
+    } else {
+      secretClicks = 0;
+    }
+
+    const optionBtn = target.closest('.option-btn');
+    const toggleBtn = target.closest('.toggle-btn');
+
+    if (optionBtn) {
+      handleOptionClick(/** @type {HTMLElement} */ (optionBtn));
+    } else if (toggleBtn) {
+      handleToggleClick(/** @type {HTMLElement} */ (toggleBtn));
     } else if (target.closest('#multi-submit-btn')) {
       handleMultiSubmit();
     } else if (target.closest('#back-btn')) {
@@ -156,41 +165,38 @@ function handleOptionClick(btn) {
     ? JSON.parse(JSON.stringify(currentOrderState))
     : {modifiers: [], pendingEndpoint: null};
 
-  // 1. Direct inline endpoints skip the rest of the flow
   if (selectedOption.inlineEndpoint) {
-    transition(() =>
+    transition(appContainer, () =>
       renderEndpoint(selectedOption.inlineEndpoint, nextOrderState),
     );
     return;
   }
 
-  // 2. Accumulate modifiers sequentially
   if (currentNodeData.isModifier && selectedOption.modifierValue) {
     nextOrderState.modifiers.push(selectedOption.modifierValue);
   }
 
-  // 3. Track the eventual destination
   if (selectedOption.pendingEndpoint) {
     nextOrderState.pendingEndpoint = selectedOption.pendingEndpoint;
   }
 
-  // 4. Chain to the 'next' question, or hit destination if chain is complete
   if (selectedOption.next) {
-    /** @type {any} */
     const nextNode = /** @type {any} */ (menuData)[selectedOption.next];
     if (nextNode && nextNode.isEndpoint) {
-      transition(() => renderEndpoint(nextNode, nextOrderState));
+      transition(appContainer, () => renderEndpoint(nextNode, nextOrderState));
     } else {
-      transition(() => renderNode(selectedOption.next, nextOrderState));
+      transition(appContainer, () =>
+        renderNode(selectedOption.next, nextOrderState),
+      );
     }
   } else {
-    // Reached the end of the chain, dispatch to pendingEndpoint
     if (nextOrderState.pendingEndpoint) {
-      /** @type {any} */
       const endpointNode = /** @type {any} */ (menuData)[
         nextOrderState.pendingEndpoint
       ];
-      transition(() => renderEndpoint(endpointNode, nextOrderState));
+      transition(appContainer, () =>
+        renderEndpoint(endpointNode, nextOrderState),
+      );
     } else {
       console.error(
         'Path dead end: No next question or pending endpoint defined!',
@@ -216,6 +222,12 @@ function handleToggleClick(btn) {
     btn.classList.remove('btn-secondary');
     if (!btn.innerText.includes('✅')) btn.innerText = btn.innerText + ' ✅';
   }
+
+  const submitBtn = document.getElementById('multi-submit-btn');
+  if (submitBtn) {
+    submitBtn.innerText =
+      currentMultiSelections.size === 0 ? 'Skip ➔' : 'Continue 🚀';
+  }
 }
 
 function handleMultiSubmit() {
@@ -223,7 +235,6 @@ function handleMultiSubmit() {
 
   const nextOrderState = JSON.parse(JSON.stringify(currentOrderState));
 
-  // Apply all toggled modifiers
   currentMultiSelections.forEach((index) => {
     const option = currentNodeData.options[index];
     if (option.modifierValue) {
@@ -235,80 +246,40 @@ function handleMultiSubmit() {
     const nextNodeId = currentNodeData.multiSelectNext;
     const nextNode = /** @type {any} */ (menuData)[nextNodeId];
     if (nextNode && nextNode.isEndpoint) {
-      transition(() => renderEndpoint(nextNode, nextOrderState));
+      transition(appContainer, () => renderEndpoint(nextNode, nextOrderState));
     } else {
-      transition(() => renderNode(nextNodeId, nextOrderState));
+      transition(appContainer, () => renderNode(nextNodeId, nextOrderState));
     }
   } else if (nextOrderState.pendingEndpoint) {
     const endpointNode = /** @type {any} */ (menuData)[
       nextOrderState.pendingEndpoint
     ];
-    transition(() => renderEndpoint(endpointNode, nextOrderState));
+    transition(appContainer, () =>
+      renderEndpoint(endpointNode, nextOrderState),
+    );
   } else {
     console.error('MultiSelect node missing pendingEndpoint!');
   }
 }
 
 function handleBack() {
-  historyStack.pop();
-  const previousState = historyStack.pop();
-
-  if (previousState) {
-    transition(() =>
-      renderNode(previousState.nodeId, previousState.orderState),
-    );
-  } else {
-    transition(() =>
-      renderNode('start', {modifiers: [], pendingEndpoint: null}),
-    );
-  }
+  history.back();
 }
 
 function handleRestart() {
-  historyStack = [];
-  transition(() => renderNode('start', {modifiers: [], pendingEndpoint: null}));
+  transition(appContainer, () => {
+    history.pushState(null, '', '#start');
+    renderNode('start', {modifiers: [], pendingEndpoint: null}, true);
+  });
 }
 
 function handleSurprise() {
-  /** @type {string[]} */
   const endpoints = Object.keys(menuData).filter(
     (key) => /** @type {any} */ (menuData)[key].isEndpoint,
   );
   const randomKey = endpoints[Math.floor(Math.random() * endpoints.length)];
   const randomDrink = /** @type {any} */ (menuData)[randomKey];
-
   renderEndpoint(randomDrink, {modifiers: [], pendingEndpoint: null});
-}
-
-function unleashConfetti() {
-  const container = document.createElement('div');
-  container.className = 'confetti-container';
-  const emojis = ['☕', '✨', '🚀', '🎉', '🍼', '🥵'];
-
-  for (let i = 0; i < 35; i++) {
-    const el = document.createElement('div');
-    el.className = 'confetti';
-    el.innerText = emojis[Math.floor(Math.random() * emojis.length)];
-
-    const angle = Math.random() * Math.PI * 2;
-    const distance = 100 + Math.random() * 250;
-    const tx = Math.cos(angle) * distance;
-    const ty = Math.sin(angle) * distance;
-    const tr = (Math.random() - 0.5) * 360;
-
-    el.style.setProperty('--tx', `${tx}px`);
-    el.style.setProperty('--ty', `${ty}px`);
-    el.style.setProperty('--tr', `${tr}deg`);
-    el.style.animationDelay = `${Math.random() * 0.2}s`;
-
-    container.appendChild(el);
-  }
-
-  if (appContainer) appContainer.appendChild(container);
-
-  if (navigator.vibrate) {
-    navigator.vibrate([30, 50, 50, 50, 70, 50, 100]);
-  }
 }
 
 function sendOrder() {
@@ -316,18 +287,13 @@ function sendOrder() {
   const recipe = currentEndpointRecipe;
 
   const bodyText = `Drink: ${drinkName}\nRecipe: ${recipe}\n`;
-
+  const subject = encodeURIComponent('Incoming Coffee Order! ☕');
   const body = encodeURIComponent(bodyText);
 
-  // iOS strictly requires '&' instead of '?' for sms link body parameters
-  const isIOS =
-    (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) &&
-    !(/** @type {any} */ (window).MSStream);
-  const separator = isIOS ? '&' : '?';
+  const email = atob('bWVAYW5kcmV3bWF4d2VsbC5kZXY=');
 
   setTimeout(() => {
-    window.location.href = `sms:+13143418080${separator}body=${body}`;
+    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
   }, 2000);
 
   const isTea =
@@ -341,7 +307,7 @@ function sendOrder() {
   if (isTea) actionText = 'Andrew is gently coaxing the kettle to life.';
   if (isCocoa) actionText = 'Andrew is warming up the choccy milk.';
 
-  transition(() => {
+  transition(appContainer, () => {
     if (!appContainer) return;
     appContainer.innerHTML = `
       <div class="animate-in" style="font-size: 3.5rem; margin-bottom: 16px;">🎉</div>
@@ -349,7 +315,7 @@ function sendOrder() {
       <p class="animate-in" style="animation-delay: 0.1s; color: var(--text-muted); font-size: 1.1rem;">${actionText}<br><br>He has been alerted and is legally obligated to make this.</p>
       <button type="button" class="btn btn-secondary animate-in" style="animation-delay: 0.15s; margin-top: 32px;" id="restart-btn">I panicked, start over 😰</button>
     `;
-    setTimeout(unleashConfetti, 50);
+    setTimeout(() => unleashConfetti(appContainer), 50);
   });
 }
 
@@ -361,15 +327,7 @@ function sendOrder() {
  * @param {boolean} [isGoingBack=false]
  */
 function renderNode(nodeId, orderState, isGoingBack = false) {
-  /** @type {any} */
   const node = /** @type {any} */ (menuData)[nodeId];
-
-  if (!isGoingBack) {
-    historyStack.push({
-      nodeId,
-      orderState: JSON.parse(JSON.stringify(orderState)),
-    });
-  }
 
   if (nodeId === 'surprise_handler') {
     handleSurprise();
@@ -377,8 +335,12 @@ function renderNode(nodeId, orderState, isGoingBack = false) {
   }
 
   if (node.isEndpoint) {
-    renderEndpoint(node, orderState);
+    renderEndpoint(node, orderState, isGoingBack);
     return;
+  }
+
+  if (!isGoingBack) {
+    pushStateToUrl(nodeId, orderState);
   }
 
   currentOrderState = orderState;
@@ -391,7 +353,7 @@ function renderNode(nodeId, orderState, isGoingBack = false) {
     html += `
       <div class="animate-in" style="font-size: 3.5rem; margin-bottom: 8px;">✨</div>
       <div class="animate-in" style="animation-delay: 0.05s; color: var(--text-muted); font-size: 1rem; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 4px;">Welcome to</div>
-      <h1 class="highlight animate-in" style="animation-delay: 0.1s; font-size: 2.8rem; margin-bottom: 12px; line-height: 1.1;">Andrew's<br>Coffee Bar</h1>
+      <h1 class="highlight animate-in" style="animation-delay: 0.1s; font-size: 2.8rem; margin-bottom: 12px; line-height: 1.1; cursor: pointer;">Andrew's<br>Coffee Bar</h1>
       <p class="animate-in" style="animation-delay: 0.15s; margin-bottom: 32px; font-size: 1.1rem;">${node.question}</p>
     `;
   } else {
@@ -404,7 +366,7 @@ function renderNode(nodeId, orderState, isGoingBack = false) {
         html += `<button type="button" class="btn btn-secondary toggle-btn animate-in" style="animation-delay: ${index * 0.05}s" data-index="${index}">${option.label}</button>`;
       },
     );
-    html += `<button type="button" class="btn animate-in" style="margin-top: 32px; animation-delay: ${node.options.length * 0.05}s" id="multi-submit-btn">Continue 🚀</button>`;
+    html += `<button type="button" class="btn animate-in" style="margin-top: 32px; animation-delay: ${node.options.length * 0.05}s" id="multi-submit-btn">Skip ➔</button>`;
   } else {
     node.options.forEach(
       (/** @type {any} */ option, /** @type {number} */ index) => {
@@ -414,12 +376,9 @@ function renderNode(nodeId, orderState, isGoingBack = false) {
   }
 
   let actionBarHtml = '';
-  if (historyStack.length > 1) {
-    actionBarHtml += `<button type="button" class="btn btn-secondary animate-in" style="animation-delay: ${node.options.length * 0.05}s" id="back-btn">Wait, undo! 🔙</button>`;
-  }
-
   if (nodeId !== 'start') {
-    actionBarHtml += `<button type="button" class="btn btn-danger animate-in" style="animation-delay: ${(node.options.length + 1) * 0.05}s" id="restart-btn">I panicked, start over 😰</button>`;
+    actionBarHtml += `<button type="button" class="btn btn-secondary animate-in" style="animation-delay: ${node.options ? node.options.length * 0.05 : 0}s" id="back-btn">Undo</button>`;
+    actionBarHtml += `<button type="button" class="btn btn-danger animate-in" style="animation-delay: ${node.options ? (node.options.length + 1) * 0.05 : 0.05}s" id="restart-btn">Start over</button>`;
   }
 
   if (actionBarHtml) {
@@ -432,20 +391,25 @@ function renderNode(nodeId, orderState, isGoingBack = false) {
 /**
  * @param {any} nodeData
  * @param {OrderState} orderState
+ * @param {boolean} [isGoingBack=false]
  */
-function renderEndpoint(nodeData, orderState) {
+function renderEndpoint(nodeData, orderState, isGoingBack = false) {
+  if (!isGoingBack) {
+    const keys = Object.keys(menuData);
+    const nodeId =
+      keys.find((k) => /** @type {any} */ (menuData)[k] === nodeData) ||
+      'start';
+    pushStateToUrl(nodeId, orderState);
+  }
+
   let finalDrinkName = nodeData.drinkName;
-  // If there are accumulated modifiers, neatly list them out
   if (orderState && orderState.modifiers && orderState.modifiers.length > 0) {
-    // Treat 'Iced' specially by prepending it to the base drink name
     if (
       orderState.modifiers.includes('Iced') &&
       !finalDrinkName.includes('Iced')
     ) {
       finalDrinkName = `Iced ${finalDrinkName}`;
     }
-
-    // Omit formatting "Regular", "Hot", and "Iced". Keep the others.
     const activeModifiers = orderState.modifiers.filter(
       (m) => m !== 'Regular' && m !== 'Hot' && m !== 'Iced',
     );
@@ -455,8 +419,8 @@ function renderEndpoint(nodeData, orderState) {
   }
 
   currentEndpointName = finalDrinkName;
-
   let finalRecipe = nodeData.recipe;
+
   if (
     orderState &&
     orderState.modifiers &&
@@ -476,8 +440,8 @@ function renderEndpoint(nodeData, orderState) {
     <p class="animate-in" style="animation-delay: 0.1s"><em>(${finalRecipe})</em></p>
 
     <div class="action-bar animate-in" style="animation-delay: 0.2s;">
-      <button type="button" class="btn btn-secondary" id="back-btn">Wait, undo! 🔙</button>
-      <button type="button" class="btn" id="order-btn">Summon Andrew 🚀</button>
+      <button type="button" class="btn btn-secondary" id="back-btn">Undo</button>
+      <button type="button" class="btn" id="order-btn">Send it</button>
     </div>
   `;
 }

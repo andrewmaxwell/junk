@@ -49,21 +49,21 @@ body::before {
   top: -10vh;
   left: -10vw;
   background: rgba(245, 158, 11, 0.15); /* Amber glow */
-  transform: translate(calc(var(--mouse-x, 0px) * 0.2), calc(var(--mouse-y, 0px) * 0.2));
+  transform: translate(var(--mouse-x, 0px), var(--mouse-y, 0px));
 }
 
 body::after {
   bottom: -10vh;
   right: -10vw;
   background: rgba(99, 102, 241, 0.12); /* Indigo contrast glow */
-  transform: translate(calc(var(--mouse-x, 0px) * -0.2), calc(var(--mouse-y, 0px) * -0.2));
+  transform: translate(calc(var(--mouse-x, 0px) * -1), calc(var(--mouse-y, 0px) * -1));
 }
 
 /* Action Bar */
 .action-bar {
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: stretch;
   gap: 16px;
   margin-top: 32px;
   padding-top: 24px;
@@ -76,6 +76,10 @@ body::after {
   font-size: 1.1rem;
   padding: 16px;
   flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  line-height: 1.25;
 }
 
 #app-container {
@@ -144,6 +148,7 @@ h2 {
   margin-bottom: 28px;
   background: linear-gradient(135deg, #F8FAFC 0%, #CBD5E1 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   line-height: 1.25;
   letter-spacing: -0.01em;
@@ -290,6 +295,7 @@ input[type="text"]::placeholder {
 .highlight {
   background: linear-gradient(135deg, var(--primary-start), var(--primary-end));
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
