@@ -8,13 +8,56 @@ const getMilkOptions = (next) =>
     // 'Coconut Milk',
   ].map((milk) => ({label: milk, modifierValue: milk, next}));
 
+/** @param {string} next */
+const getCaffeineOptions = (next) => ({
+  question: 'How severely do you need your nervous system stimulated?',
+  isModifier: true,
+  options: [
+    {label: 'Caffeinate me! 🫨', modifierValue: 'Regular', next},
+    {label: 'Half-Caf (Trust Issues) 🤨', modifierValue: 'Half-Caf', next},
+    {label: 'Decaf (Why are we even here?) 😒', modifierValue: 'Decaf', next},
+  ],
+});
+
+/** @param {string} next */
+const createBlendChoice = (next) => ({
+  question: 'Do you want to blend this into a noisy Frappé equivalent?',
+  isModifier: true,
+  options: [
+    {label: 'No, just over ice 🧊', next},
+    {label: 'Yes, blend it 🌪️', modifierValue: 'Blended', next},
+  ],
+});
+
+/**
+ * @param {string} drinkName
+ * @param {'black' | 'chinese_black' | 'green' | 'herbal'} type
+ */
+const createTeaEndpoint = (drinkName, type) => {
+  const recipes = {
+    black:
+      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
+    chinese_black:
+      'Submerge dead foliage in boiling water for 3 to 5 minutes or until you feel something.',
+    green:
+      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
+    herbal:
+      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
+  };
+  return {
+    isEndpoint: true,
+    drinkName,
+    recipe: recipes[type],
+  };
+};
+
 export const menuData = {
   start: {
     question: 'Select the liquid that keeps you tethered to this mortal plane:',
     options: [
       {label: 'Bean Soup (Espresso) ☕', next: 'espresso_temp'},
       {label: 'Leaf Soup (Tea) 🍵', next: 'tea_category_choice'},
-      {label: 'Misc Coping Mechanisms 🧊', next: 'other_drinks'},
+      {label: 'Other Coping Mechanisms 🧊', next: 'other_drinks'},
       {label: 'Surprise Me! 🎲', next: 'surprise_handler'},
     ],
   },
@@ -55,12 +98,12 @@ export const menuData = {
 
   // --- TEA/MATCHA ROUTING ---
   tea_category_choice: {
-    question: 'Hot leaf juice. Pick your plant:',
+    question: 'What kind?',
     options: [
+      {label: 'Tea 🍵', next: 'tea_temp_choice'},
       {label: 'Matcha Latte 🍵', next: 'temp_choice_matcha'},
       {label: 'Chai Latte ☕', next: 'temp_choice_chai'},
       {label: 'Dirty Chai ☕', next: 'temp_choice_dirty_chai'},
-      {label: 'Traditional Teas 🍵', next: 'tea_temp_choice'},
     ],
   },
 
@@ -68,8 +111,12 @@ export const menuData = {
     question: 'Select your thermal preference:',
     isModifier: true,
     options: [
-      {label: 'Hot & Cozy 🔥', modifierValue: 'Hot', next: 'tea_caffeine'},
-      {label: 'Crisp & Iced 🧊', modifierValue: 'Iced', next: 'tea_caffeine'},
+      {label: 'Hot 🔥', modifierValue: 'Hot', next: 'tea_caffeine'},
+      {
+        label: 'Iced 🧊',
+        modifierValue: 'Iced',
+        next: 'blend_choice_tea_caffeine',
+      },
     ],
   },
 
@@ -78,13 +125,13 @@ export const menuData = {
     question: 'Select your thermal preference:',
     options: [
       {
-        label: 'Hot & Cozy 🔥',
-        next: 'caffeine_choice_dirty_chai',
+        label: 'Hot 🔥',
+        next: 'milk_choice_short',
         pendingEndpoint: 'endpoint_hot_dirty_chai',
       },
       {
-        label: 'Crisp & Iced 🧊',
-        next: 'caffeine_choice_dirty_chai',
+        label: 'Iced 🧊',
+        next: 'blend_choice_milk_choice_short',
         pendingEndpoint: 'endpoint_iced_dirty_chai',
       },
     ],
@@ -93,13 +140,13 @@ export const menuData = {
     question: 'Select your thermal preference:',
     options: [
       {
-        label: 'Hot & Cozy 🔥',
+        label: 'Hot 🔥',
         next: 'milk_choice_short',
         pendingEndpoint: 'endpoint_hot_matcha',
       },
       {
-        label: 'Crisp & Iced 🧊',
-        next: 'milk_choice_short',
+        label: 'Iced 🧊',
+        next: 'blend_choice_milk_choice_short',
         pendingEndpoint: 'endpoint_iced_matcha',
       },
     ],
@@ -108,13 +155,13 @@ export const menuData = {
     question: 'Select your thermal preference:',
     options: [
       {
-        label: 'Hot & Cozy 🔥',
+        label: 'Hot 🔥',
         next: 'milk_choice_short',
         pendingEndpoint: 'endpoint_hot_chai',
       },
       {
-        label: 'Crisp & Iced 🧊',
-        next: 'milk_choice_short',
+        label: 'Iced 🧊',
+        next: 'blend_choice_milk_choice_short',
         pendingEndpoint: 'endpoint_iced_chai',
       },
     ],
@@ -124,13 +171,8 @@ export const menuData = {
   espresso_temp: {
     question: 'What climate are we simulating today?',
     options: [
-      {label: 'Hot & Searing 🔥', next: 'espresso_hot_style'},
-      {label: 'Cold & Emotionally Distant 🧊', next: 'espresso_iced_style'},
-      {
-        label: 'Like a Milkshake 🌪️',
-        next: 'caffeine_choice_frappe',
-        pendingEndpoint: 'endpoint_frappe',
-      },
+      {label: 'Hot 🔥', next: 'espresso_hot_style'},
+      {label: 'Iced 🧊', next: 'espresso_iced_style'},
     ],
   },
   espresso_hot_style: {
@@ -162,166 +204,50 @@ export const menuData = {
     question: 'How do you want your chilled anxiety distributed?',
     options: [
       {
-        label: 'Straight over ice (Psychopath) 🧊',
-        next: 'caffeine_choice_espresso',
-        pendingEndpoint: 'endpoint_iced_espresso',
-      },
-      {
-        label: 'Black over ice (Americano) 😨',
-        next: 'caffeine_choice_americano',
-        pendingEndpoint: 'endpoint_iced_americano',
-      },
-      {
-        label: 'A little milk (Iced Cortado) 🎩',
-        next: 'caffeine_choice_cortado',
-        pendingEndpoint: 'endpoint_iced_cortado',
-      },
-      {
         label: 'Creamy iced latte 🐄',
-        next: 'caffeine_choice_latte',
+        next: 'blend_choice_caffeine_latte',
         pendingEndpoint: 'endpoint_iced_latte',
       },
       {
-        label: 'Shaken with a splash of milk 🌪️',
-        next: 'caffeine_choice_latte',
-        pendingEndpoint: 'endpoint_shaken_espresso',
+        label: 'A little milk (Iced Cortado) 🎩',
+        next: 'blend_choice_caffeine_cortado',
+        pendingEndpoint: 'endpoint_iced_cortado',
+      },
+      {
+        label: 'Straight over ice (Psychopath) 🧊',
+        next: 'blend_choice_caffeine_espresso',
+        pendingEndpoint: 'endpoint_iced_espresso',
       },
       {
         label: 'Espresso Tonic (Hipster nonsense) 🩲',
-        next: 'caffeine_choice_espresso',
+        next: 'blend_choice_caffeine_espresso',
         pendingEndpoint: 'endpoint_espresso_tonic',
       },
     ],
   },
 
+  // --- BLEND CHOICES ---
+  blend_choice_caffeine_espresso: createBlendChoice('caffeine_choice_espresso'),
+  blend_choice_caffeine_americano: createBlendChoice(
+    'caffeine_choice_americano',
+  ),
+  blend_choice_caffeine_cortado: createBlendChoice('caffeine_choice_cortado'),
+  blend_choice_caffeine_latte: createBlendChoice('caffeine_choice_latte'),
+  blend_choice_tea_caffeine: createBlendChoice('tea_caffeine'),
+
+  blend_choice_milk_choice_short: createBlendChoice('milk_choice_short'),
+
   // --- CAFFEINE ROUTING ---
-  caffeine_choice_espresso: {
-    question: 'How violently should we attack your nervous system?',
-    isModifier: true,
-    options: [
-      {
-        label: 'Standard Issue Jitters 🫨',
-        modifierValue: 'Regular',
-        next: 'flavor_sweetener_choice',
-      },
-      {
-        label: 'Half-Caf (Commitment Issues) 🤨',
-        modifierValue: 'Half-Caf',
-        next: 'flavor_sweetener_choice',
-      },
-      {
-        label: 'Decaf (A waste of time) 😒',
-        modifierValue: 'Decaf',
-        next: 'flavor_sweetener_choice',
-      },
-    ],
-  },
-  caffeine_choice_dirty_chai: {
-    question: 'How dirty are we talking?',
-    isModifier: true,
-    options: [
-      {
-        label: 'Regular Doubleshot 🫨',
-        modifierValue: 'Regular Doubleshot',
-        next: 'milk_choice_short',
-      },
-      {
-        label: 'Decaf Doubleshot (Chai still has caffeine!) 😒',
-        modifierValue: 'Decaf Doubleshot',
-        next: 'milk_choice_short',
-      },
-    ],
-  },
-  caffeine_choice_americano: {
-    question: 'How severely do you need your nervous system stimulated?',
-    isModifier: true,
-    options: [
-      {
-        label: 'Regular (Standard Issue) 🫨',
-        modifierValue: 'Regular',
-        next: 'tea_milk_optional',
-      },
-      {
-        label: 'Half-Caf (Trust Issues) 🤨',
-        modifierValue: 'Half-Caf',
-        next: 'tea_milk_optional',
-      },
-      {
-        label: 'Decaf (Why are we even here?) 😒',
-        modifierValue: 'Decaf',
-        next: 'tea_milk_optional',
-      },
-    ],
-  },
-  caffeine_choice_cortado: {
-    question: 'How severely do you need your nervous system stimulated?',
-    isModifier: true,
-    options: [
-      {
-        label: 'Regular (Standard Issue) 🫨',
-        modifierValue: 'Regular',
-        next: 'milk_choice_short',
-      },
-      {
-        label: 'Half-Caf (Trust Issues) 🤨',
-        modifierValue: 'Half-Caf',
-        next: 'milk_choice_short',
-      },
-      {
-        label: 'Decaf (Why are we even here?) 😒',
-        modifierValue: 'Decaf',
-        next: 'milk_choice_short',
-      },
-    ],
-  },
-  caffeine_choice_latte: {
-    question: 'How severely do you need your nervous system stimulated?',
-    isModifier: true,
-    options: [
-      {
-        label: 'Regular (Standard Issue) 🫨',
-        modifierValue: 'Regular',
-        next: 'milk_choice_short',
-      },
-      {
-        label: 'Half-Caf (Trust Issues) 🤨',
-        modifierValue: 'Half-Caf',
-        next: 'milk_choice_short',
-      },
-      {
-        label: 'Decaf (Why are we even here?) 😒',
-        modifierValue: 'Decaf',
-        next: 'milk_choice_short',
-      },
-    ],
-  },
-  caffeine_choice_frappe: {
-    question: 'How severely do you need your nervous system stimulated?',
-    isModifier: true,
-    options: [
-      {
-        label: 'Regular (Standard Issue) 🫨',
-        modifierValue: 'Regular',
-        next: 'milk_choice_short',
-      },
-      {
-        label: 'Half-Caf (Trust Issues) 🤨',
-        modifierValue: 'Half-Caf',
-        next: 'milk_choice_short',
-      },
-      {
-        label: 'Decaf (Why are we even here?) 😒',
-        modifierValue: 'Decaf',
-        next: 'milk_choice_short',
-      },
-    ],
-  },
+  caffeine_choice_espresso: getCaffeineOptions('flavor_topping_choice'),
+  caffeine_choice_americano: getCaffeineOptions('tea_milk_optional'),
+  caffeine_choice_cortado: getCaffeineOptions('milk_choice_short'),
+  caffeine_choice_latte: getCaffeineOptions('milk_choice_short'),
 
   // --- MODIFIERS CHAIN ---
   milk_choice_short: {
     question: 'Choose your preferred dilution liquid:',
     isModifier: true,
-    options: getMilkOptions('flavor_sweetener_choice'),
+    options: getMilkOptions('flavor_topping_choice'),
   },
 
   // Special quick flavor screen for basic beverages (skips toppings)
@@ -336,18 +262,19 @@ export const menuData = {
     ],
   },
 
-  flavor_sweetener_choice: {
-    question: 'Select your artificial joy (Syrups/Sweeteners):',
+  flavor_topping_choice: {
+    question: 'Select your artificial joy and frivolous garnishes:',
     isModifier: true,
     multiSelect: true,
-    multiSelectNext: 'topping_choice',
+    multiSelectNext: null,
     options: [
-      {label: 'Vanilla Syrup', modifierValue: 'Vanilla Syrup', next: null},
-      {label: 'Caramel Syrup', modifierValue: 'Caramel Syrup', next: null},
-      // {label: 'Mocha', modifierValue: 'Mocha', next: null},
-      // {label: 'Brown Sugar', modifierValue: 'Brown Sugar', next: null},
       {label: 'Sugar', modifierValue: 'Sugar', next: null},
       {label: 'Stevia', modifierValue: 'Stevia', next: null},
+      {label: 'Cinnamon', modifierValue: 'Cinnamon', next: null},
+      {label: 'Cocoa Powder', modifierValue: 'Cocoa Powder', next: null},
+      {label: 'Vanilla Syrup', modifierValue: 'Vanilla Syrup', next: null},
+      {label: 'Caramel Syrup', modifierValue: 'Caramel Syrup', next: null},
+      {label: 'Whipped Cream', modifierValue: 'Whipped Cream', next: null},
       {label: 'Honey', modifierValue: 'Honey', next: null},
     ],
   },
@@ -355,27 +282,15 @@ export const menuData = {
   milk_choice_cocoa: {
     question: 'Select your preferred udder or nut extract:',
     isModifier: true,
-    options: getMilkOptions('topping_choice'),
+    options: getMilkOptions('flavor_topping_choice'),
   },
 
   tea_milk_optional: {
     question: 'Dilute it with some milk?',
     isModifier: true,
     options: [
-      {label: 'No, keep it clear', next: 'flavor_sweetener_choice'},
-      ...getMilkOptions('flavor_sweetener_choice'),
-    ],
-  },
-
-  topping_choice: {
-    question: 'Any frivolous garnishes to distract from reality?',
-    isModifier: true,
-    multiSelect: true,
-    options: [
-      {label: 'Whipped Cream', modifierValue: 'Whipped Cream', next: null},
-      {label: 'Cinnamon', modifierValue: 'Cinnamon', next: null},
-      {label: 'Cocoa Powder', modifierValue: 'Cocoa Powder', next: null},
-      {label: 'Caramel Drizzle', modifierValue: 'Caramel Drizzle', next: null},
+      {label: 'No, keep it clear', next: 'flavor_topping_choice'},
+      ...getMilkOptions('flavor_topping_choice'),
     ],
   },
 
@@ -384,20 +299,47 @@ export const menuData = {
     question: 'Do you require artificial energy?',
     options: [
       {label: 'Yes, caffeinate me 🫨', next: 'tea_caf_type'},
-      {label: 'No, keep it herbal/decaf 😒', next: 'tea_decaf_list'},
+      {label: 'No, keep it herbal/decaf 😒', next: 'tea_decaf_categories'},
     ],
   },
   tea_caf_type: {
     question: 'Black tea or Green tea?',
     options: [
-      {label: 'Bold Black Teas ☕', next: 'tea_caf_black_list'},
-      {label: 'Bright Green Teas 🍵', next: 'tea_caf_green_list'},
+      {label: 'Bold Black Teas ☕', next: 'tea_caf_black_categories'},
+      {label: 'Bright Green Teas 🍵', next: 'tea_caf_green_categories'},
     ],
   },
 
-  // Notice how Black teas point to 'tea_milk_optional', while Green/Herbal teas skip milk and go to 'flavor_sweetener_choice'!
-  tea_caf_black_list: {
-    question: 'Pick your Black Tea:',
+  // Notice how Black teas point to 'tea_milk_optional', while Green/Herbal teas skip milk and go to 'flavor_topping_choice'!
+  tea_caf_black_categories: {
+    question: 'Choose your Black Tea profile:',
+    options: [
+      {label: 'Traditional & Classic ☕', next: 'tea_caf_black_traditional'},
+      {label: 'Spiced & Vibrant 🌶️', next: 'tea_caf_black_spiced'},
+    ],
+  },
+  tea_caf_black_traditional: {
+    question: 'Pick your Traditional Black Tea:',
+    options: [
+      {
+        label: 'Chinese Loose Black',
+        next: 'tea_milk_optional',
+        pendingEndpoint: 'endpoint_tea_chinese_black',
+      },
+      {
+        label: 'Earl Gray Black',
+        next: 'tea_milk_optional',
+        pendingEndpoint: 'endpoint_tea_earl_gray_black',
+      },
+      {
+        label: 'Traditional English Breakfast',
+        next: 'tea_milk_optional',
+        pendingEndpoint: 'endpoint_tea_english_breakfast',
+      },
+    ],
+  },
+  tea_caf_black_spiced: {
+    question: 'Pick your Spiced Black Tea:',
     options: [
       {
         label: 'Chai Black',
@@ -405,19 +347,9 @@ export const menuData = {
         pendingEndpoint: 'endpoint_hot_chai',
       },
       {
-        label: 'Chinese Loose Black',
-        next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_chinese_black',
-      },
-      {
         label: 'Constant Comment',
         next: 'tea_milk_optional',
         pendingEndpoint: 'endpoint_tea_constant_comment',
-      },
-      {
-        label: 'Earl Gray Black',
-        next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_earl_gray_black',
       },
       {
         label: 'Ginger Peach Black',
@@ -434,15 +366,38 @@ export const menuData = {
         next: 'tea_milk_optional',
         pendingEndpoint: 'endpoint_tea_orange_spice_black',
       },
+    ],
+  },
+
+  tea_caf_green_categories: {
+    question: 'Choose your Green Tea profile:',
+    options: [
+      {label: 'Traditional & Mint 🌱', next: 'tea_caf_green_traditional'},
+      {label: 'Fruity & Citrus 🍑', next: 'tea_caf_green_fruity'},
+    ],
+  },
+  tea_caf_green_traditional: {
+    question: 'Pick your Traditional Green Tea:',
+    options: [
       {
-        label: 'Traditional English Breakfast',
+        label: 'Standard Green',
         next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_english_breakfast',
+        pendingEndpoint: 'endpoint_tea_green',
+      },
+      {
+        label: 'Moroccan Mint Green',
+        next: 'tea_milk_optional',
+        pendingEndpoint: 'endpoint_tea_moroccan_mint',
+      },
+      {
+        label: 'Organic Green',
+        next: 'tea_milk_optional',
+        pendingEndpoint: 'endpoint_tea_organic_green',
       },
     ],
   },
-  tea_caf_green_list: {
-    question: 'Pick your Green Tea:',
+  tea_caf_green_fruity: {
+    question: 'Pick your Fruity Green Tea:',
     options: [
       {
         label: 'Acai Berry Green',
@@ -465,19 +420,9 @@ export const menuData = {
         pendingEndpoint: 'endpoint_tea_mango_green',
       },
       {
-        label: 'Moroccan Mint Green',
-        next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_moroccan_mint',
-      },
-      {
         label: 'Orange Spice Green',
         next: 'tea_milk_optional',
         pendingEndpoint: 'endpoint_tea_orange_green',
-      },
-      {
-        label: 'Organic Green',
-        next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_organic_green',
       },
       {
         label: 'Peach Green',
@@ -489,45 +434,25 @@ export const menuData = {
         next: 'tea_milk_optional',
         pendingEndpoint: 'endpoint_tea_pomegranate_green',
       },
-      {
-        label: 'Standard Green',
-        next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_green',
-      },
     ],
   },
-  tea_decaf_list: {
-    question: 'Pick your Herbal/Decaf Tea:',
+
+  tea_decaf_categories: {
+    question: 'Choose your Herbal/Decaf profile:',
     options: [
-      {
-        label: 'Bengal Spice',
-        next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_bengal_spice',
-      },
-      {
-        label: 'Earl Gray Decaf',
-        next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_decaf_earl_gray',
-      },
-      {
-        label: 'Honey Vanilla Chamomile',
-        next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_honey_chamomile',
-      },
+      {label: 'Fruity & Bright 🍋', next: 'tea_decaf_fruity'},
+      {label: 'Floral & Relaxing 🌼', next: 'tea_decaf_relaxing'},
+      {label: 'Earthy, Spiced & Functional 🍄', next: 'tea_decaf_earthy'},
+      {label: 'Decaf Traditional 🫖', next: 'tea_decaf_traditional'},
+    ],
+  },
+  tea_decaf_fruity: {
+    question: 'Pick your Fruity Herbal Tea:',
+    options: [
       {
         label: 'Lipton Peach Mango Herbal',
         next: 'tea_milk_optional',
         pendingEndpoint: 'endpoint_tea_lipton_peach_mango',
-      },
-      {
-        label: 'Mugwort',
-        next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_mugwort',
-      },
-      {
-        label: 'Mushroom Delight (Caffeine Free)',
-        next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_mushroom_delight',
       },
       {
         label: 'Orange Ginger Mint Herbal',
@@ -544,10 +469,15 @@ export const menuData = {
         next: 'tea_milk_optional',
         pendingEndpoint: 'endpoint_tea_peach',
       },
+    ],
+  },
+  tea_decaf_relaxing: {
+    question: 'Pick your Relaxing Herbal Tea:',
+    options: [
       {
-        label: 'Reishi Eleuthero',
+        label: 'Honey Vanilla Chamomile',
         next: 'tea_milk_optional',
-        pendingEndpoint: 'endpoint_tea_reishi',
+        pendingEndpoint: 'endpoint_tea_honey_chamomile',
       },
       {
         label: 'Sleepytime Vanilla',
@@ -558,6 +488,41 @@ export const menuData = {
         label: 'Tension Tamer',
         next: 'tea_milk_optional',
         pendingEndpoint: 'endpoint_tea_tension_tamer',
+      },
+    ],
+  },
+  tea_decaf_earthy: {
+    question: 'Pick your Earthy/Spiced Herbal Tea:',
+    options: [
+      {
+        label: 'Bengal Spice',
+        next: 'tea_milk_optional',
+        pendingEndpoint: 'endpoint_tea_bengal_spice',
+      },
+      {
+        label: 'Mugwort',
+        next: 'tea_milk_optional',
+        pendingEndpoint: 'endpoint_tea_mugwort',
+      },
+      {
+        label: 'Mushroom Delight (Caffeine Free)',
+        next: 'tea_milk_optional',
+        pendingEndpoint: 'endpoint_tea_mushroom_delight',
+      },
+      {
+        label: 'Reishi Eleuthero',
+        next: 'tea_milk_optional',
+        pendingEndpoint: 'endpoint_tea_reishi',
+      },
+    ],
+  },
+  tea_decaf_traditional: {
+    question: 'Pick your Traditional Decaf Tea:',
+    options: [
+      {
+        label: 'Earl Gray Decaf',
+        next: 'tea_milk_optional',
+        pendingEndpoint: 'endpoint_tea_decaf_earl_gray',
       },
     ],
   },
@@ -594,12 +559,6 @@ export const menuData = {
     isEndpoint: true,
     drinkName: 'Straight Iced Espresso',
     recipe: 'A violent shock to your system. Cold and completely unforgiving.',
-  },
-  endpoint_shaken_espresso: {
-    isEndpoint: true,
-    drinkName: 'Iced Shaken Espresso',
-    recipe:
-      'Shaken so violently that the espresso questions its life choices. Splashed with milk to hide the bruising.',
   },
   endpoint_hot_dirty_chai: {
     isEndpoint: true,
@@ -659,184 +618,102 @@ export const menuData = {
   },
 
   // Tea Endpoints
-  endpoint_tea_chinese_black: {
-    isEndpoint: true,
-    drinkName: 'Chinese Loose Black Tea',
-    recipe:
-      'Submerge dead foliage in boiling water for 3 to 5 minutes or until you feel something.',
-  },
-  endpoint_tea_english_breakfast: {
-    isEndpoint: true,
-    drinkName: 'English Breakfast Tea',
-    recipe:
-      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
-  },
-  endpoint_tea_constant_comment: {
-    isEndpoint: true,
-    drinkName: 'Constant Comment Black Tea',
-    recipe:
-      'Submerge dead foliage in boiling water for 3 to 5 minutes or until you feel something.',
-  },
-  endpoint_tea_old_world_spice: {
-    isEndpoint: true,
-    drinkName: 'Old World Spice Black Tea',
-    recipe:
-      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
-  },
+  endpoint_tea_chinese_black: createTeaEndpoint(
+    'Chinese Loose Black Tea',
+    'chinese_black',
+  ),
+  endpoint_tea_english_breakfast: createTeaEndpoint(
+    'English Breakfast Tea',
+    'black',
+  ),
+  endpoint_tea_constant_comment: createTeaEndpoint(
+    'Constant Comment Black Tea',
+    'chinese_black',
+  ),
+  endpoint_tea_old_world_spice: createTeaEndpoint(
+    'Old World Spice Black Tea',
+    'black',
+  ),
 
-  endpoint_tea_green: {
-    isEndpoint: true,
-    drinkName: 'Green Tea',
-    recipe:
-      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
-  },
-  endpoint_tea_orange_green: {
-    isEndpoint: true,
-    drinkName: 'Orange Spice Green Tea',
-    recipe:
-      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
-  },
-  endpoint_tea_honey_ginseng: {
-    isEndpoint: true,
-    drinkName: 'Honey Lemon Ginseng Green Tea',
-    recipe:
-      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
-  },
+  endpoint_tea_green: createTeaEndpoint('Green Tea', 'green'),
+  endpoint_tea_orange_green: createTeaEndpoint(
+    'Orange Spice Green Tea',
+    'green',
+  ),
+  endpoint_tea_honey_ginseng: createTeaEndpoint(
+    'Honey Lemon Ginseng Green Tea',
+    'green',
+  ),
 
-  endpoint_tea_lemon_ginger: {
-    isEndpoint: true,
-    drinkName: 'Lemon Ginger Herbal Tea',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
-  endpoint_tea_bengal_spice: {
-    isEndpoint: true,
-    drinkName: 'Bengal Spice Herbal Tea',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
-  endpoint_tea_honey_chamomile: {
-    isEndpoint: true,
-    drinkName: 'Honey Vanilla Chamomile',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
-  endpoint_tea_sleepytime_vanilla: {
-    isEndpoint: true,
-    drinkName: 'Sleepytime Vanilla Herbal Tea',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
-  endpoint_tea_peach: {
-    isEndpoint: true,
-    drinkName: 'Peach Herbal Tea',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
-  endpoint_tea_tension_tamer: {
-    isEndpoint: true,
-    drinkName: 'Tension Tamer Herbal Tea',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
-  endpoint_tea_mugwort: {
-    isEndpoint: true,
-    drinkName: 'Mugwort Tea',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
-  endpoint_tea_reishi: {
-    isEndpoint: true,
-    drinkName: 'Reishi Eleuthero Tea',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
-  endpoint_tea_decaf_earl_gray: {
-    isEndpoint: true,
-    drinkName: 'Decaf Earl Gray',
-    recipe:
-      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
-  },
+  endpoint_tea_lemon_ginger: createTeaEndpoint(
+    'Lemon Ginger Herbal Tea',
+    'herbal',
+  ),
+  endpoint_tea_bengal_spice: createTeaEndpoint(
+    'Bengal Spice Herbal Tea',
+    'herbal',
+  ),
+  endpoint_tea_honey_chamomile: createTeaEndpoint(
+    'Honey Vanilla Chamomile',
+    'herbal',
+  ),
+  endpoint_tea_sleepytime_vanilla: createTeaEndpoint(
+    'Sleepytime Vanilla Herbal Tea',
+    'herbal',
+  ),
+  endpoint_tea_peach: createTeaEndpoint('Peach Herbal Tea', 'herbal'),
+  endpoint_tea_tension_tamer: createTeaEndpoint(
+    'Tension Tamer Herbal Tea',
+    'herbal',
+  ),
+  endpoint_tea_mugwort: createTeaEndpoint('Mugwort Tea', 'herbal'),
+  endpoint_tea_reishi: createTeaEndpoint('Reishi Eleuthero Tea', 'herbal'),
+  endpoint_tea_decaf_earl_gray: createTeaEndpoint('Decaf Earl Gray Tea', 'black'),
 
   // NEW TEAS
-  endpoint_tea_earl_gray_black: {
-    isEndpoint: true,
-    drinkName: 'Earl Gray Black Tea',
-    recipe:
-      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
-  },
-  endpoint_tea_ginger_peach_black: {
-    isEndpoint: true,
-    drinkName: 'Ginger Peach Black Tea',
-    recipe:
-      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
-  },
-  endpoint_tea_orange_spice_black: {
-    isEndpoint: true,
-    drinkName: 'Orange Spice Black Tea',
-    recipe:
-      'Leave this in hot water for exactly 4 minutes. Do not make eye contact with it.',
-  },
-  endpoint_tea_acai_berry_green: {
-    isEndpoint: true,
-    drinkName: 'Acai Berry Green Tea',
-    recipe:
-      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
-  },
-  endpoint_tea_lemon_ginger_green: {
-    isEndpoint: true,
-    drinkName: 'Lemon Ginger Green Tea',
-    recipe:
-      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
-  },
-  endpoint_tea_mango_green: {
-    isEndpoint: true,
-    drinkName: 'Mango Green Tea',
-    recipe:
-      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
-  },
-  endpoint_tea_moroccan_mint: {
-    isEndpoint: true,
-    drinkName: 'Moroccan Mint Green Tea',
-    recipe:
-      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
-  },
-  endpoint_tea_organic_green: {
-    isEndpoint: true,
-    drinkName: 'Organic Green Tea',
-    recipe:
-      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
-  },
-  endpoint_tea_peach_green: {
-    isEndpoint: true,
-    drinkName: 'Peach Green Tea',
-    recipe:
-      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
-  },
-  endpoint_tea_pomegranate_green: {
-    isEndpoint: true,
-    drinkName: 'Pomegranate Green Tea',
-    recipe:
-      'Drown these specific leaves in screaming hot water for exactly 180 seconds.',
-  },
-  endpoint_tea_lipton_peach_mango: {
-    isEndpoint: true,
-    drinkName: 'Lipton Peach Mango Herbal Tea',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
-  endpoint_tea_mushroom_delight: {
-    isEndpoint: true,
-    drinkName: 'Mushroom Delight Tea',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
-  endpoint_tea_orange_ginger_mint: {
-    isEndpoint: true,
-    drinkName: 'Orange Ginger Mint Herbal Tea',
-    recipe:
-      'Aggressively boil the flavor out of this plant for 5 minutes straight.',
-  },
+  endpoint_tea_earl_gray_black: createTeaEndpoint(
+    'Earl Gray Black Tea',
+    'black',
+  ),
+  endpoint_tea_ginger_peach_black: createTeaEndpoint(
+    'Ginger Peach Black Tea',
+    'black',
+  ),
+  endpoint_tea_orange_spice_black: createTeaEndpoint(
+    'Orange Spice Black Tea',
+    'black',
+  ),
+  endpoint_tea_acai_berry_green: createTeaEndpoint(
+    'Acai Berry Green Tea',
+    'green',
+  ),
+  endpoint_tea_lemon_ginger_green: createTeaEndpoint(
+    'Lemon Ginger Green Tea',
+    'green',
+  ),
+  endpoint_tea_mango_green: createTeaEndpoint('Mango Green Tea', 'green'),
+  endpoint_tea_moroccan_mint: createTeaEndpoint(
+    'Moroccan Mint Green Tea',
+    'green',
+  ),
+  endpoint_tea_organic_green: createTeaEndpoint('Organic Green Tea', 'green'),
+  endpoint_tea_peach_green: createTeaEndpoint('Peach Green Tea', 'green'),
+  endpoint_tea_pomegranate_green: createTeaEndpoint(
+    'Pomegranate Green Tea',
+    'green',
+  ),
+  endpoint_tea_lipton_peach_mango: createTeaEndpoint(
+    'Lipton Peach Mango Herbal Tea',
+    'herbal',
+  ),
+  endpoint_tea_mushroom_delight: createTeaEndpoint(
+    'Mushroom Delight Tea',
+    'herbal',
+  ),
+  endpoint_tea_orange_ginger_mint: createTeaEndpoint(
+    'Orange Ginger Mint Herbal Tea',
+    'herbal',
+  ),
 
   // Custom Ice Requests
   endpoint_iced_cortado: {
