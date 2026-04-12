@@ -1,11 +1,16 @@
+import {
+  formatDrinkName,
+  formatRecipe,
+  getRandomSassyQuote,
+} from './formatter.js';
 import { menuData } from './menu.js';
+import { sendOrder } from './order.js';
 import { parseStateFromUrl, pushStateToUrl } from './router.js';
 import {
   bindGlobalHaptics,
   bindMouseTracking,
   getIsTransitioning,
   transition,
-  unleashConfetti,
 } from './ui.js';
 
 /**
@@ -29,7 +34,7 @@ let currentEndpointName = '';
 let currentEndpointRecipe = '';
 
 let secretClicks = 0;
-/** @type {any} */
+/** @type {ReturnType<typeof setTimeout> | null} */
 let secretTimer = null;
 
 // --- Initialization ---
@@ -152,7 +157,8 @@ function bindEvents() {
     } else if (target.closest('#restart-btn')) {
       handleRestart();
     } else if (target.closest('#order-btn')) {
-      sendOrder();
+      if (appContainer)
+        sendOrder(currentEndpointName, currentEndpointRecipe, appContainer);
     }
   });
 }
@@ -286,44 +292,6 @@ function handleSurprise() {
   renderEndpoint(randomDrink, {modifiers: [], pendingEndpoint: null});
 }
 
-function sendOrder() {
-  const drinkName = currentEndpointName;
-  const recipe = currentEndpointRecipe;
-
-  const bodyText = `New Order! ☕\nDrink: ${drinkName}\nRecipe: ${recipe}\n`;
-  const body = encodeURIComponent(bodyText);
-
-  const phone = atob('MzE0MzQxODA4MA==');
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  const separator = isIOS ? '&' : '?';
-
-  setTimeout(() => {
-    window.location.href = `sms:${phone}${separator}body=${body}`;
-  }, 2000);
-
-  const isTea =
-    drinkName.toLowerCase().includes('tea') ||
-    drinkName.toLowerCase().includes('matcha');
-  const isCocoa =
-    drinkName.toLowerCase().includes('chocolate') ||
-    drinkName.toLowerCase().includes('cocoa');
-
-  let actionText = 'Andrew is violently assaulting the espresso grinder.';
-  if (isTea) actionText = 'Andrew is gently coaxing the kettle to life.';
-  if (isCocoa) actionText = 'Andrew is warming up the choccy milk.';
-
-  transition(appContainer, () => {
-    if (!appContainer) return;
-    appContainer.innerHTML = `
-      <div class="animate-in" style="font-size: 3.5rem; margin-bottom: 16px;">🎉</div>
-      <h2 class="highlight animate-in" style="animation-delay: 0.05s;">Order Sent!</h2>
-      <p class="animate-in" style="animation-delay: 0.1s; color: var(--text-muted); font-size: 1.1rem;">${actionText}<br><br>He has been alerted and is legally obligated to make this.</p>
-      <button type="button" class="btn btn-secondary animate-in" style="animation-delay: 0.15s; margin-top: 32px;" id="restart-btn">I panicked, start over 😰</button>
-    `;
-    setTimeout(() => unleashConfetti(appContainer), 50);
-  });
-}
-
 // --- Core Rendering Engine ---
 
 /**
@@ -401,97 +369,29 @@ function renderNode(nodeId, orderState, isGoingBack = false) {
 function renderEndpoint(nodeData, orderState, isGoingBack = false) {
   if (!isGoingBack) {
     const keys = Object.keys(menuData);
-    const nodeId =
-      keys.find((k) => /** @type {any} */ (menuData)[k] === nodeData) ||
-      'start';
-    pushStateToUrl(nodeId, orderState);
-  }
-
-  let finalDrinkName = nodeData.drinkName;
-  if (orderState && orderState.modifiers && orderState.modifiers.length > 0) {
-    let hasIce = false;
-    let hasBlend = false;
-    if (orderState.modifiers.includes('Iced')) hasIce = true;
-    if (orderState.modifiers.includes('Blended')) hasBlend = true;
-
-    if (hasBlend) {
-      if (finalDrinkName.includes('Iced ')) {
-        finalDrinkName = finalDrinkName.replace('Iced ', 'Blended ');
-      } else if (!finalDrinkName.includes('Blended ')) {
-        finalDrinkName = `Blended ${finalDrinkName}`;
-      }
-    } else if (hasIce && !finalDrinkName.includes('Iced')) {
-      finalDrinkName = `Iced ${finalDrinkName}`;
-    }
-
-    const activeModifiers = orderState.modifiers.filter(
-      (m) => m !== 'Regular' && m !== 'Hot' && m !== 'Iced' && m !== 'Blended',
+    const nodeId = keys.find(
+      (k) => /** @type {any} */ (menuData)[k] === nodeData,
     );
-    if (activeModifiers.length > 0) {
-      finalDrinkName = `${finalDrinkName} (with ${activeModifiers.join(', ')})`;
+    if (nodeId) {
+      pushStateToUrl(nodeId, orderState);
     }
   }
 
-  currentEndpointName = finalDrinkName;
-  let finalRecipe = nodeData.recipe;
-
-  if (orderState && orderState.modifiers) {
-    const isBlended = orderState.modifiers.includes('Blended');
-    const isIced = orderState.modifiers.includes('Iced');
-
-    if (isBlended) {
-      if (finalRecipe.toLowerCase().includes('over ice.')) {
-        finalRecipe = finalRecipe.replace(/over ice\./i, 'blended with ice.');
-      } else if (finalRecipe.toLowerCase().includes('over ice')) {
-        finalRecipe = finalRecipe.replace(/over ice/i, 'blended with ice');
-      } else if (!finalRecipe.toLowerCase().includes('blend')) {
-        finalRecipe = finalRecipe.replace(/\.$/, '') + ', blended with ice.';
-      }
-    } else if (isIced && !finalRecipe.toLowerCase().includes('ice')) {
-      finalRecipe = finalRecipe.replace(/\.$/, '') + ', served over ice.';
-    }
-  }
-  currentEndpointRecipe = finalRecipe;
+  currentEndpointName = formatDrinkName(
+    nodeData.drinkName,
+    orderState?.modifiers,
+  );
+  currentEndpointRecipe = formatRecipe(nodeData.recipe, orderState?.modifiers);
 
   if (!appContainer) return;
 
-  const sassyQuotes = [
-    'A truly terrible choice.',
-    "I'm judging you silently.",
-    'Bold of you to assume this will fix you.',
-    'Your therapist would disagree.',
-    "I'll make it, but I won't respect you for it.",
-    'Is this a cry for help?',
-    'Blink twice if you need water instead.',
-    "Well, nobody's perfect.",
-    "Don't say I didn't warn you.",
-    "I guess we're doing this.",
-    "I've seen better life choices made at 3 AM.",
-    "This won't fill the void, but okay.",
-    'My condolences to your nervous system.',
-    'Processing your order and my disappointment.',
-    'Just remember, you did this to yourself.',
-    'I question your decision-making skills.',
-    'Enjoy your artificially flavored coping mechanism.',
-    'Are we absolutely sure about this?',
-    'Adding extra judgment at no additional cost.',
-    "That's certainly one way to ruin water.",
-    "This'll just be our little secret.",
-    "I'm going to make this exactly how you asked, which is your true punishment.",
-    'If mediocrity had a flavor profile, you just nailed it.',
-    'This is the beverage equivalent of replying "k" to a heartfelt text.',
-    'Proof that free will was a mistake.',
-    'This order is legally considered a crime in three countries.',
-    'You could have just asked for a cup of disappointment.',
-    'Your order has been received and deeply judged.',
-  ];
-  const quote = sassyQuotes[Math.floor(Math.random() * sassyQuotes.length)];
+  const quote = getRandomSassyQuote();
 
   appContainer.innerHTML = `
     <div class="animate-in" style="font-size: 3.5rem; margin-bottom: 8px;">✨</div>
     <h2>${quote}</h2>
-    <h1 class="highlight animate-in" style="margin-bottom: 16px;">${finalDrinkName}</h1>
-    <p class="animate-in" style="animation-delay: 0.1s"><em>(${finalRecipe})</em></p>
+    <h1 class="highlight animate-in" style="margin-bottom: 16px;">${currentEndpointName}</h1>
+    <p class="animate-in" style="animation-delay: 0.1s"><em>(${currentEndpointRecipe})</em></p>
 
     <div class="action-bar animate-in" style="animation-delay: 0.2s;">
       <button type="button" class="btn btn-secondary" id="back-btn">Undo 🙂‍↔️</button>

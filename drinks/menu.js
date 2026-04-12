@@ -269,13 +269,13 @@ export const menuData = {
     multiSelectNext: null,
     options: [
       {label: 'Sugar', modifierValue: 'Sugar', next: null},
-      {label: 'Stevia', modifierValue: 'Stevia', next: null},
-      {label: 'Cinnamon', modifierValue: 'Cinnamon', next: null},
-      {label: 'Cocoa Powder', modifierValue: 'Cocoa Powder', next: null},
       {label: 'Vanilla Syrup', modifierValue: 'Vanilla Syrup', next: null},
       {label: 'Caramel Syrup', modifierValue: 'Caramel Syrup', next: null},
       {label: 'Whipped Cream', modifierValue: 'Whipped Cream', next: null},
+      {label: 'Cinnamon', modifierValue: 'Cinnamon', next: null},
+      {label: 'Cocoa Powder', modifierValue: 'Cocoa Powder', next: null},
       {label: 'Honey', modifierValue: 'Honey', next: null},
+      {label: 'Stevia', modifierValue: 'Stevia', next: null},
     ],
   },
 
@@ -668,7 +668,10 @@ export const menuData = {
   ),
   endpoint_tea_mugwort: createTeaEndpoint('Mugwort Tea', 'herbal'),
   endpoint_tea_reishi: createTeaEndpoint('Reishi Eleuthero Tea', 'herbal'),
-  endpoint_tea_decaf_earl_gray: createTeaEndpoint('Decaf Earl Gray Tea', 'black'),
+  endpoint_tea_decaf_earl_gray: createTeaEndpoint(
+    'Decaf Earl Gray Tea',
+    'black',
+  ),
 
   // NEW TEAS
   endpoint_tea_earl_gray_black: createTeaEndpoint(
