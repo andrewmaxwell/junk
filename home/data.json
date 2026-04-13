@@ -6,6 +6,12 @@
     "desc": "A web app that helps you figure out what to drink at my house."
   },
   {
+    "filePath": "perf",
+    "title": "Total Compute Estimator",
+    "year": 2026,
+    "desc": "Measures your machine's power."
+  },
+  {
     "filePath": "polygonPhysics",
     "title": "Polygon Physics",
     "year": 2025,
