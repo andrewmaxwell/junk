@@ -402,3 +402,7 @@ function renderEndpoint(nodeData, orderState, isGoingBack = false) {
 
 // Start the app!
 initApp();
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js');
+}

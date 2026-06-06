@@ -214,6 +214,11 @@ export const menuData = {
         pendingEndpoint: 'endpoint_iced_cortado',
       },
       {
+        label: 'Black & over ice (Americano) 😨',
+        next: 'blend_choice_caffeine_americano',
+        pendingEndpoint: 'endpoint_iced_americano',
+      },
+      {
         label: 'Straight over ice (Psychopath) 🧊',
         next: 'blend_choice_caffeine_espresso',
         pendingEndpoint: 'endpoint_iced_espresso',
@@ -310,7 +315,6 @@ export const menuData = {
     ],
   },
 
-  // Notice how Black teas point to 'tea_milk_optional', while Green/Herbal teas skip milk and go to 'flavor_topping_choice'!
   tea_caf_black_categories: {
     question: 'Choose your Black Tea profile:',
     options: [
@@ -581,13 +585,6 @@ export const menuData = {
     drinkName: 'Iced Latte',
     recipe: 'The basic lifeline. 80% ice, 20% personality.',
   },
-  endpoint_frappe: {
-    isEndpoint: true,
-    drinkName: 'Espresso Frappé',
-    recipe:
-      'A noisy blender apocalypse serving liquid diabetes with a hint of coffee.',
-  },
-
   // Matcha & Chai
   endpoint_hot_matcha: {
     isEndpoint: true,

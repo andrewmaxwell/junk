@@ -12,7 +12,7 @@ export function getIsTransitioning() {
 export async function transition(appContainer, renderFn) {
   if (!appContainer || isTransitioning) return;
   isTransitioning = true;
-  appContainer.classList.add('fade-out');
+  appContainer.classList.add('fade-out', 'is-transitioning');
   await new Promise((resolve) => setTimeout(resolve, 150));
 
   renderFn();
@@ -21,7 +21,7 @@ export async function transition(appContainer, renderFn) {
   appContainer.classList.add('fade-in');
 
   setTimeout(() => {
-    if (appContainer) appContainer.classList.remove('fade-in');
+    if (appContainer) appContainer.classList.remove('fade-in', 'is-transitioning');
     isTransitioning = false;
   }, 150);
 }
@@ -54,6 +54,7 @@ export function unleashConfetti(appContainer) {
   }
 
   if (appContainer) appContainer.appendChild(container);
+  setTimeout(() => container.remove(), 2000);
 
   if (typeof navigator.vibrate === 'function') {
     navigator.vibrate([30, 50, 50, 50, 70, 50, 100]);

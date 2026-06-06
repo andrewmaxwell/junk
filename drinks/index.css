@@ -129,6 +129,10 @@ body::after {
 }
 
 /* Soft UI container transitions */
+#app-container.is-transitioning {
+  pointer-events: none;
+}
+
 #app-container.fade-out {
   opacity: 0;
   transform: scale(0.97);
