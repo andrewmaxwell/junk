@@ -4,14 +4,16 @@ const url =
   'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ03_eRjHaTw-LlfgdomjIuuGo-aCG6-gK6-zivdQaZonq7AmOEIAua6A5GPh3LFMC4VEQykhRLLBDD/pub?output=xlsx';
 
 const parseWeights = (weights = '') =>
-  Object.fromEntries(
-    weights.split(',').map((nameAndValue) => {
-      const [person2Name, weight] = nameAndValue
-        .split(':')
-        .map((s) => s.trim());
-      return [person2Name, Number(weight)];
-    }),
-  );
+  weights.trim()
+    ? Object.fromEntries(
+        weights.split(',').map((nameAndValue) => {
+          const [person2Name, weight] = nameAndValue
+            .split(':')
+            .map((s) => s.trim());
+          return [person2Name, Number(weight)];
+        }),
+      )
+    : {};
 
 /** @import {Person} from './solver.js' */
 /** @param {Person[]} people */
@@ -42,6 +44,7 @@ const processPeople = (people, attendance) => {
         grade: row.Grade,
         gender: row.Gender,
         contrib: row.Contrib || 0,
+        email: (row.Email || '').trim(),
         weights: parseWeights(row.Weights || ''),
         dates: (dateIndex[row.id] || []).sort((a, b) => a - b),
         birthday: row.Birthdate,

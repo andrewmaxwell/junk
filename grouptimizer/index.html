@@ -4,20 +4,43 @@
     <meta name=viewport content="width=device-width,initial-scale=1">
     <title>Grouptimizer</title>
     <style>
-      * {font-family: sans-serif}
-      #attendance td {width: 16px}
+      * {font-family: sans-serif; box-sizing: border-box}
+      body {background: #222; color: white; margin: 0; padding: 12px; padding-bottom: 320px}
+      a {color: #6cf}
+      .controls {display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px}
+      .controls input, .controls button, .controls a {
+        font-size: 16px; padding: 10px 14px; border-radius: 8px;
+      }
+      .controls input {width: 70px; border: 1px solid #555; background: #333; color: white}
+      .controls button {border: none; background: #3a7; color: white; cursor: pointer}
+      .controls button:active {background: #2c6}
+      .controls a {background: #444; text-decoration: none; color: #6cf}
+      #output {white-space: pre-wrap; line-height: 1.4}
+      #groups {margin-bottom: 16px}
+      #groups:empty {display: none}
+      #groups .meta {color: #888; font-size: 12px; margin-bottom: 8px}
+      .group {background: #2c2c2c; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px}
+      .group .names {white-space: pre-wrap}
+      .group .groupStats {color: #999; font-size: 13px; margin-top: 6px}
+      h3 {margin: 16px 0 8px}
+      #attendance {border-collapse: separate; border-spacing: 1px}
+      #attendance td {width: 16px; height: 16px}
+      #attendance td.name {width: auto; padding-right: 8px; white-space: nowrap; background: none}
       #attendance .absent {background: rgba(255,255,255,0.2)}
       #attendance .present {background: white}
-      a {color: white}
     </style>
   </head>
-  <body style="background: #222; color: white">
-		<input type="number" min="2" max="9" id="numGroups" value="4" placeholder="Number of Groups" />
-		<button class="go">Grouptimize</button>
-    <button class="go" data-gender="m">Boys</button>
-    <button class="go" data-gender="f">Girls</button>
-    <a id="email" target="_blank">Email</a>
-		<a href="https://docs.google.com/spreadsheets/d/1GFt1QV-LEui12pWztIMXwblcoLy5xdkTQBSQrlg50GY/edit?usp=sharing" target="_blank">Inputs</a>
+  <body>
+    <div class="controls">
+      <input type="number" min="2" max="12" id="numGroups" value="4" title="Number of groups" />
+      <button class="go" data-mode="mixed">Grouptimize</button>
+      <button class="go" data-mode="gender">By Gender</button>
+      <a id="email" target="_blank">Email</a>
+      <a href="https://docs.google.com/spreadsheets/d/1GFt1QV-LEui12pWztIMXwblcoLy5xdkTQBSQrlg50GY/edit?usp=sharing" target="_blank">Inputs</a>
+    </div>
+    <div id="groups"></div>
+
+    <h3>Summary</h3>
     <div id="output">
       <p>Loading...</p>
     </div>

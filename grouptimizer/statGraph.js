@@ -77,7 +77,7 @@ export default class StatGraph {
     const canvasHeight = this.canvas.height;
 
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-    ctx.font = 'monospace';
+    ctx.font = '12px monospace';
 
     this.graphs
       .filter((g) => g.data.length > 0)

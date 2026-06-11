@@ -18,8 +18,6 @@ export const makeAttendanceTable = (people) => {
     ...new Set(peopleWithWeeks.flatMap((p) => p.weeks.map((w) => w.weeksAgo))),
   ].sort((a, b) => a - b);
 
-  console.log(peopleWithWeeks);
-
   return peopleWithWeeks
     .sort((a, b) => b.score - a.score)
     .map(({name, weeks}) => {
@@ -30,14 +28,10 @@ export const makeAttendanceTable = (people) => {
         (w) =>
           `<td class="${weekIndex[w] ? 'present' : 'absent'}" title="${
             weekIndex[w]?.toLocaleDateString() || ''
-          }"/>`,
+          }"></td>`,
       );
 
-      return `
-        <tr>
-          <td>${name}<td>
-          ${weekCells.join('')}
-        </tr>`;
+      return `<tr><td class="name">${name}</td>${weekCells.join('')}</tr>`;
     })
     .join('');
 };
