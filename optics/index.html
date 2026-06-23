@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Optics Simulator</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0a0a0a; color: white; cursor: default; }
+        canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+        #light-toggle {
+            position: fixed;
+            bottom: 14px;
+            right: 14px;
+            display: flex;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.07);
+            padding: 3px;
+            gap: 2px;
+            z-index: 10;
+            user-select: none;
+        }
+        #light-toggle button {
+            border: none;
+            background: none;
+            color: rgba(255,255,255,0.32);
+            padding: 5px 11px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-family: system-ui, sans-serif;
+            cursor: pointer;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            transition: background 0.15s, color 0.15s;
+        }
+        #light-toggle button.active {
+            background: rgba(255,255,255,0.13);
+            color: rgba(255,255,255,0.85);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="light-toggle">
+        <button id="btn-white" class="active">White</button>
+        <button id="btn-rainbow">Rainbow</button>
+    </div>
+    <script type="module" src="main.js"></script>
+</body>
+</html>

@@ -6,6 +6,18 @@
     "desc": "A web app that helps you figure out what to drink at my house."
   },
   {
+    "filePath": "langViz",
+    "title": "Language Model Visualizer",
+    "year": 2026,
+    "desc": "Watch the inner workings of a tiny GPT doing inference"
+  },
+  {
+    "filePath": "optics",
+    "title": "Optics Simulator",
+    "year": 2026,
+    "desc": "Play with lenses"
+  },
+  {
     "filePath": "perf",
     "title": "Total Compute Estimator",
     "year": 2026,

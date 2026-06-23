@@ -1,0 +1,15 @@
+{
+  "name": "langviz",
+  "version": "1.0.0",
+  "description": "Tiny GPT inference visualizer — KJV-trained, browser-side, pannable/zoomable network",
+  "type": "module",
+  "scripts": {
+    "serve": "python3 -m http.server 8765",
+    "train": "python3 -u train.py",
+    "train:smoke": "MAX_STEPS=40 python3 -u train.py",
+    "parity": "python3 parity.py",
+    "labels": "python3 neuron_labels.py",
+    "shot": "node tools/shot.mjs"
+  },
+  "private": true
+}

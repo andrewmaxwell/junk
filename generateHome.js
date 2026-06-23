@@ -5,12 +5,14 @@ const data = fs
   .filter(
     (filePath) =>
       fs.existsSync(`./${filePath}/README.md`) &&
-      fs.existsSync(`./${filePath}/index.html`)
+      fs.existsSync(`./${filePath}/index.html`) &&
+      fs.existsSync(`./${filePath}/image.png`),
   )
   .map((filePath) => {
     const [title, year, desc = ''] = fs
       .readFileSync(filePath + '/README.md')
       .toString()
+      .split('\n')[0]
       .trim()
       .split(' - ');
     return {filePath, title, year: Number(year), desc};

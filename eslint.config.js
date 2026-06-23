@@ -12,7 +12,7 @@ export default [
     plugins: {prettier},
 
     languageOptions: {
-      globals: globals.browser,
+      globals: {...globals.browser, ...globals.node},
       parser: tseslint.parser,
       ecmaVersion: 'latest',
       sourceType: 'module',
