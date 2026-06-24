@@ -54,6 +54,8 @@ export const recipe = {
   // The drum stays at 90% (only quit stops it) so the beans tumble out.
   dropTemp: 204, // °C bean temp that ends the roast
   dropStep: {burner: 0, air: 0, cooling: 1, heater: 0},
+  dropConfirmTicks: 2, // consecutive readings at/above dropTemp before auto-dropping
+  // (debounce vs. thermocouple spikes; ~3s, well under 1°C of overshoot)
 
   dropTempDrop: 5, // °C fall after drop that confirms beans are out (silences the alarm)
   rorWindowSec: 30, // window for rate-of-rise calculation

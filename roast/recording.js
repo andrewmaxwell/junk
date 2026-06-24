@@ -25,6 +25,7 @@ export function exportRecording() {
       turningPointBT: s.turningPoint ? s.turningPoint.BT : null,
       firstCrack: relTime(s.firstCrack),
       drop: relTime(s.endTime),
+      beansOut: relTime(s.beansOutTime),
     },
     data: s.recording,
   };

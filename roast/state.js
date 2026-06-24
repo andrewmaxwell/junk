@@ -23,6 +23,8 @@ export const s = {
   coolingBaseTemp: null,
   beansOut: false, // set once BT confirms the beans left the drum (silences the alarm)
   beansOutTime: null,
+  cmdHP: null, // burner % we last commanded (manual nudge base; echo lags this)
+  dropConfirm: 0, // consecutive ticks BT has been at/above dropTemp (noise debounce)
   armed: false, // temp-step triggers start only after the post-charge turning point
   turningPoint: null, // {time, BT} — coolest point after charge
   nextStep: 0,
