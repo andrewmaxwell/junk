@@ -3,9 +3,13 @@
 export const SIM =
   process.argv.includes('--simulate') || process.argv.includes('--sim');
 export const QUICK = SIM || process.argv.includes('--quick');
-export const TITLE = SIM ? 'KALEIDO M1  [SIM]' : 'KALEIDO M1 LITE';
+// Roast the decaf profile instead of the regular one (see decafRecipe below).
+export const DECAF = process.argv.includes('--decaf');
+export const TITLE =
+  (SIM ? 'KALEIDO M1  [SIM]' : 'KALEIDO M1 LITE') + (DECAF ? '  [DECAF]' : '');
 
-export const recipe = {
+// Regular-bean recipe. Selected by default; pass --decaf for decafRecipe.
+const regularRecipe = {
   // Serial
   baudRate: 57600, // Change to 115200 if 57600 doesn't connect
 
@@ -60,5 +64,26 @@ export const recipe = {
   dropTempDrop: 5, // °C fall after drop that confirms beans are out (silences the alarm)
   rorWindowSec: 30, // window for rate-of-rise calculation
 };
+
+// Decaf (EA-processed) recipe. Identical to the regular recipe except for the
+// FC-region tempSteps and a slightly lower dropTemp. EA decaf's post-FC
+// exothermic reaction is weaker, so without intervention the ROR stalls/bowls
+// out mid-development; this profile is validated across several roasts.
+export const decafRecipe = {
+  ...regularRecipe,
+  tempSteps: [
+    {temp: 150, burner: 45},
+    {temp: 173, burner: 35, air: 40}, // gentler approach into FC than regular (air 40, burner 35)
+    // Decaf-specific FC-sustaining bump: this machine's FC start lands ~177-183°C,
+    // and decaf's weaker exothermic phase needs the extra heat here to hold ROR
+    // through development. Regular beans don't need this step.
+    {temp: 178, burner: 40},
+    {temp: 188, burner: 35}, // step back down ~60s post-FC for a controlled glide to drop
+  ],
+  dropTemp: 202, // City+ target; decaf doesn't need regular's extra 2°C
+};
+
+// The recipe loaded for this run. Defaults to regular; --decaf selects decaf.
+export const recipe = DECAF ? decafRecipe : regularRecipe;
 
 if (QUICK) recipe.preheat.stableSeconds = 15;
