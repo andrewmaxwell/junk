@@ -94,40 +94,74 @@ function offscreen(b, v, W, H) {
   );
 }
 
-// Mouse-wheel zoom (toward the cursor) + drag pan.
+// Zoom toward a screen point (sx,sy) by factor f, keeping the world point under
+// the cursor/fingers fixed. Shared by wheel zoom and pinch zoom.
+function zoomAt(view, sx, sy, f) {
+  const mx = (sx - view.ox) / view.k;
+  const my = (view.oy - sy) / view.k;
+  view.k *= f;
+  view.ox = sx - mx * view.k;
+  view.oy = sy + my * view.k;
+}
+
+// Controls for both mouse and touch, via Pointer Events (one code path handles
+// mouse drag, one-finger pan, and two-finger pinch-zoom). Mouse wheel still zooms.
 export function installControls(canvas, view, requestDraw) {
+  // Mouse wheel: zoom toward the cursor.
   canvas.addEventListener(
     'wheel',
     (e) => {
       e.preventDefault();
-      const f = Math.exp(-e.deltaY * 0.0015);
-      const mx = (e.offsetX - view.ox) / view.k;
-      const my = (view.oy - e.offsetY) / view.k;
-      view.k *= f;
-      view.ox = e.offsetX - mx * view.k;
-      view.oy = e.offsetY + my * view.k;
+      zoomAt(view, e.offsetX, e.offsetY, Math.exp(-e.deltaY * 0.0015));
       requestDraw();
     },
     {passive: false},
   );
 
-  let dragging = false,
-    lx = 0,
-    ly = 0;
-  canvas.addEventListener('mousedown', (e) => {
-    dragging = true;
-    lx = e.clientX;
-    ly = e.clientY;
+  // Active pointers (mouse button held, or fingers down), by pointerId.
+  const pts = new Map();
+  let prevMid = null,
+    prevDist = 0;
+
+  // Midpoint + spread of the current pointers. One pointer: pan only (dist 0).
+  // Two+ pointers: pan by the midpoint and pinch-zoom by the spread ratio.
+  const gesture = () => {
+    const a = [...pts.values()];
+    if (a.length === 1) return {mx: a[0].x, my: a[0].y, dist: 0};
+    const [p, q] = a;
+    return {
+      mx: (p.x + q.x) / 2,
+      my: (p.y + q.y) / 2,
+      dist: Math.hypot(p.x - q.x, p.y - q.y),
+    };
+  };
+  const sync = () => {
+    const g = gesture();
+    prevMid = g;
+    prevDist = g.dist;
+  };
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, {x: e.clientX, y: e.clientY});
+    sync();
   });
-  addEventListener('mousemove', (e) => {
-    if (!dragging) return;
-    view.ox += e.clientX - lx;
-    view.oy += e.clientY - ly;
-    lx = e.clientX;
-    ly = e.clientY;
+  canvas.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, {x: e.clientX, y: e.clientY});
+    if (pts.size > 2) return; // ignore extra fingers; keep the first pinch stable
+    const g = gesture();
+    view.ox += g.mx - prevMid.mx; // pan by how the midpoint moved
+    view.oy += g.my - prevMid.my;
+    if (g.dist > 0 && prevDist > 0) zoomAt(view, g.mx, g.my, g.dist / prevDist);
+    prevMid = g;
+    prevDist = g.dist;
     requestDraw();
   });
-  addEventListener('mouseup', () => {
-    dragging = false;
-  });
+  const release = (e) => {
+    pts.delete(e.pointerId);
+    if (pts.size) sync(); // reset baseline so a lifted finger doesn't jump the view
+  };
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
 }

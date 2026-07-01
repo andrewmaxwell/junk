@@ -2,11 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Neighborhoods</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-    canvas { display: block; }
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden;
+      overscroll-behavior: none; }
+    /* touch-action:none lets the canvas receive raw touch gestures (pan/pinch)
+       instead of the browser hijacking them for page scroll/zoom. */
+    canvas { display: block; touch-action: none; }
     #status {
       position: fixed; left: 8px; bottom: 8px; margin: 0;
       font: 12px/1.4 ui-monospace, monospace; color: #888;
