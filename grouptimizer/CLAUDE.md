@@ -35,14 +35,18 @@ https://docs.google.com/spreadsheets/d/1GFt1QV-LEui12pWztIMXwblcoLy5xdkTQBSQrlg5
   (round-robin deal, sponsors first, **order shuffled** so each restart starts
   differently).
 - **Moves** (`generateNeighbor` picks one at random per iteration):
-  - `swapMove` (~50%): swap two **same-type** people (sponsor↔sponsor,
+  - `swapMove` (~70%): swap two **same-type** people (sponsor↔sponsor,
     student↔student) between two groups. Preserves sizes & sponsor counts.
-  - `studentMove` (~30%): relocate one **student** to another group (changes
-    sizes; never empties a group; sponsors never move).
-  - `studentCycle` (~20%): rotate one student each among 3 groups (preserves
+  - `studentCycle` (~30%): rotate one student each among 3 groups (preserves
     sizes; helps escape local minima).
-  - **Sponsors only ever swap**, so each group keeps its initially-dealt sponsor
-    count. Students can move freely; the `W_SIZE` term keeps sizes even.
+  - **Every move preserves each group's student count**, so sizes never drift
+    from the initial round-robin deal, which is perfectly even (floor/ceil).
+    "As equal as possible" is a **hard structural invariant**, not something the
+    soft `W_SIZE` term has to win. (Sponsors only ever swap too, so each group
+    also keeps its initially-dealt sponsor count.) There used to be a
+    size-changing `studentMove`; it was removed because the soft weight let sizes
+    drift uneven (a real 2/3/4 student split) whenever the other terms gained a
+    hair — see 2026-07-02 in History.
 - **Objective** (`makeCostFn`, lower = better). Every term is normalized to
   ~[0,1] so the `W_*` weights at the top of `solver.js` express relative
   priority. These weights are the main tuning knob — adjust to taste:
@@ -53,18 +57,16 @@ https://docs.google.com/spreadsheets/d/1GFt1QV-LEui12pWztIMXwblcoLy5xdkTQBSQrlg5
   - `W_SPREAD` (1) — reward each group having an internal *mix* of high and low
     contributors (rewards within-group contrib stdev ≈ population stdev). Aligned
     with `W_CONTRIB` but distinct: it prefers a `{0,4}` group over a `{2,2}` one.
-  - `W_TALKER` (1) — penalize any group lacking a strong contributor. A "talker"
-    = contrib ≥ the numGroups-th-highest contrib, so ideally one lands per group.
-  - `W_LONE` (1.5) — penalize a group with a lone minority gender (e.g. exactly
-    1 girl among boys). This is the *primary* gender goal.
-  - `W_SIZE` (2) — penalize uneven group sizes (must stay fairly strong or free
-    student-moves would collapse everyone into fewer, pair-dense groups).
-  - `W_GENDER` (0.5, low) — penalize uneven female *ratio* across groups.
-  Gender terms are no-ops for the Boys/Girls single-gender runs.
+  - `W_GENDER` (0.5, low) — penalize uneven female *ratio* across groups. No-op
+    for the single-gender By-Gender runs.
+  - **Group size** is not a cost term at all — it's a hard structural invariant
+    (all moves preserve student counts; see Moves above), so it can't be traded
+    away. Removed terms (2026-07-02): `W_SIZE` (vestigial once sizes were locked),
+    `W_TALKER` (redundant with `W_CONTRIB`/`W_SPREAD`; threshold degenerated under
+    ties), and `W_LONE` (Andrew: a lone boy/girl in a group isn't worth avoiding).
 - **Priority guidance from Andrew (for tuning if output ever feels off):**
-  pairing should rank *slightly* above contribution balance (it does: 3 vs 2);
-  the talker-per-group goal is *lower* priority because it tends to happen
-  naturally (`W_TALKER` lowered to 0.5 on this basis). Andrew has otherwise
+  pairing should rank *slightly* above contribution balance (it does: 3 vs 2).
+  Andrew has otherwise
   approved the current weights, so don't churn them without being asked.
 - **Multi-restart**: `main.js` runs the annealer `RESTARTS` (5) times from
   different shuffled starts and keeps the lowest-cost result (SA is stochastic).
@@ -120,6 +122,30 @@ which is how empty/degenerate groups are handled safely.
   `makeReport` called before `makeAttendanceTable` in `main.js`.
 
 ## History
+
+**2026-07-02 even-sizes fix** — Bug: a 3-group run produced a 2/3/4 **student**
+split. Root cause: even sizing was only a *soft* `W_SIZE` term, and on this data
+the best 2/3/4 (cost −0.2101) edged out the best 3/3/3 (−0.2065) by a hair, so
+the tradeable weight lost. Also, the 4 present sponsors deal 2/1/1, so an even
+*student* split (5/4/4 total) and an even *total* split (4/4/5 → 2/3/4 students)
+pull opposite ways. Fix: removed the size-changing `studentMove` so **all** moves
+preserve student counts; since `makeInitialState` deals evenly (floor/ceil), even
+sizes are now a hard invariant. `swapMove`/`studentCycle` rebalanced to 0.7/0.3.
+Verified: 3 groups → always 3/3/3 and hits the brute-force optimum; 4/5 groups →
+spread ≤1; sponsor counts and all-present-once preserved. `W_SIZE` left at 2 but
+now vestigial.
+
+**2026-07-02 objective cleanup** — Analyzed convergence: at this scale SA + 5
+restarts already finds the global optimum every run (best cost sd = 0 on real
+data and a 36-person synthetic set), so the search isn't the bottleneck — the
+objective *definition* is. Per Andrew, pruned three terms: `W_SIZE` (vestigial
+after the even-sizes fix), `W_TALKER` (redundant with contrib/spread, degenerate
+under ties), and `W_LONE` (lone boy/girl not worth avoiding). Also dropped the
+now-unused `maxContrib` from `GroupStats`. Objective is now just `W_PAIR` (3),
+`W_CONTRIB` (2), `W_SPREAD` (1), `W_GENDER` (0.5). Re-verified: still even sizes,
+converges consistently, all invariants hold. (Not done, noted for later: the
+pair term's normalization is loosely scaled — conflicts can dominate when there
+are no positive weights — left as-is intentionally.)
 
 **2026-06-11 pass 1** — WeakMap delta-cost caching (~20× fewer ops/iter),
 normalized objective + named `W_*` weights, auto-calibrated temperature,

@@ -24,9 +24,6 @@ import {rand, randWhere, shuffled, variance} from './utils.js';
 const W_PAIR = 3; // satisfy pairing prefs: keep "+" pairs together, "-" apart
 const W_CONTRIB = 2; // even out avg contribution so no group is all-quiet/all-loud
 const W_SPREAD = 1; // reward each group having a *mix* of high & low contributors
-const W_TALKER = 0.5; // nudge toward a strong contributor per group (tends to happen anyway)
-const W_LONE = 1.5; // avoid leaving a lone girl among boys (or vice versa)
-const W_SIZE = 2; // keep group sizes roughly even
 const W_GENDER = 0.5; // (low priority) even out the gender ratio across groups
 
 /**
@@ -56,7 +53,6 @@ const makeInitialState = (numGroups, people) => {
  *  genderRatio: number,
  *  contribAverage: number,
  *  contribStdev: number,
- *  maxContrib: number,
  *  weightSum: number,
  * }} GroupStats
  */
@@ -69,7 +65,6 @@ export const getGroupStats = (group) => {
   let boys = 0;
   let contrib = 0;
   let contribSq = 0;
-  let maxContrib = 0;
   let students = 0;
   let weightSum = 0;
 
@@ -81,7 +76,6 @@ export const getGroupStats = (group) => {
       else boys++;
       contrib += p.contrib;
       contribSq += p.contrib ** 2;
-      if (p.contrib > maxContrib) maxContrib = p.contrib;
     }
     // weights are mirrored, so each in-group pair is counted exactly once
     for (let k = 0; k < i; k++) {
@@ -99,7 +93,6 @@ export const getGroupStats = (group) => {
     contribStdev: students
       ? Math.sqrt(Math.max(0, contribSq / students - contribAverage ** 2))
       : 0,
-    maxContrib,
     weightSum,
   };
 };
@@ -114,18 +107,10 @@ const makeCostFn = (people, numGroups) => {
     studentContribs.reduce((s, c) => s + c, 0) / (students.length || 1);
   const globalFemaleRatio =
     students.filter((s) => s.gender === 'f').length / (students.length || 1);
-  const avgGroupSize = students.length / numGroups || 1;
   const contribScale = avgContrib || 1;
   // Population spread of contribution; the spread reward aims for each group to
   // internally match this (i.e. contain a mix of high and low contributors).
   const globalContribStdev = Math.sqrt(variance(studentContribs)) || 1;
-
-  // A student counts as a "talker" if their contrib is at least the
-  // numGroups-th highest, so in the ideal case each group gets one of them.
-  const sortedContribs = [...studentContribs].sort((a, b) => b - a);
-  const talkerThreshold = sortedContribs.length
-    ? sortedContribs[Math.min(numGroups, sortedContribs.length) - 1]
-    : Infinity;
 
   // Largest pair-benefit achievable (everyone with everyone), used to scale the
   // pair term into ~[0, 1]. Only positive weights count; mirrored, so halve.
@@ -150,32 +135,25 @@ const makeCostFn = (people, numGroups) => {
     return s;
   };
 
-  const rmsNorm = (sqErr, scale) =>
-    Math.sqrt(sqErr / numGroups) / (scale || 1);
+  const rmsNorm = (sqErr, scale) => Math.sqrt(sqErr / numGroups) / (scale || 1);
 
   /** @param {Person[][]} groups */
   return (groups) => {
     let pairBenefit = 0;
     let contribSqErr = 0;
     let genderSqErr = 0;
-    let sizeSqErr = 0;
     let spreadSum = 0;
     let groupsWithStudents = 0;
-    let talkerless = 0;
-    let lone = 0;
 
     for (const g of groups) {
       const s = statsFor(g);
       pairBenefit += s.weightSum;
       contribSqErr += (s.contribAverage - avgContrib) ** 2;
       genderSqErr += (s.genderRatio - globalFemaleRatio) ** 2;
-      sizeSqErr += (s.students - avgGroupSize) ** 2;
       if (s.students > 0) {
         spreadSum += s.contribStdev;
         groupsWithStudents++;
-        if (s.maxContrib < talkerThreshold) talkerless++;
       }
-      if (s.boys >= 1 && s.girls >= 1 && (s.boys === 1 || s.girls === 1)) lone++;
     }
 
     const avgSpread = groupsWithStudents ? spreadSum / groupsWithStudents : 0;
@@ -184,9 +162,6 @@ const makeCostFn = (people, numGroups) => {
       -W_PAIR * (pairBenefit / maxPairBenefit) +
       W_CONTRIB * rmsNorm(contribSqErr, contribScale) +
       -W_SPREAD * (avgSpread / globalContribStdev) +
-      W_TALKER * (talkerless / numGroups) +
-      W_LONE * (lone / numGroups) +
-      W_SIZE * rmsNorm(sizeSqErr, avgGroupSize) +
       W_GENDER * rmsNorm(genderSqErr, 1)
     );
   };
@@ -230,28 +205,6 @@ const swapMove = (grouping) => {
 };
 
 /**
- * Relocate one student from one group to another. Changes group sizes (kept in
- * check by the size term). Sponsors never move, so each group keeps its
- * sponsor(s).
- * @param {Person[][]} grouping */
-const studentMove = (grouping) => {
-  const gi1 = rand(grouping.length);
-  const g1 = grouping[gi1];
-  // don't move the last person out of a group (would leave it empty)
-  if (g1.length <= 1) return grouping;
-  const pi1 = randPersonOfType(g1, false);
-  if (pi1 < 0) return grouping;
-  const gi2 = randWhere(grouping.length, (r) => r !== gi1);
-  if (gi2 < 0) return grouping;
-
-  const next = grouping.slice(0);
-  next[gi1] = g1.slice(0);
-  next[gi2] = grouping[gi2].slice(0);
-  next[gi2].push(next[gi1].splice(pi1, 1)[0]);
-  return next;
-};
-
-/**
  * Rotate one student each among three groups (g1->g2->g3->g1). Preserves all
  * group sizes but reassigns three students at once, which helps escape local
  * minima that single swaps can't.
@@ -279,14 +232,16 @@ const studentCycle = (grouping) => {
   return next;
 };
 
-/** @param {Person[][]} grouping */
-const generateNeighbor = (grouping) => {
-  const r = Math.random();
-  if (r < 0.5) return swapMove(grouping);
-  if (r < 0.8) return studentMove(grouping);
-  return studentCycle(grouping);
-};
-
+/**
+ * All moves preserve every group's student count, so group sizes stay exactly
+ * as the initial round-robin deal made them — perfectly even (floor/ceil).
+ * "As equal as possible" is therefore a hard structural invariant: there's no
+ * size cost term because sizes simply can never drift.
+ * @param {Person[][]} grouping */
+const generateNeighbor = (grouping) =>
+  // Swap:cycle kept at the original 5:2 ratio (was 0.5 / 0.2 alongside a
+  // size-changing student move that we removed to lock sizes even).
+  Math.random() < 0.7 ? swapMove(grouping) : studentCycle(grouping);
 /**
  * @param {number} numGroups
  * @param {Person[]} filteredPeople */
