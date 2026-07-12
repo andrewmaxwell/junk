@@ -16,11 +16,11 @@
 /mix/02 ON   -oo
 /mix/03 ON   -oo +0 EQ-> 0
 /mix/04 ON   -oo
-/mix/05 ON  -7.8 +0 PRE 0
+/mix/05 ON   -oo +0 PRE 0
 /mix/06 ON  -2.5
-/mix/07 ON  -5.0 +0 POST 0
+/mix/07 ON  +0.3 +0 POST 0
 /mix/08 ON -29.5
-/mix/09 ON   -oo +0 POST 0
+/mix/09 ON   -oo +0 EQ-> 0
 /mix/10 ON -11.5
 /mix/11 ON   -oo +0 POST 0
 /mix/12 ON   -oo
