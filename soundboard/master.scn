@@ -291,7 +291,7 @@
 /ch/08/mix/16 ON   -oo
 /ch/08/grp %00000001 %000000
 /ch/08/automix OFF -12.0
-/ch/09/config "Acoustic Rya" 23 CY 9
+/ch/09/config "Ryan Guitar" 23 CY 9
 /ch/09/delay OFF   0.3
 /ch/09/preamp +0.0 OFF ON 24 121
 /ch/09/gate OFF GATE -63.5 14.0 8 79.6  124 0
@@ -1027,7 +1027,7 @@
 /ch/31/mix/16 ON   -oo
 /ch/31/grp %00000000 %000000
 /ch/31/automix OFF -12.0
-/ch/32/config "Do Not Use" 1 RDi 32
+/ch/32/config "DO NOT USE" 1 RDi 32
 /ch/32/delay OFF   0.3
 /ch/32/preamp +0.0 OFF OFF 24  22
 /ch/32/gate OFF GATE -80.0 60.0 1  502  983 0
@@ -1059,7 +1059,7 @@
 /ch/32/mix/16 ON   -oo
 /ch/32/grp %00000000 %000000
 /ch/32/automix OFF -12.0
-/auxin/01/config "VID PC L" 55 RD 33
+/auxin/01/config "Projection L" 55 RD 33
 /auxin/01/preamp +3.0 OFF
 /auxin/01/eq ON
 /auxin/01/eq/1 LCut 202.3 +12.0 1.9
@@ -1084,7 +1084,7 @@
 /auxin/01/mix/15 ON   -oo -100 POST 0
 /auxin/01/mix/16 ON   -oo
 /auxin/01/grp %00000000 %000000
-/auxin/02/config "VID PC R" 55 RD 34
+/auxin/02/config "Projection R" 55 RD 34
 /auxin/02/preamp +3.0 OFF
 /auxin/02/eq ON
 /auxin/02/eq/1 LCut 202.3 +12.0 1.9
