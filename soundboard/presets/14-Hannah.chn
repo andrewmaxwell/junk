@@ -1,5 +1,5 @@
 #4.0# 15 "Hannah" 0 %0011111100110100 1                                                                                 
-/config "Hannah" 42 RD
+/config "Hannah" 42 WH
 /delay OFF   0.3
 /preamp +0.0 OFF ON 24  89
 /gate OFF GATE -29.0 21.0 32  100  804 0
@@ -11,21 +11,21 @@
 /eq/2 PEQ 550.8 -3.50 3.2
 /eq/3 PEQ 2k34 -4.75 5.0
 /eq/4 PEQ 8k43 +0.75 2.2
-/mix ON  -3.2 ON +0 OFF  -8.5
+/mix OFF  -6.8 ON +0 OFF  -8.5
 /mix/01 ON  +2.8 +0 EQ-> 0
 /mix/02 ON  +4.8
 /mix/03 ON   -oo +0 EQ-> 0
 /mix/04 ON   -oo
-/mix/05 ON   -oo +0 PRE 0
-/mix/06 ON -13.0
-/mix/07 ON  +0.3 +0 POST 0
+/mix/05 ON -11.0 +0 POST 0
+/mix/06 OFF -13.0
+/mix/07 OFF  +0.3 +0 POST 0
 /mix/08 ON   -oo
 /mix/09 ON  -5.8 +0 EQ-> 0
-/mix/10 ON   -oo
-/mix/11 ON   -oo +0 POST 0
-/mix/12 ON   -oo
+/mix/10 OFF   -oo
+/mix/11 OFF   -oo +0 POST 0
+/mix/12 OFF   -oo
 /mix/13 ON  -4.0 +0 POST 0
 /mix/14 ON   -oo
 /mix/15 ON   -oo +0 POST 0
-/mix/16 ON -12.0
-/headamp/005 +20.0 OFF
+/mix/16 OFF -12.0
+/headamp/003 +19.5 OFF

@@ -1,0 +1,31 @@
+#4.0# 7 "Elders Mic" 0 %0011111100110100 1                                                                              
+/config "Elders Mic" 52 YE
+/delay OFF   0.3
+/preamp +0.0 OFF ON 24 114
+/gate OFF GATE -29.0 21.0 32  100  804 0
+/gate/filter OFF 3.0 1k39
+/dyn ON COMP RMS LIN -25.0 2.5 1 3.00 32 0.40  17 POST 0 100 OFF
+/dyn/filter OFF 3.0 990.9
+/eq ON
+/eq/1 VEQ 202.3 +1.00 2.2
+/eq/2 PEQ 390.0 -3.00 0.7
+/eq/3 PEQ 4k08 +0.50 0.5
+/eq/4 PEQ 17k41 -5.75 0.9
+/mix OFF  +2.3 ON +0 OFF  -8.3
+/mix/01 ON -25.0 +0 EQ-> 0
+/mix/02 ON -27.5
+/mix/03 ON   -oo +0 EQ-> 0
+/mix/04 ON   -oo
+/mix/05 ON   0.0 +0 POST 0
+/mix/06 OFF  -0.5
+/mix/07 OFF  +0.3 +0 POST 0
+/mix/08 ON   -oo
+/mix/09 ON  -9.5 +0 EQ-> 0
+/mix/10 OFF   -oo
+/mix/11 OFF   -oo +0 POST 0
+/mix/12 OFF   -oo
+/mix/13 ON   -oo +0 POST 0
+/mix/14 ON   -oo
+/mix/15 ON   -oo +0 POST 0
+/mix/16 OFF   -oo
+/headamp/000 +29.5 ON

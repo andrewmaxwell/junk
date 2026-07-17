@@ -16,16 +16,16 @@
 /mix/02 ON  +3.8
 /mix/03 ON   -oo +0 EQ-> 0
 /mix/04 ON   -oo
-/mix/05 ON   -oo +0 PRE 0
-/mix/06 ON  -2.3
-/mix/07 ON  +0.3 +0 POST 0
+/mix/05 ON   -oo +0 POST 0
+/mix/06 OFF  -2.3
+/mix/07 OFF  +0.3 +0 POST 0
 /mix/08 ON   -oo
 /mix/09 ON  -5.0 +0 EQ-> 0
-/mix/10 ON   -oo
-/mix/11 ON   -oo +0 POST 0
-/mix/12 ON   -oo
+/mix/10 OFF   -oo
+/mix/11 OFF   -oo +0 POST 0
+/mix/12 OFF   -oo
 /mix/13 ON  -5.0 +0 POST 0
 /mix/14 ON   -oo
 /mix/15 ON   -oo +0 POST 0
-/mix/16 ON -12.0
+/mix/16 OFF -12.0
 /headamp/003 +25.5 OFF

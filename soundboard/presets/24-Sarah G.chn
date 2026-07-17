@@ -1,5 +1,5 @@
 #4.0# 25 "Sarah G" 0 %0011111100110100 1                                                                                
-/config "Sarah G" 42 RD
+/config "Sarah G" 42 BL
 /delay OFF   0.3
 /preamp +0.0 OFF ON 24  61
 /gate OFF GATE -29.0 21.0 32  100  804 0
@@ -11,21 +11,21 @@
 /eq/2 PEQ 893.4 -2.75 3.2
 /eq/3 PEQ 3k55 -1.75 8.6
 /eq/4 HShv 8k43 +4.00 2.0
-/mix ON -11.6 ON +0 OFF  -8.5
+/mix OFF  -4.1 ON +0 OFF  -8.5
 /mix/01 ON  -4.3 +0 EQ-> 0
 /mix/02 ON  -4.3
 /mix/03 ON   -oo +0 EQ-> 0
 /mix/04 ON   -oo
-/mix/05 ON   -oo +0 PRE 0
-/mix/06 ON  +2.3
-/mix/07 ON  +0.3 +0 POST 0
+/mix/05 ON  -9.3 +0 POST 0
+/mix/06 OFF  +2.3
+/mix/07 OFF  +0.3 +0 POST 0
 /mix/08 ON   -oo
 /mix/09 ON  -5.8 +0 EQ-> 0
-/mix/10 ON   -oo
-/mix/11 ON   -oo +0 POST 0
-/mix/12 ON   -oo
+/mix/10 OFF   -oo
+/mix/11 OFF   -oo +0 POST 0
+/mix/12 OFF   -oo
 /mix/13 ON  -7.5 +0 POST 0
 /mix/14 ON   -oo
 /mix/15 ON   -oo +0 POST 0
-/mix/16 ON -12.0
-/headamp/005 +30.5 OFF
+/mix/16 OFF -12.0
+/headamp/004 +24.0 OFF

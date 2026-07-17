@@ -1,4 +1,4 @@
-#4.0# "7-12-26" "" %000000000 1                                                                                                
+#4.0# "7-17-26" "" %000000000 1                                                                                                
 /config/chlink OFF OFF OFF OFF OFF OFF OFF OFF ON ON ON OFF OFF OFF OFF OFF
 /config/auxlink ON ON ON ON
 /config/fxlink ON ON ON ON
@@ -53,18 +53,18 @@
 /ch/01/mix/02 ON -27.5
 /ch/01/mix/03 ON   -oo +0 EQ-> 0
 /ch/01/mix/04 ON   -oo
-/ch/01/mix/05 ON   0.0 +0 PRE 0
-/ch/01/mix/06 ON  -0.5
-/ch/01/mix/07 ON  +0.3 +0 POST 0
+/ch/01/mix/05 ON   0.0 +0 POST 0
+/ch/01/mix/06 OFF  -0.5
+/ch/01/mix/07 OFF  +0.3 +0 POST 0
 /ch/01/mix/08 ON   -oo
 /ch/01/mix/09 ON  -9.5 +0 EQ-> 0
-/ch/01/mix/10 ON   -oo
-/ch/01/mix/11 ON   -oo +0 POST 0
-/ch/01/mix/12 ON   -oo
+/ch/01/mix/10 OFF   -oo
+/ch/01/mix/11 OFF   -oo +0 POST 0
+/ch/01/mix/12 OFF   -oo
 /ch/01/mix/13 ON   -oo +0 POST 0
 /ch/01/mix/14 ON   -oo
 /ch/01/mix/15 ON   -oo +0 POST 0
-/ch/01/mix/16 ON   -oo
+/ch/01/mix/16 OFF   -oo
 /ch/01/grp %00000000 %000100
 /ch/01/automix OFF  -3.0
 /ch/02/config "Sergei" 53 WH 2
@@ -74,7 +74,7 @@
 /ch/02/gate/filter ON LC12 112.5
 /ch/02/dyn ON COMP PEAK LOG -40.5 3.0 3 3.00 35 1.00  151 PRE 0 75 ON
 /ch/02/dyn/filter OFF 3.0 158.9
-/ch/02/insert OFF POST FX6L
+/ch/02/insert OFF POST OFF
 /ch/02/eq ON
 /ch/02/eq/1 PEQ 403.7 -12.7 1.0
 /ch/02/eq/2 PEQ 1k44 +0.25  10
@@ -85,18 +85,18 @@
 /ch/02/mix/02 ON   -oo
 /ch/02/mix/03 ON   -oo +0 EQ-> 0
 /ch/02/mix/04 ON   -oo
-/ch/02/mix/05 ON  -1.5 +0 PRE 0
-/ch/02/mix/06 ON  -5.3
-/ch/02/mix/07 ON  +0.3 +0 POST 0
+/ch/02/mix/05 ON  -1.5 +0 POST 0
+/ch/02/mix/06 OFF  -5.3
+/ch/02/mix/07 OFF  +0.3 +0 POST 0
 /ch/02/mix/08 ON   -oo
 /ch/02/mix/09 ON   -oo +0 EQ-> 0
-/ch/02/mix/10 ON   -oo
-/ch/02/mix/11 ON   -oo +0 POST 0
-/ch/02/mix/12 ON   -oo
+/ch/02/mix/10 OFF   -oo
+/ch/02/mix/11 OFF   -oo +0 POST 0
+/ch/02/mix/12 OFF   -oo
 /ch/02/mix/13 ON   -oo +0 POST 0
 /ch/02/mix/14 ON   -oo
 /ch/02/mix/15 ON   -oo +0 POST 0
-/ch/02/mix/16 ON   -oo
+/ch/02/mix/16 OFF   -oo
 /ch/02/grp %00000000 %001000
 /ch/02/automix OFF -12.0
 /ch/03/config "Ryan" 41 WHi 3
@@ -118,17 +118,17 @@
 /ch/03/mix/03 ON   -oo +0 EQ-> 0
 /ch/03/mix/04 ON   -oo
 /ch/03/mix/05 ON  -0.5 +0 POST 0
-/ch/03/mix/06 ON   0.0
-/ch/03/mix/07 ON  +0.8 +0 POST 0
+/ch/03/mix/06 OFF   0.0
+/ch/03/mix/07 OFF  +0.8 +0 POST 0
 /ch/03/mix/08 ON   -oo
 /ch/03/mix/09 ON  -5.8 +0 EQ-> 0
-/ch/03/mix/10 ON   -oo
-/ch/03/mix/11 ON   -oo +0 POST 0
-/ch/03/mix/12 ON   -oo
+/ch/03/mix/10 OFF   -oo
+/ch/03/mix/11 OFF   -oo +0 POST 0
+/ch/03/mix/12 OFF   -oo
 /ch/03/mix/13 ON  -5.3 +0 POST 0
 /ch/03/mix/14 ON   -oo
 /ch/03/mix/15 ON   -oo +0 POST 0
-/ch/03/mix/16 ON -12.0
+/ch/03/mix/16 OFF -12.0
 /ch/03/grp %00000000 %000001
 /ch/03/automix OFF -12.0
 /ch/04/config "Hannah" 42 WH 4
@@ -149,18 +149,18 @@
 /ch/04/mix/02 ON  +4.8
 /ch/04/mix/03 ON   -oo +0 EQ-> 0
 /ch/04/mix/04 ON   -oo
-/ch/04/mix/05 ON -11.0 +0 PRE 0
-/ch/04/mix/06 ON -13.0
-/ch/04/mix/07 ON  +0.3 +0 POST 0
+/ch/04/mix/05 ON -11.0 +0 POST 0
+/ch/04/mix/06 OFF -13.0
+/ch/04/mix/07 OFF  +0.3 +0 POST 0
 /ch/04/mix/08 ON   -oo
 /ch/04/mix/09 ON  -5.8 +0 EQ-> 0
-/ch/04/mix/10 ON   -oo
-/ch/04/mix/11 ON   -oo +0 POST 0
-/ch/04/mix/12 ON   -oo
+/ch/04/mix/10 OFF   -oo
+/ch/04/mix/11 OFF   -oo +0 POST 0
+/ch/04/mix/12 OFF   -oo
 /ch/04/mix/13 ON  -4.0 +0 POST 0
 /ch/04/mix/14 ON   -oo
 /ch/04/mix/15 ON   -oo +0 POST 0
-/ch/04/mix/16 ON -12.0
+/ch/04/mix/16 OFF -12.0
 /ch/04/grp %00000001 %000001
 /ch/04/automix OFF -12.0
 /ch/05/config "Sarah G" 42 BL 5
@@ -181,18 +181,18 @@
 /ch/05/mix/02 ON  -4.3
 /ch/05/mix/03 ON   -oo +0 EQ-> 0
 /ch/05/mix/04 ON   -oo
-/ch/05/mix/05 ON  -9.3 +0 PRE 0
-/ch/05/mix/06 ON  +2.3
-/ch/05/mix/07 ON  +0.3 +0 POST 0
+/ch/05/mix/05 ON  -9.3 +0 POST 0
+/ch/05/mix/06 OFF  +2.3
+/ch/05/mix/07 OFF  +0.3 +0 POST 0
 /ch/05/mix/08 ON   -oo
 /ch/05/mix/09 ON  -5.8 +0 EQ-> 0
-/ch/05/mix/10 ON   -oo
-/ch/05/mix/11 ON   -oo +0 POST 0
-/ch/05/mix/12 ON   -oo
+/ch/05/mix/10 OFF   -oo
+/ch/05/mix/11 OFF   -oo +0 POST 0
+/ch/05/mix/12 OFF   -oo
 /ch/05/mix/13 ON  -7.5 +0 POST 0
 /ch/05/mix/14 ON   -oo
 /ch/05/mix/15 ON   -oo +0 POST 0
-/ch/05/mix/16 ON -12.0
+/ch/05/mix/16 OFF -12.0
 /ch/05/grp %00000001 %000001
 /ch/05/automix OFF -12.0
 /ch/06/config "Liberty" 42 RD 6
@@ -213,18 +213,18 @@
 /ch/06/mix/02 ON  -2.3
 /ch/06/mix/03 ON   -oo +0 EQ-> 0
 /ch/06/mix/04 ON   -oo
-/ch/06/mix/05 ON -14.5 +0 PRE 0
-/ch/06/mix/06 ON -13.0
-/ch/06/mix/07 ON  +0.3 +0 POST 0
+/ch/06/mix/05 ON -14.5 +0 POST 0
+/ch/06/mix/06 OFF -13.0
+/ch/06/mix/07 OFF  +0.3 +0 POST 0
 /ch/06/mix/08 ON   -oo
 /ch/06/mix/09 ON  -5.8 +0 EQ-> 0
-/ch/06/mix/10 ON   -oo
-/ch/06/mix/11 ON   -oo +0 POST 0
-/ch/06/mix/12 ON   -oo
+/ch/06/mix/10 OFF   -oo
+/ch/06/mix/11 OFF   -oo +0 POST 0
+/ch/06/mix/12 OFF   -oo
 /ch/06/mix/13 ON  -4.0 +0 POST 0
 /ch/06/mix/14 ON   -oo
 /ch/06/mix/15 ON   -oo +0 POST 0
-/ch/06/mix/16 ON -12.0
+/ch/06/mix/16 OFF -12.0
 /ch/06/grp %00000001 %000001
 /ch/06/automix OFF -12.0
 /ch/07/config "Dave" 41 YE 7
@@ -245,18 +245,18 @@
 /ch/07/mix/02 ON  -6.5
 /ch/07/mix/03 ON   -oo +0 EQ-> 0
 /ch/07/mix/04 ON   -oo
-/ch/07/mix/05 ON -17.0 +0 PRE 0
-/ch/07/mix/06 ON  -4.8
-/ch/07/mix/07 ON  +0.3 +0 POST 0
+/ch/07/mix/05 ON -17.0 +0 POST 0
+/ch/07/mix/06 OFF  -4.8
+/ch/07/mix/07 OFF  +0.3 +0 POST 0
 /ch/07/mix/08 ON   -oo
 /ch/07/mix/09 ON  -5.8 +0 EQ-> 0
-/ch/07/mix/10 ON   -oo
-/ch/07/mix/11 ON   -oo +0 POST 0
-/ch/07/mix/12 ON   -oo
+/ch/07/mix/10 OFF   -oo
+/ch/07/mix/11 OFF   -oo +0 POST 0
+/ch/07/mix/12 OFF   -oo
 /ch/07/mix/13 ON  -6.8 +0 POST 0
 /ch/07/mix/14 ON   -oo
 /ch/07/mix/15 ON   -oo +0 POST 0
-/ch/07/mix/16 ON   -oo
+/ch/07/mix/16 OFF   -oo
 /ch/07/grp %00000001 %000000
 /ch/07/automix OFF -12.0
 /ch/08/config "Orange" 41 YEi 8
@@ -277,18 +277,18 @@
 /ch/08/mix/02 ON  -3.5
 /ch/08/mix/03 ON   -oo +0 EQ-> 0
 /ch/08/mix/04 ON   -oo
-/ch/08/mix/05 ON  -4.8 +0 PRE 0
-/ch/08/mix/06 ON  -3.8
-/ch/08/mix/07 ON  -0.5 +0 POST 0
+/ch/08/mix/05 ON  -4.8 +0 POST 0
+/ch/08/mix/06 OFF  -3.8
+/ch/08/mix/07 OFF  -0.5 +0 POST 0
 /ch/08/mix/08 ON   -oo
 /ch/08/mix/09 ON  -5.8 +0 EQ-> 0
-/ch/08/mix/10 ON   -oo
-/ch/08/mix/11 ON   -oo +0 POST 0
-/ch/08/mix/12 ON   -oo
+/ch/08/mix/10 OFF   -oo
+/ch/08/mix/11 OFF   -oo +0 POST 0
+/ch/08/mix/12 OFF   -oo
 /ch/08/mix/13 ON -10.5 +0 POST 0
 /ch/08/mix/14 ON   -oo
 /ch/08/mix/15 ON   -oo +0 POST 0
-/ch/08/mix/16 ON   -oo
+/ch/08/mix/16 OFF   -oo
 /ch/08/grp %00000001 %000000
 /ch/08/automix OFF -12.0
 /ch/09/config "Ryan Guitar" 23 CY 9
@@ -309,18 +309,18 @@
 /ch/09/mix/02 ON  +0.8
 /ch/09/mix/03 ON -10.0 +0 EQ-> 0
 /ch/09/mix/04 ON   -oo
-/ch/09/mix/05 ON  -5.0 +0 PRE 0
-/ch/09/mix/06 ON  -1.0
-/ch/09/mix/07 ON  +0.3 +0 POST 0
+/ch/09/mix/05 ON  -5.0 +0 POST 0
+/ch/09/mix/06 OFF  -1.0
+/ch/09/mix/07 OFF  +0.3 +0 POST 0
 /ch/09/mix/08 ON   -oo
 /ch/09/mix/09 ON   -oo +0 EQ-> 0
-/ch/09/mix/10 ON  -9.5
-/ch/09/mix/11 ON   -oo +0 POST 0
-/ch/09/mix/12 ON   -oo
+/ch/09/mix/10 OFF  -9.5
+/ch/09/mix/11 OFF   -oo +0 POST 0
+/ch/09/mix/12 OFF   -oo
 /ch/09/mix/13 ON  -2.3 +0 POST 0
 /ch/09/mix/14 ON  -7.8
 /ch/09/mix/15 ON   -oo +0 POST 0
-/ch/09/mix/16 ON   -oo
+/ch/09/mix/16 OFF   -oo
 /ch/09/grp %00000010 %000010
 /ch/09/automix OFF -12.0
 /ch/10/config "Violin" 39 MG 10
@@ -330,7 +330,7 @@
 /ch/10/gate/filter OFF 3.0 990.9
 /ch/10/dyn ON COMP PEAK LOG -33.0 3.0 1 0.00 10 10.0  151 POST 0 100 OFF
 /ch/10/dyn/filter OFF 3.0 990.9
-/ch/10/insert OFF POST FX8R
+/ch/10/insert OFF POST OFF
 /ch/10/eq ON
 /ch/10/eq/1 PEQ 133.7 -1.50  10
 /ch/10/eq/2 PEQ 339.6 -0.25  10
@@ -341,18 +341,18 @@
 /ch/10/mix/02 ON -10.0
 /ch/10/mix/03 ON   -oo +0 EQ-> 0
 /ch/10/mix/04 ON   -oo
-/ch/10/mix/05 ON  -6.5 +0 PRE 0
-/ch/10/mix/06 ON   -oo
-/ch/10/mix/07 ON  +0.3 +0 POST 0
+/ch/10/mix/05 ON  -6.5 +0 POST 0
+/ch/10/mix/06 OFF   -oo
+/ch/10/mix/07 OFF  +0.3 +0 POST 0
 /ch/10/mix/08 ON   -oo
 /ch/10/mix/09 ON -78.0 +0 EQ-> 0
-/ch/10/mix/10 ON   -oo
-/ch/10/mix/11 ON   -oo +0 POST 0
-/ch/10/mix/12 ON   -oo
+/ch/10/mix/10 OFF   -oo
+/ch/10/mix/11 OFF   -oo +0 POST 0
+/ch/10/mix/12 OFF   -oo
 /ch/10/mix/13 ON   -oo +0 POST 0
 /ch/10/mix/14 ON  -1.0
 /ch/10/mix/15 ON   -oo +0 POST 0
-/ch/10/mix/16 ON   -oo
+/ch/10/mix/16 OFF   -oo
 /ch/10/grp %00000010 %000000
 /ch/10/automix OFF -12.0
 /ch/11/config "Cello" 40 MG 31
@@ -373,21 +373,21 @@
 /ch/11/mix/02 ON   -oo
 /ch/11/mix/03 ON   -oo +0 EQ-> 0
 /ch/11/mix/04 ON   -oo
-/ch/11/mix/05 ON  -6.8 +0 PRE 0
-/ch/11/mix/06 ON  -1.0
-/ch/11/mix/07 ON   0.0 +0 POST 0
+/ch/11/mix/05 ON  -6.8 +0 POST 0
+/ch/11/mix/06 OFF  -1.0
+/ch/11/mix/07 OFF   0.0 +0 POST 0
 /ch/11/mix/08 ON -25.0
 /ch/11/mix/09 ON   -oo +0 EQ-> 0
-/ch/11/mix/10 ON   -oo
-/ch/11/mix/11 ON   -oo +0 POST 0
-/ch/11/mix/12 ON   -oo
+/ch/11/mix/10 OFF   -oo
+/ch/11/mix/11 OFF   -oo +0 POST 0
+/ch/11/mix/12 OFF   -oo
 /ch/11/mix/13 ON  -8.8 +0 POST 0
 /ch/11/mix/14 ON  -4.5
 /ch/11/mix/15 ON   -oo +0 POST 0
-/ch/11/mix/16 ON   -oo
+/ch/11/mix/16 OFF   -oo
 /ch/11/grp %00000010 %000000
 /ch/11/automix OFF -12.0
-/ch/12/config "Piano Low " 27 WH 12
+/ch/12/config "Piano Low" 27 WH 12
 /ch/12/delay OFF   0.3
 /ch/12/preamp +0.0 OFF OFF 24  82
 /ch/12/gate ON GATE -59.0 40.0 0  502  983 0
@@ -405,18 +405,18 @@
 /ch/12/mix/02 ON   -oo
 /ch/12/mix/03 ON   -oo +100 EQ-> 0
 /ch/12/mix/04 ON   -oo
-/ch/12/mix/05 ON  -5.3 +100 PRE 0
-/ch/12/mix/06 ON -13.0
-/ch/12/mix/07 ON  +0.8 +100 POST 0
+/ch/12/mix/05 ON  -5.3 +100 POST 0
+/ch/12/mix/06 OFF -13.0
+/ch/12/mix/07 OFF  +0.8 +100 POST 0
 /ch/12/mix/08 ON  -6.3
 /ch/12/mix/09 ON   -oo +100 EQ-> 0
-/ch/12/mix/10 ON   -oo
-/ch/12/mix/11 ON   -oo +100 POST 0
-/ch/12/mix/12 ON   -oo
+/ch/12/mix/10 OFF   -oo
+/ch/12/mix/11 OFF   -oo +100 POST 0
+/ch/12/mix/12 OFF   -oo
 /ch/12/mix/13 ON   -oo +100 POST 0
 /ch/12/mix/14 ON   -oo
 /ch/12/mix/15 ON   -oo +100 POST 0
-/ch/12/mix/16 ON   -oo
+/ch/12/mix/16 OFF   -oo
 /ch/12/grp %00000010 %000010
 /ch/12/automix OFF -12.0
 /ch/13/config "Piano High" 27 WH 14
@@ -437,18 +437,18 @@
 /ch/13/mix/02 ON   -oo
 /ch/13/mix/03 ON -39.0 +0 EQ-> 0
 /ch/13/mix/04 ON   -oo
-/ch/13/mix/05 ON  -4.5 +0 PRE 0
-/ch/13/mix/06 ON -13.0
-/ch/13/mix/07 ON  +4.5 +0 POST 0
+/ch/13/mix/05 ON  -4.5 +0 POST 0
+/ch/13/mix/06 OFF -13.0
+/ch/13/mix/07 OFF  +4.5 +0 POST 0
 /ch/13/mix/08 ON  -5.5
 /ch/13/mix/09 ON   -oo +0 EQ-> 0
-/ch/13/mix/10 ON   -oo
-/ch/13/mix/11 ON   -oo +0 POST 0
-/ch/13/mix/12 ON   -oo
+/ch/13/mix/10 OFF   -oo
+/ch/13/mix/11 OFF   -oo +0 POST 0
+/ch/13/mix/12 OFF   -oo
 /ch/13/mix/13 ON   -oo +0 POST 0
 /ch/13/mix/14 ON   -oo
 /ch/13/mix/15 ON   -oo +0 POST 0
-/ch/13/mix/16 ON   -oo
+/ch/13/mix/16 OFF   -oo
 /ch/13/grp %00000010 %000010
 /ch/13/automix OFF -12.0
 /ch/14/config "Jadon Bass" 17 MG 32
@@ -469,18 +469,18 @@
 /ch/14/mix/02 ON  -3.3
 /ch/14/mix/03 ON   -oo +0 EQ-> 0
 /ch/14/mix/04 ON   -oo
-/ch/14/mix/05 ON  -6.3 +0 PRE 0
-/ch/14/mix/06 ON  -2.0
-/ch/14/mix/07 ON  +0.3 +0 POST 0
+/ch/14/mix/05 ON  -6.3 +0 POST 0
+/ch/14/mix/06 OFF  -2.0
+/ch/14/mix/07 OFF  +0.3 +0 POST 0
 /ch/14/mix/08 ON  -1.8
 /ch/14/mix/09 ON   -oo +0 EQ-> 0
-/ch/14/mix/10 ON   -oo
-/ch/14/mix/11 ON   -oo +0 POST 0
-/ch/14/mix/12 ON   -oo
+/ch/14/mix/10 OFF   -oo
+/ch/14/mix/11 OFF   -oo +0 POST 0
+/ch/14/mix/12 OFF   -oo
 /ch/14/mix/13 ON   -oo +0 POST 0
 /ch/14/mix/14 ON   -oo
 /ch/14/mix/15 ON   -oo +0 POST 0
-/ch/14/mix/16 ON   -oo
+/ch/14/mix/16 OFF   -oo
 /ch/14/grp %00000010 %000010
 /ch/14/automix OFF -12.0
 /ch/15/config "Drums" 11 GN 15
@@ -501,18 +501,18 @@
 /ch/15/mix/02 ON  +0.8
 /ch/15/mix/03 ON -39.0 -100 EQ-> 0
 /ch/15/mix/04 ON  -8.8
-/ch/15/mix/05 ON -12.0 -100 PRE 0
-/ch/15/mix/06 ON  -8.0
-/ch/15/mix/07 ON  -7.3 -100 POST 0
+/ch/15/mix/05 ON -12.0 -100 POST 0
+/ch/15/mix/06 OFF  -8.0
+/ch/15/mix/07 OFF  -7.3 -100 POST 0
 /ch/15/mix/08 ON   0.0
 /ch/15/mix/09 ON   -oo -100 EQ-> 0
-/ch/15/mix/10 ON   -oo
-/ch/15/mix/11 ON   -oo -100 POST 0
-/ch/15/mix/12 ON   -oo
+/ch/15/mix/10 OFF   -oo
+/ch/15/mix/11 OFF   -oo -100 POST 0
+/ch/15/mix/12 OFF   -oo
 /ch/15/mix/13 ON   -oo -100 POST 0
 /ch/15/mix/14 ON   -oo
 /ch/15/mix/15 ON  -7.8 -100 POST 0
-/ch/15/mix/16 ON   -oo
+/ch/15/mix/16 OFF   -oo
 /ch/15/grp %00000010 %000010
 /ch/15/automix OFF -12.0
 /ch/16/config "Cymbals" 11 GN 16
@@ -533,18 +533,18 @@
 /ch/16/mix/02 ON  +1.3
 /ch/16/mix/03 ON -30.0 +100 EQ-> 0
 /ch/16/mix/04 ON -12.0
-/ch/16/mix/05 ON -12.5 +100 PRE 0
-/ch/16/mix/06 ON  -8.0
-/ch/16/mix/07 ON  -5.8 +100 POST 0
+/ch/16/mix/05 ON -12.5 +100 POST 0
+/ch/16/mix/06 OFF  -8.0
+/ch/16/mix/07 OFF  -5.8 +100 POST 0
 /ch/16/mix/08 ON -28.0
 /ch/16/mix/09 ON   -oo +100 EQ-> 0
-/ch/16/mix/10 ON   -oo
-/ch/16/mix/11 ON   -oo +100 POST 0
-/ch/16/mix/12 ON   -oo
+/ch/16/mix/10 OFF   -oo
+/ch/16/mix/11 OFF   -oo +100 POST 0
+/ch/16/mix/12 OFF   -oo
 /ch/16/mix/13 ON   -oo +100 POST 0
 /ch/16/mix/14 ON   -oo
 /ch/16/mix/15 ON -21.5 +100 POST 0
-/ch/16/mix/16 ON   -oo
+/ch/16/mix/16 OFF   -oo
 /ch/16/grp %00000010 %000010
 /ch/16/automix OFF -12.0
 /ch/17/config "LP-Guitar L" 20 YE 17
@@ -565,18 +565,18 @@
 /ch/17/mix/02 ON  -0.8
 /ch/17/mix/03 ON -12.0 -100 EQ-> 0
 /ch/17/mix/04 ON   -oo
-/ch/17/mix/05 ON  -1.8 -100 EQ-> 0
-/ch/17/mix/06 ON   -oo
-/ch/17/mix/07 ON  -4.0 -100 POST 0
+/ch/17/mix/05 ON  -1.8 -100 POST 0
+/ch/17/mix/06 OFF   -oo
+/ch/17/mix/07 OFF  -4.0 -100 POST 0
 /ch/17/mix/08 ON   -oo
 /ch/17/mix/09 ON -44.0 -100 EQ-> 0
-/ch/17/mix/10 ON   -oo
-/ch/17/mix/11 ON   -oo -100 POST 0
-/ch/17/mix/12 ON   -oo
+/ch/17/mix/10 OFF   -oo
+/ch/17/mix/11 OFF   -oo -100 POST 0
+/ch/17/mix/12 OFF   -oo
 /ch/17/mix/13 ON   -oo -100 POST 0
 /ch/17/mix/14 ON   -oo
 /ch/17/mix/15 ON   -oo -100 POST 0
-/ch/17/mix/16 ON   -oo
+/ch/17/mix/16 OFF   -oo
 /ch/17/grp %00000000 %000010
 /ch/17/automix OFF -12.0
 /ch/18/config "LP-Guitar R" 20 YE 18
@@ -597,18 +597,18 @@
 /ch/18/mix/02 ON  -0.8
 /ch/18/mix/03 ON -12.0 +100 EQ-> 0
 /ch/18/mix/04 ON   -oo
-/ch/18/mix/05 ON  -1.8 +100 EQ-> 0
-/ch/18/mix/06 ON   -oo
-/ch/18/mix/07 ON  -4.0 +100 POST 0
+/ch/18/mix/05 ON  -1.8 +100 POST 0
+/ch/18/mix/06 OFF   -oo
+/ch/18/mix/07 OFF  -4.0 +100 POST 0
 /ch/18/mix/08 ON   -oo
 /ch/18/mix/09 ON -44.0 +100 EQ-> 0
-/ch/18/mix/10 ON   -oo
-/ch/18/mix/11 ON   -oo +100 POST 0
-/ch/18/mix/12 ON   -oo
+/ch/18/mix/10 OFF   -oo
+/ch/18/mix/11 OFF   -oo +100 POST 0
+/ch/18/mix/12 OFF   -oo
 /ch/18/mix/13 ON   -oo +100 POST 0
 /ch/18/mix/14 ON   -oo
 /ch/18/mix/15 ON   -oo +100 POST 0
-/ch/18/mix/16 ON   -oo
+/ch/18/mix/16 OFF   -oo
 /ch/18/grp %00000000 %000010
 /ch/18/automix OFF -12.0
 /ch/19/config "Choir Left" 43 CYi 19
@@ -629,18 +629,18 @@
 /ch/19/mix/02 ON   -oo
 /ch/19/mix/03 ON   -oo -100 EQ-> 0
 /ch/19/mix/04 ON   -oo
-/ch/19/mix/05 ON   -oo -100 PRE 0
-/ch/19/mix/06 ON   -oo
-/ch/19/mix/07 ON   0.0 -100 POST 0
+/ch/19/mix/05 ON   -oo -100 POST 0
+/ch/19/mix/06 OFF   -oo
+/ch/19/mix/07 OFF   0.0 -100 POST 0
 /ch/19/mix/08 ON   -oo
 /ch/19/mix/09 ON   -oo -100 EQ-> 0
-/ch/19/mix/10 ON   -oo
-/ch/19/mix/11 ON   -oo -100 POST 0
-/ch/19/mix/12 ON   -oo
+/ch/19/mix/10 OFF   -oo
+/ch/19/mix/11 OFF   -oo -100 POST 0
+/ch/19/mix/12 OFF   -oo
 /ch/19/mix/13 ON   -oo -100 POST 0
 /ch/19/mix/14 ON   -oo
 /ch/19/mix/15 ON   -oo -100 POST 0
-/ch/19/mix/16 ON   -oo
+/ch/19/mix/16 OFF   -oo
 /ch/19/grp %00000000 %000000
 /ch/19/automix OFF -12.0
 /ch/20/config "Choir Right" 43 CYi 20
@@ -661,18 +661,18 @@
 /ch/20/mix/02 ON   -oo
 /ch/20/mix/03 ON   -oo +100 EQ-> 0
 /ch/20/mix/04 ON   -oo
-/ch/20/mix/05 ON   -oo +100 PRE 0
-/ch/20/mix/06 ON   -oo
-/ch/20/mix/07 ON   0.0 +100 POST 0
+/ch/20/mix/05 ON   -oo +100 POST 0
+/ch/20/mix/06 OFF   -oo
+/ch/20/mix/07 OFF   0.0 +100 POST 0
 /ch/20/mix/08 ON   -oo
 /ch/20/mix/09 ON   -oo +100 EQ-> 0
-/ch/20/mix/10 ON   -oo
-/ch/20/mix/11 ON   -oo +100 POST 0
-/ch/20/mix/12 ON   -oo
+/ch/20/mix/10 OFF   -oo
+/ch/20/mix/11 OFF   -oo +100 POST 0
+/ch/20/mix/12 OFF   -oo
 /ch/20/mix/13 ON   -oo +100 POST 0
 /ch/20/mix/14 ON   -oo
 /ch/20/mix/15 ON   -oo +100 POST 0
-/ch/20/mix/16 ON   -oo
+/ch/20/mix/16 OFF   -oo
 /ch/20/grp %00000000 %000000
 /ch/20/automix OFF -12.0
 /ch/21/config "Keyboard" 32 GNi 21
@@ -693,18 +693,18 @@
 /ch/21/mix/02 ON  -5.0
 /ch/21/mix/03 ON   -oo +0 EQ-> 0
 /ch/21/mix/04 ON   -oo
-/ch/21/mix/05 ON -26.0 +0 PRE 0
-/ch/21/mix/06 ON  -7.5
-/ch/21/mix/07 ON  +0.3 +0 POST 0
+/ch/21/mix/05 ON -26.0 +0 POST 0
+/ch/21/mix/06 OFF  -7.5
+/ch/21/mix/07 OFF  +0.3 +0 POST 0
 /ch/21/mix/08 ON   -oo
 /ch/21/mix/09 ON   -oo +0 EQ-> 0
-/ch/21/mix/10 ON   -oo
-/ch/21/mix/11 ON   -oo +0 POST 0
-/ch/21/mix/12 ON   -oo
+/ch/21/mix/10 OFF   -oo
+/ch/21/mix/11 OFF   -oo +0 POST 0
+/ch/21/mix/12 OFF   -oo
 /ch/21/mix/13 ON   -oo +0 POST 0
 /ch/21/mix/14 ON   -oo
 /ch/21/mix/15 ON   -oo +0 POST 0
-/ch/21/mix/16 ON   -oo
+/ch/21/mix/16 OFF   -oo
 /ch/21/grp %00000000 %000010
 /ch/21/automix OFF -12.0
 /ch/22/config "Keyboard" 32 GNi 22
@@ -725,18 +725,18 @@
 /ch/22/mix/02 ON  -5.0
 /ch/22/mix/03 ON   -oo +0 EQ-> 0
 /ch/22/mix/04 ON   -oo
-/ch/22/mix/05 ON -26.0 +0 PRE 0
-/ch/22/mix/06 ON  -7.5
-/ch/22/mix/07 ON  +0.3 +0 POST 0
+/ch/22/mix/05 ON -26.0 +0 POST 0
+/ch/22/mix/06 OFF  -7.5
+/ch/22/mix/07 OFF  +0.3 +0 POST 0
 /ch/22/mix/08 ON   -oo
 /ch/22/mix/09 ON   -oo +0 EQ-> 0
-/ch/22/mix/10 ON   -oo
-/ch/22/mix/11 ON   -oo +0 POST 0
-/ch/22/mix/12 ON   -oo
+/ch/22/mix/10 OFF   -oo
+/ch/22/mix/11 OFF   -oo +0 POST 0
+/ch/22/mix/12 OFF   -oo
 /ch/22/mix/13 ON   -oo +0 POST 0
 /ch/22/mix/14 ON   -oo
 /ch/22/mix/15 ON   -oo +0 POST 0
-/ch/22/mix/16 ON   -oo
+/ch/22/mix/16 OFF   -oo
 /ch/22/grp %00000000 %000010
 /ch/22/automix OFF -12.0
 /ch/23/config "" 1 OFF 23
@@ -757,18 +757,18 @@
 /ch/23/mix/02 ON   -oo
 /ch/23/mix/03 ON   -oo +0 EQ-> 0
 /ch/23/mix/04 ON   -oo
-/ch/23/mix/05 ON   -oo +0 EQ-> 0
-/ch/23/mix/06 ON   -oo
-/ch/23/mix/07 ON   -oo +0 IN/LC 0
+/ch/23/mix/05 ON   -oo +0 POST 0
+/ch/23/mix/06 OFF   -oo
+/ch/23/mix/07 OFF   -oo +0 IN/LC 0
 /ch/23/mix/08 ON   -oo
 /ch/23/mix/09 ON   -oo +0 EQ-> 0
-/ch/23/mix/10 ON   -oo
-/ch/23/mix/11 ON   -oo +0 POST 0
-/ch/23/mix/12 ON   -oo
+/ch/23/mix/10 OFF   -oo
+/ch/23/mix/11 OFF   -oo +0 POST 0
+/ch/23/mix/12 OFF   -oo
 /ch/23/mix/13 ON   -oo +0 POST 0
 /ch/23/mix/14 ON   -oo
 /ch/23/mix/15 ON   -oo +0 POST 0
-/ch/23/mix/16 ON   -oo
+/ch/23/mix/16 OFF   -oo
 /ch/23/grp %00000000 %000000
 /ch/23/automix OFF -12.0
 /ch/24/config "" 1 OFF 24
@@ -789,18 +789,18 @@
 /ch/24/mix/02 ON   -oo
 /ch/24/mix/03 ON   -oo +0 EQ-> 0
 /ch/24/mix/04 ON   -oo
-/ch/24/mix/05 ON   -oo +0 PRE 0
-/ch/24/mix/06 ON   -oo
-/ch/24/mix/07 ON   -oo +0 PRE 0
+/ch/24/mix/05 ON   -oo +0 POST 0
+/ch/24/mix/06 OFF   -oo
+/ch/24/mix/07 OFF   -oo +0 PRE 0
 /ch/24/mix/08 ON   -oo
 /ch/24/mix/09 ON   -oo +0 POST 0
-/ch/24/mix/10 ON   -oo
-/ch/24/mix/11 ON   -oo +0 POST 0
-/ch/24/mix/12 ON   -oo
+/ch/24/mix/10 OFF   -oo
+/ch/24/mix/11 OFF   -oo +0 POST 0
+/ch/24/mix/12 OFF   -oo
 /ch/24/mix/13 ON   -oo +0 POST 0
 /ch/24/mix/14 ON   -oo
 /ch/24/mix/15 ON   -oo +0 POST 0
-/ch/24/mix/16 ON   -oo
+/ch/24/mix/16 OFF   -oo
 /ch/24/grp %00000000 %000000
 /ch/24/automix OFF -12.0
 /ch/25/config "Crowd Mic" 44 CYi 25
@@ -822,17 +822,17 @@
 /ch/25/mix/03 ON   -oo +0 EQ-> 0
 /ch/25/mix/04 ON   -oo
 /ch/25/mix/05 ON -19.0 +0 PRE 0
-/ch/25/mix/06 ON -11.0
-/ch/25/mix/07 ON -10.0 +0 PRE 0
+/ch/25/mix/06 OFF -11.0
+/ch/25/mix/07 OFF -10.0 +0 PRE 0
 /ch/25/mix/08 ON   -oo
 /ch/25/mix/09 ON   -oo +0 EQ-> 0
-/ch/25/mix/10 ON   -oo
-/ch/25/mix/11 ON   -oo +0 POST 0
-/ch/25/mix/12 ON   -oo
+/ch/25/mix/10 OFF   -oo
+/ch/25/mix/11 OFF   -oo +0 POST 0
+/ch/25/mix/12 OFF   -oo
 /ch/25/mix/13 ON   -oo +0 POST 0
 /ch/25/mix/14 ON   -oo
 /ch/25/mix/15 ON   -oo +0 POST 0
-/ch/25/mix/16 ON   -oo
+/ch/25/mix/16 OFF   -oo
 /ch/25/grp %00000000 %000000
 /ch/25/automix OFF -12.0
 /ch/26/config "" 1 OFF 26
@@ -853,18 +853,18 @@
 /ch/26/mix/02 ON   -oo
 /ch/26/mix/03 ON   -oo +0 EQ-> 0
 /ch/26/mix/04 ON   -oo
-/ch/26/mix/05 ON   -oo +0 EQ-> 0
-/ch/26/mix/06 ON   -oo
-/ch/26/mix/07 ON   -oo +0 IN/LC 0
+/ch/26/mix/05 ON   -oo +0 POST 0
+/ch/26/mix/06 OFF   -oo
+/ch/26/mix/07 OFF   -oo +0 IN/LC 0
 /ch/26/mix/08 ON   -oo
 /ch/26/mix/09 ON   -oo +0 EQ-> 0
-/ch/26/mix/10 ON   -oo
-/ch/26/mix/11 ON   -oo +0 POST 0
-/ch/26/mix/12 ON   -oo
+/ch/26/mix/10 OFF   -oo
+/ch/26/mix/11 OFF   -oo +0 POST 0
+/ch/26/mix/12 OFF   -oo
 /ch/26/mix/13 ON   -oo +0 POST 0
 /ch/26/mix/14 ON   -oo
 /ch/26/mix/15 ON   -oo +0 POST 0
-/ch/26/mix/16 ON   -oo
+/ch/26/mix/16 OFF   -oo
 /ch/26/grp %00000000 %000000
 /ch/26/automix OFF -12.0
 /ch/27/config "" 1 OFF 27
@@ -885,18 +885,18 @@
 /ch/27/mix/02 ON   -oo
 /ch/27/mix/03 ON   -oo +0 EQ-> 0
 /ch/27/mix/04 ON   -oo
-/ch/27/mix/05 ON   -oo +0 EQ-> 0
-/ch/27/mix/06 ON   -oo
-/ch/27/mix/07 ON   -oo +0 IN/LC 0
+/ch/27/mix/05 ON   -oo +0 POST 0
+/ch/27/mix/06 OFF   -oo
+/ch/27/mix/07 OFF   -oo +0 IN/LC 0
 /ch/27/mix/08 ON   -oo
 /ch/27/mix/09 ON   -oo +0 EQ-> 0
-/ch/27/mix/10 ON   -oo
-/ch/27/mix/11 ON   -oo +0 POST 0
-/ch/27/mix/12 ON   -oo
+/ch/27/mix/10 OFF   -oo
+/ch/27/mix/11 OFF   -oo +0 POST 0
+/ch/27/mix/12 OFF   -oo
 /ch/27/mix/13 ON   -oo +0 POST 0
 /ch/27/mix/14 ON   -oo
 /ch/27/mix/15 ON   -oo +0 POST 0
-/ch/27/mix/16 ON   -oo
+/ch/27/mix/16 OFF   -oo
 /ch/27/grp %00000000 %000000
 /ch/27/automix OFF -12.0
 /ch/28/config "" 1 OFF 28
@@ -917,18 +917,18 @@
 /ch/28/mix/02 ON   -oo
 /ch/28/mix/03 ON   -oo +0 EQ-> 0
 /ch/28/mix/04 ON   -oo
-/ch/28/mix/05 ON   -oo +0 EQ-> 0
-/ch/28/mix/06 ON   -oo
-/ch/28/mix/07 ON   -oo +0 IN/LC 0
+/ch/28/mix/05 ON   -oo +0 POST 0
+/ch/28/mix/06 OFF   -oo
+/ch/28/mix/07 OFF   -oo +0 IN/LC 0
 /ch/28/mix/08 ON   -oo
 /ch/28/mix/09 ON   -oo +0 EQ-> 0
-/ch/28/mix/10 ON   -oo
-/ch/28/mix/11 ON   -oo +0 POST 0
-/ch/28/mix/12 ON   -oo
+/ch/28/mix/10 OFF   -oo
+/ch/28/mix/11 OFF   -oo +0 POST 0
+/ch/28/mix/12 OFF   -oo
 /ch/28/mix/13 ON   -oo +0 POST 0
 /ch/28/mix/14 ON   -oo
 /ch/28/mix/15 ON   -oo +0 POST 0
-/ch/28/mix/16 ON   -oo
+/ch/28/mix/16 OFF   -oo
 /ch/28/grp %00000000 %000000
 /ch/28/automix OFF -12.0
 /ch/29/config "" 1 OFF 29
@@ -949,18 +949,18 @@
 /ch/29/mix/02 ON   -oo
 /ch/29/mix/03 ON   -oo +0 EQ-> 0
 /ch/29/mix/04 ON   -oo
-/ch/29/mix/05 ON   -oo +0 EQ-> 0
-/ch/29/mix/06 ON   -oo
-/ch/29/mix/07 ON   -oo +0 IN/LC 0
+/ch/29/mix/05 ON   -oo +0 POST 0
+/ch/29/mix/06 OFF   -oo
+/ch/29/mix/07 OFF   -oo +0 IN/LC 0
 /ch/29/mix/08 ON   -oo
 /ch/29/mix/09 ON   -oo +0 EQ-> 0
-/ch/29/mix/10 ON   -oo
-/ch/29/mix/11 ON   -oo +0 POST 0
-/ch/29/mix/12 ON   -oo
+/ch/29/mix/10 OFF   -oo
+/ch/29/mix/11 OFF   -oo +0 POST 0
+/ch/29/mix/12 OFF   -oo
 /ch/29/mix/13 ON   -oo +0 POST 0
 /ch/29/mix/14 ON   -oo
 /ch/29/mix/15 ON   -oo +0 POST 0
-/ch/29/mix/16 ON   -oo
+/ch/29/mix/16 OFF   -oo
 /ch/29/grp %00000000 %000000
 /ch/29/automix OFF -12.0
 /ch/30/config "" 1 OFF 30
@@ -981,18 +981,18 @@
 /ch/30/mix/02 ON   -oo
 /ch/30/mix/03 ON   -oo +0 EQ-> 0
 /ch/30/mix/04 ON   -oo
-/ch/30/mix/05 ON   -oo +0 EQ-> 0
-/ch/30/mix/06 ON   -oo
-/ch/30/mix/07 ON   -oo +0 IN/LC 0
+/ch/30/mix/05 ON   -oo +0 POST 0
+/ch/30/mix/06 OFF   -oo
+/ch/30/mix/07 OFF   -oo +0 IN/LC 0
 /ch/30/mix/08 ON   -oo
 /ch/30/mix/09 ON   -oo +0 EQ-> 0
-/ch/30/mix/10 ON   -oo
-/ch/30/mix/11 ON   -oo +0 POST 0
-/ch/30/mix/12 ON   -oo
+/ch/30/mix/10 OFF   -oo
+/ch/30/mix/11 OFF   -oo +0 POST 0
+/ch/30/mix/12 OFF   -oo
 /ch/30/mix/13 ON   -oo +0 POST 0
 /ch/30/mix/14 ON   -oo
 /ch/30/mix/15 ON   -oo +0 POST 0
-/ch/30/mix/16 ON   -oo
+/ch/30/mix/16 OFF   -oo
 /ch/30/grp %00000000 %000000
 /ch/30/automix OFF -12.0
 /ch/31/config "DO NOT USE" 1 RDi 31
@@ -1013,18 +1013,18 @@
 /ch/31/mix/02 ON   -oo
 /ch/31/mix/03 ON   -oo +0 EQ-> 0
 /ch/31/mix/04 ON   -oo
-/ch/31/mix/05 ON   -oo +0 EQ-> 0
-/ch/31/mix/06 ON   -oo
-/ch/31/mix/07 ON   -oo +0 IN/LC 0
+/ch/31/mix/05 ON   -oo +0 POST 0
+/ch/31/mix/06 OFF   -oo
+/ch/31/mix/07 OFF   -oo +0 IN/LC 0
 /ch/31/mix/08 ON   -oo
 /ch/31/mix/09 ON   -oo +0 EQ-> 0
-/ch/31/mix/10 ON   -oo
-/ch/31/mix/11 ON   -oo +0 POST 0
-/ch/31/mix/12 ON   -oo
+/ch/31/mix/10 OFF   -oo
+/ch/31/mix/11 OFF   -oo +0 POST 0
+/ch/31/mix/12 OFF   -oo
 /ch/31/mix/13 ON   -oo +0 POST 0
 /ch/31/mix/14 ON   -oo
 /ch/31/mix/15 ON   -oo +0 POST 0
-/ch/31/mix/16 ON   -oo
+/ch/31/mix/16 OFF   -oo
 /ch/31/grp %00000000 %000000
 /ch/31/automix OFF -12.0
 /ch/32/config "DO NOT USE" 1 RDi 32
@@ -1045,18 +1045,18 @@
 /ch/32/mix/02 ON   -oo
 /ch/32/mix/03 ON   -oo +0 EQ-> 0
 /ch/32/mix/04 ON   -oo
-/ch/32/mix/05 ON   -oo +0 EQ-> 0
-/ch/32/mix/06 ON   -oo
-/ch/32/mix/07 ON   -oo +0 IN/LC 0
+/ch/32/mix/05 ON   -oo +0 POST 0
+/ch/32/mix/06 OFF   -oo
+/ch/32/mix/07 OFF   -oo +0 IN/LC 0
 /ch/32/mix/08 ON   -oo
 /ch/32/mix/09 ON   -oo +0 EQ-> 0
-/ch/32/mix/10 ON   -oo
-/ch/32/mix/11 ON   -oo +0 POST 0
-/ch/32/mix/12 ON -41.0
+/ch/32/mix/10 OFF   -oo
+/ch/32/mix/11 OFF   -oo +0 POST 0
+/ch/32/mix/12 OFF -41.0
 /ch/32/mix/13 ON   -oo +0 POST 0
 /ch/32/mix/14 ON   -oo
 /ch/32/mix/15 ON   -oo +0 POST 0
-/ch/32/mix/16 ON   -oo
+/ch/32/mix/16 OFF   -oo
 /ch/32/grp %00000000 %000000
 /ch/32/automix OFF -12.0
 /auxin/01/config "Projection L" 55 RD 33
@@ -1071,18 +1071,18 @@
 /auxin/01/mix/02 ON -22.5
 /auxin/01/mix/03 ON   -oo -100 PRE 0
 /auxin/01/mix/04 ON   -oo
-/auxin/01/mix/05 ON -87.0 -100 EQ-> 0
-/auxin/01/mix/06 ON  -2.3
-/auxin/01/mix/07 ON -19.0 -100 IN/LC 0
+/auxin/01/mix/05 ON -87.0 -100 POST 0
+/auxin/01/mix/06 OFF  -2.3
+/auxin/01/mix/07 OFF -19.0 -100 IN/LC 0
 /auxin/01/mix/08 ON -30.0
 /auxin/01/mix/09 ON   -oo -100 POST 0
-/auxin/01/mix/10 ON   -oo
-/auxin/01/mix/11 ON   -oo -100 POST 0
-/auxin/01/mix/12 ON   -oo
+/auxin/01/mix/10 OFF   -oo
+/auxin/01/mix/11 OFF   -oo -100 POST 0
+/auxin/01/mix/12 OFF   -oo
 /auxin/01/mix/13 ON   -oo -100 POST 0
 /auxin/01/mix/14 ON   -oo
 /auxin/01/mix/15 ON   -oo -100 POST 0
-/auxin/01/mix/16 ON   -oo
+/auxin/01/mix/16 OFF   -oo
 /auxin/01/grp %00000000 %000000
 /auxin/02/config "Projection R" 55 RD 34
 /auxin/02/preamp +3.0 OFF
@@ -1096,18 +1096,18 @@
 /auxin/02/mix/02 ON -22.5
 /auxin/02/mix/03 ON   -oo +100 PRE 0
 /auxin/02/mix/04 ON   -oo
-/auxin/02/mix/05 ON -87.0 +100 EQ-> 0
-/auxin/02/mix/06 ON  -2.3
-/auxin/02/mix/07 ON -19.0 +100 IN/LC 0
+/auxin/02/mix/05 ON -87.0 +100 POST 0
+/auxin/02/mix/06 OFF  -2.3
+/auxin/02/mix/07 OFF -19.0 +100 IN/LC 0
 /auxin/02/mix/08 ON -30.0
 /auxin/02/mix/09 ON   -oo +100 POST 0
-/auxin/02/mix/10 ON   -oo
-/auxin/02/mix/11 ON   -oo +100 POST 0
-/auxin/02/mix/12 ON   -oo
+/auxin/02/mix/10 OFF   -oo
+/auxin/02/mix/11 OFF   -oo +100 POST 0
+/auxin/02/mix/12 OFF   -oo
 /auxin/02/mix/13 ON   -oo +100 POST 0
 /auxin/02/mix/14 ON   -oo
 /auxin/02/mix/15 ON   -oo +100 POST 0
-/auxin/02/mix/16 ON   -oo
+/auxin/02/mix/16 OFF   -oo
 /auxin/02/grp %00000000 %000000
 /auxin/03/config "Bluetooth L" 55 RD 35
 /auxin/03/preamp +0.0 OFF
@@ -1121,18 +1121,18 @@
 /auxin/03/mix/02 OFF   -oo
 /auxin/03/mix/03 ON   -oo -100 PRE 0
 /auxin/03/mix/04 ON   -oo
-/auxin/03/mix/05 ON   -oo -100 PRE 0
-/auxin/03/mix/06 ON   -oo
-/auxin/03/mix/07 ON -20.0 -100 PRE 0
+/auxin/03/mix/05 ON   -oo -100 POST 0
+/auxin/03/mix/06 OFF   -oo
+/auxin/03/mix/07 OFF -20.0 -100 POST 0
 /auxin/03/mix/08 ON  -4.5
 /auxin/03/mix/09 ON   -oo -100 POST 0
-/auxin/03/mix/10 ON   -oo
-/auxin/03/mix/11 ON   -oo -100 POST 0
-/auxin/03/mix/12 ON   -oo
+/auxin/03/mix/10 OFF   -oo
+/auxin/03/mix/11 OFF   -oo -100 POST 0
+/auxin/03/mix/12 OFF   -oo
 /auxin/03/mix/13 ON   -oo -100 POST 0
 /auxin/03/mix/14 ON   -oo
 /auxin/03/mix/15 ON   -oo -100 POST 0
-/auxin/03/mix/16 ON   -oo
+/auxin/03/mix/16 OFF   -oo
 /auxin/03/grp %00000000 %000000
 /auxin/04/config "Bluetooth R" 55 RD 36
 /auxin/04/preamp +0.0 OFF
@@ -1146,18 +1146,18 @@
 /auxin/04/mix/02 OFF   -oo
 /auxin/04/mix/03 ON   -oo +100 PRE 0
 /auxin/04/mix/04 ON   -oo
-/auxin/04/mix/05 ON   -oo +100 PRE 0
-/auxin/04/mix/06 ON   -oo
-/auxin/04/mix/07 ON -20.0 +100 PRE 0
+/auxin/04/mix/05 ON   -oo +100 POST 0
+/auxin/04/mix/06 OFF   -oo
+/auxin/04/mix/07 OFF -20.0 +100 POST 0
 /auxin/04/mix/08 ON  -4.5
 /auxin/04/mix/09 ON   -oo +100 POST 0
-/auxin/04/mix/10 ON   -oo
-/auxin/04/mix/11 ON   -oo +100 POST 0
-/auxin/04/mix/12 ON   -oo
+/auxin/04/mix/10 OFF   -oo
+/auxin/04/mix/11 OFF   -oo +100 POST 0
+/auxin/04/mix/12 OFF   -oo
 /auxin/04/mix/13 ON   -oo +100 POST 0
 /auxin/04/mix/14 ON   -oo
 /auxin/04/mix/15 ON   -oo +100 POST 0
-/auxin/04/mix/16 ON   -oo
+/auxin/04/mix/16 OFF   -oo
 /auxin/04/grp %00000000 %000000
 /auxin/05/config "PC L" 55 RD 37
 /auxin/05/preamp +3.8 OFF
@@ -1172,17 +1172,17 @@
 /auxin/05/mix/03 ON   -oo -100 POST 0
 /auxin/05/mix/04 ON   -oo
 /auxin/05/mix/05 ON  -1.0 -100 POST 0
-/auxin/05/mix/06 ON   -oo
-/auxin/05/mix/07 ON   -oo -100 POST 0
+/auxin/05/mix/06 OFF   -oo
+/auxin/05/mix/07 OFF   -oo -100 POST 0
 /auxin/05/mix/08 ON -17.0
 /auxin/05/mix/09 ON   -oo -100 POST 0
-/auxin/05/mix/10 ON   -oo
-/auxin/05/mix/11 ON   -oo -100 POST 0
-/auxin/05/mix/12 ON   -oo
+/auxin/05/mix/10 OFF   -oo
+/auxin/05/mix/11 OFF   -oo -100 POST 0
+/auxin/05/mix/12 OFF   -oo
 /auxin/05/mix/13 ON   -oo -100 POST 0
 /auxin/05/mix/14 ON   -oo
 /auxin/05/mix/15 ON   -oo -100 POST 0
-/auxin/05/mix/16 ON   -oo
+/auxin/05/mix/16 OFF   -oo
 /auxin/05/grp %00000000 %000000
 /auxin/06/config "PC R" 55 RD 38
 /auxin/06/preamp +3.8 OFF
@@ -1197,17 +1197,17 @@
 /auxin/06/mix/03 ON   -oo +100 POST 0
 /auxin/06/mix/04 ON   -oo
 /auxin/06/mix/05 ON  -1.0 +100 POST 0
-/auxin/06/mix/06 ON   -oo
-/auxin/06/mix/07 ON   -oo +100 POST 0
+/auxin/06/mix/06 OFF   -oo
+/auxin/06/mix/07 OFF   -oo +100 POST 0
 /auxin/06/mix/08 ON -17.0
 /auxin/06/mix/09 ON   -oo +100 POST 0
-/auxin/06/mix/10 ON   -oo
-/auxin/06/mix/11 ON   -oo +100 POST 0
-/auxin/06/mix/12 ON   -oo
+/auxin/06/mix/10 OFF   -oo
+/auxin/06/mix/11 OFF   -oo +100 POST 0
+/auxin/06/mix/12 OFF   -oo
 /auxin/06/mix/13 ON   -oo +100 POST 0
 /auxin/06/mix/14 ON   -oo
 /auxin/06/mix/15 ON   -oo +100 POST 0
-/auxin/06/mix/16 ON   -oo
+/auxin/06/mix/16 OFF   -oo
 /auxin/06/grp %00000000 %000000
 /auxin/07/config "USB L" 60 YE 39
 /auxin/07/preamp -18.0 OFF
@@ -1221,18 +1221,18 @@
 /auxin/07/mix/02 ON   -oo
 /auxin/07/mix/03 ON   -oo -100 PRE 0
 /auxin/07/mix/04 ON   -oo
-/auxin/07/mix/05 ON   -oo -100 EQ-> 0
-/auxin/07/mix/06 ON   -oo
-/auxin/07/mix/07 ON   -oo -100 IN/LC 0
+/auxin/07/mix/05 ON   -oo -100 POST 0
+/auxin/07/mix/06 OFF   -oo
+/auxin/07/mix/07 OFF   -oo -100 IN/LC 0
 /auxin/07/mix/08 ON   -oo
 /auxin/07/mix/09 ON   -oo -100 POST 0
-/auxin/07/mix/10 ON   -oo
-/auxin/07/mix/11 ON   -oo -100 POST 0
-/auxin/07/mix/12 ON   -oo
+/auxin/07/mix/10 OFF   -oo
+/auxin/07/mix/11 OFF   -oo -100 POST 0
+/auxin/07/mix/12 OFF   -oo
 /auxin/07/mix/13 ON   -oo -100 POST 0
 /auxin/07/mix/14 ON   -oo
 /auxin/07/mix/15 ON   -oo -100 POST 0
-/auxin/07/mix/16 ON   -oo
+/auxin/07/mix/16 OFF   -oo
 /auxin/07/grp %00000000 %000000
 /auxin/08/config "USB R" 60 YE 40
 /auxin/08/preamp -18.0 OFF
@@ -1246,18 +1246,18 @@
 /auxin/08/mix/02 ON   -oo
 /auxin/08/mix/03 ON   -oo +100 PRE 0
 /auxin/08/mix/04 ON   -oo
-/auxin/08/mix/05 ON   -oo +100 EQ-> 0
-/auxin/08/mix/06 ON   -oo
-/auxin/08/mix/07 ON   -oo +100 IN/LC 0
+/auxin/08/mix/05 ON   -oo +100 POST 0
+/auxin/08/mix/06 OFF   -oo
+/auxin/08/mix/07 OFF   -oo +100 IN/LC 0
 /auxin/08/mix/08 ON   -oo
 /auxin/08/mix/09 ON   -oo +100 POST 0
-/auxin/08/mix/10 ON   -oo
-/auxin/08/mix/11 ON   -oo +100 POST 0
-/auxin/08/mix/12 ON   -oo
+/auxin/08/mix/10 OFF   -oo
+/auxin/08/mix/11 OFF   -oo +100 POST 0
+/auxin/08/mix/12 OFF   -oo
 /auxin/08/mix/13 ON   -oo +100 POST 0
 /auxin/08/mix/14 ON   -oo
 /auxin/08/mix/15 ON   -oo +100 POST 0
-/auxin/08/mix/16 ON   -oo
+/auxin/08/mix/16 OFF   -oo
 /auxin/08/grp %00000000 %000000
 /fxrtn/01/config "Vocal FX L" 61 MG
 /fxrtn/01/eq OFF
@@ -1271,17 +1271,17 @@
 /fxrtn/01/mix/03 ON   -oo -100 POST 0
 /fxrtn/01/mix/04 ON   -oo
 /fxrtn/01/mix/05 ON  +1.5 -100 POST 0
-/fxrtn/01/mix/06 ON  -2.0
-/fxrtn/01/mix/07 ON  -7.5 -100 POST 0
+/fxrtn/01/mix/06 OFF  -2.0
+/fxrtn/01/mix/07 OFF  -7.5 -100 POST 0
 /fxrtn/01/mix/08 ON   -oo
 /fxrtn/01/mix/09 ON   -oo -100 POST 0
-/fxrtn/01/mix/10 ON   -oo
-/fxrtn/01/mix/11 ON   -oo -100 POST 0
-/fxrtn/01/mix/12 ON   -oo
+/fxrtn/01/mix/10 OFF   -oo
+/fxrtn/01/mix/11 OFF   -oo -100 POST 0
+/fxrtn/01/mix/12 OFF   -oo
 /fxrtn/01/mix/13 ON   -oo -100 POST 0
 /fxrtn/01/mix/14 ON   -oo
 /fxrtn/01/mix/15 ON   -oo -100 POST 0
-/fxrtn/01/mix/16 ON   -oo
+/fxrtn/01/mix/16 OFF   -oo
 /fxrtn/01/grp %00000000 %100000
 /fxrtn/02/config "Vocal FX R" 61 MG
 /fxrtn/02/eq OFF
@@ -1295,17 +1295,17 @@
 /fxrtn/02/mix/03 ON   -oo +100 POST 0
 /fxrtn/02/mix/04 ON   -oo
 /fxrtn/02/mix/05 ON  +1.5 +100 POST 0
-/fxrtn/02/mix/06 ON  -2.0
-/fxrtn/02/mix/07 ON  -7.5 +100 POST 0
+/fxrtn/02/mix/06 OFF  -2.0
+/fxrtn/02/mix/07 OFF  -7.5 +100 POST 0
 /fxrtn/02/mix/08 ON   -oo
 /fxrtn/02/mix/09 ON   -oo +100 POST 0
-/fxrtn/02/mix/10 ON   -oo
-/fxrtn/02/mix/11 ON   -oo +100 POST 0
-/fxrtn/02/mix/12 ON   -oo
+/fxrtn/02/mix/10 OFF   -oo
+/fxrtn/02/mix/11 OFF   -oo +100 POST 0
+/fxrtn/02/mix/12 OFF   -oo
 /fxrtn/02/mix/13 ON   -oo +100 POST 0
 /fxrtn/02/mix/14 ON   -oo
 /fxrtn/02/mix/15 ON   -oo +100 POST 0
-/fxrtn/02/mix/16 ON   -oo
+/fxrtn/02/mix/16 OFF   -oo
 /fxrtn/02/grp %00000000 %100000
 /fxrtn/03/config "Music FX L" 61 MG
 /fxrtn/03/eq OFF
@@ -1319,17 +1319,17 @@
 /fxrtn/03/mix/03 ON   -oo +0 POST 0
 /fxrtn/03/mix/04 ON   -oo
 /fxrtn/03/mix/05 ON  -3.5 +0 POST 0
-/fxrtn/03/mix/06 ON  -3.5
-/fxrtn/03/mix/07 ON  -6.0 +0 POST 0
+/fxrtn/03/mix/06 OFF  -3.5
+/fxrtn/03/mix/07 OFF  -6.0 +0 POST 0
 /fxrtn/03/mix/08 ON   -oo
 /fxrtn/03/mix/09 ON   -oo +0 POST 0
-/fxrtn/03/mix/10 ON   -oo
-/fxrtn/03/mix/11 ON   -oo +0 POST 0
-/fxrtn/03/mix/12 ON   -oo
+/fxrtn/03/mix/10 OFF   -oo
+/fxrtn/03/mix/11 OFF   -oo +0 POST 0
+/fxrtn/03/mix/12 OFF   -oo
 /fxrtn/03/mix/13 ON   -oo +0 POST 0
 /fxrtn/03/mix/14 ON   -oo
 /fxrtn/03/mix/15 ON   -oo +0 POST 0
-/fxrtn/03/mix/16 ON   -oo
+/fxrtn/03/mix/16 OFF   -oo
 /fxrtn/03/grp %00000000 %100000
 /fxrtn/04/config "Music FX R" 61 MG
 /fxrtn/04/eq OFF
@@ -1343,17 +1343,17 @@
 /fxrtn/04/mix/03 ON   -oo +0 POST 0
 /fxrtn/04/mix/04 ON   -oo
 /fxrtn/04/mix/05 ON  -3.5 +0 POST 0
-/fxrtn/04/mix/06 ON  -3.5
-/fxrtn/04/mix/07 ON  -6.0 +0 POST 0
+/fxrtn/04/mix/06 OFF  -3.5
+/fxrtn/04/mix/07 OFF  -6.0 +0 POST 0
 /fxrtn/04/mix/08 ON   -oo
 /fxrtn/04/mix/09 ON   -oo +0 POST 0
-/fxrtn/04/mix/10 ON   -oo
-/fxrtn/04/mix/11 ON   -oo +0 POST 0
-/fxrtn/04/mix/12 ON   -oo
+/fxrtn/04/mix/10 OFF   -oo
+/fxrtn/04/mix/11 OFF   -oo +0 POST 0
+/fxrtn/04/mix/12 OFF   -oo
 /fxrtn/04/mix/13 ON   -oo +0 POST 0
 /fxrtn/04/mix/14 ON   -oo
 /fxrtn/04/mix/15 ON   -oo +0 POST 0
-/fxrtn/04/mix/16 ON   -oo
+/fxrtn/04/mix/16 OFF   -oo
 /fxrtn/04/grp %00000000 %100000
 /fxrtn/05/config "Drum FX L" 61 MG
 /fxrtn/05/eq OFF
@@ -1367,17 +1367,17 @@
 /fxrtn/05/mix/03 ON   -oo +0 POST 0
 /fxrtn/05/mix/04 ON   -oo
 /fxrtn/05/mix/05 ON  -9.8 +0 POST 0
-/fxrtn/05/mix/06 ON  -9.8
-/fxrtn/05/mix/07 ON  -4.8 +0 POST 0
+/fxrtn/05/mix/06 OFF  -9.8
+/fxrtn/05/mix/07 OFF  -4.8 +0 POST 0
 /fxrtn/05/mix/08 ON   -oo
 /fxrtn/05/mix/09 ON   -oo +0 POST 0
-/fxrtn/05/mix/10 ON   -oo
-/fxrtn/05/mix/11 ON   -oo +0 POST 0
-/fxrtn/05/mix/12 ON   -oo
+/fxrtn/05/mix/10 OFF   -oo
+/fxrtn/05/mix/11 OFF   -oo +0 POST 0
+/fxrtn/05/mix/12 OFF   -oo
 /fxrtn/05/mix/13 ON   -oo +0 POST 0
 /fxrtn/05/mix/14 ON   -oo
 /fxrtn/05/mix/15 ON   -oo +0 POST 0
-/fxrtn/05/mix/16 ON   -oo
+/fxrtn/05/mix/16 OFF   -oo
 /fxrtn/05/grp %00000000 %100000
 /fxrtn/06/config "Drum FX R" 61 MG
 /fxrtn/06/eq OFF
@@ -1391,19 +1391,19 @@
 /fxrtn/06/mix/03 ON   -oo +0 POST 0
 /fxrtn/06/mix/04 ON   -oo
 /fxrtn/06/mix/05 ON  -9.8 +0 POST 0
-/fxrtn/06/mix/06 ON  -9.8
-/fxrtn/06/mix/07 ON  -4.8 +0 POST 0
+/fxrtn/06/mix/06 OFF  -9.8
+/fxrtn/06/mix/07 OFF  -4.8 +0 POST 0
 /fxrtn/06/mix/08 ON   -oo
 /fxrtn/06/mix/09 ON   -oo +0 POST 0
-/fxrtn/06/mix/10 ON   -oo
-/fxrtn/06/mix/11 ON   -oo +0 POST 0
-/fxrtn/06/mix/12 ON   -oo
+/fxrtn/06/mix/10 OFF   -oo
+/fxrtn/06/mix/11 OFF   -oo +0 POST 0
+/fxrtn/06/mix/12 OFF   -oo
 /fxrtn/06/mix/13 ON   -oo +0 POST 0
 /fxrtn/06/mix/14 ON   -oo
 /fxrtn/06/mix/15 ON   -oo +0 POST 0
-/fxrtn/06/mix/16 ON   -oo
+/fxrtn/06/mix/16 OFF   -oo
 /fxrtn/06/grp %00000000 %100000
-/fxrtn/07/config "" 61 MG
+/fxrtn/07/config "" 1 OFF
 /fxrtn/07/eq OFF
 /fxrtn/07/eq/1 PEQ 124.7 +0.00 2.0
 /fxrtn/07/eq/2 PEQ 496.6 +0.00 2.0
@@ -1415,19 +1415,19 @@
 /fxrtn/07/mix/03 ON   -oo +0 POST 0
 /fxrtn/07/mix/04 ON   -oo
 /fxrtn/07/mix/05 ON   -oo +0 POST 0
-/fxrtn/07/mix/06 ON   -oo
-/fxrtn/07/mix/07 ON   -oo +0 POST 0
+/fxrtn/07/mix/06 OFF   -oo
+/fxrtn/07/mix/07 OFF   -oo +0 POST 0
 /fxrtn/07/mix/08 ON   -oo
 /fxrtn/07/mix/09 ON   -oo +0 POST 0
-/fxrtn/07/mix/10 ON   -oo
-/fxrtn/07/mix/11 ON   -oo +0 POST 0
-/fxrtn/07/mix/12 ON   -oo
+/fxrtn/07/mix/10 OFF   -oo
+/fxrtn/07/mix/11 OFF   -oo +0 POST 0
+/fxrtn/07/mix/12 OFF   -oo
 /fxrtn/07/mix/13 ON   -oo +0 POST 0
 /fxrtn/07/mix/14 ON   -oo
 /fxrtn/07/mix/15 ON   -oo +0 POST 0
-/fxrtn/07/mix/16 ON   -oo
+/fxrtn/07/mix/16 OFF   -oo
 /fxrtn/07/grp %00000000 %000000
-/fxrtn/08/config "" 61 MG
+/fxrtn/08/config "" 1 OFF
 /fxrtn/08/eq OFF
 /fxrtn/08/eq/1 PEQ 124.7 +0.00 2.0
 /fxrtn/08/eq/2 PEQ 496.6 +0.00 2.0
@@ -1439,17 +1439,17 @@
 /fxrtn/08/mix/03 ON   -oo +0 POST 0
 /fxrtn/08/mix/04 ON   -oo
 /fxrtn/08/mix/05 ON   -oo +0 POST 0
-/fxrtn/08/mix/06 ON   -oo
-/fxrtn/08/mix/07 ON   -oo +0 POST 0
+/fxrtn/08/mix/06 OFF   -oo
+/fxrtn/08/mix/07 OFF   -oo +0 POST 0
 /fxrtn/08/mix/08 ON   -oo
 /fxrtn/08/mix/09 ON   -oo +0 POST 0
-/fxrtn/08/mix/10 ON   -oo
-/fxrtn/08/mix/11 ON   -oo +0 POST 0
-/fxrtn/08/mix/12 ON   -oo
+/fxrtn/08/mix/10 OFF   -oo
+/fxrtn/08/mix/11 OFF   -oo +0 POST 0
+/fxrtn/08/mix/12 OFF   -oo
 /fxrtn/08/mix/13 ON   -oo +0 POST 0
 /fxrtn/08/mix/14 ON   -oo
 /fxrtn/08/mix/15 ON   -oo +0 POST 0
-/fxrtn/08/mix/16 ON   -oo
+/fxrtn/08/mix/16 OFF   -oo
 /fxrtn/08/grp %00000000 %000000
 /bus/01/config "MON L" 64 CY
 /bus/01/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 0 100 OFF
@@ -1527,7 +1527,7 @@
 /bus/04/mix/05 ON   -oo +0 POST 0
 /bus/04/mix/06 ON   -oo
 /bus/04/grp %00000000 %000000
-/bus/05/config "HALLWAY" 64 CY
+/bus/05/config "Aux Mix" 64 CY
 /bus/05/dyn ON COMP PEAK LOG -6.5 10 2 0.00 0 10.0  173 POST 0 100 OFF
 /bus/05/dyn/filter OFF HC12 990.9
 /bus/05/insert OFF POST OFF
@@ -1546,7 +1546,7 @@
 /bus/05/mix/05 OFF   -oo +0 POST 0
 /bus/05/mix/06 OFF   -oo
 /bus/05/grp %00000000 %000000
-/bus/06/config "Flash Drive " 60 GN
+/bus/06/config "" 1 OFF
 /bus/06/dyn ON COMP RMS LOG -42.0 1.3 3 0.00 8 10.0  173 POST 0 0 ON
 /bus/06/dyn/filter OFF HC12 990.9
 /bus/06/insert OFF POST OFF
@@ -1565,7 +1565,7 @@
 /bus/06/mix/05 ON  +0.3 +0 POST 0
 /bus/06/mix/06 ON  +0.3
 /bus/06/grp %00000000 %000000
-/bus/07/config "Live Stream" 62 YE
+/bus/07/config "" 1 OFF
 /bus/07/dyn ON COMP PEAK LOG -11.0 7.0 2 0.00 0 10.0  141 POST 0 100 OFF
 /bus/07/dyn/filter OFF 3.0 990.9
 /bus/07/insert OFF POST OFF
@@ -1622,7 +1622,7 @@
 /bus/09/mix/05 ON   -oo +0 POST 0
 /bus/09/mix/06 ON   -oo
 /bus/09/grp %00000000 %000000
-/bus/10/config "MixBus" 71 CY
+/bus/10/config "" 1 OFF
 /bus/10/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 0 100 OFF
 /bus/10/dyn/filter OFF 3.0 990.9
 /bus/10/insert OFF PRE OFF
@@ -1641,7 +1641,7 @@
 /bus/10/mix/05 ON   -oo +0 POST 0
 /bus/10/mix/06 ON   -oo
 /bus/10/grp %00000000 %000000
-/bus/11/config "MixBus" 71 CY
+/bus/11/config "" 1 OFF
 /bus/11/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 0 100 OFF
 /bus/11/dyn/filter OFF 3.0 990.9
 /bus/11/insert OFF PRE OFF
@@ -1660,10 +1660,10 @@
 /bus/11/mix/05 ON   -oo +0 POST 0
 /bus/11/mix/06 ON   -oo
 /bus/11/grp %00000000 %000000
-/bus/12/config "MixBus" 71 CY
+/bus/12/config "" 1 OFF
 /bus/12/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 0 100 OFF
 /bus/12/dyn/filter OFF 3.0 990.9
-/bus/12/insert OFF PRE FX4L
+/bus/12/insert OFF PRE OFF
 /bus/12/eq OFF
 /bus/12/eq/1 LShv 79.6 +0.00 2.0
 /bus/12/eq/2 PEQ 158.9 +0.00 2.0
@@ -1736,7 +1736,7 @@
 /bus/15/mix/05 ON   -oo +0 POST 0
 /bus/15/mix/06 ON   -oo
 /bus/15/grp %00010000 %100000
-/bus/16/config "Fx 4" 61 MG
+/bus/16/config "" 1 OFF
 /bus/16/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 0 100 OFF
 /bus/16/dyn/filter OFF 3.0 990.9
 /bus/16/insert OFF PRE OFF
@@ -1755,7 +1755,7 @@
 /bus/16/mix/05 ON   -oo +0 POST 0
 /bus/16/mix/06 ON   -oo
 /bus/16/grp %00000000 %000000
-/mtx/01/config "HALLWAY" 67 MG
+/mtx/01/config "" 1 OFF
 /mtx/01/preamp OFF
 /mtx/01/dyn ON COMP RMS LOG -40.0 10 3 0.00 10 10.0  151 PRE 100 OFF
 /mtx/01/dyn/filter OFF 3.0 990.9
@@ -1768,7 +1768,7 @@
 /mtx/01/eq/5 PEQ 5k02 +0.00 2.0
 /mtx/01/eq/6 HShv 10k02 +0.00 2.0
 /mtx/01/mix ON   0.0
-/mtx/02/config "" 72 MG
+/mtx/02/config "" 1 OFF
 /mtx/02/preamp OFF
 /mtx/02/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 100 OFF
 /mtx/02/dyn/filter OFF 3.0 990.9
@@ -1781,7 +1781,7 @@
 /mtx/02/eq/5 PEQ 5k02 +0.00 2.0
 /mtx/02/eq/6 HShv 10k02 +0.00 2.0
 /mtx/02/mix ON   -oo
-/mtx/03/config "" 72 MG
+/mtx/03/config "" 1 OFF
 /mtx/03/preamp OFF
 /mtx/03/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 100 OFF
 /mtx/03/dyn/filter OFF 3.0 990.9
@@ -1794,7 +1794,7 @@
 /mtx/03/eq/5 PEQ 5k02 +0.00 2.0
 /mtx/03/eq/6 HShv 10k02 +0.00 2.0
 /mtx/03/mix ON   -oo
-/mtx/04/config "" 72 MG
+/mtx/04/config "" 1 OFF
 /mtx/04/preamp OFF
 /mtx/04/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 100 OFF
 /mtx/04/dyn/filter OFF 3.0 990.9
@@ -1874,37 +1874,37 @@
 /dca/2 ON  -8.3
 /dca/2/config "Band" 69 WH
 /dca/3 ON -10.9
-/dca/3/config "Choir Mics" 43 WH
+/dca/3/config "" 1 OFF
 /dca/4 ON -50.9
-/dca/4/config "" 70 WH
+/dca/4/config "" 1 OFF
 /dca/5 ON   0.0
-/dca/5/config "Effects" 61 WH
+/dca/5/config "" 1 OFF
 /dca/6 ON   -oo
-/dca/6/config "DCA" 70 WH
+/dca/6/config "" 1 OFF
 /dca/7 ON   -oo
-/dca/7/config "DCA" 70 WH
+/dca/7/config "" 1 OFF
 /dca/8 ON   -oo
-/dca/8/config "DCA" 70 WH
+/dca/8/config "" 1 OFF
 /fx/1 PLAT
 /fx/1/source MIX13 MIX13
 /fx/1/par 62 2.37 42 6k50 30 -2.0 60 5k5 1.09 211.44 18 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 /fx/2 HALL
-/fx/2/source MIX15 MIX15
+/fx/2/source MIX14 MIX14
 /fx/2/par 104 2.80 76 5k74 25 9.5 83 6k0 0.95 30 50 50 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 /fx/3 VREV
-/fx/3/source MIX14 MIX14
+/fx/3/source MIX15 MIX15
 /fx/3/par 14 1.9 20 ON FRONT 0.0 60 15k3 0.78 0.53 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 /fx/4 VRM
-/fx/4/source MIX13 MIX13
+/fx/4/source MIX16 MIX16
 /fx/4/par 20 2.16 24 30 22 0.0 1.10 0.69 89 10k4 28 34 OFF 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 /fx/5 GEQ2
 /fx/5/par 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
 /fx/6 GEQ2
-/fx/6/par 0.0 0.5 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.5 0.0 1.0 0.0 0.5 0.5 0.0 0.0 0.0 0.0 0.0 0.0 4.0 3.0 0.0 0.0 0.0 -1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+/fx/6/par 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
 /fx/7 WAVD
-/fx/7/par 62 86 -1.0 16 -14 -3.0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+/fx/7/par 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
 /fx/8 ENH2
-/fx/8/par -2.0 20 14 28 25 40 43 OFF -2.0 20 14 20 25 20 43 OFF 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+/fx/8/par 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
 /outputs/main/01 4 POST OFF
 /outputs/main/01/delay OFF   0.3
 /outputs/main/02 5 POST OFF
