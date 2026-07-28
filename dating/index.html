@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dating: What's the Point?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,600;1,6..72,300;1,6..72,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#12142149;
+    --bg:#121421;
+    --bg-2:#171A2B;
+    --panel:#1A1E31;
+    --panel-open:#20253C;
+    --line:#2B3149;
+    --paper:#EAE6DB;
+    --muted:#A3A9C0;
+    --lamp:#E3A93F;
+    --lamp-dim:#8C6D2C;
+    --lamp-glow:rgba(227,169,63,.13);
+    --measure:44rem;
+    --display:"Bricolage Grotesque","Trebuchet MS",system-ui,sans-serif;
+    --body:"Newsreader","Iowan Old Style",Georgia,serif;
+    --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  }
+
+  *{box-sizing:border-box}
+
+  html{-webkit-text-size-adjust:100%}
+
+  body{
+    margin:0;
+    background:var(--bg);
+    background-image:radial-gradient(120% 60% at 50% -10%, #1D2135 0%, var(--bg) 60%);
+    background-attachment:fixed;
+    color:var(--paper);
+    font-family:var(--body);
+    font-size:18px;
+    line-height:1.62;
+    font-weight:300;
+  }
+
+  .wrap{max-width:var(--measure);margin:0 auto;padding:0 1.25rem 5rem}
+
+  /* ---------- hero ---------- */
+  .hero{padding:4.5rem 0 2.5rem}
+
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:.7rem;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--lamp);
+    margin:0 0 1.75rem;
+  }
+
+  .thesis{
+    font-family:var(--display);
+    font-weight:800;
+    font-size:clamp(2rem,7vw,3.4rem);
+    line-height:1.05;
+    letter-spacing:-.02em;
+    margin:0;
+    text-wrap:balance;
+  }
+  .thesis em{font-style:normal;color:var(--lamp)}
+
+  .standfirst{
+    margin:1.75rem 0 0;
+    font-size:1.075rem;
+    color:#C9C6BC;
+    max-width:34rem;
+  }
+  .standfirst.note{
+    font-size:.95rem;
+    color:var(--muted);
+    border-left:2px solid var(--lamp-dim);
+    padding-left:1rem;
+  }
+
+  .toolbar{
+    margin-top:2.5rem;
+    padding-top:1.5rem;
+    border-top:1px solid var(--line);
+    display:flex;
+    gap:.75rem;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+
+  .btn{
+    font-family:var(--mono);
+    font-size:.72rem;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--muted);
+    background:transparent;
+    border:1px solid var(--line);
+    border-radius:100px;
+    padding:.5rem 1rem;
+    cursor:pointer;
+    transition:color .18s ease,border-color .18s ease;
+  }
+  .btn:hover{color:var(--paper);border-color:#3C4362}
+  .btn:focus-visible{outline:2px solid var(--lamp);outline-offset:2px}
+
+  /* ---------- sections ---------- */
+  .group-label{
+    font-family:var(--mono);
+    font-size:.78rem;
+    font-weight:500;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--lamp);
+    margin:3.25rem 0 1rem;
+    padding-bottom:.75rem;
+    border-bottom:1px solid var(--line);
+  }
+
+  details.card{
+    position:relative;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    margin-bottom:.6rem;
+    overflow:hidden;
+    transition:background .3s ease,border-color .3s ease;
+  }
+
+  /* the signature: an open panel is lit from its left edge */
+  details.card::before{
+    content:"";
+    position:absolute;
+    inset:0 auto 0 0;
+    width:3px;
+    background:var(--lamp);
+    opacity:0;
+    transition:opacity .35s ease;
+  }
+  details.card[open]{
+    background:
+      radial-gradient(90% 120% at 0% 0%, var(--lamp-glow) 0%, rgba(0,0,0,0) 55%),
+      var(--panel-open);
+    border-color:#333B58;
+  }
+  details.card[open]::before{opacity:1}
+
+  summary{
+    list-style:none;
+    cursor:pointer;
+    display:flex;
+    align-items:baseline;
+    gap:1rem;
+    padding:1.15rem 1.4rem;
+    font-family:var(--display);
+    font-weight:600;
+    font-size:1.15rem;
+    line-height:1.3;
+    color:#C6C9D6;
+    transition:color .25s ease;
+  }
+  summary::-webkit-details-marker{display:none}
+  summary:hover{color:var(--paper)}
+  summary:focus-visible{outline:2px solid var(--lamp);outline-offset:-4px;border-radius:14px}
+  details.card[open] > summary{color:var(--paper)}
+
+  .mark{
+    flex:none;
+    width:.85rem;
+    font-family:var(--mono);
+    font-size:.9rem;
+    color:var(--lamp-dim);
+    transition:transform .3s ease,color .3s ease;
+  }
+  details.card[open] > summary .mark{color:var(--lamp);transform:rotate(45deg)}
+
+  .body{padding:0 1.4rem 1.5rem;margin-left:0}
+  .body > :first-child{margin-top:0}
+  .body p{margin:0 0 1.05rem}
+  .body p:last-child{margin-bottom:0}
+
+  /* nested question cards */
+  details.q{
+    background:rgba(0,0,0,.16);
+    border:1px solid #262C43;
+    border-radius:10px;
+    margin-bottom:.45rem;
+    overflow:hidden;
+  }
+  details.q[open]{background:rgba(0,0,0,.28);border-color:#333B58}
+  details.q > summary{
+    font-family:var(--body);
+    font-weight:400;
+    font-style:italic;
+    font-size:1.03rem;
+    padding:.85rem 1.1rem;
+    color:#B9BCCB;
+  }
+  details.q[open] > summary{color:var(--lamp);font-style:italic}
+  details.q .body{padding:0 1.1rem 1.15rem;font-size:.97rem}
+
+  /* ---------- content bits ---------- */
+  .punch{
+    font-family:var(--display);
+    font-weight:600;
+    font-size:1.05rem;
+    line-height:1.45;
+    color:var(--paper);
+    margin:1.85rem 0;
+    padding-left:1rem;
+    border-left:2px solid var(--lamp);
+    text-wrap:pretty;
+  }
+
+  blockquote{
+    margin:1.4rem 0;
+    padding:0;
+    font-family:var(--body);
+    font-style:italic;
+    font-size:1.05rem;
+    color:#DAD6CB;
+  }
+  blockquote p{margin:0}
+  .body blockquote p,
+  .closing blockquote p,
+  .prayer blockquote p{margin:0}
+  blockquote cite{
+    display:block;
+    margin-top:.3rem;
+    font-family:var(--body);
+    font-style:normal;
+    font-weight:400;
+    font-size:.85rem;
+    letter-spacing:0;
+    text-transform:none;
+    color:var(--muted);
+  }
+  blockquote cite::before{content:"\2014\00a0"}
+
+  ul,ol{margin:0 0 1.05rem;padding-left:1.15rem}
+  li{margin-bottom:.5rem}
+  li::marker{color:var(--lamp-dim)}
+  strong{font-weight:600;color:#F3F0E7}
+
+  h4{
+    font-family:var(--display);
+    font-weight:600;
+    font-size:1rem;
+    margin:1.6rem 0 .6rem;
+    color:var(--paper);
+  }
+
+  /* ---------- checklist ---------- */
+  .checklist-top{margin-top:3.25rem}
+  .checklist{
+    margin-top:1rem;
+    background:linear-gradient(180deg,#20253C 0%,#1A1E31 100%);
+    border:1px solid #333B58;
+    border-radius:14px;
+    padding:1.75rem 1.5rem;
+  }
+  .checklist h3{
+    font-family:var(--display);
+    font-weight:800;
+    font-size:1.35rem;
+    margin:0 0 .35rem;
+    letter-spacing:-.01em;
+  }
+  .checklist .sub{color:var(--muted);font-size:.95rem;margin:0 0 1.4rem}
+
+  .check{
+    display:flex;
+    gap:.85rem;
+    align-items:flex-start;
+    padding:.7rem 0;
+    border-top:1px solid #2A3049;
+    cursor:pointer;
+    font-size:1rem;
+    transition:color .2s ease;
+  }
+  .check input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
+  .box{
+    flex:none;
+    margin-top:.28rem;
+    width:1.05rem;height:1.05rem;
+    border:1px solid #4A5273;
+    border-radius:4px;
+    display:grid;place-items:center;
+    transition:border-color .2s ease,background .2s ease;
+  }
+  .box::after{
+    content:"";
+    width:.5rem;height:.28rem;
+    border-left:2px solid var(--bg);
+    border-bottom:2px solid var(--bg);
+    transform:rotate(-45deg) scale(.4);
+    opacity:0;
+    transition:opacity .18s ease,transform .18s ease;
+  }
+  .check input:checked ~ .box{background:var(--lamp);border-color:var(--lamp)}
+  .check input:checked ~ .box::after{opacity:1;transform:rotate(-45deg) scale(1)}
+  .check input:checked ~ .label{color:var(--muted);text-decoration:line-through;text-decoration-color:#4A5273}
+  .check input:focus-visible ~ .box{outline:2px solid var(--lamp);outline-offset:2px}
+
+  .verdict{
+    margin:1.5rem 0 0;
+    font-family:var(--display);
+    font-weight:600;
+    font-size:1.05rem;
+    color:var(--lamp);
+  }
+
+  .reprise{
+    font-family:var(--display);
+    font-weight:600;
+    font-size:clamp(1.25rem,3.4vw,1.7rem);
+    line-height:1.25;
+    letter-spacing:-.01em;
+    color:var(--lamp);
+    text-align:center;
+    text-wrap:balance;
+    margin:4rem auto 1rem;
+    max-width:30rem;
+  }
+
+  .lifeline{
+    margin-top:1.75rem;
+    padding:1.1rem 1.25rem;
+    border:1px dashed #4A5273;
+    border-radius:12px;
+    background:rgba(0,0,0,.2);
+  }
+  .lifeline p{margin:0 0 .6rem;font-size:.97rem}
+  .lifeline p:last-child{margin-bottom:0}
+  .lifeline-h{
+    font-family:var(--display);
+    font-weight:600;
+    color:var(--lamp);
+  }
+  .names{
+    font-family:var(--display);
+    font-weight:600;
+    font-size:1.02rem;
+    color:var(--paper);
+    line-height:1.7;
+  }
+  .lifeline-sub{color:var(--muted);font-size:.95rem}
+
+  .handnote{
+    margin-top:2.5rem;
+    padding:1.4rem 1.5rem;
+    border:1px dashed #4A5273;
+    border-radius:14px;
+    background:rgba(0,0,0,.18);
+  }
+  .handnote p{margin:0 0 .6rem}
+  .handnote p:last-child{margin-bottom:0}
+  .handnote-h{
+    font-family:var(--display);
+    font-weight:600;
+    color:var(--lamp);
+  }
+  .handnote p{font-size:1.02rem}
+  .signature{
+    font-family:var(--display);
+    font-weight:600;
+    color:var(--lamp);
+  }
+  .signature::before{content:"\2014\00a0"}
+
+  .prayer{
+    background:
+      radial-gradient(90% 120% at 0% 0%, var(--lamp-glow) 0%, rgba(0,0,0,0) 60%),
+      var(--panel-open);
+    border:1px solid #333B58;
+    border-radius:14px;
+    padding:1.6rem 1.5rem;
+  }
+  .prayer > p:first-child{margin-top:0}
+  .prayer-body{
+    font-style:italic;
+    font-size:1.05rem;
+    color:#DAD6CB;
+    border-left:2px solid var(--lamp);
+    padding-left:1.1rem;
+    margin:1.2rem 0;
+  }
+  .prayer-foot{margin-bottom:0;color:var(--muted);font-size:.97rem}
+
+  .closing{
+    margin-top:3.5rem;
+    padding-top:2.5rem;
+    border-top:1px solid var(--line);
+    text-align:center;
+  }
+  .closing p{
+    margin:0 auto 1.05rem;
+    max-width:34rem;
+    text-wrap:pretty;
+  }
+  .closing-h{
+    font-family:var(--mono);
+    font-size:.7rem;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--lamp);
+  }
+  .closing blockquote{max-width:30rem;margin:2rem auto}
+  .closing blockquote p{max-width:none}
+  .closing-punch{
+    font-family:var(--display);
+    font-weight:800;
+    font-size:clamp(1.15rem,2.9vw,1.5rem);
+    line-height:1.3;
+    letter-spacing:-.01em;
+    color:var(--paper);
+    max-width:33rem;
+    margin:2.25rem auto 0;
+    text-wrap:balance;
+  }
+
+  footer{
+    margin-top:2.75rem;
+    padding-top:1.5rem;
+    border-top:1px solid var(--line);
+    font-size:.78rem;
+    line-height:1.6;
+    color:#6E7490;
+  }
+
+  @media (max-width:520px){
+    body{font-size:17px}
+    .wrap{padding:0 1rem 4rem}
+    .hero{padding:3rem 0 1.75rem}
+    summary{padding:1rem 1.1rem;font-size:1.05rem}
+    .body{padding:0 1.1rem 1.35rem}
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none!important;animation:none!important}
+  }
+
+  @media print{
+    body{background:#fff;color:#111;font-size:11pt}
+    .toolbar,.mark{display:none}
+    details.card,details.q{background:none!important;border:none;border-top:1px solid #bbb;border-radius:0;margin:0}
+    details.card::before{display:none}
+    summary{color:#000!important;padding:.6rem 0}
+    .body{padding:0 0 .8rem}
+    .punch{border-left:2px solid #999;color:#000}
+    blockquote{color:#333}
+    blockquote cite{color:#666}
+    .checklist{background:none;border:1px solid #999;padding:1rem}
+    .verdict{color:#000}
+    .reprise{color:#000;margin:2rem auto 1rem}
+    .lifeline{border:1px dashed #999;background:none}
+    .lifeline-h,.closing-h{color:#000}
+    .closing{border-top:1px solid #999}
+    .prayer{background:none;border:1px solid #999}
+    .handnote{background:none;border:1px solid #999}
+    .signature,.names{color:#000}
+    .handnote-h{color:#000}
+    .prayer-body{border-left:2px solid #999;color:#000}
+    .closing-punch{color:#000}
+
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <h1 class="thesis">Liking someone and dating someone are <em>two different decisions.</em></h1>
+    <p class="standfirst">Most people never separate them. You like someone, they like you back, and you start dating. Nobody stops to ask if it's a good idea.</p>
+    <p class="standfirst">You don't have to read all of this. Read the first section, then open whatever actually applies to you.</p>
+    <p class="standfirst note">Where the Bible speaks directly, it's quoted so you can check it yourself. The rest is wisdom, not command, and you should always know which one you're reading. Whoever handed you this has gotten some of it wrong themselves. That's most of why they care.</p>
+    <div class="toolbar">
+      <button class="btn" id="toggleAll" type="button">Open everything</button>
+      <button class="btn" type="button" onclick="window.print()">Print this</button>
+    </div>
+  </header>
+
+  <section class="handnote">
+    <p class="handnote-h">Before you start</p>
+    <p>When I was in high school, if I liked a girl and thought she might like me, I pursued dating her full force. Not because it was good, not because I thought it would help us both love Jesus more, but because it's what I wanted more than anything else. Getting closer to a girl I liked felt like a shot of pure heroin.</p>
+    <p>I trusted my feelings instead of the Lord and did things that dishonored Him. Things didn't get much better in college. Andrea and I spent too much time in isolation and crossed lines that we shouldn't have. We just let things happen in the moment. We felt guilty and ashamed.</p>
+    <p>But shame is not the end of the story. The Lord forgives and has shown us His faithfulness over and over.</p>
+    <p>The advice below is stuff I wish I had known and taken seriously when I was your age.</p>
+    <p class="signature">Andrew</p>
+  </section>
+
+  <p class="group-label">Start here</p>
+
+  <details class="card" open>
+    <summary><span class="mark">+</span><span>Read this part even if you read nothing else</span></summary>
+    <div class="body">
+      <p>If all this page does is hand you more rules, it failed.</p>
+      <p>A rule almost never stops you from doing something you badly want to do. What stops you is wanting something else more.</p>
+      <p>Jesus told a story about a man who found treasure buried in a field and sold everything he owned to buy that field. The detail that matters is how he did it.</p>
+      <blockquote><p>"The kingdom of heaven is like treasure hidden in a field, which a man found and covered up. Then in his joy he goes and sells all that he has and buys that field."</p><cite>Matthew 13:44</cite></blockquote>
+      <p>In his joy. He wasn't giving something up. He was trading up, and he was thrilled about it.</p>
+      <blockquote><p>"You make known to me the path of life; in your presence there is fullness of joy; at your right hand are pleasures forevermore."</p><cite>Psalm 16:11</cite></blockquote>
+      <p class="punch">God is not the one standing between you and a good life. He is offering you one you cannot get any other way.</p>
+      <p>So this page is not mainly about avoiding the wrong relationship. It's about knowing Jesus well enough that every other relationship starts finding its right size.</p>
+      <h4>The real engine</h4>
+      <p>Being liked feels the way it does because being chosen feels like being worth something. That's not shallow, that's human, and everybody feels it.</p>
+      <p>Here's the problem. You're trying to get from another teenager something you already have.</p>
+      <blockquote><p>"See what kind of love the Father has given to us, that we should be called children of God; and so we are."</p><cite>1 John 3:1</cite></blockquote>
+      <p class="punch">You are already fully known and already chosen. Nothing a person says to you adds one thing to that, and nothing they say takes it away.</p>
+      <p>Someone who knows that dates completely differently from someone trying to prove something. That difference is most of what this page is about.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>The whole thing in 60 seconds</span></summary>
+    <div class="body">
+      <p>If you read nothing else on this page, read this.</p>
+      <ol>
+        <li>Liking someone and dating someone are two different decisions. Make the second one on purpose.</li>
+        <li>A feeling tells you what you want. It tells you nothing about whether you should have it.</li>
+        <li>Dating is for figuring out whether to marry someone while helping each other follow Jesus. Anything else is just enjoying the feeling.</li>
+        <li>Watch character, not chemistry. Nobody is on their best behavior forever.</li>
+        <li>Decide your limits out loud, in advance, with your parents in the loop. You will not out-argue the moment.</li>
+        <li>Jesus is better than the thing you're afraid of missing. That's the only reason any of the rest of this is worth doing.</li>
+      </ol>
+      <p>The rest of the page is these six things, slower, with the reasons.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>What is dating even for?</span></summary>
+    <div class="body">
+      <p>Dating is not for feeling good. It's not for feeling wanted, or interesting, or chosen.</p>
+      <p>The Bible never defines dating, because dating didn't exist when it was written. So this isn't a verse. It's the clearest working definition anyone has come up with:</p>
+      <p class="punch">Dating is two people helping each other move toward Christ while they figure out whether they should marry.</p>
+      <p>If that's not what's happening, you're enjoying the feeling and calling it something else.</p>
+      <p>That does not mean a sixteen-year-old should treat two weeks of dating like a marriage decision. Putting that weight on something new is its own kind of damage. It means you should know which direction you're pointed, and be honest with yourself if the answer is nowhere.</p>
+      <p>At sixteen, success in this isn't a ring. It's learning to say hard things kindly, to hold a line you set, and to protect somebody else's heart even when it costs you something. Those are the skills. You'll use them for the rest of your life.</p>
+      <p class="punch">The test: if this relationship ended tomorrow, would that person be closer to God or further from God because of how you treated them?</p>
+      <p>If you can't answer that yet, waiting is almost certainly the wiser call.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>Why does God even care who I date?</span></summary>
+    <div class="body">
+      <p>The rules around sex and exclusivity feel arbitrary until you know what they're guarding.</p>
+      <blockquote><p>"'Therefore a man shall leave his father and mother and hold fast to his wife, and the two shall become one flesh.' This mystery is profound, and I am saying that it refers to Christ and the church."</p><cite>Ephesians 5:31-32</cite></blockquote>
+      <p>Marriage isn't just an arrangement God happens to approve of. It's a picture. It exists to show the world what Christ's love for His people looks like: total, permanent, self-giving, going first, staying.</p>
+      <p>That's why none of this is casual. Sex and exclusivity say something whether or not you meant to say it.</p>
+      <h4>What it looks like when people get this right</h4>
+      <p>Twenty years in, it looks like someone who has seen you sick, broke, wrong, boring, and unimpressive, and is still there. Someone who knows the worst true things about you and did not leave. Who chose you again this morning, on an ordinary Tuesday, when nothing about it felt like a movie.</p>
+      <p>That is not butterflies. Butterflies are what you feel about someone you don't know yet.</p>
+      <p class="punch">What you're waiting for is not a longer version of what you feel right now. It's something you can't feel yet, because it gets built out of years you haven't lived.</p>
+    </div>
+  </details>
+
+  <p class="group-label">The pull</p>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>Why you can't just trust the feeling</span></summary>
+    <div class="body">
+      <p>Here's the honest part. When you like someone and they like you back, everything in you says go. Now. Hard.</p>
+      <p>That feeling is not sin. God made it. You're not broken for feeling it.</p>
+      <p>But it is not proof. A strong feeling tells you that you want something. It tells you nothing about whether it's good for you.</p>
+      <blockquote><p>"Keep your heart with all vigilance, for from it flow the springs of life."</p><cite>Proverbs 4:23</cite></blockquote>
+      <p>Guarding your heart means not handing it to someone just because it feels good to.</p>
+      <blockquote><p>"For all that is in the world&mdash;the desires of the flesh and the desires of the eyes and pride of life&mdash;is not from the Father but is from the world."</p><cite>1 John 2:16</cite></blockquote>
+      <p class="punch">Wanting something badly has never once made it wise.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>How do I know if I actually like them?</span></summary>
+    <div class="body">
+      <p>Four different things feel almost identical from the inside. It's worth knowing which one you've got.</p>
+      <p><strong>Attraction.</strong> Your body noticing another body. It's instant, it's normal, and it tells you nothing about who they are.</p>
+      <p><strong>Novelty.</strong> They're new. New is exciting all by itself, and new is a temporary condition. Whatever is only running on novelty runs out.</p>
+      <p><strong>Admiration.</strong> You like something real about them. They're funny, or kind, or good at something. That's true, but it's a trait you've noticed, not a person you know.</p>
+      <p><strong>Infatuation.</strong> This is the sneaky one. You don't actually know them yet, so your brain quietly filled in the blanks, and it wrote a very flattering version. Then you fell for the version you wrote.</p>
+      <p>Actually knowing someone takes a long time, and it feels quieter than any of the four.</p>
+      <p>Someone once spent three months certain she was in love with a guy at youth group, because her stomach dropped every time he walked in. Then she finally had a real conversation with him and realized they had never had one before. The feeling had been about the walking in, not about him.</p>
+      <h4>Three questions that sort it out fast</h4>
+      <ul>
+        <li>Can I name three things about them that aren't about how they make me feel?</li>
+        <li>Do I know what they're afraid of?</li>
+        <li>Have I ever seen them be boring, wrong, or unimpressive?</li>
+      </ul>
+      <blockquote><p>"For the LORD sees not as man sees: man looks on the outward appearance, but the LORD looks on the heart."</p><cite>1 Samuel 16:7</cite></blockquote>
+      <p class="punch">A crush is mostly a story you're telling yourself about someone you haven't met yet. That's not an insult. It's just early.</p>
+      <p>None of this means the feeling is fake. It means it's early, and early feelings are information, not conclusions.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>Before you say anything to them</span></summary>
+    <div class="body">
+      <p>Four things, in this order:</p>
+      <ol>
+        <li><strong>Pray.</strong> Before you text them, before you tell your friends. Ask God what He wants, and be willing to hear no.</li>
+        <li><strong>Talk to your parents or a leader.</strong> If you don't want them to know, you already know what they'd say.</li>
+        <li><strong>Ask yourself why.</strong> Loneliness, boredom, and wanting to feel chosen are not the same as actually loving this person.</li>
+        <li><strong>Ask if you could survive it ending.</strong> If a breakup would wreck you for months, you're not ready for what you're about to start.</li>
+      </ol>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>What "pray about it" actually means</span></summary>
+    <div class="body">
+      <p>It's the first instruction on this page and the vaguest one, so here's what it actually looks like.</p>
+      <h4>Say the real thing.</h4>
+      <p>Don't pray "Your will be done" when what you mean is "please say yes." He already knows which one it is. Tell Him the true version.</p>
+      <h4>Ask an actual question.</h4>
+      <p>Not "bless this." Try: Is this wise for me right now? What am I really after here? What am I ignoring on purpose?</p>
+      <h4>Decide you'll take no for an answer before you ask.</h4>
+      <p>If you're not willing to hear no, you're not praying. You're lobbying.</p>
+      <h4>Don't do it alone or in one night.</h4>
+      <p>Read Proverbs while you're at it. Tell a parent or a leader you're praying about this and ask them to pray too. God usually answers this kind of question through wise people, not through a feeling in your chest.</p>
+      <blockquote><p>"If any of you lacks wisdom, let him ask God, who gives generously to all without reproach, and it will be given him."</p><cite>James 1:5</cite></blockquote>
+      <h4>"How do I know if it's God saying no or just me not liking the answer?"</h4>
+      <p>Usually it looks like this: every wise person who loves you says the same thing, and you keep looking for one who won't.</p>
+      <p class="punch">God isn't hiding the answer from you. Most of the time you're not stuck, you're stalling.</p>
+    </div>
+  </details>
+
+  <p class="group-label">The questions everyone asks</p>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>When should I date?</span></summary>
+    <div class="body">
+      <p>Not an age question. A readiness question.</p>
+      <ul>
+        <li>Do I walk with God on my own, or is my faith mostly borrowed from my parents?</li>
+        <li>Am I trying to figure out if I should marry this person, or trying to fill something in myself?</li>
+        <li>Could I handle this ending without falling apart?</li>
+      </ul>
+      <p>Almost no high school relationship ends in marriage. So ask it straight:</p>
+      <p class="punch">If this isn't going anywhere, what is it for?</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>Who should I date?</span></summary>
+    <div class="body">
+      <p>Character, not chemistry. Chemistry is a starting line. Character is what runs the whole race.</p>
+      <p>Watch how they live when nothing is on the line:</p>
+      <ul>
+        <li>How do they treat their parents?</li>
+        <li>How do they handle being told no?</li>
+        <li>How do they talk about people who aren't in the room?</li>
+        <li>Do they make me want to pray more, or sneak around more?</li>
+      </ul>
+      <blockquote><p>"Do not be unequally yoked with unbelievers. For what partnership has righteousness with lawlessness? Or what fellowship has light with darkness?"</p><cite>2 Corinthians 6:14</cite></blockquote>
+      <p class="punch">You will not out-influence someone who is pulling you the other way. You will drift toward them.</p>
+      <blockquote><p>"Iron sharpens iron, and one man sharpens another."</p><cite>Proverbs 27:17</cite></blockquote>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>How should I date?</span></summary>
+    <div class="body">
+      <p>Decide all of this before the moment. In the moment, feelings win every argument.</p>
+      <h4>No secrets.</h4>
+      <p>Parents and leaders know what's going on. Anything that can't survive being seen shouldn't be happening.</p>
+      <p>That verse below isn't about dating. It's about something always true of people, which is why it applies here.</p>
+      <blockquote><p>"For everyone who does wicked things hates the light and does not come to the light, lest his works should be exposed."</p><cite>John 3:20</cite></blockquote>
+      <h4>Stay around other people.</h4>
+      <p>Being alone together speeds everything up faster than either of you is ready for.</p>
+      <h4>Set your lines out loud, ahead of time.</h4>
+      <p>Not "we'll see how it goes." Specific limits, agreed on before there is any pressure.</p>
+      <blockquote><p>"So flee youthful passions and pursue righteousness, faith, love, and peace, along with those who call on the Lord from a pure heart."</p><cite>2 Timothy 2:22</cite></blockquote>
+      <p class="punch">The word is flee, not resist. You don't win that fight by staying in the room. You win it by not being in the room.</p>
+      <h4>Say what you're doing out loud.</h4>
+      <p>Most people drift into relationships without ever discussing them. Name it. "Here's what we're doing and here's why."</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>How far is too far?</span></summary>
+    <div class="body">
+      <p>Everybody asks this one, so here's a straight answer instead of a dodge.</p>
+      <p>First, notice what the question actually means. "How far can I go?" is asking how close to the edge you can stand without falling. Nobody asks that about anything they care about protecting.</p>
+      <blockquote><p>"But sexual immorality and all impurity or covetousness must not even be named among you, as is proper among saints."</p><cite>Ephesians 5:3</cite></blockquote>
+      <p>Now the practical answer, because you deserve one.</p>
+      <h4>Physical stuff escalates. That's the whole design.</h4>
+      <p>It isn't supposed to stop. Every step is built to make the next one feel obvious. So the useful question isn't "is this specific thing allowed," it's "where is this going, and did I decide that or did it just happen?"</p>
+      <h4>Three tests that catch nearly everything</h4>
+      <ul>
+        <li>Would I be fine if their parents walked in right now?</li>
+        <li>Am I about to hide this from someone whose opinion I respect?</li>
+        <li>If we broke up next month, would I regret this?</li>
+      </ul>
+      <h4>And the settings matter more than the willpower</h4>
+      <p>Almost nothing goes wrong standing in a kitchen at 4pm. Alone in a house, in a car at night, in a bedroom, lying down: those aren't neutral. You will not out-decide the setting, so don't put yourself in it and then try to be strong.</p>
+      <p class="punch">The better question is not how far can I go. It's what would I want to be true of me if I could see this from ten years out.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>What should my goal be?</span></summary>
+    <div class="body">
+      <p>Becoming more like Christ. Both of you. Whether or not you end up together.</p>
+      <blockquote><p>"For this is the will of God, your sanctification: that you abstain from sexual immorality."</p><cite>1 Thessalonians 4:3</cite></blockquote>
+      <blockquote><p>"Or do you not know that your body is a temple of the Holy Spirit within you, whom you have from God? You are not your own, for you were bought with a price. So glorify God in your body."</p><cite>1 Corinthians 6:19-20</cite></blockquote>
+      <p class="punch">You are not your own. Neither is the person you like. They belong to God before they belong to you.</p>
+    </div>
+  </details>
+
+  <p class="reprise">You only walk away from something when you want something else more.</p>
+
+  <p class="group-label">If you're not dating anyone</p>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>"I really like someone and I'm not ready"</span></summary>
+    <div class="body">
+      <p>This is the hardest spot to be in, and it's an honest one. Here's what to do.</p>
+      <h4>Don't hide it.</h4>
+      <p>Tell a parent or a leader. People who love you can think clearly when your head is full of feelings.</p>
+      <h4>You don't have to label it.</h4>
+      <p>Liking someone does not require a decision. You're allowed to let it sit.</p>
+      <h4>Stay in groups.</h4>
+      <p>Keep doing normal things with other people around. Don't build private space that pushes you faster than you're ready for.</p>
+      <h4>Say it plainly if you need to.</h4>
+      <p>"I like you, but I don't think this is the right time, and here's why." That is one of the most mature things a person can say.</p>
+      <h4>Use the wait.</h4>
+      <p>Growing now is exactly what makes you ready later, if the time ever comes.</p>
+      <blockquote><p>"I adjure you, O daughters of Jerusalem, by the gazelles or the does of the field, that you not stir up or awaken love until it pleases."</p><cite>Song of Solomon 2:7</cite></blockquote>
+      <p class="punch">Don't wake love up before it's time. Song of Solomon says this three times. Not because the feeling is wrong, but because forcing it early costs you something.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>What if nobody likes me back?</span></summary>
+    <div class="body">
+      <p>Most of this page assumes somebody likes you. For plenty of you that isn't the problem. The problem is that nobody does, everyone around you seems paired off, and there's a quiet ache in that nobody talks about.</p>
+      <p>That hurts. It isn't dumb to feel it, and you don't have to pretend you're fine.</p>
+      <p>What you shouldn't hear is a promise nobody can make: that if you're patient enough, God will send someone. Nobody knows that.</p>
+      <p>What is true is this: not being wanted by teenagers is not the same as not being wanted.</p>
+      <blockquote><p>"The LORD is near to the brokenhearted and saves the crushed in spirit."</p><cite>Psalm 34:18</cite></blockquote>
+      <p class="punch">Being single at sixteen and being alone are not the same thing.</p>
+      <p>The worst version of these years is spending them waiting for someone to pick you. The best version is building a life so full, with real friends and real work and things you actually care about, that a relationship would have to be genuinely good to be worth adding to it.</p>
+      <p>That's not a consolation prize. That's the stronger position, and you'll still have it at twenty-five.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>What if I never date at all?</span></summary>
+    <div class="body">
+      <p class="punch">Being single is not a waiting room.</p>
+      <p>Nothing on this page means your real life starts when you find someone. That idea is everywhere, and it isn't from Scripture. Paul says something closer to the opposite: single people have a freedom to serve God that married people genuinely don't have.</p>
+      <blockquote><p>"I want you to be free from anxieties. The unmarried man is anxious about the things of the Lord, how to please the Lord."</p><cite>1 Corinthians 7:32</cite></blockquote>
+      <p class="punch">You are not half a person waiting to be completed. You're a whole person with time on your hands, which is a gift, not a problem to fix.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>Friendship is the actual practice for marriage</span></summary>
+    <div class="body">
+      <p>Students think dating is practice for marriage. Mostly it's practice for breaking up.</p>
+      <p>What actually makes someone a good spouse is learned somewhere else: keeping your word, showing up for people who can't pay you back, handling conflict without going silent or going cruel, staying loyal when it stops being fun.</p>
+      <p>You can build every one of those right now, without dating anyone.</p>
+      <blockquote><p>"Do nothing from selfish ambition or conceit, but in humility count others more significant than yourselves. Let each of you look not only to his own interests, but also to the interests of others."</p><cite>Philippians 2:3-4</cite></blockquote>
+    </div>
+  </details>
+
+  <p class="group-label">If you are, or you're about to be</p>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>What it looks like when the answer is yes</span></summary>
+    <div class="body">
+      <p>Not everyone reading this should wait. Some of you have thought it through, you're actually ready, and a page that only ever says no would be lying to you.</p>
+      <p>So here's what doing it right looks like:</p>
+      <ul>
+        <li><strong>Be clear instead of vague.</strong> Say what you're asking for and why. Ambiguity isn't romantic, it's just cowardly.</li>
+        <li><strong>Go to their parents first.</strong> Not as a performance. Someone who won't have one awkward conversation with the people raising them hasn't earned the right to be trusted with them. If that family situation is complicated or unsafe, bring in another adult who can hold you accountable instead. The point is accountability, not a ceremony.</li>
+        <li><strong>Set the boundaries before the first date.</strong> Both of you, out loud, specific.</li>
+        <li><strong>Keep people around you who can ask you anything.</strong> And who will get a true answer when they do.</li>
+        <li><strong>Move at a pace you'd be fine describing to your mom.</strong> That one test will catch almost everything.</li>
+      </ul>
+      <p>And if you're the one being pursued rather than doing the pursuing, none of this makes you a passenger. You ask the same questions, you set the same lines, and you are allowed to say no for any reason or no reason.</p>
+      <blockquote><p>"...older women as mothers, younger women as sisters, in all purity."</p><cite>1 Timothy 5:2</cite></blockquote>
+      <p class="punch">Treat them like someone's future spouse. Because they are. Maybe yours.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>Why does everything go sideways after 11pm?</span></summary>
+    <div class="body">
+      <p>Late at night over text is where emotional lines quietly disappear. You're tired, your guard is down, the conversation goes somewhere it wouldn't have gone at noon, and nobody can see it happening.</p>
+      <p>Picture two students who never do a single thing anybody would call inappropriate. They just text every night until one in the morning. Five months later they know each other's worst fears, they check in before every decision, and they feel married. Neither one of them is remotely ready to be married. Nobody crossed a line, and they're in over their heads anyway.</p>
+      <p>A rule beats a good intention here. Phone out of the bedroom. Conversations end at a set time. Decide it now, while it's easy.</p>
+      <p class="punch">Never send a picture. Never ask for one. Not once, not to anyone, no matter what they say back.</p>
+      <p>This is spiritually serious. It is also, if either of you is under 18, a serious crime for both people, including the one who sent it. If someone asks you for a picture, that is a tell-an-adult moment, not a keep-it-quiet moment.</p>
+      <blockquote><p>"I will not set before my eyes anything that is worthless."</p><cite>Psalm 101:3</cite></blockquote>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>How do I know if this has gotten unhealthy?</span></summary>
+    <div class="body">
+      <p>Anyone can be great when things are easy. You learn who someone actually is when you say no, when you're busy, when you disagree with them.</p>
+      <p>These are not rough patches. These are patterns, and they get worse, not better:</p>
+      <ul>
+        <li>Guilt when you don't text back fast enough</li>
+        <li>Jealousy presented to you as love</li>
+        <li>Pressure to keep things from your parents</li>
+        <li>Slowly losing contact with your other friends</li>
+        <li>Wanting to check your phone</li>
+        <li>Anger that becomes your fault somehow</li>
+      </ul>
+      <blockquote><p>"Love is patient and kind; love does not envy or boast; it is not arrogant or rude. It does not insist on its own way; it is not irritable or resentful."</p><cite>1 Corinthians 13:4-5</cite></blockquote>
+      <p>If you're a Christian, <strong>"be patient, be forgiving, be humble" can get used against you.</strong> Those are real commands. They were never meant as a reason to stay somewhere that's hurting you.</p>
+      <p>If you're reading that list and recognizing your relationship, the answer is not to try harder. Tell an adult you trust. Today.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>Learn to break up well</span></summary>
+    <div class="body">
+      <p>Nobody teaches this, and everybody eventually needs it.</p>
+      <ul>
+        <li>Do it in person. Not over text, not through a friend.</li>
+        <li>Be honest and be kind. Both, at the same time.</li>
+        <li>Don't drag it out over three weeks of "I don't know."</li>
+        <li>Then actually end it. Staying "friends" right away usually means neither of you heals.</li>
+      </ul>
+      <blockquote><p>"So whatever you wish that others would do to you, do also to them, for this is the Law and the Prophets."</p><cite>Matthew 7:12</cite></blockquote>
+      <p>How someone treats the person they just stopped dating tells you more about their character than anything they did while dating.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>Don't build your future around a high school relationship</span></summary>
+    <div class="body">
+      <p>Picking a college, a job, or a city to stay near someone at seventeen is a decision you will not be able to unmake. Make big decisions for your own reasons, and let the relationship survive them or not.</p>
+      <blockquote><p>"Desire without knowledge is not good, and whoever makes haste with his feet misses his way."</p><cite>Proverbs 19:2</cite></blockquote>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>If you're in college</span></summary>
+    <div class="body">
+      <p>Same principles. Different mechanics.</p>
+      <p>The marriage question is actually live for you now, which changes things. Dating with no intention of ever answering it wastes two people's time, and one of you will get hurt more than the other.</p>
+      <p><strong>"Tell your parents" becomes something you have to build.</strong> Nobody is checking on you anymore. So you need people who are allowed to ask you anything and who will get an honest answer. Not friends who tell you what you want to hear.</p>
+      <blockquote><p>"And let us consider how to stir up one another to love and good works, not neglecting to meet together, as is the habit of some, but encouraging one another."</p><cite>Hebrews 10:24-25</cite></blockquote>
+      <p><strong>Isolation is the whole ballgame.</strong> An empty apartment at midnight is not a neutral setting, and neither of you will be thinking clearly about it beforehand. Decide about that in daylight, with someone else knowing what you decided.</p>
+      <p>You have more freedom and less oversight than at any other point in your life. That's exactly why this is the season it matters most.</p>
+    </div>
+  </details>
+
+  <p class="group-label">If something has already gone wrong</p>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>If you've already gone further than you meant to</span></summary>
+    <div class="body">
+      <p>Some of you are reading this too late for it to be a warning. You've had sex. You've sent pictures. You've got a habit you can't seem to break. Or something happened to you that you never chose.</p>
+      <p>Read this part slowly.</p>
+      <p>You are not a lesser category of Christian. You are not damaged goods, and you did not use up your one chance at a good life. That idea has done enormous damage in churches, and it is not in the Bible anywhere.</p>
+      <blockquote><p>"Those who are well have no need of a physician, but those who are sick. I came not to call the righteous, but sinners."</p><cite>Mark 2:17</cite></blockquote>
+      <p>Jesus did not come for people who kept themselves clean. He came for people who couldn't. That's the whole point, and if you're in that group, you are exactly who He came for.</p>
+      <p>Repentance is not God grudgingly letting you back in the door. The debt was already paid, in full, before you ever ran it up. He is not reluctant about you.</p>
+      <blockquote><p>"As far as the east is from the west, so far does he remove our transgressions from us."</p><cite>Psalm 103:12</cite></blockquote>
+      <blockquote><p>"There is therefore now no condemnation for those who are in Christ Jesus."</p><cite>Romans 8:1</cite></blockquote>
+      <p class="punch">Purity is not a thing you either still have or lost forever. It's something Christ gives back, and He gives it back completely.</p>
+      <h4>If it wasn't your choice</h4>
+      <p>If someone pressured you, coerced you, or forced you, that is not your sin and you are not carrying it. It belongs entirely to the person who did it. Please tell an adult you trust. You should not be handling that by yourself, and you don't have to.</p>
+      <h4>What to do now</h4>
+      <p>Tell one person. Today, not eventually. A parent, a leader, someone older who loves you.</p>
+      <p>Shame's entire strategy is keeping you quiet, because it only works in the dark. The moment you say it out loud to one safe person, it starts losing.</p>
+      <blockquote><p>"If we confess our sins, he is faithful and just to forgive us our sins and to cleanse us from all unrighteousness."</p><cite>1 John 1:9</cite></blockquote>
+      <div class="lifeline">
+        <p class="lifeline-h">If saying it out loud is the hard part</p>
+        <p>You don't have to open with the whole story. "Can I talk to you about something?" is enough to start, and any of us will take it from there.</p>
+        <p class="names">Pastor Josh &middot; Krys &middot; Manny &middot; Rose &middot; Selia &middot; Sydney &middot; Andrew</p>
+        <p class="lifeline-sub">Any one of us. Pick whoever is easiest to say it to.</p>
+      </div>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary><span class="mark">+</span><span>Is porn really that big a deal?</span></summary>
+    <div class="body">
+      <p>Pornography, and most romance shows and books, teach the same two lies: that other people exist for your feelings, and that closeness costs nothing.</p>
+      <p>If that's what's shaping you, no list of principles is going to hold. You will date the way you were trained to, without noticing.</p>
+      <blockquote><p>"I have made a covenant with my eyes."</p><cite>Job 31:1</cite></blockquote>
+      <p class="punch">You can't feed one thing and expect a different thing to grow.</p>
+      <blockquote><p>"Finally, brothers, whatever is true, whatever is honorable, whatever is just, whatever is pure, whatever is lovely, whatever is commendable, if there is any excellence, if there is anything worthy of praise, think about these things."</p><cite>Philippians 4:8</cite></blockquote>
+      <p>If this is a struggle for you, it's more common than you think and it is not the end of your story. Tell someone. Fighting it alone is how it wins.</p>
+    </div>
+  </details>
+
+  <p class="group-label">Questions you're probably already thinking</p>
+
+  <details class="q">
+    <summary>"The Bible never says anything about dating. Aren't you making this up?"</summary>
+    <div class="body">
+      <p>Correct, it doesn't. Dating didn't exist when the Bible was written. But Scripture says a lot about purity, wisdom, honesty, and how to treat people, and all of that applies directly. The question was never "is dating allowed." It's "am I doing this wisely."</p>
+      <blockquote><p>"'All things are lawful,' but not all things are helpful."</p><cite>1 Corinthians 10:23</cite></blockquote>
+    </div>
+  </details>
+
+  <details class="q">
+    <summary>"Honestly, I'm not that into God right now. So what does this mean for me?"</summary>
+    <div class="body">
+      <p>Then be honest about that instead of pretending. Here's the hard truth: if reading your Bible feels like "fine, I guess," and being with this person feels like everything, that's not a small detail. That's telling you exactly where your heart actually is.</p>
+      <blockquote><p>"For where your treasure is, there your heart will be also."</p><cite>Matthew 6:21</cite></blockquote>
+      <p>You don't fix that by faking spiritual excitement. You fix it by being honest with God about it. "I believe; help my unbelief" is an actual prayer someone prayed in the Bible, and Jesus answered him.</p>
+      <blockquote><p>"Immediately the father of the child cried out and said, 'I believe; help my unbelief!'"</p><cite>Mark 9:24</cite></blockquote>
+      <p>And even if you're not sure where you stand with God, everything on this page still protects you. You're about to hand a piece of yourself to another teenager. Slowing down is just not stupid.</p>
+    </div>
+  </details>
+
+  <details class="q">
+    <summary>"What if they're not really walking with God?"</summary>
+    <div class="body">
+      <p>Two Christians can absolutely wreck each other, so sharing a label isn't the answer either. The question is direction, not background. Is this person actually pursuing Christ, or did they just grow up in church like you did?</p>
+      <p>And if they're not a believer at all, the "I could help them" plan almost never works, and you already know it. In practice the one who cares less about God sets the pace, because they have fewer reasons to slow down. You will not pull them up. They will pull you down, slowly, and you won't notice it happening.</p>
+      <blockquote><p>"Do not be deceived: 'Bad company ruins good morals.'"</p><cite>1 Corinthians 15:33</cite></blockquote>
+    </div>
+  </details>
+
+  <details class="q">
+    <summary>"We're not doing anything physical. What's the harm?"</summary>
+    <div class="body">
+      <p>Nobody plans on it. It happens because you kept putting yourself in situations where it got easier and easier to say yes. Nobody thinks they'll be the example, which is exactly why so many people are.</p>
+      <blockquote><p>"Can a man carry fire next to his chest and his clothes not be burned?"</p><cite>Proverbs 6:27</cite></blockquote>
+      <blockquote><p>"But each person is tempted when he is lured and enticed by his own desire. Then desire when it has conceived gives birth to sin&hellip;"</p><cite>James 1:14-15</cite></blockquote>
+      <p>Also, physical isn't the only way to give away too much. Emotional closeness bonds you to someone just as fast and hurts just as much to undo.</p>
+    </div>
+  </details>
+
+  <details class="q">
+    <summary>"Everyone else dates. Why are we the weird ones?"</summary>
+    <div class="body">
+      <p>Look at how that's working out for everyone else. Being normal is not a goal Scripture ever gives you.</p>
+      <blockquote><p>"Do not be conformed to this world, but be transformed by the renewal of your mind, that by testing you may discern what is the will of God, what is good and acceptable and perfect."</p><cite>Romans 12:2</cite></blockquote>
+    </div>
+  </details>
+
+  <details class="q">
+    <summary>"Why does it have to be about marriage? Can't it just be fun?"</summary>
+    <div class="body">
+      <p>It can be fun. But if it's only fun, then somebody is being used for somebody else's good time, and usually both people are doing it to each other.</p>
+      <blockquote><p>"Love does no wrong to a neighbor; therefore love is the fulfilling of the law."</p><cite>Romans 13:10</cite></blockquote>
+      <p>There's also a cost you won't feel until later. If it's only fun, you're practicing giving your heart away and taking it back. That's a skill you don't want to get good at, because you'll carry it into your marriage someday.</p>
+    </div>
+  </details>
+
+  <details class="q">
+    <summary>"Are you saying my feelings are wrong?"</summary>
+    <div class="body">
+      <p>No. Your feelings are real, and God made you able to feel them. The problem isn't having them. The problem is letting them make the decisions.</p>
+      <p>Your heart is a great thing to listen to and a terrible thing to obey. It will tell you what you want with total confidence and be completely wrong about whether you should have it.</p>
+      <blockquote><p>"The heart is deceitful above all things, and desperately sick; who can understand it?"</p><cite>Jeremiah 17:9</cite></blockquote>
+      <p class="punch">Feel it fully. Just don't let it drive.</p>
+    </div>
+  </details>
+
+  <details class="q">
+    <summary>"You keep saying wait. Wait for what, exactly?"</summary>
+    <div class="body">
+      <p>Fair. "Wait" with no finish line is frustrating. So here's a real answer: wait until you could honestly say yes to the questions at the bottom of this page. Not sort of. Actually.</p>
+      <p>If that's a year away, it's a year away. And if this person is worth it, a year won't change that.</p>
+      <p>And if you're afraid waiting means missing your chance, then it wasn't your chance. God is not trying to trick you out of something good by asking you to be wise.</p>
+      <blockquote><p>"No good thing does he withhold from those who walk uprightly."</p><cite>Psalm 84:11</cite></blockquote>
+    </div>
+  </details>
+
+  <details class="q">
+    <summary>"We're not really dating. We just talk every day."</summary>
+    <div class="body">
+      <p>Then say that out loud to each other and see if it still sounds true. Constant texting, calling, and telling each other everything is a relationship. Not naming it doesn't make it less real, it just means neither of you has to take responsibility for it.</p>
+    </div>
+  </details>
+
+  <details class="q">
+    <summary>"I already started something. Is it too late?"</summary>
+    <div class="body">
+      <p>No. It is never too late to stop and reset. Tell a parent or a leader today, not eventually.</p>
+      <p class="punch">Guilt makes you hide. God asks you to come into the light instead. That's always the harder step and always the better one.</p>
+      <p>If you've gone further than you meant to, read the section above called <strong>"If you've already gone further than you meant to."</strong> It was written for you specifically.</p>
+    </div>
+  </details>
+
+  <p class="group-label">If you don't know what to say to God about this</p>
+
+  <section class="prayer">
+    <p>You don't have to be eloquent. Try this, out loud, and mean the parts you can:</p>
+    <p class="prayer-body">God, You know exactly how I feel about this person, so I'm not going to pretend otherwise. I want this. I might want it more than I want You right now, and I don't know how to fix that.<br><br>Show me what I'm ignoring on purpose. Give me the guts to hear no if the answer is no. Help me want You more than I want this, because I can't talk myself into it.<br><br>And if I've already made a mess of this, thank you that You already knew and already paid for it. Amen.</p>
+    <p class="prayer-foot">Then go tell one person you prayed it. That's the part that makes it real.</p>
+  </section>
+
+  <section class="checklist checklist-top">
+    <h3>Before you ask them out</h3>
+    <p class="sub">Pull this up first. Answer honestly. Nobody sees it but you.</p>
+
+    <label class="check"><input type="checkbox"><span class="box"></span><span class="label">Have I prayed about this and honestly listened?</span></label>
+    <label class="check"><input type="checkbox"><span class="box"></span><span class="label">Have I told my parents or a leader?</span></label>
+    <label class="check"><input type="checkbox"><span class="box"></span><span class="label">Am I doing this because I've thought it through, or because I want it?</span></label>
+    <label class="check"><input type="checkbox"><span class="box"></span><span class="label">Am I ready to lead someone toward God right now?</span></label>
+    <label class="check"><input type="checkbox"><span class="box"></span><span class="label">If this ended, could I walk away in a way that honors God?</span></label>
+    <label class="check"><input type="checkbox"><span class="box"></span><span class="label">Would I still be okay if the answer to all of this is wait?</span></label>
+
+    <p class="verdict">If you can't answer these, that's your answer. Wait.</p>
+  </section>
+
+  <section class="closing">
+    <p class="closing-h">One last thing</p>
+    <p>You'll forget most of this page. That's fine.</p>
+    <p>Everything here has been circling one sentence: <strong>you only walk away from something when you want something else more.</strong></p>
+    <p>So here is the something else.</p>
+    <p>Jesus is better than anything you're afraid of missing. Better than being wanted by someone in your grade. He is enough for every wait, every breakup, and every quiet Friday night, and He is the one handing you the good gifts when they come.</p>
+    <blockquote><p>"Whom have I in heaven but you? And there is nothing on earth that I desire besides you. My flesh and my heart may fail, but God is the strength of my heart and my portion forever."</p><cite>Psalm 73:25-26</cite></blockquote>
+    <p class="closing-punch">Don't put dating at the center of your story. Someone is already there, and He's better at it.</p>
+  </section>
+
+  <footer>
+    <p>Scripture quotations are from the ESV Bible (The Holy Bible, English Standard Version), copyright 2001 by Crossway, a publishing ministry of Good News Publishers. Used by permission. All rights reserved.</p>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    const btn = document.getElementById('toggleAll');
+    const all = document.querySelectorAll('details');
+    const anyClosed = () => Array.from(all).some(d => !d.open);
+    const sync = () => { btn.textContent = anyClosed() ? 'Open everything' : 'Close everything'; };
+
+    btn.addEventListener('click', () => {
+      const opening = anyClosed();
+      all.forEach(d => { d.open = opening; });
+      sync();
+    });
+
+    all.forEach(d => d.addEventListener('toggle', sync));
+
+    // Everything opens for printing, then returns to how the reader left it.
+    let snapshot = [];
+    window.addEventListener('beforeprint', () => {
+      snapshot = Array.from(all).map(d => d.open);
+      all.forEach(d => { d.open = true; });
+    });
+    window.addEventListener('afterprint', () => {
+      all.forEach((d, i) => { d.open = snapshot[i]; });
+    });
+  })();
+</script>
+</body>
+</html>
