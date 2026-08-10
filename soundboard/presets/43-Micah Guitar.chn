@@ -11,21 +11,21 @@
 /eq/2 PEQ 701.5 +1.00 1.8
 /eq/3 PEQ 2k19 -1.50 1.2
 /eq/4 PEQ 8k14 +1.00 2.1
-/mix OFF  -1.2 ON +0 OFF   0.0
+/mix OFF  -1.2 ON +0 OFF   -oo
 /mix/01 ON  -2.3 +0 EQ-> 0
 /mix/02 ON  -1.5
 /mix/03 ON -10.0 +0 EQ-> 0
 /mix/04 ON   -oo
-/mix/05 ON   -oo +0 POST 0
-/mix/06 OFF  -1.0
-/mix/07 OFF  +0.3 +0 POST 0
+/mix/05 ON   0.0 +0 POST 0
+/mix/06 OFF   -oo
+/mix/07 OFF   -oo +0 POST 0
 /mix/08 ON   -oo
 /mix/09 ON   -oo +0 EQ-> 0
-/mix/10 OFF  -9.5
+/mix/10 OFF   -oo
 /mix/11 OFF   -oo +0 POST 0
 /mix/12 OFF   -oo
-/mix/13 ON  -2.3 +0 POST 0
-/mix/14 ON  -7.8
-/mix/15 ON   -oo +0 POST 0
-/mix/16 OFF -12.0
+/mix/13 OFF   -oo +0 POST 0
+/mix/14 ON -18.0
+/mix/15 OFF   -oo +0 POST 0
+/mix/16 OFF   -oo
 /headamp/009 +28.0 OFF
