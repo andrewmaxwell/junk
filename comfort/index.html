@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#12151c">
+<meta name="description" content="How good the weather is for a 30 minute walk or an hour sitting outside, right now and over the next week.">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<title>Walk Comfort</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-1: oklch(0.19 0.02 250);
+    --bg-2: oklch(0.14 0.015 250);
+    --card: oklch(0.185 0.018 250);
+    --text: oklch(0.95 0.005 250);
+    --muted: oklch(0.62 0.012 250);
+    --faint: oklch(0.5 0.01 250);
+    --accent: #FFC97F;
+    --score-color: var(--accent);
+    --night: oklch(0.11 0.02 260 / 0.55);
+    --border: oklch(1 0 0 / 0.06);
+    --border-soft: oklch(1 0 0 / 0.07);
+    --ring-track: oklch(1 0 0 / 0.07);
+    --ref-line: oklch(1 0 0 / 0.14);
+    --alt-line: #7FC7C0;
+    --surface: oklch(1 0 0 / 0.035);
+  }
+  * { box-sizing: border-box; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 30% 20%, var(--bg-1) 0%, var(--bg-2) 60%);
+    padding: 40px 20px;
+    color: var(--text);
+  }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+  .card {
+    width: 760px;
+    max-width: 100%;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 28px;
+    padding: 44px 48px 40px;
+    box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.6), 0 0 0 1px oklch(1 0 0 / 0.02);
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 36px;
+  }
+  .location {
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+    background: none; border: none; padding: 4px 6px; margin: -4px -6px;
+    border-radius: 9px; cursor: pointer; text-align: left; color: inherit;
+  }
+  .location:hover, .location:focus-visible { background: var(--surface); }
+  .location span {
+    color: var(--muted); font-size: 14px; font-weight: 500; letter-spacing: 0.01em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .location .chevron { flex: none; opacity: 0.5; }
+  .updated { color: var(--faint); font-size: 13px; white-space: nowrap; }
+
+  /* Place search. Until now the app could only answer for where you stand. */
+  .place-search { margin: -22px 0 26px; }
+  .place-search[hidden] { display: none; }
+  .place-input {
+    width: 100%; padding: 10px 14px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 11px;
+    color: var(--text); font-size: 14px;
+  }
+  .place-input:focus-visible { outline: 1px solid var(--accent); border-color: transparent; }
+  .place-results { list-style: none; margin: 8px 0 0; padding: 0; }
+  .place-results:empty { display: none; }
+  .place-results li + li { margin-top: 2px; }
+  .place-option {
+    width: 100%; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    padding: 9px 14px; border: none; border-radius: 9px;
+    background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer;
+  }
+  .place-option:hover, .place-option:focus-visible { background: var(--surface); }
+  .place-option .detail { color: var(--faint); font-size: 12px; }
+  .place-note { margin-top: 8px; font-size: 12px; color: var(--faint); }
+
+  /* Main grid */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 236px 1fr;
+    gap: 48px;
+    align-items: start;
+  }
+
+  /* Score column */
+  .score-col { display: flex; flex-direction: column; align-items: center; text-align: center; }
+
+  /* Which question the ring is answering. The model always knew there was more
+     than one; only the readout assumed you wanted the walking answer. */
+  .activity-toggle {
+    display: flex; gap: 3px; margin-bottom: 20px; padding: 3px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
+  }
+  .activity-option {
+    flex: 1; padding: 6px 13px; border: none; border-radius: 999px;
+    background: none; color: var(--muted); cursor: pointer;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+  /* Only ever shown on the option you are not on: the selected one is answered
+     by the 44px number directly below it. This is what the separate "Sitting in
+     the shade · Great (97)" line used to say, minus a whole row and minus the
+     third place on the card that mentioned sitting. */
+  .activity-score { margin-left: 5px; opacity: 0.75; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .activity-option[aria-pressed='true'] { background: oklch(1 0 0 / 0.09); color: var(--text); }
+  .activity-option:focus-visible { outline: 1px solid var(--accent); }
+  .score-readout { display: flex; flex-direction: column; align-items: center; }
+  .ring-wrap { position: relative; width: 180px; height: 180px; }
+  .ring-svg { transform: rotate(-90deg); }
+  .ring-track { fill: none; stroke: var(--ring-track); stroke-width: 12; }
+  /* The scale, as a thin ring outside the track. Painting it *on* the track was
+     the obvious thing and the wrong one: the progress arc covers everything
+     below the current score, so the only part of the scale still visible was
+     the part you had not reached. Concentric and outside, the whole scale is
+     always there to read the arc against. */
+  .ring-band { fill: none; stroke-width: 3; stroke-opacity: 0.6; }
+  .ring-progress {
+    fill: none;
+    stroke: var(--score-color);
+    stroke-width: 12;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 10px color-mix(in oklab, var(--score-color) 50%, transparent));
+    transition: stroke-dashoffset 0.5s ease, stroke 0.5s ease;
+  }
+  .ring-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  }
+  .score-value { font-size: 44px; font-weight: 800; letter-spacing: -0.02em; }
+  .score-label { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; }
+  .headline-row { margin-top: 18px; display: flex; align-items: center; gap: 6px; }
+  .headline-row svg { stroke: var(--score-color); transition: stroke 0.5s ease; }
+  .headline { font-size: 15px; font-weight: 600; }
+  .reason { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); text-wrap: pretty; }
+
+  /* The breakdown. The score's whole claim is that it weighed things for you,
+     which is only worth believing if it will show its work on request. */
+  .why-toggle {
+    margin-top: 10px; padding: 4px 10px;
+    background: none; border: 1px solid var(--border); border-radius: 999px;
+    color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer;
+    letter-spacing: 0.03em;
+  }
+  .why-toggle:hover, .why-toggle:focus-visible { background: var(--surface); color: var(--text); }
+  .why-panel { margin-top: 14px; width: 100%; text-align: left; }
+  .why-panel[hidden] { display: none; }
+  .band-scale { display: flex; height: 5px; border-radius: 3px; overflow: hidden; }
+  .band-scale span { flex: 1; }
+  .band-marks {
+    position: relative; height: 13px; margin-top: 3px;
+    font-size: 9px; color: var(--faint); letter-spacing: 0.02em;
+  }
+  .band-marks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+  .why-lead { margin: 12px 0 8px; font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+  .factor-row { display: grid; grid-template-columns: 1fr 74px 30px; align-items: center; gap: 8px; margin-top: 5px; }
+  .factor-name { font-size: 12px; color: var(--muted); }
+  .factor-track { height: 4px; border-radius: 2px; background: var(--ring-track); overflow: hidden; }
+  .factor-fill { display: block; height: 100%; border-radius: 2px; background: var(--score-color); }
+  .factor-cost { font-size: 12px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .why-note { margin: 12px 0 0; font-size: 11px; line-height: 1.5; color: var(--faint); text-wrap: pretty; }
+
+  /* Conditions column */
+  .temp-row {
+    display: flex; align-items: center; gap: 20px;
+    padding-bottom: 22px; margin-bottom: 22px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .temp-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .temp-value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; }
+  .feels-like { font-size: 15px; color: var(--muted); }
+  .sit-score {
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft);
+    font-size: 12px; color: var(--muted); text-align: center;
+  }
+  .sit-score::before {
+    content: ''; display: inline-block; width: 14px; height: 0;
+    border-top: 1.5px solid var(--alt-line); vertical-align: middle; margin-right: 6px; opacity: 0.7;
+  }
+  .sit-score:empty { display: none; }
+  .sky-label { font-size: 13px; color: var(--faint); }
+
+  .tiles-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px 24px; }
+  .tile { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .tile-value { font-size: 15px; font-weight: 600; }
+  .tile-label { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.04em; }
+
+  /* Temporal context for the score, so it lives with the other temporal
+     context instead of floating on its own line in the middle of the card. */
+  .percentile {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--faint);
+    text-wrap: pretty;
+  }
+  .percentile:empty { display: none; }
+
+  /* Recommendation: the one thing the app is actually for. It sits under the
+     conditions rather than in a full-width strip below both columns — that
+     strip left the conditions column ending 240px short of the score column,
+     so the card had a large empty rectangle in it and its most actionable line
+     read as a footnote under everything else. */
+  .best-window {
+    margin-top: 24px;
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  .best-window svg { flex: none; stroke: var(--accent); }
+  .best-window-label { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+  .best-window-value { font-size: 15px; font-weight: 600; margin-top: 2px; }
+  .best-window-score { margin-left: auto; font-size: 12px; color: var(--muted); text-align: right; }
+
+  /* Chart */
+  .chart-section { margin-top: 30px; padding-top: 26px; border-top: 1px solid var(--border-soft); }
+  .chart-header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; }
+  .chart-title { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .chart-delta { font-size: 12px; font-weight: 600; color: #8FD19E; letter-spacing: 0.02em; }
+  .chart-delta.is-down { color: #E8846B; }
+  .chart-wrap { position: relative; margin-top: 12px; }
+  #comfort-chart { width: 100%; height: auto; display: block; overflow: visible; touch-action: none; }
+  .chart-ref-label { fill: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: 0.08em; }
+  .chart-tip {
+    position: absolute; top: -6px; transform: translateX(-50%);
+    padding: 4px 8px; border-radius: 6px;
+    background: oklch(0.26 0.02 250); border: 1px solid var(--border-soft);
+    font-size: 11px; font-weight: 500; color: var(--text);
+    white-space: nowrap; pointer-events: none;
+  }
+  .chart-tip[hidden] { display: none; }
+  .day-row { position: relative; height: 27px; margin-top: 8px; }
+  .day-cell {
+    position: absolute; top: 0; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 4px; white-space: nowrap;
+  }
+  .day-label { font-size: 11px; color: var(--faint); }
+
+  /* Six things are drawn in that chart. Until now none of them said so. */
+  .chart-legend {
+    display: flex; flex-wrap: wrap; gap: 6px 16px;
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-soft);
+  }
+  .legend-item {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--faint); white-space: nowrap;
+  }
+  .legend-item svg { flex: none; }
+
+  .status-line { min-height: 1.2em; color: var(--faint); font-size: 12px; margin-top: 14px; text-align: center; }
+  .link-button {
+    background: none; border: none; padding: 0; font-size: 12px;
+    color: var(--accent); text-decoration: underline; cursor: pointer;
+  }
+
+  @media (max-width: 640px) {
+    .main-grid { grid-template-columns: 1fr; gap: 32px; justify-items: center; }
+    .card { padding: 32px 24px; border-radius: 22px; }
+    .tiles-grid { gap: 18px; }
+    /* It fits inline at 340px; the old wrap rule orphaned "comfort 96" onto a
+       line of its own with nothing beside it. */
+    .best-window { padding: 13px 15px; gap: 10px; }
+    .place-search { margin: -18px 0 22px; }
+    .why-panel { max-width: 320px; }
+    .chart-legend { gap: 6px 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ring-progress { transition: none; }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1 class="visually-hidden">Walk comfort</h1>
+    <div class="header">
+      <button type="button" class="location" id="location-button" aria-expanded="false" aria-controls="place-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21Z"></path><circle cx="12" cy="9.5" r="2.4"></circle></svg>
+        <span id="location-name">Locating…</span>
+        <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+      </button>
+      <span class="updated" id="updated"></span>
+    </div>
+
+    <div class="place-search" id="place-search" hidden>
+      <input class="place-input" id="place-input" type="search" autocomplete="off"
+             placeholder="Search for a town or city…" aria-label="Search for a place">
+      <ul class="place-results" id="place-results"></ul>
+      <div class="place-note" id="place-note"></div>
+    </div>
+
+    <div class="main-grid">
+      <div class="score-col">
+        <div class="activity-toggle" id="activity-toggle" role="group" aria-label="Activity"></div>
+        <div class="score-readout" aria-live="polite">
+        <div class="ring-wrap">
+          <svg class="ring-svg" width="180" height="180" viewBox="0 0 180 180" aria-hidden="true">
+            <circle class="ring-track" cx="90" cy="90" r="68"></circle>
+            <g id="ring-bands"></g>
+            <circle class="ring-progress" id="ring-progress" cx="90" cy="90" r="68"></circle>
+          </svg>
+          <div class="ring-center">
+            <span class="score-value" id="comfort-value">--</span>
+            <span class="score-label">Comfort</span>
+          </div>
+        </div>
+        <div class="headline-row">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="1.6"></circle><path d="M12 7v6M12 13l-3 6M12 13l3.5 5"></path><path d="M12 9l-3 2M12 9l3 1.5"></path></svg>
+          <span class="headline" id="comfort-headline">--</span>
+        </div>
+        <span class="reason" id="comfort-reason"></span>
+        </div>
+        <button type="button" class="why-toggle" id="why-toggle" aria-expanded="false" aria-controls="why-panel">
+          Why this score?
+        </button>
+        <div class="why-panel" id="why-panel" hidden>
+          <div class="band-scale" id="band-scale"></div>
+          <div class="band-marks" id="band-marks"></div>
+          <p class="why-lead" id="why-lead">What it cost</p>
+          <div id="factor-rows"></div>
+          <p class="why-note" id="why-note"></p>
+        </div>
+      </div>
+
+      <div class="conditions-col">
+        <div class="temp-row">
+          <svg id="sky-icon" width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>
+          <div>
+            <div class="temp-line">
+              <span class="temp-value" id="temp">--</span>
+              <span class="feels-like" id="feels-like"></span>
+            </div>
+            <span class="sky-label" id="sky-label"></span>
+          </div>
+        </div>
+
+        <div class="tiles-grid">
+          <div class="tile">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 8h11a3 3 0 1 0-2.5-4.6"></path><path d="M3 12h15a3 3 0 1 1-2.5 4.6"></path><path d="M3 16h8"></path></svg>
+            <div><div class="tile-value" id="wind">--</div><div class="tile-label" id="wind-label">Wind</div></div>
+          </div>
+          <div class="tile">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 14.5a4 4 0 0 0-.5-8 5.2 5.2 0 0 0-9.9-1.4A4.2 4.2 0 0 0 6.5 13h11Z"></path><path d="M9 17.5 8 20"></path><path d="M13 17.5 12 20"></path></svg>
+            <div><div class="tile-value" id="rain">--</div><div class="tile-label">Rain</div></div>
+          </div>
+          <div class="tile">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c2.5 4 5.5 7.4 5.5 11a5.5 5.5 0 1 1-11 0C6.5 10.4 9.5 7 12 3Z"></path></svg>
+            <div><div class="tile-value" id="humidity">--</div><div class="tile-label" id="humidity-label">Humidity</div></div>
+          </div>
+          <div class="tile">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20c0-6 3-9.5 8-10.5"></path><path d="M19 4.5c0 6.5-3.5 10-8.5 10a4.5 4.5 0 0 1 0-9c3 0 5.5-.4 8.5-1Z"></path></svg>
+            <div><div class="tile-value" id="air-quality">--</div><div class="tile-label" id="air-quality-label">Air quality</div></div>
+          </div>
+          <div class="tile">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"></circle><path d="M12 2.5v2.4M12 19.1v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"></path></svg>
+            <div><div class="tile-value" id="sun">--</div><div class="tile-label" id="sun-label">Sun</div></div>
+          </div>
+          <div class="tile">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17h18"></path><path d="M7 17a5 5 0 0 1 10 0"></path><path d="M12 4.5v2M5.6 7.6l1.4 1.4M18.4 7.6 17 9"></path><path d="M4 21h16"></path></svg>
+            <div><div class="tile-value" id="daylight">--</div><div class="tile-label" id="daylight-label">Daylight left</div></div>
+          </div>
+        </div>
+
+        <div class="best-window">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>
+          <div>
+            <div class="best-window-label">Best window</div>
+            <div class="best-window-value" id="best-window">--</div>
+          </div>
+          <div class="best-window-score" id="best-window-score"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-section">
+      <div class="chart-header">
+        <span class="chart-title">Comfort · 3 days back, 7 ahead</span>
+        <span class="chart-delta" id="chart-delta"></span>
+      </div>
+      <p class="percentile" id="percentile"></p>
+      <div class="chart-wrap">
+        <svg id="comfort-chart" viewBox="0 0 640 160" role="img"></svg>
+        <div class="chart-tip" id="chart-tip" hidden></div>
+        <div class="day-row" id="day-row"></div>
+        <div class="chart-legend" id="chart-legend"></div>
+      </div>
+    </div>
+
+    <div class="status-line" id="status"></div>
+  </main>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

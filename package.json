@@ -28,7 +28,7 @@
   },
   "scripts": {
     "dev": "npm i && npm run gen && open http://localhost:3000 && node devServer",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test comfort/test/*.test.js",
     "gen": "node generateHome.js"
   },
   "repository": {
