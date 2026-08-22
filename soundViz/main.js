@@ -11,6 +11,39 @@ const MIN_SAMPLES = 4096; // ~85 ms; shorter than this there is nothing to trans
 const MIN_SPAN = 24;
 const MIN_RATIO = 1.001;
 
+const NOTES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+
+// Nearest equal-tempered note. Only worth showing once the viewport is inside
+// an octave: any wider and naming the two ends says nothing you could not read
+// off the numbers.
+const NOTE_RATIO = 2;
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function note(f) {
+  const n = Math.round(69 + 12 * Math.log2(f / 440));
+  return `${NOTES[n % 12]}${Math.floor(n / 12) - 1}`;
+}
+
+// The frequencies at the bottom and top of the viewport. Decimals come from the
+// *span* rather than the magnitude: a thousandth of an octave up at 700 Hz is a
+// band less than a hertz wide, and "700-700 Hz" would be no readout at all.
+function band(f0, f1) {
+  const kilo = f0 >= 1000;
+  const scale = kilo ? 1000 : 1;
+  const dp = clamp(Math.ceil(-Math.log10((f1 - f0) / scale / 4)), 0, 3);
+  const range = `${(f0 / scale).toFixed(dp)}–${(f1 / scale).toFixed(dp)} ${kilo ? 'kHz' : 'Hz'}`;
+
+  if (f1 / f0 > NOTE_RATIO) {
+    return range;
+  }
+
+  const lo = note(f0);
+  const hi = note(f1);
+
+  return `${range} · ${lo === hi ? lo : `${lo}–${hi}`}`;
+}
+
 const canvas = document.getElementById('view');
 const status = document.getElementById('status');
 const hint = document.getElementById('hint');
@@ -37,6 +70,30 @@ const lag = () => Math.max(0, performance.now() - pressAt);
 const held = new Set(); // pointers currently down
 let quietUntil = 0; // suppress the short-take nag right after a gesture
 
+// Hold to record, drag to pan. The two are only ambiguous when there is
+// something to pan, and they stay ambiguous for this long: past it the press is
+// committed to a recording, so a hand that drifts mid-take does not throw it
+// away. Waiting costs no audio — `beginTake` reaches back by the real press
+// time and the sound is already in the ring buffer.
+const HOLD_MS = 180;
+
+let holdTimer = null;
+
+// Answered once per press, and both this file and the gesture code read it from
+// the same event, so they cannot disagree about what the press was.
+const canPan = () => !!rec && !isFullView(viewport, limits);
+
+function cancelHold() {
+  if (holdTimer === null) {
+    return false;
+  }
+
+  clearTimeout(holdTimer);
+  holdTimer = null;
+
+  return true;
+}
+
 function setStatus(text, recording) {
   clearTimeout(nagTimer);
   status.textContent = text;
@@ -56,7 +113,9 @@ function showZoom() {
       : ms < 1000
         ? `${Math.round(ms)} ms`
         : `${(ms / 1000).toFixed(2)} s`;
-  setStatus(`${zoomFactor(viewport, limits).toFixed(0)}x · ${span} across`, false);
+  const zoom = `${zoomFactor(viewport, limits).toFixed(0)}x`;
+
+  setStatus(`${zoom} · ${span} across · ${band(viewport.f0, viewport.f1)}`, false);
 }
 
 async function press(pressedAt) {
@@ -105,6 +164,7 @@ function release() {
 // A second finger means the gesture was never a recording. Throw the take away
 // rather than rendering whatever was caught before the pinch started.
 function abort() {
+  cancelHold();
   clearInterval(ticker);
   ticker = null;
   opening = false;
@@ -157,7 +217,7 @@ function finish(result) {
   setTimeout(() => {
     analyze(canvas, rec, viewport, true);
     setStatus('', false);
-    hint.textContent = 'Hold to record · scroll or pinch to zoom · S to save';
+    hint.textContent = 'Hold to record · drag to pan · scroll to zoom · S to save';
     draw(canvas, viewport);
   }, 24);
 }
@@ -204,7 +264,7 @@ async function save() {
   }
 }
 
-attachGestures(canvas, {
+const gestures = attachGestures(canvas, {
   getView: () => viewport,
   setView: v => {
     viewport = v;
@@ -224,6 +284,10 @@ attachGestures(canvas, {
     showZoom();
   },
   onMultiTouch: abort,
+  canPan,
+  // A drag is not a recording. Throw away whatever the press had started
+  // rather than rendering the moment before the pan.
+  onDragStart: abort,
 });
 
 // The whole screen is the button, so this works the same under a finger.
@@ -236,12 +300,36 @@ window.addEventListener('pointerdown', e => {
     return;
   }
 
-  press(e.timeStamp);
+  // Nothing to pan means nothing to disambiguate, and the press records at
+  // once — which covers every press made before a recording exists.
+  if (!canPan()) {
+    press(e.timeStamp);
+    return;
+  }
+
+  const at = e.timeStamp;
+
+  cancelHold();
+  holdTimer = setTimeout(() => {
+    holdTimer = null;
+
+    // Held long enough to be a take, so it is one from here on: the gesture
+    // handler must stop watching this press for a drag, or a hand that drifts
+    // mid-recording would abort it.
+    gestures.cancelDrag();
+    press(at);
+  }, HOLD_MS);
 });
 
 function lift(e) {
   const wasHeld = held.delete(e.pointerId);
   if (held.size > 0 || !wasHeld) return;
+
+  // Let go before the press committed to anything: a tap, not a take. Nothing
+  // to stop, and nothing to nag about — at this point there is a picture on
+  // screen and the user was aiming at it.
+  if (cancelHold()) return;
+
   release();
 }
 
@@ -249,6 +337,7 @@ window.addEventListener('pointerup', lift);
 window.addEventListener('pointercancel', lift);
 window.addEventListener('blur', () => {
   held.clear();
+  cancelHold();
   release();
 });
 

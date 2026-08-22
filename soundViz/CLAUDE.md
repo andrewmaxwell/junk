@@ -2,9 +2,9 @@
 
 Hold anywhere to record from the microphone; on release the sound is drawn
 full-screen as a **reassigned spectrogram**. Scroll or pinch to zoom in on any
-part of it, `S` to save it as a large PNG. Served from
-`http://localhost:3000/soundViz/`. No build step, no dependencies — plain ES
-modules loaded by `index.html`.
+part of it, drag to pan once you are in, `S` to save it as a large PNG. Served
+from `http://localhost:3000/soundViz/`. No build step, no dependencies — plain
+ES modules loaded by `index.html`.
 
 The look being chased is the MATLAB spectrograms from Mythbusters: fine bright
 filaments on black, not fuzzy blobs.
@@ -31,7 +31,7 @@ picture in different terms. Several things below exist only to hold that line.
 | `fft.js` | iterative radix-2 complex FFT |
 | `render.js` | picks the sampling grid, drives `reassign` → `glview`, tiles the export |
 | `glview.js` | WebGL2 renderer: accumulate → measure background → colour |
-| `zoom.js` | viewport model (samples × Hz) and gesture handling |
+| `zoom.js` | viewport model (samples × Hz), gesture handling, hold-vs-drag |
 
 Dependency direction: `main → {recorder, render, zoom}`, `render → {reassign,
 glview}`, `reassign → fft`. Nothing else imports anything.
@@ -282,6 +282,29 @@ callbacks at all, so a take made just before switching away sat unanalysed at
 "analysing…" until you came back. This bit the CDP harness before it could bite
 Andrew, because an occluded window is backgrounded too.
 
+**A press is a recording or a pan, and the first 180 ms decides.** The whole
+screen being the button collides with drag-to-pan, and the resolution is that
+`main.js` waits `HOLD_MS` before starting a take while `zoom.js` watches for
+`DRAG_SLOP` of movement; whichever happens first wins. Three things make it
+work and each was needed:
+
+- **Waiting costs no audio.** `beginTake(lagMs)` reaches back by the real press
+  time and the sound is already in the ring, so a press that survives the wait
+  starts where it was made. `LEAD_TRIM` then skips forward by 150 ms, which
+  very nearly cancels the 180 ms reach-back — takes begin within about 30 ms of
+  where they did before drag-to-pan existed.
+- **Both files ask `canPan()` once, off the same event.** It is false at full
+  view, where there is nothing to pan and the press must record immediately —
+  which is every press made before a recording exists. Re-asking it later would
+  let the two disagree about what a press was halfway through it.
+- **Committing to a take disarms the drag** (`gestures.cancelDrag()`). Without
+  it a hand that drifted *after* the take started was read as a pan and threw
+  the recording away — a hold long enough to be worth keeping is exactly the
+  hold most likely to wander.
+
+A tap shorter than `HOLD_MS` on an existing picture does nothing at all. At full
+view it still runs the short-take nag, because there the press did record.
+
 **The mic stays open with a ring buffer.** A freshly opened capture stream
 delivers ~200 ms of silence and a startup click. `WARMUP_SEC` discards it;
 `LEAD_TRIM` skips forward past the sound of the button press itself.
@@ -331,12 +354,20 @@ recover it; without this the take comes out empty.
 - `PROBE = 384` — background measured from a point-sampled copy this size, never
   averaged (a percentile of averages is not the percentile we want).
 
+`zoom.js`
+- `DRAG_SLOP = 8` px — movement before a press is a pan rather than a hold.
+  Generous on purpose: a finger resting on glass is never quite still, and
+  3 px of drift must not cost a recording.
+
 `recorder.js`
 - `FADE_SEC = 0.004` — raised-cosine at each end of a take. A hard cut is a
   step and a step is broadband; without this every recording had a bright
   vertical curtain down its edges that was never in the sound.
 
 `main.js`
+- `HOLD_MS = 180` — how long a press stays ambiguous between a take and a pan.
+  Longer makes panning feel sticky; shorter starts taking recordings off the
+  beginning of a drag.
 - `MIN_SPAN = 24` samples, `MIN_RATIO = 1.001` — the zoom stops, in both axes,
   both far past what the analysis can resolve. Andrew asked for them to be
   removed; past a few hundred × the picture simply thins out, which is a thing

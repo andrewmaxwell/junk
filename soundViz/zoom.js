@@ -103,8 +103,16 @@ export function zoomFactor(view, limits) {
   return (limits.tMax - limits.tMin) / (view.t1 - view.t0);
 }
 
-// Wheel, trackpad pinch and two-finger touch, all landing on the same two
-// operations. One finger is left alone: it is how a recording is made.
+// How far a press may wander before it is a pan rather than a hold. Generous,
+// because a finger resting on glass is never quite still.
+const DRAG_SLOP = 8;
+
+// Wheel, trackpad pinch, two-finger touch and single-pointer drag, all landing
+// on the same two operations.
+//
+// A single pointer is only taken as a pan when there is something to pan —
+// otherwise it belongs to the recorder, which owns every press made at full
+// view. `canPan` is asked once per press so the two cannot disagree.
 //
 // A gesture only ever re-projects the cloud already in hand, which is instant.
 // If the new view wants a finer grid than that cloud was built on, one is
@@ -112,12 +120,14 @@ export function zoomFactor(view, limits) {
 // cells without moving any, so it reads as detail arriving rather than as the
 // picture changing.
 export function attachGestures(el, opts) {
-  const {getView, setView, getLimits, onGesture, onSettle, onMultiTouch} = opts;
+  const {getView, setView, getLimits, onGesture, onSettle, onMultiTouch, canPan, onDragStart} =
+    opts;
 
   const rect = () => el.getBoundingClientRect();
   const pointers = new Map();
 
   let pinch = null;
+  let drag = null;
   let settleTimer = null;
 
   function settleLater() {
@@ -158,11 +168,15 @@ export function attachGestures(el, opts) {
   );
 
   el.addEventListener('pointerdown', e => {
+    pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+
+    // Decided here and not revisited: whether this press is allowed to become
+    // a pan is a property of the view it started in.
+    drag = pointers.size === 1 && canPan() ? {x: e.clientX, y: e.clientY, moved: false} : null;
+
     if (e.pointerType !== 'touch') {
       return;
     }
-
-    pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
 
     if (pointers.size >= 2) {
       multiUntil = performance.now() + 500;
@@ -186,6 +200,38 @@ export function attachGestures(el, opts) {
     }
 
     pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+
+    if (pointers.size === 1 && drag) {
+      if (!drag.moved) {
+        if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < DRAG_SLOP) {
+          return;
+        }
+
+        // Past the slop the gesture has declared itself, and whatever the press
+        // had begun is no longer wanted.
+        drag.moved = true;
+        onDragStart();
+      }
+
+      const r = rect();
+
+      setView(
+        panBy(
+          getView(),
+          (e.clientX - drag.x) / r.width,
+          (e.clientY - drag.y) / r.height,
+          getLimits(),
+        ),
+      );
+
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+
+      onGesture();
+      settleLater();
+
+      return;
+    }
 
     if (pointers.size !== 2 || !pinch) {
       return;
@@ -222,6 +268,10 @@ export function attachGestures(el, opts) {
 
     if (pointers.size < 2) {
       pinch = null;
+    }
+
+    if (pointers.size === 0) {
+      drag = null;
     }
   }
 
@@ -262,5 +312,12 @@ export function attachGestures(el, opts) {
 
   return {
     pointerCount: () => pointers.size,
+
+    // The press has committed to something else — a recording — so it is no
+    // longer a candidate for a pan. Without this a hand that drifts *after* the
+    // take has started would be read as a drag and throw the take away.
+    cancelDrag: () => {
+      drag = null;
+    },
   };
 }
