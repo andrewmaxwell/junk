@@ -2,9 +2,11 @@
 
 Hold anywhere to record from the microphone; on release the sound is drawn
 full-screen as a **reassigned spectrogram**. Scroll or pinch to zoom in on any
-part of it, drag to pan once you are in, `S` to save it as a large PNG. Served
-from `http://localhost:3000/soundViz/`. No build step, no dependencies — plain
-ES modules loaded by `index.html`.
+part of it, drag to pan once you are in, tap a point to read off what is
+there, `P` to hear the part you are looking at, `S` to save it as a large PNG.
+Served from
+`http://localhost:3000/soundViz/`. No build step, no dependencies — plain ES
+modules loaded by `index.html`.
 
 The look being chased is the MATLAB spectrograms from Mythbusters: fine bright
 filaments on black, not fuzzy blobs.
@@ -23,18 +25,21 @@ picture in different terms. Several things below exist only to hold that line.
 
 | file | role |
 |---|---|
-| `index.html` | canvas, hint/status chrome, touch CSS. Whole screen is the button. |
+| `index.html` | canvas, hint/status chrome, readout tooltip, touch CSS |
 | `main.js` | recording state machine, gesture wiring, PNG save, status text |
 | `recorder.js` | persistent mic, ring buffer, take start/end |
 | `capture-processor.js` | AudioWorklet, posts raw blocks to the main thread |
+| `playback.js` | clips a viewport back to audio: time slice + STFT band filter |
 | `reassign.js` | the analysis: STFT → cloud of reassigned cells |
 | `fft.js` | iterative radix-2 complex FFT |
 | `render.js` | picks the sampling grid, drives `reassign` → `glview`, tiles the export |
-| `glview.js` | WebGL2 renderer: accumulate → measure background → colour |
+| `glview.js` | WebGL2 renderer: accumulate → measure background → colour → per-pixel readback |
 | `zoom.js` | viewport model (samples × Hz), gesture handling, hold-vs-drag |
 
-Dependency direction: `main → {recorder, render, zoom}`, `render → {reassign,
-glview}`, `reassign → fft`. Nothing else imports anything.
+Dependency direction: `main → {recorder, render, zoom, playback}`, `render →
+{reassign, glview}`, `reassign → fft`, `playback → fft`. Nothing else imports
+anything. `playback` is handed the `AudioContext` rather than reaching for it,
+which is what keeps it off `recorder`.
 
 ## What a single drawn segment means
 
@@ -282,6 +287,88 @@ callbacks at all, so a take made just before switching away sat unanalysed at
 "analysing…" until you came back. This bit the CDP harness before it could bite
 Andrew, because an occluded window is backgrounded too.
 
+**A tap reads the picture back rather than recomputing it.** Clicking a point
+asks the accumulation buffer what it actually holds there — amplitude above
+the recording's own background, mean coherence, mean sweep drive — the same
+three quantities already on screen as brightness, saturation and hue. Nothing
+is re-analysed: `glview.js`'s `sampleCell(u, v, f)` renders one texel of
+`accum` into a dedicated 1×1 `RGBA32F` target and reads that back, rather than
+`readPixels`-ing `accum` directly, because `accum` itself may be `RGBA16F`
+(`canBlend32` false) and reading a half-float framebuffer back as `FLOAT` is
+not something every implementation is asked to support.
+
+Three things follow from reading the buffer rather than the cloud. An empty
+pixel reports "nothing here" rather than a fabricated floor — the same
+distinction `measureBackground` already makes. The reported chirp value is a
+*lean*, not a rate in Hz/s: it is `accum`'s coherence-weighted mean of
+`vDrive` over however many cells landed on that pixel, the identical quantity
+the hue channel already visualises, and it does not invert back to a
+per-partial measurement. True per-cell phase is gone by this point regardless
+— reassignment consumes it to produce `t̂`/`f̂` and never stores it, so a
+literal "phase at this point" was never on the table.
+
+And the lean is withheld below `SWEEP_MIN_CONF`. The drive is a ratio whose
+denominator is the coherent power on the pixel, so as coherence falls it
+becomes a confident-looking number derived from almost nothing — a pixel
+measured at 5% coherence was happily reporting "falling 47%". The picture
+never made that claim, because it rotates hue by `drive * conf` and so shows
+no tint there at all; the readout now agrees with it and says "not
+corroborated" instead.
+
+**The readout is reachable at every zoom, including full view.** Only two
+questions gate a press, and they are deliberately not the same one:
+`hasPicture()` decides whether the press waits `HOLD_MS` (so a tap can mean
+something), and `canPan()` decides whether the gesture code arms a drag. A tap
+reads the picture wherever you are; only a zoomed-in view has anywhere to pan
+to. `canPan` implies `hasPicture`, so the gesture code can never arm a drag on
+a press `main.js` chose to record immediately — that implication is the whole
+consistency argument, and it is why the two predicates may differ safely.
+
+Escape backs out one layer at a time, outermost first — the sound, then the
+readout, then the zoom — because each is something you would want to leave
+without losing the one under it. Dismissing the tooltip must not also throw
+away the view it was opened from.
+
+**Playing a viewport is a time slice and a brick-wall filter.** The picture is
+a rectangle in time and frequency, so hearing it means clipping both. Time is a
+slice of the samples; frequency is an overlap-add STFT filter that zeros every
+bin outside the band — no practical cascade of biquads has a skirt steep enough
+for a band that can be a fraction of a hertz wide. Measured on white noise
+through the real path: >100 dB out-of-band rejection, and a 40 Hz band
+separates partials 60 Hz apart by 52 dB. Worst case cost is 46 ms (a narrow
+band across a 5 s recording), one-off on the keypress.
+
+`fft.js` only transforms forwards, so the inverse comes from it by conjugation
+(`ifft(X) = conj(fft(conj(X)))/N`) rather than growing an inverse the rest of
+the app would never call. Synthesis divides by the summed square of the window
+instead of trusting a COLA constant, so the window and overlap are free to
+change without silently rescaling the output.
+
+Three things the clip has to be honest about, because in each case what you
+hear is wider than what you see:
+
+- **A viewport can be 24 samples across.** Played as-is that is half a
+  millisecond; looped, it would be a buzz whose pitch is the loop rate rather
+  than anything in the recording. Clips are widened to `MIN_PLAY_MS` and the
+  status says `wider in time`.
+- **A band can be narrower than one FFT bin.** It survives as that one bin —
+  silence would be the wrong answer — and the status says `wider in band`. The
+  test for this is whether the transform was long enough to fit
+  `MIN_BAND_BINS` inside the band, *not* whether the band collapsed to nothing:
+  a hairline band collapses to one bin, which is audible and still far wider
+  than the picture, and an earlier version reported that as unwidened.
+- **The playhead can be outside the picture**, whenever the clip is wider than
+  the viewport. It hides rather than parking at the edge, which would claim the
+  sound was somewhere it is not.
+
+The playhead is a DOM element, not something drawn into the picture: a
+full-view redraw costs ~90 ms, so animating a line by re-rendering would cost
+more per frame than the analysis budget allows. Nothing about the picture
+changes while it sweeps.
+
+**Recording stops playback**, or the take is a recording of the recording
+coming out of the speakers. `press()` does it before the mic opens.
+
 **A press is a recording or a pan, and the first 180 ms decides.** The whole
 screen being the button collides with drag-to-pan, and the resolution is that
 `main.js` waits `HOLD_MS` before starting a take while `zoom.js` watches for
@@ -359,12 +446,30 @@ recover it; without this the take comes out empty.
   Generous on purpose: a finger resting on glass is never quite still, and
   3 px of drift must not cost a recording.
 
+`glview.js`
+- The `pick` target and `PICK_FS` program exist solely for `sampleCell`; they
+  cost one 1×1 float framebuffer and one tiny program, created once.
+
+`playback.js`
+- `MIN_PLAY_MS = 120` — the shortest clip worth looping. Below this you hear
+  the loop rate rather than the sound.
+- `MIN_BAND_BINS = 4` — resolution the band filter aims for. Fewer and the
+  filter rings, and the result reads as a sine whatever went in.
+- `MAX_FILTER_FFT = 32768` — where the filter stops chasing a narrowing band.
+  Past it the sound is wider than the picture and says so.
+- `EDGE_FADE_SEC = 0.005` — same reasoning as `recorder.js`'s `FADE_SEC`, but
+  the tick it removes would land on every pass of the loop.
+
 `recorder.js`
 - `FADE_SEC = 0.004` — raised-cosine at each end of a take. A hard cut is a
   step and a step is broadband; without this every recording had a bright
   vertical curtain down its edges that was never in the sound.
 
 `main.js`
+- `SWEEP_MIN_CONF = 0.4` — below this the readout will not name a sweep
+  direction. Sits above the measured power-weighted means for white noise
+  (~0.33) and two-component loops (~0.38), and below what a real ridge keeps
+  even while beating (~0.61).
 - `HOLD_MS = 180` — how long a press stays ambiguous between a take and a pan.
   Longer makes panning feel sticky; shorter starts taking recordings off the
   beginning of a drag.

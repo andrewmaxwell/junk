@@ -224,6 +224,15 @@ export function draw(canvas, viewport) {
   view.render(viewport);
 }
 
+// What the accumulation buffer holds at one point of the current viewport:
+// amplitude above the recording's own background, mean coherence, mean sweep
+// drive. u, v are fractions of the canvas (v downwards from the top); f is the
+// frequency already known to correspond to v, so the background lookup does
+// not have to be redone here.
+export function sampleCell(u, v, f) {
+  return view.sampleCell(u, v, f);
+}
+
 // The part of `v` covered by the given fractions of its width and height, the
 // vertical ones measured downwards from the top.
 function crop(v, u0, u1, y0, y1) {

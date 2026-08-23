@@ -30,9 +30,11 @@
         position: fixed;
         left: max(16px, env(safe-area-inset-left));
         top: max(14px, env(safe-area-inset-top));
+        right: max(16px, env(safe-area-inset-right));
         display: flex;
         align-items: center;
-        gap: 12px;
+        flex-wrap: wrap; /* the hint outgrows a phone on its own */
+        gap: 8px 12px;
         font:
           13px "Helvetica Neue",
           Helvetica,
@@ -54,6 +56,105 @@
         color: #ff5a4a;
         font-weight: 600;
       }
+      #inspect {
+        position: fixed;
+        display: none;
+        pointer-events: none; /* only the close button takes clicks */
+        padding: 9px 12px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 6px;
+        background: rgba(6, 10, 16, 0.85);
+        -webkit-backdrop-filter: blur(7px);
+        backdrop-filter: blur(7px);
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+        color: #e8f0ff;
+        font:
+          12px/1.5 "Helvetica Neue",
+          Helvetica,
+          Arial,
+          sans-serif;
+        font-variant-numeric: tabular-nums;
+        z-index: 2;
+      }
+      #inspect.show {
+        display: block;
+      }
+      #inspect-head {
+        margin-bottom: 7px;
+        padding: 0 20px 6px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        white-space: nowrap;
+      }
+      #inspect-rows {
+        display: grid;
+        grid-template-columns: auto auto;
+        gap: 2px 18px;
+        margin: 0;
+      }
+      #inspect-rows dt {
+        color: rgba(232, 240, 255, 0.5);
+      }
+      #inspect-rows dd {
+        margin: 0;
+        text-align: right;
+        white-space: nowrap;
+      }
+      #inspect-rows dd.none {
+        color: rgba(232, 240, 255, 0.5);
+      }
+      #close {
+        position: absolute;
+        top: 3px;
+        right: 4px;
+        width: 19px;
+        height: 19px;
+        padding: 0;
+        border: 0;
+        border-radius: 3px;
+        background: none;
+        color: rgba(232, 240, 255, 0.45);
+        font: 16px/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
+        cursor: pointer;
+        pointer-events: auto;
+      }
+      #close:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.12);
+      }
+      /* Sweeps the viewport while the visible region is playing. */
+      #playhead {
+        position: fixed;
+        display: none;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: rgba(255, 255, 255, 0.85);
+        box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+        pointer-events: none;
+        z-index: 1;
+      }
+      #playhead.show {
+        display: block;
+      }
+      /* Marks the exact point the readout describes. */
+      #pin {
+        position: fixed;
+        display: none;
+        width: 13px;
+        height: 13px;
+        margin: -7px 0 0 -7px;
+        border: 1px solid rgba(255, 255, 255, 0.8);
+        border-radius: 50%;
+        box-shadow: 0 0 6px rgba(0, 0, 0, 0.8);
+        pointer-events: none;
+        z-index: 2;
+      }
+      #pin.show {
+        display: block;
+      }
     </style>
   </head>
   <body>
@@ -61,6 +162,13 @@
     <div id="ui">
       <div id="hint">Hold anywhere to record</div>
       <span id="status"></span>
+    </div>
+    <div id="playhead"></div>
+    <div id="pin"></div>
+    <div id="inspect">
+      <button id="close" type="button" aria-label="Close readout">×</button>
+      <div id="inspect-head"></div>
+      <dl id="inspect-rows"></dl>
     </div>
     <script type="module" src="./main.js"></script>
   </body>

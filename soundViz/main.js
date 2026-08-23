@@ -1,5 +1,6 @@
-import {ensureMic, beginTake, endTake, isArming} from './recorder.js';
-import {createRenderer, analyze, draw, clear, exportImage, F_MIN} from './render.js';
+import {ensureMic, beginTake, endTake, isArming, audioContext} from './recorder.js';
+import * as audio from './playback.js';
+import {createRenderer, analyze, draw, clear, exportImage, sampleCell, F_MIN} from './render.js';
 import {fullView, isFullView, zoomFactor, attachGestures} from './zoom.js';
 
 const MIN_SAMPLES = 4096; // ~85 ms; shorter than this there is nothing to transform
@@ -17,6 +18,15 @@ const NOTES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A�
 // an octave: any wider and naming the two ends says nothing you could not read
 // off the numbers.
 const NOTE_RATIO = 2;
+
+// Below this coherence the readout declines to name a sweep direction. The
+// drive is a ratio whose denominator is the coherent power on that pixel, so
+// as coherence goes to zero it is a confident-looking number computed from
+// almost nothing — and the picture agrees, because it rotates hue by
+// `drive * conf` and so shows no tint there either. Placed above the measured
+// means for white noise (~0.33) and two-component loops (~0.38), and below
+// what a real ridge keeps even while beating (~0.61).
+const SWEEP_MIN_CONF = 0.4;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -44,9 +54,24 @@ function band(f0, f1) {
   return `${range} · ${lo === hi ? lo : `${lo}–${hi}`}`;
 }
 
+// A single frequency, for the inspect readout — `band()` above is for the two
+// ends of a viewport, and one end alone wants its own precision rule.
+function freqLabel(f) {
+  const kilo = f >= 1000;
+  const v = kilo ? f / 1000 : f;
+  const dp = kilo ? 2 : v < 100 ? 1 : 0;
+  return `${v.toFixed(dp)} ${kilo ? 'kHz' : 'Hz'} · ${note(f)}`;
+}
+
 const canvas = document.getElementById('view');
 const status = document.getElementById('status');
 const hint = document.getElementById('hint');
+const inspectEl = document.getElementById('inspect');
+const inspectHead = document.getElementById('inspect-head');
+const inspectRows = document.getElementById('inspect-rows');
+const closeBtn = document.getElementById('close');
+const pinEl = document.getElementById('pin');
+const playheadEl = document.getElementById('playhead');
 
 const accelerated = createRenderer(canvas);
 
@@ -79,9 +104,14 @@ const HOLD_MS = 180;
 
 let holdTimer = null;
 
-// Answered once per press, and both this file and the gesture code read it from
-// the same event, so they cannot disagree about what the press was.
+// Two different questions, both answered once per press and both off the same
+// event. `canPan` gates the drag; `hasPicture` gates the wait that lets a tap
+// mean something. They are not the same predicate — a tap reads the picture at
+// every zoom, while only a zoomed-in view has anywhere to pan to — but
+// `canPan` implies `hasPicture`, so the gesture code can never arm a drag on a
+// press this file decided to record immediately.
 const canPan = () => !!rec && !isFullView(viewport, limits);
+const hasPicture = () => !!rec;
 
 function cancelHold() {
   if (holdTimer === null) {
@@ -101,6 +131,13 @@ function setStatus(text, recording) {
 }
 
 function showZoom() {
+  // While something is playing, the status line is describing that instead —
+  // panning around mid-playback should not silently retitle what you are
+  // listening to.
+  if (audio.isPlaying()) {
+    return;
+  }
+
   if (!rec || isFullView(viewport, limits)) {
     setStatus('', false);
     return;
@@ -118,8 +155,202 @@ function showZoom() {
   setStatus(`${zoom} · ${span} across · ${band(viewport.f0, viewport.f1)}`, false);
 }
 
+const inspectOpen = () => inspectEl.classList.contains('show');
+
+function hideInspect() {
+  inspectEl.classList.remove('show');
+  pinEl.classList.remove('show');
+}
+
+// Anchored to the point that was read, not to a fixed corner — the whole point
+// is that it is about *there*, not about the picture in general. The pin marks
+// the exact pixel, because at these zooms a tooltip a few pixels off would be
+// describing a different partial than the one under it.
+function showInspectAt(x, y, title, rows) {
+  inspectHead.textContent = title;
+  inspectRows.textContent = '';
+
+  for (const [label, value, none] of rows) {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+
+    if (none) {
+      dd.className = 'none';
+    }
+
+    inspectRows.append(dt, dd);
+  }
+
+  // Shown before measuring: a `display: none` box has no size to place.
+  inspectEl.classList.add('show');
+
+  const half = inspectEl.offsetWidth / 2 + 8;
+  const above = y - inspectEl.offsetHeight - 14 > 8;
+
+  inspectEl.style.left = `${clamp(x, half, window.innerWidth - half)}px`;
+  inspectEl.style.top = `${above ? y - 14 : y + 14}px`;
+  inspectEl.style.transform = above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)';
+
+  pinEl.style.left = `${x}px`;
+  pinEl.style.top = `${y}px`;
+  pinEl.classList.add('show');
+}
+
+// The close button sits over the canvas, so its press must not reach the
+// window handler below — that would hide the readout and then immediately
+// reopen it, since the point tapped is still a point of the picture.
+closeBtn.addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  e.preventDefault();
+  hideInspect();
+});
+
+// A tap that never became a hold or a drag: report what is at that point of
+// the picture instead of doing nothing with it. Available at every zoom,
+// full view included — the numbers are as meaningful there as anywhere, and
+// the only press that cannot spare a second meaning is one made before any
+// recording exists.
+function inspect(x, y) {
+  if (!rec) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const u = (x - rect.left) / rect.width;
+  const v = (y - rect.top) / rect.height;
+
+  if (u < 0 || u > 1 || v < 0 || v > 1) return;
+
+  const t = viewport.t0 + u * (viewport.t1 - viewport.t0);
+  const l0 = Math.log(viewport.f0);
+  const l1 = Math.log(viewport.f1);
+  const f = Math.exp(l0 + (1 - v) * (l1 - l0));
+
+  const ms = (t / rec.sampleRate) * 1000;
+  const spanMs = ((viewport.t1 - viewport.t0) / rec.sampleRate) * 1000;
+  const dp = clamp(Math.ceil(-Math.log10(spanMs / 4)), 0, 3);
+  const timeLabel =
+    ms < 1000 ? `${ms.toFixed(dp)} ms` : `${(ms / 1000).toFixed(Math.max(dp, 2))} s`;
+
+  const rows = [['time', timeLabel]];
+  const sample = sampleCell(u, v, f);
+
+  if (!sample) {
+    // Empty is not the same as quiet — nothing landed on this pixel at all,
+    // which is a real answer and worth giving rather than a fabricated floor.
+    rows.push(['signal', 'nothing here', true]);
+  } else {
+    const db = Math.round(sample.aboveBg);
+
+    rows.push(['level', `${db >= 0 ? '+' : ''}${db} dB`]);
+    rows.push(['coherence', `${Math.round(sample.conf * 100)}%`]);
+
+    // The sweep drive is a coherence-weighted average over everything that
+    // landed on this pixel, not a per-partial measurement — reported as a
+    // lean, the same word the picture's own hue uses for it, not as a rate in
+    // Hz/s it cannot actually support. And not reported at all where nothing
+    // corroborates the direction it came from.
+    const mag = Math.round(Math.abs(sample.drive) * 100);
+
+    if (sample.conf < SWEEP_MIN_CONF) {
+      rows.push(['sweep', 'not corroborated', true]);
+    } else if (mag < 15) {
+      rows.push(['sweep', 'steady', true]);
+    } else {
+      rows.push(['sweep', `${sample.drive > 0 ? 'rising' : 'falling'} ${mag}%`]);
+    }
+  }
+
+  showInspectAt(x, y, freqLabel(f), rows);
+}
+
+let playFrame = null;
+
+function stopPlaying() {
+  if (!audio.isPlaying()) {
+    return;
+  }
+
+  audio.stop();
+  cancelAnimationFrame(playFrame);
+  playFrame = null;
+  playheadEl.classList.remove('show');
+  showZoom();
+}
+
+// The playhead is a DOM element rather than something drawn into the picture,
+// and deliberately: a full-view redraw costs ~90 ms, so animating a line by
+// re-rendering would cost more per frame than the whole analysis budget allows.
+// Nothing about the picture changes while it sweeps.
+function trackPlayhead() {
+  const ctx = audioContext();
+
+  const step = () => {
+    const at = audio.playhead(ctx);
+
+    if (at === null) {
+      return;
+    }
+
+    const u = (at - viewport.t0) / (viewport.t1 - viewport.t0);
+
+    // The clip can be wider than the viewport — a very short view is widened to
+    // something audible — so for part of each pass the playhead is genuinely
+    // outside the picture. Hiding it is the honest answer; parking it at the
+    // edge would claim the sound is somewhere it is not.
+    if (u < 0 || u > 1) {
+      playheadEl.classList.remove('show');
+    } else {
+      playheadEl.style.left = `${u * window.innerWidth}px`;
+      playheadEl.classList.add('show');
+    }
+
+    playFrame = requestAnimationFrame(step);
+  };
+
+  step();
+}
+
+function togglePlay() {
+  if (audio.isPlaying()) {
+    stopPlaying();
+    return;
+  }
+
+  if (!rec) return;
+
+  const ctx = audioContext();
+
+  if (!ctx) return;
+
+  // A key press is a user gesture, so this is allowed to resume a context the
+  // browser suspended while the page sat idle.
+  if (ctx.state === 'suspended') ctx.resume();
+
+  const clip = audio.play(ctx, rec, viewport);
+
+  if (!clip) return;
+
+  const ms = ((clip.t1 - clip.t0) / clip.sampleRate) * 1000;
+  const span = ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
+
+  // Say when what you are hearing is wider than what you are looking at,
+  // rather than letting the difference pass as if it were not there.
+  const wider = [clip.widenedTime && 'time', clip.widenedBand && 'band'].filter(Boolean);
+  const caveat = wider.length ? ` · wider in ${wider.join(' and ')}` : '';
+
+  setStatus(`▶ ${span} · ${band(clip.f0, clip.f1)}${caveat}`, false);
+  trackPlayhead();
+}
+
 async function press(pressedAt) {
   if (take !== null || opening) return;
+
+  // The mic is about to open and the speakers are playing the last thing it
+  // heard. Stop, or the take is a recording of the recording.
+  stopPlaying();
+
   pressAt = pressedAt;
   opening = true;
   released = false;
@@ -217,7 +448,8 @@ function finish(result) {
   setTimeout(() => {
     analyze(canvas, rec, viewport, true);
     setStatus('', false);
-    hint.textContent = 'Hold to record · drag to pan · scroll to zoom · S to save';
+    hint.textContent =
+      'Hold to record · tap to read · drag to pan · scroll to zoom · P to play · S to save';
     draw(canvas, viewport);
   }, 24);
 }
@@ -293,6 +525,7 @@ const gestures = attachGestures(canvas, {
 // The whole screen is the button, so this works the same under a finger.
 window.addEventListener('pointerdown', e => {
   e.preventDefault();
+  hideInspect();
   held.add(e.pointerId);
 
   if (held.size > 1) {
@@ -300,9 +533,10 @@ window.addEventListener('pointerdown', e => {
     return;
   }
 
-  // Nothing to pan means nothing to disambiguate, and the press records at
-  // once — which covers every press made before a recording exists.
-  if (!canPan()) {
+  // With nothing on screen there is nothing to tap and nowhere to pan, so the
+  // press can only mean "record" and does so at once. This is every press made
+  // before the first recording exists.
+  if (!hasPicture()) {
     press(e.timeStamp);
     return;
   }
@@ -325,10 +559,12 @@ function lift(e) {
   const wasHeld = held.delete(e.pointerId);
   if (held.size > 0 || !wasHeld) return;
 
-  // Let go before the press committed to anything: a tap, not a take. Nothing
-  // to stop, and nothing to nag about — at this point there is a picture on
-  // screen and the user was aiming at it.
-  if (cancelHold()) return;
+  // Let go before the press committed to anything: a tap, not a take. Report
+  // what is under it rather than doing nothing with it.
+  if (cancelHold()) {
+    inspect(e.clientX, e.clientY);
+    return;
+  }
 
   release();
 }
@@ -343,6 +579,20 @@ window.addEventListener('blur', () => {
 
 window.addEventListener('keydown', e => {
   if (e.code === 'Escape' && rec) {
+    // One layer at a time, outermost first: the sound, then the readout, then
+    // the zoom. Each of these is something you would want to back out of
+    // without losing the one under it — dismissing a tooltip must not also
+    // throw away the view it was opened from.
+    if (audio.isPlaying()) {
+      stopPlaying();
+      return;
+    }
+
+    if (inspectOpen()) {
+      hideInspect();
+      return;
+    }
+
     viewport = fullView(limits);
     analyze(canvas, rec, viewport, false);
     requestFrame();
@@ -350,6 +600,10 @@ window.addEventListener('keydown', e => {
   }
   if (e.code === 'KeyS' && rec) {
     save();
+    return;
+  }
+  if (e.code === 'KeyP' && rec && !e.repeat) {
+    togglePlay();
     return;
   }
   if (e.code !== 'Space' || e.repeat) return;

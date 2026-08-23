@@ -77,6 +77,14 @@ export async function ensureMic() {
   node.connect(audioCtx.destination); // Safari needs a sink; the node emits silence.
 }
 
+// The playback path needs somewhere to send audio, and this is the context the
+// recording's sample rate belongs to — resampling a take just to play it back
+// would put the picture and the sound on different clocks. Only ever called
+// once a recording exists, so the context is always already open.
+export function audioContext() {
+  return audioCtx;
+}
+
 export function releaseMic() {
   clearTimeout(idleTimer);
   idleTimer = null;

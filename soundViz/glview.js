@@ -290,6 +290,20 @@ void main() {
   frag = vec4(texelFetch(uAccum, at, 0).r, 0.0, 0.0, 1.0);
 }`;
 
+// One texel of the accumulation buffer, verbatim. Routed through its own
+// RGBA32F target rather than read back directly, because the accumulation
+// buffer itself may be RGBA16F (`canBlend32` false) and reading a half-float
+// framebuffer as FLOAT is not something every implementation is asked to
+// support.
+const PICK_FS = `#version 300 es
+precision highp float;
+uniform highp sampler2D uAccum;
+uniform ivec2 uAt;
+out vec4 frag;
+void main() {
+  frag = texelFetch(uAccum, uAt, 0);
+}`;
+
 const PRESENT_FS = `#version 300 es
 precision highp float;
 
@@ -411,6 +425,7 @@ export function createView(canvas) {
   const accumProg = program(gl, ACCUM_VS, ACCUM_FS);
   const decimateProg = program(gl, QUAD_VS, DECIMATE_FS);
   const presentProg = program(gl, QUAD_VS, PRESENT_FS);
+  const pickProg = program(gl, QUAD_VS, PICK_FS);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -439,12 +454,14 @@ export function createView(canvas) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
   const probe = target(gl, PROBE, PROBE, gl.RGBA32F, gl.RGBA, gl.FLOAT);
+  const pick = target(gl, 1, 1, gl.RGBA32F, gl.RGBA, gl.FLOAT);
 
-  if (!probe) {
+  if (!probe || !pick) {
     return null;
   }
 
   const probePixels = new Float32Array(PROBE * PROBE * 4);
+  const pickPixel = new Float32Array(4);
   const level = new Float32Array(PROBE);
   const smoothed = new Float32Array(PROBE);
   const row = new Float32Array(PROBE);
@@ -752,6 +769,54 @@ export function createView(canvas) {
 
       accumulate(view);
       present(view, null, canvas.width, canvas.height);
+    },
+
+    // Reads back exactly what the accumulation buffer holds for one screen
+    // pixel — amplitude above the recording's own background, mean coherence,
+    // mean sweep drive — the same three quantities the picture already encodes
+    // as brightness, saturation and hue. Nothing is recomputed from the cloud;
+    // this is what is on screen, in numbers. Routed through the dedicated 1x1
+    // `pick` target rather than reading `accum` directly, because `accum` may
+    // be RGBA16F (`canBlend32` false) and reading a half-float framebuffer back
+    // as FLOAT is not something every implementation is asked to support.
+    sampleCell(u, v, f) {
+      if (!accum) {
+        return null;
+      }
+
+      const x = Math.min(accum.w - 1, Math.max(0, Math.round(u * accum.w)));
+      const y = Math.min(accum.h - 1, Math.max(0, Math.round((1 - v) * accum.h)));
+
+      gl.disable(gl.BLEND);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, pick.fbo);
+      gl.viewport(0, 0, 1, 1);
+      gl.useProgram(pickProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, accum.tex);
+      gl.uniform1i(gl.getUniformLocation(pickProg, 'uAccum'), 0);
+      gl.uniform2i(gl.getUniformLocation(pickProg, 'uAt'), x, y);
+      fullScreen(pickProg);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, pickPixel);
+
+      const [power, gSum, , aSum] = pickPixel;
+
+      // Empty is not the same as quiet: nothing landed here at all.
+      if (power <= 0) {
+        return null;
+      }
+
+      const conf = Math.min(1, aSum / power);
+      const drive = aSum > 0 ? Math.max(-1, Math.min(1, gSum / aSum)) : 0;
+
+      // The same background lookup the present pass makes for this pixel, so
+      // the number matches the brightness it actually drew at.
+      const s = Math.min(1, Math.max(0, (Math.log(f) - bgLogF[0]) / (bgLogF[1] - bgLogF[0])));
+      const at = s * (PROBE - 1);
+      const i0 = Math.floor(at);
+      const i1 = Math.min(PROBE - 1, i0 + 1);
+      const bg = Math.max(smoothed[i0] + (smoothed[i1] - smoothed[i0]) * (at - i0), floorDb);
+
+      return {aboveBg: 10 * Math.log10(power) - bg, conf, drive};
     },
 
     // One tile of a larger image, returned as RGBA rows top-first. Strokes are
