@@ -1,5 +1,5 @@
 import {FFT} from './fft.js';
-import {REACH} from './ridge.js';
+import {REACH, SHARE_ROWS} from './ridge.js';
 
 // Reassigned spectrogram, as a cloud of cells rather than a grid.
 //
@@ -16,7 +16,8 @@ import {REACH} from './ridge.js';
 // Cell layout, stride 5:
 //   [0] t     instant, in samples from the start of the take
 //   [1] f     frequency, Hz
-//   [2] p     power, normalised so a given sound reads the same at any settings
+//   [2] p     power, normalised so a given sound reads the same at any settings,
+//             times this window length's share of the energy where the cell fell
 //   [3] a     ridge direction, atan2(rise in Hz, run in samples)
 //   [4] c     coherence, 0..1 — see below
 //
@@ -94,6 +95,9 @@ export function analyzeCells({
   fMin,
   fMax,
   ridge,
+  share,
+  shareFrames,
+  rowScale,
   out,
 }) {
   const fft = new FFT(fftSize);
@@ -210,6 +214,15 @@ export function analyzeCells({
   const mapBins = ridge ? ridge.bins : 0;
   const pad = fftSize / winLen;
 
+  // This window length's share of the energy, on the arena `ridge.js` blended
+  // it on: absolute instant along one axis, absolute frequency along the other,
+  // so a re-emitted cell reads back the share it already had. Read bilinearly
+  // rather than at the nearest entry — the arena's frames are REACH samples
+  // apart, and at a deep zoom that is a wide enough step for nearest-entry
+  // lookup to draw visible vertical seams through the picture.
+  const shareRows = SHARE_ROWS;
+  const lastRow = shareRows - 1;
+
   // Where each of this region's frames begins in `out`, plus one past the end.
   const starts = new Uint32Array(frame1 - frame0 + 1);
 
@@ -311,11 +324,36 @@ export function analyzeCells({
         conf *= support[mf * mapBins + mb] / 255;
       }
 
+      let p = hot.p[b];
+
+      if (share) {
+        const sf = cur.t[b] / REACH;
+        const i0 = sf <= 0 ? 0 : Math.min(shareFrames - 1, sf | 0);
+        const i1 = Math.min(shareFrames - 1, i0 + 1);
+        const ft = Math.min(1, Math.max(0, sf - i0));
+
+        // sqrt, not log: the arena's rows are spaced in sqrt(f) precisely so
+        // that this lookup costs one hardware instruction. Once per cell, and
+        // there are tens of millions of them.
+        const sy = Math.sqrt(f) * rowScale;
+        const r0 = sy <= 0 ? 0 : Math.min(lastRow, sy | 0);
+        const r1 = Math.min(lastRow, r0 + 1);
+        const rt = Math.min(1, Math.max(0, sy - r0));
+
+        const a0 = i0 * shareRows;
+        const a1 = i1 * shareRows;
+
+        const s0 = share[a0 + r0] + (share[a0 + r1] - share[a0 + r0]) * rt;
+        const s1 = share[a1 + r0] + (share[a1 + r1] - share[a1 + r0]) * rt;
+
+        p *= (s0 + (s1 - s0) * ft) / 255;
+      }
+
       const at = count * STRIDE;
 
       out[at] = cur.t[b];
       out[at + 1] = f;
-      out[at + 2] = hot.p[b];
+      out[at + 2] = p;
       out[at + 3] = Math.atan2(hot.rise[b], hot.run[b]);
       out[at + 4] = conf;
 

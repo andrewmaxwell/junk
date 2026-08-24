@@ -1,5 +1,12 @@
 // GPU renderer for the reassigned cell cloud.
 //
+// The cloud is several clouds — one per window length the sound was analysed
+// at — laid end to end in one buffer and drawn one after another into the same
+// accumulation. They are not alternatives to choose between: `ridge.js` has
+// already divided the energy between them, so what they sum to is one picture
+// carrying one recording's worth of power, sharp in time where a short window
+// earned it and sharp in frequency where a long one did.
+//
 // The cloud is analysed once, for the whole recording, and then lives in GPU
 // memory. Changing the viewport is a matter of new uniforms, so panning and
 // zooming re-project exact positions at animation rate — and, crucially, show
@@ -475,7 +482,6 @@ export function createView(canvas) {
   // the buffer in hand, so an export tile draws exactly what the screen would.
   let imageHeight = 1;
 
-  let count = 0;
   let analysis = null;
   let bgLogF = [0, 1];
   let floorDb = ABS_FLOOR;
@@ -516,21 +522,17 @@ export function createView(canvas) {
   // run — which is what makes it affordable to hold a cloud far larger than any
   // one view of it needs.
   //
-  // One run per region of the pass, not one overall. The pass is analysed by a
-  // pool of threads, each writing its own region into the stretch its frames
-  // would fill at their widest, so the buffer has a gap wherever a region
-  // emitted fewer cells than it reserved. Regions are in frame order and there
-  // are at most a couple of dozen of them, so this is a handful of draw calls
-  // rather than one, and the gaps are never touched.
-  function slice(view, out) {
+  // One run per region of one scale, not one overall. The pass is several
+  // window lengths, each cut into regions and analysed by a pool of threads,
+  // and each region writes into the stretch its frames would fill at their
+  // widest — so the buffer has a gap wherever a region emitted fewer cells than
+  // it reserved. Regions are in frame order and there are at most a couple of
+  // dozen per scale, so this is a handful of draw calls rather than one, and
+  // the gaps are never touched.
+  function slice(view, sc, out) {
     out.length = 0;
 
-    if (!analysis || !analysis.starts) {
-      out.push(0, count);
-      return out;
-    }
-
-    const {starts, regions, hop, winLen, frames, tStart} = analysis;
+    const {starts, regions, hop, winLen, frames, tStart} = sc;
     const reach = winLen / 2 + hop;
 
     const lo = Math.max(0, Math.min(frames, Math.floor((view.t0 - reach - tStart) / hop)));
@@ -584,8 +586,6 @@ export function createView(canvas) {
     const l0 = Math.log(view.f0);
     const l1 = Math.log(view.f1);
 
-    slice(view, ranges);
-
     gl.bindFramebuffer(gl.FRAMEBUFFER, accum.fbo);
     gl.viewport(0, 0, accum.w, accum.h);
 
@@ -600,10 +600,11 @@ export function createView(canvas) {
     gl.uniform2f(gl.getUniformLocation(accumProg, 'uT'), view.t0, view.t1);
     gl.uniform2f(gl.getUniformLocation(accumProg, 'uLogF'), l0, l1);
     gl.uniform2f(gl.getUniformLocation(accumProg, 'uSize'), accum.w, accum.h);
-    gl.uniform1f(gl.getUniformLocation(accumProg, 'uHop'), analysis.hop);
-    gl.uniform1f(gl.getUniformLocation(accumProg, 'uBinHz'), analysis.binHz);
     gl.uniform1f(gl.getUniformLocation(accumProg, 'uMaxHalf'), MAX_HALF_SCREENS * imageHeight);
     gl.uniform1f(gl.getUniformLocation(accumProg, 'uSr'), analysis.sampleRate);
+
+    const hopLoc = gl.getUniformLocation(accumProg, 'uHop');
+    const binHzLoc = gl.getUniformLocation(accumProg, 'uBinHz');
 
     const cornerLoc = gl.getAttribLocation(accumProg, 'corner');
     gl.bindBuffer(gl.ARRAY_BUFFER, corners);
@@ -621,12 +622,23 @@ export function createView(canvas) {
     gl.enableVertexAttribArray(confLoc);
     gl.vertexAttribDivisor(confLoc, 1);
 
-    for (let i = 0; i < ranges.length; i += 2) {
-      const base = ranges[i] * stride;
+    // The scales are laid end to end in one buffer but each was sampled on a
+    // grid of its own, and the stroke length a cell earns is the gap to where
+    // its neighbour fell — so the hop and the bin spacing change between them.
+    // Two uniforms per scale is the whole of the cost.
+    for (const sc of analysis.scales) {
+      gl.uniform1f(hopLoc, sc.hop);
+      gl.uniform1f(binHzLoc, sc.binHz);
 
-      gl.vertexAttribPointer(cellLoc, 4, gl.FLOAT, false, stride, base);
-      gl.vertexAttribPointer(confLoc, 1, gl.FLOAT, false, stride, base + 16);
-      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, ranges[i + 1]);
+      slice(view, sc, ranges);
+
+      for (let i = 0; i < ranges.length; i += 2) {
+        const base = ranges[i] * stride;
+
+        gl.vertexAttribPointer(cellLoc, 4, gl.FLOAT, false, stride, base);
+        gl.vertexAttribPointer(confLoc, 1, gl.FLOAT, false, stride, base + 16);
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, ranges[i + 1]);
+      }
     }
 
     gl.vertexAttribDivisor(cellLoc, 0);
@@ -804,7 +816,6 @@ export function createView(canvas) {
       gl.bindBuffer(gl.ARRAY_BUFFER, cloud);
       gl.bufferData(gl.ARRAY_BUFFER, cells * CELL_FLOATS * 4, gl.STATIC_DRAW);
 
-      count = 0;
       analysis = null;
       accumFor = null;
     },
@@ -813,7 +824,6 @@ export function createView(canvas) {
     pushAt(at, data, n) {
       gl.bindBuffer(gl.ARRAY_BUFFER, cloud);
       gl.bufferSubData(gl.ARRAY_BUFFER, at * CELL_FLOATS * 4, data, 0, n * CELL_FLOATS);
-      count += n;
     },
 
     end(params) {

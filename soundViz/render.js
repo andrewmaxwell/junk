@@ -8,7 +8,48 @@ export const F_MIN = 60;
 // separated, how sharply a transient reads.
 const WIN_MS = 25;
 const WIN_MIN = 256;
-const WIN_MAX = 2048;
+const WIN_MAX = 4096;
+
+// Multiscale.
+//
+// One window length is one compromise between separating harmonics and placing
+// transients, and no single choice is right for a whole recording. So the sound
+// is analysed at several, all of them, up front — and the energy is divided
+// between them by `ridge.js`'s share arena, so that the several clouds drawn on
+// top of each other carry exactly the energy one of them would have.
+//
+// Four times apart, not two: at two the analyses are near enough alike that
+// each adds little the others did not already have. At four the extremes are
+// genuinely different instruments. On a 48 kHz recording these come out at
+// 5.3 ms, 21 ms and 85 ms, and what each is for:
+//
+//   short  resolves events milliseconds apart — plosives, attacks, the
+//          individual pulses of a buzz — where one window covering both of
+//          them puts their energy at a weighted average of the two.
+//   base   what the picture has always been analysed at, and still its spine.
+//   long   six cycles at 80 Hz instead of one and a half, which is what opens
+//          up the bottom of the picture; also what separates a vibrato's
+//          sidebands from its carrier.
+//
+// The base scale keeps twice the cell budget of either flank. It is the proven
+// one, its saturation at the full view is what makes the picture look finished,
+// and halving it outright would be spending a certainty on a hope.
+const SCALE_STEPS = [0.25, 1, 4];
+const SCALE_WEIGHTS = [1, 2, 1];
+
+// Below about this many cycles inside its window, a phase estimate is being
+// read out of noise — which is the reasoning that used to put a floor under
+// `F_MIN`, now applied per scale instead. A short window therefore does not bid
+// for the bottom of the picture at all: at 48 kHz the 5.3 ms window says
+// nothing below 281 Hz, the 21 ms one nothing below 70, and only the 85 ms one
+// reaches `F_MIN` itself — with room to spare, since it is honest down to about
+// 18 Hz. Its fitness above a window's own floor is zero, so the arena hands the
+// whole of the low end to the windows that can actually measure it.
+//
+// That spare room means `F_MIN = 60` is no longer a limit, only where the log
+// axis starts. See the note in CLAUDE.md before lowering it: the cost is that
+// everything above gets compressed, which is Andrew's call and not a free win.
+const MIN_CYCLES = 1.5;
 
 // How far zero padding may go. This is not a resolution limit — the window
 // decides that — it is how finely the reassignment field is *sampled* along
@@ -44,6 +85,12 @@ const MAX_RING_CELLS = 18e6;
 // time and nothing else. It binds only at the deepest zooms, where the rings
 // are large: eight of them at 256x measured a 4.0 GB renderer, which is enough
 // to make the machine stall in ways that look like the app's fault.
+//
+// Spent as a limit on how many threads a pass may use at once, rather than on
+// how many regions it is cut into. Those were the same thing while a pass was
+// one grid; they are not once the pass is several scales dealt out to the pool
+// together, because then the regions in flight can all be from the scale with
+// the largest ring.
 const MAX_POOL_RING_CELLS = 72e6;
 
 // Cells cost 20 bytes each on the GPU and roughly 100 ns each to compute, so
@@ -61,9 +108,23 @@ const MAX_POOL_RING_CELLS = 72e6;
 //   48M   4.5 s first pass, settles 4.8-6.1 s   fill 0.99 full view, 0.08 at 116x
 //   64M   4.9 s first pass, settles up to 11 s  no better at depth than 48M
 //
-// 48M is the knee: the full view is saturated (strokes meet), deep zoom has
-// four times the cells 16M gave it, and the draw still runs at 120 fps. Past
-// it the wait doubles and the picture does not move.
+// 48M is the knee: deep zoom has four times the cells 16M gave it and the draw
+// still runs at 120 fps. Past it the wait doubles.
+//
+// Multiscale spends this budget three ways, so the base scale now works with
+// 24M of it rather than 48M and no longer quite saturates the full view. What
+// that costs is *coverage*, not exposure: measured on the same synthetic take,
+// lit pixels fall 56.5% to 52.7% while the lit pixels themselves come out
+// slightly brighter (mean luma over them 129.4 to 132.3) and exactly as
+// saturated (mean chroma 0.365 to 0.368). Fewer pixels carry the picture; the
+// ones that do are unchanged. Against that it buys the vertical structure the
+// short window resolves, which the single-scale picture did not have at all.
+//
+// Raising this to 64e6 more than recovers the coverage — 60.3% lit, past what
+// one scale ever managed — and is the obvious lever if the trade ever reads
+// wrong. It is Andrew's to pull rather than one to take quietly: it costs a
+// 2.0 s blocked main thread on the first analysis against 0.4 s, and a 1.28 GB
+// vertex buffer on a page that already peaks at 2.4 GB.
 const MAX_CELLS = 48000000;
 
 // Rendering above the display's own pixel ratio was tried, on the theory that
@@ -110,10 +171,10 @@ const pow2 = v => 1 << Math.max(0, Math.round(Math.log2(v)));
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 let view = null;
-let current = null; // what the cloud in hand covers, and how finely
+let current = null; // what the cloud in hand covers, and how finely, per scale
 let wanted = null; // what the newest pass in flight will make it, if any
 let audioFor = null; // the recording the pool has a copy of
-let ridgeFor = null; // the recording the pool has a ridge map for
+let ridgeFor = null; // the recording the pool has ridge and share maps for
 let generation = 0; // passes are discarded rather than cancelled; this says which
 
 // Somebody to tell while a pass is in flight, so the status line can show it.
@@ -186,8 +247,10 @@ function ask(worker, msg) {
 
 // Deal `jobs` out to the pool, each worker taking the next one whenever it
 // comes free. Resolves with the answers in the order the jobs were given.
-async function share(jobs) {
-  const ws = pool();
+// `threads` is how many of the pool may be busy at once, which is how the
+// coherence rings are kept inside their collective budget.
+async function share(jobs, threads = POOL) {
+  const ws = pool().slice(0, Math.max(1, threads));
   const results = new Array(jobs.length);
 
   let next = 0;
@@ -273,7 +336,12 @@ function gaps(hop, fftSize, sampleRate, vp, w, h) {
 //
 // Zooming multiplies both gaps by the same factor, so the padding that balances
 // them is the same at every zoom — only the hop moves, and only by halving.
-function plan(rec, vp, w, h, winLen) {
+//
+// `budget` is this scale's share of the cells. Each scale plans its own grid
+// against its own share, independently: the scales differ in what padding
+// balances them, and a short window needs more of it to reach the same bin
+// spacing, so one grid could not have served all three.
+function plan(rec, vp, w, h, winLen, budget) {
   const {samples, sampleRate} = rec;
   const n = samples.length;
 
@@ -290,9 +358,9 @@ function plan(rec, vp, w, h, winLen) {
   for (let pad = 1; winLen * pad <= MAX_FFT; pad *= 2) {
     const fftSize = winLen * pad;
     const bins = fftSize / 2 - 1;
-    const budget = Math.floor(MAX_CELLS / bins);
+    const room = Math.floor(budget / bins);
 
-    if (budget < 64) {
+    if (room < 64) {
       break;
     }
 
@@ -303,11 +371,11 @@ function plan(rec, vp, w, h, winLen) {
     // Cover the whole recording if that fits. It does until the zoom gets
     // deep, and while it does, panning and zooming out show finished picture
     // rather than an edge — nothing is recomputed at all.
-    if (Math.ceil(n / hop) > budget) {
+    if (Math.ceil(n / hop) > room) {
       start = Math.max(0, Math.floor(vp.t0 - span * ANALYSIS_MARGIN));
       end = Math.min(n, Math.ceil(vp.t1 + span * ANALYSIS_MARGIN));
 
-      while (Math.ceil((end - start) / hop) > budget) {
+      while (Math.ceil((end - start) / hop) > room) {
         hop *= 2;
       }
     }
@@ -344,18 +412,14 @@ function plan(rec, vp, w, h, winLen) {
 // it. Nothing subtler is warranted; the answer is the pool size almost
 // everywhere, and it only departs from it where the overlap is large enough to
 // matter — the deepest zooms, where the hop is 1 and D is the whole of REACH.
-function regionsFor(frames, hop, bins) {
+function regionsFor(frames, hop) {
   const D = Math.max(1, Math.round(REACH / hop));
   const overlap = 2 * D * OVERLAP_COST;
-
-  // Each region in flight holds a coherence ring of this many cells.
-  const ring = bins * (2 * D + 1);
-  const most = Math.max(1, Math.min(MAX_REGIONS, Math.floor(MAX_POOL_RING_CELLS / ring)));
 
   let best = 1;
   let cost = Infinity;
 
-  for (let r = 1; r <= most; r++) {
+  for (let r = 1; r <= MAX_REGIONS; r++) {
     const round = Math.ceil(r / POOL) * (frames / r + overlap);
 
     if (round < cost) {
@@ -367,10 +431,48 @@ function regionsFor(frames, hop, bins) {
   return best;
 }
 
+// The window lengths this recording is analysed at, longest last, with the
+// lowest frequency each is entitled to speak about.
+//
+// A take too short to hold a long window simply gets fewer scales: the clamp
+// collapses the long one onto the base, and the duplicate is dropped. That is
+// the right degradation — a 60 ms take has nothing an 85 ms window could
+// measure — and it means the scale count is never something the rest of the
+// file has to be told.
+function scalesFor(rec) {
+  const {samples, sampleRate} = rec;
+
+  const cap = Math.min(WIN_MAX, Math.max(WIN_MIN, pow2(samples.length / 4)));
+  const out = [];
+
+  SCALE_STEPS.forEach((step, i) => {
+    const winLen = clamp(pow2((sampleRate * WIN_MS * step) / 1000), WIN_MIN, cap);
+
+    if (out.some(o => o.winLen === winLen)) {
+      return;
+    }
+
+    out.push({
+      index: out.length,
+      winLen,
+      weight: SCALE_WEIGHTS[i],
+      fMin: Math.max(F_MIN, (MIN_CYCLES * sampleRate) / winLen),
+      fMax: sampleRate / 2,
+    });
+  });
+
+  return out;
+}
+
 // Analyse what the viewport asks for, on the pool, and swap the result in when
 // it is finished. `calibrate` sets the exposure from the whole recording, and
 // is done once per recording: everything the picture does with colour is then a
 // property of the sound rather than of where you happen to be looking.
+//
+// Every scale is planned, cut into regions and run in the same pass, and the
+// regions of all of them are dealt out to the pool as one queue — so a scale
+// that finishes early does not leave threads idle. They land in one GL buffer,
+// laid end to end, and `glview.js` draws each with its own hop and bin spacing.
 //
 // Resolves to null when the pass was not worth running, or when a later one
 // overtook it — passes are discarded rather than cancelled, because a worker in
@@ -384,19 +486,36 @@ export async function analyze(canvas, rec, viewport, calibrate) {
 
   const {samples, sampleRate} = rec;
 
-  const winLen = clamp(
-    pow2((sampleRate * WIN_MS) / 1000),
-    WIN_MIN,
-    Math.min(WIN_MAX, Math.max(WIN_MIN, pow2(samples.length / 4))),
-  );
+  const all = scalesFor(rec);
 
-  const chosen = plan(rec, viewport, w, h, winLen);
-  const {pad, fftSize, bins, hop, frames, start} = chosen;
+  // A scale whose band is entirely above the viewport has nothing to draw
+  // there, so it is left out of the pass and its cells go to the scales that
+  // do — which is exactly the low end, where the log axis spreads the bins
+  // widest and the extra frames are worth most. The whole band is always
+  // covered by the longest scale, so this can never empty the list.
+  const live = all.filter(sc => viewport.f1 > sc.fMin);
+  const use = live.length ? live : [all[all.length - 1]];
+  const weight = use.reduce((t, sc) => t + sc.weight, 0);
 
-  // Is this pass worth a pass? Only if the cloud in hand does not already reach
-  // across the viewport, or if the new grid would be markedly finer *at this
-  // viewport* than the one that cloud was built on. Without this a slow scroll
-  // fires a full analysis between every notch, for a gain nobody can see.
+  const active = [];
+
+  for (const sc of use) {
+    const grid = plan(rec, viewport, w, h, sc.winLen, (MAX_CELLS * sc.weight) / weight);
+
+    if (grid) {
+      active.push({...sc, grid});
+    }
+  }
+
+  if (!active.length) {
+    return null;
+  }
+
+  // Is this pass worth a pass? Only if some scale's cloud in hand does not
+  // already reach across the viewport, or if its new grid would be markedly
+  // finer *at this viewport* than the one that cloud was built on. Without this
+  // a slow scroll fires a full analysis between every notch, for a gain nobody
+  // can see.
   //
   // Asked of whatever a pass in flight is about to produce, if there is one,
   // and of the cloud in hand otherwise. Asking only about the cloud in hand
@@ -407,21 +526,41 @@ export async function analyze(canvas, rec, viewport, calibrate) {
   // larger of the two on its own is not a fair test: deep into a zoom the
   // frequency gap is stuck at whatever the FFT cap allows and swamps the
   // comparison, hiding the fourfold gain in time that is the whole reason the
-  // ridges join up down there.
+  // ridges join up down there. And one scale wanting a pass is enough to run
+  // one, since the pass has to redraw all of them together regardless.
   const against = wanted || current;
 
-  if (!calibrate && against && viewport.t0 >= against.start && viewport.t1 <= against.end) {
-    const now = gaps(against.hop, against.fftSize, sampleRate, viewport, w, h);
+  if (!calibrate && against) {
+    const settled = active.every(a => {
+      const was = against[a.index];
 
-    if (chosen.gap.t > now.t * WORTH_REDOING && chosen.gap.f > now.f * WORTH_REDOING) {
+      if (!was || viewport.t0 < was.start || viewport.t1 > was.end) {
+        return false;
+      }
+
+      const now = gaps(was.hop, was.fftSize, sampleRate, viewport, w, h);
+
+      return a.grid.gap.t > now.t * WORTH_REDOING && a.grid.gap.f > now.f * WORTH_REDOING;
+    });
+
+    if (settled) {
       return null;
     }
   }
 
-  const grid = {start, end: start + frames * hop, hop, fftSize};
   const gen = ++generation;
 
-  wanted = grid;
+  wanted = {};
+
+  for (const a of active) {
+    wanted[a.index] = {
+      start: a.grid.start,
+      end: a.grid.start + a.grid.frames * a.grid.hop,
+      hop: a.grid.hop,
+      fftSize: a.grid.fftSize,
+    };
+  }
+
   enter();
 
   try {
@@ -436,56 +575,108 @@ export async function analyze(canvas, rec, viewport, calibrate) {
       ridgeFor = null;
     }
 
-    // The ridge map covers the whole recording on a grid of its own, so it is
-    // built once and then read by every pass. That is what keeps it out of the
-    // zoom: were it rebuilt for a viewport, a deep zoom would be asking whether
-    // ridges persist across a span a few hundred samples wide, and nothing
-    // does. One worker walks the chains and the rest are handed the answer.
+    // The ridge maps and the share arena, once per recording. Each covers the
+    // whole recording on a grid of its own, so a deep zoom reads the same
+    // answers a full view did — were they rebuilt for a viewport, a 100x zoom
+    // would be asking whether ridges persist across a span a few hundred
+    // samples wide, and whether a window suits it, and nothing does at that
+    // range.
+    //
+    // Built for *every* scale, including any the current viewport leaves out:
+    // a later pass at another zoom will want the one that was skipped, and
+    // building it then would be a stall in the middle of a gesture.
+    //
+    // One scale per worker, so the walks run in parallel; then one worker
+    // divides the energy between them, and the answers are copied round. A
+    // worker is not sent back the map it built itself.
     if (ridgeFor !== rec) {
       const ws = pool();
-      const map = await ask(ws[0], {type: 'ridge', winLen});
+      const owner = all.map((sc, i) => i % ws.length);
+
+      const built = await Promise.all(
+        all.map((sc, i) =>
+          ask(ws[owner[i]], {
+            type: 'ridge',
+            scale: i,
+            winLen: sc.winLen,
+            fMin: sc.fMin,
+            fMax: sc.fMax,
+          }),
+        ),
+      );
 
       if (gen !== generation) {
         return null;
       }
 
-      for (let i = 1; i < ws.length; i++) {
-        tell(ws[i], {
-          type: 'map',
-          support: map.support,
-          frames: map.frames,
-          bins: map.bins,
-        });
+      const {share: shares} = await ask(ws[0], {
+        type: 'blend',
+        frames: built[0].frames,
+        parts: built.map(b => ({sumP: b.sumP, sumPG: b.sumPG})),
+        priors: all.map(sc => sc.weight),
+      });
+
+      if (gen !== generation) {
+        return null;
       }
+
+      const maps = built.map(b => ({support: b.support, frames: b.frames, bins: b.bins}));
+
+      ws.forEach((worker, i) => {
+        tell(worker, {
+          type: 'maps',
+          maps: maps.map((map, k) => (owner[k] === i ? null : map)),
+          share: shares,
+        });
+      });
 
       ridgeFor = rec;
     }
 
-    const count = regionsFor(frames, hop, bins);
+    // One queue of regions across every scale, so the pool never idles waiting
+    // on the slowest scale, and one layout saying where each scale's stretch of
+    // the buffer begins. A scale reserves the room its frames would fill at
+    // their widest — one cell per bin — for the same reason a region does.
     const jobs = [];
+    const layout = [];
 
-    for (let i = 0; i < count; i++) {
-      const frame0 = Math.round((i * frames) / count);
-      const frame1 = Math.round(((i + 1) * frames) / count);
+    let offset = 0;
+    let ring = 0;
 
-      if (frame1 > frame0) {
-        jobs.push({
-          type: 'cells',
-          winLen,
-          fftSize,
-          bins,
-          hop,
-          frames,
-          frame0,
-          frame1,
-          tStart: start,
-          fMin: F_MIN,
-          fMax: sampleRate / 2,
-        });
+    for (const a of active) {
+      const {bins, hop, frames, start, fftSize} = a.grid;
+      const count = regionsFor(frames, hop);
+      const first = jobs.length;
+
+      ring = Math.max(ring, bins * (2 * Math.max(1, Math.round(REACH / hop)) + 1));
+
+      for (let i = 0; i < count; i++) {
+        const frame0 = Math.round((i * frames) / count);
+        const frame1 = Math.round(((i + 1) * frames) / count);
+
+        if (frame1 > frame0) {
+          jobs.push({
+            type: 'cells',
+            scale: a.index,
+            winLen: a.winLen,
+            fftSize,
+            bins,
+            hop,
+            frames,
+            frame0,
+            frame1,
+            tStart: start,
+            fMin: a.fMin,
+            fMax: a.fMax,
+          });
+        }
       }
+
+      layout.push({a, base: offset, first, count: jobs.length - first});
+      offset += frames * bins;
     }
 
-    const parts = await share(jobs);
+    const parts = await share(jobs, Math.floor(MAX_POOL_RING_CELLS / ring));
 
     if (gen !== generation) {
       return null;
@@ -496,55 +687,54 @@ export async function analyze(canvas, rec, viewport, calibrate) {
     // many its neighbours produced. The gaps that leaves — bins that held
     // nothing, or fell outside the audible band — are simply never drawn: each
     // region is a contiguous run of its own, and `glview.js` draws the visible
-    // frames as one range per region rather than one range overall.
-    const starts = new Uint32Array(frames);
-    const regions = [];
+    // frames as one range per region of each scale rather than one range
+    // overall.
+    const scales = [];
 
     let total = 0;
 
-    view.begin(frames * bins);
+    view.begin(offset);
 
-    for (const part of parts) {
-      const base = part.frame0 * bins;
+    for (const {a, base, first, count} of layout) {
+      const {bins, hop, frames, start, fftSize} = a.grid;
+      const starts = new Uint32Array(frames);
+      const regions = [];
 
-      view.pushAt(base, part.cells, part.count);
+      for (let k = 0; k < count; k++) {
+        const part = parts[first + k];
+        const at = base + part.frame0 * bins;
 
-      for (let f = part.frame0; f < part.frame1; f++) {
-        starts[f] = base + part.starts[f - part.frame0];
+        view.pushAt(at, part.cells, part.count);
+
+        for (let f = part.frame0; f < part.frame1; f++) {
+          starts[f] = at + part.starts[f - part.frame0];
+        }
+
+        regions.push({f0: part.frame0, f1: part.frame1, end: at + part.count});
+        total += part.count;
       }
 
-      regions.push({
-        f0: part.frame0,
-        f1: part.frame1,
-        end: base + part.count,
+      scales.push({
+        hop,
+        binHz: sampleRate / fftSize,
+        winLen: a.winLen,
+        frames,
+        starts,
+        regions,
+        tStart: start,
       });
-      total += part.count;
     }
 
-    view.end({
-      hop,
-      binHz: sampleRate / fftSize,
-      sampleRate,
-      winLen,
-      frames,
-      starts,
-      regions,
-      tStart: start,
-    });
+    view.end({sampleRate, scales});
 
-    current = grid;
+    current = wanted;
 
     if (calibrate) {
       view.calibrate(fullSpan(rec));
     }
 
     return {
-      winLen,
-      fftSize,
-      pad,
-      frames,
-      hop,
-      start,
+      scales: active.map(a => ({winLen: a.winLen, ...a.grid})),
       total,
       regions: jobs.length,
     };
