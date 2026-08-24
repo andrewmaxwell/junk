@@ -1,4 +1,5 @@
 import {FFT} from './fft.js';
+import {REACH} from './ridge.js';
 
 // Reassigned spectrogram, as a cloud of cells rather than a grid.
 //
@@ -26,11 +27,11 @@ import {FFT} from './fft.js';
 
 export const STRIDE = 5;
 
-// Cells are handed back in batches rather than all at once. A second of audio
-// analysed at full density is several million of them — more than is worth
-// holding in memory on a phone — and every consumer either draws them straight
-// away or keeps a thinned copy, so nothing needs the whole cloud at once.
-const CHUNK = 1 << 18;
+// Cells are written straight into an array the caller owns, sized from the
+// grid, rather than handed back in batches. The caller is an analysis worker
+// staging a whole region so it can be transferred to the main thread in one
+// piece — see `worker.js` — and writing into that array directly is one fewer
+// copy of something that runs to hundreds of megabytes.
 
 // Coherence.
 //
@@ -49,19 +50,37 @@ const CHUNK = 1 << 18;
 // other. The neighbouring *instant* is what convicts them: the loop wanders
 // off the measured direction as time advances. Both tests have to pass —
 // coherence takes the worse of the two residuals. Power-weighted mean
-// coherence, measured: clean tone/chirp/click ~1.0, two-component loops
-// ~0.15, white noise ~0.06, sidelobes ~0.
+// coherence, measured: clean tone/chirp/click ~1.0, two-component loops ~0.38,
+// white noise ~0.33, sidelobes ~0.2.
 //
 // Both comparisons are pinned to *absolute* distances so the answer does not
 // depend on which analysis pass computed it — the same nesting guarantee the
 // positions have. Along frequency the neighbour is one unpadded bin away
-// (padding leaves those bins exactly where they were); along time it is
-// COHERENCE_REACH samples away, whatever the hop. A refining pass therefore
-// reproduces the coherence of every cell it re-emits, and the picture does not
-// restate itself on zoom.
+// (padding leaves those bins exactly where they were); along time it is REACH
+// samples away, whatever the hop. A refining pass therefore reproduces the
+// coherence of every cell it re-emits, and the picture does not restate itself
+// on zoom.
+//
+// Two neighbours is as far as a per-cell test can see, and that is not far
+// enough: the reassignment field of white noise is smooth over about one
+// analysis window, so its most coherent cells pass this test as convincingly
+// as a partial does. `ridge.js` follows the chains instead, and hands back a
+// support gate that says whether a cell belongs to a ridge that goes anywhere.
+// Coherence as emitted is the product: corroborated by its neighbours *and*
+// part of something that lasts.
 const COHERENCE_SIGMA = 0.15;
-const COHERENCE_REACH = 64; // samples; ~1.3 ms at 48 kHz
 
+// Entries in the tabulated Gaussian above. 2048 across the four sigma that
+// reach zero puts the lerp error at 5e-7.
+const GAUSS_LUT = 2048;
+
+// `frame0`..`frame1` is the stretch of the grid this call is responsible for
+// emitting; `frames` is the whole grid it belongs to. A pass is cut into
+// regions so a pool of workers can share it, and every region computes D extra
+// frames beyond each of its ends so that the cross-frame coherence test sees
+// exactly the neighbours it would have seen had one call done the lot. Only
+// the true ends of the grid are allowed to have a missing neighbour, so a
+// region boundary is invisible in the result.
 export function analyzeCells({
   samples,
   sampleRate,
@@ -69,10 +88,13 @@ export function analyzeCells({
   fftSize,
   hop,
   frames,
+  frame0 = 0,
+  frame1 = frames,
   tStart,
   fMin,
   fMax,
-  onCells,
+  ridge,
+  out,
 }) {
   const fft = new FFT(fftSize);
   const centre = (winLen - 1) / 2;
@@ -123,22 +145,52 @@ export function analyzeCells({
   const sigmaNorm = 1 / (2 * COHERENCE_SIGMA * COHERENCE_SIGMA);
   const rCut = 4 * COHERENCE_SIGMA;
 
-  // The cross-frame comparison needs frames COHERENCE_REACH samples away in
-  // both directions, so frames pass through a ring and are emitted D frames
-  // behind the analysis.
-  const D = Math.max(1, Math.round(COHERENCE_REACH / hop));
+  // The Gaussian, tabulated. It is evaluated once per cell — tens of millions
+  // of times a pass — and `Math.exp` costs about five times what a table
+  // lookup and a lerp do. Maximum error against the real thing is 5e-7, which
+  // is far below anything the drawing can express, and it is a table rather
+  // than an approximation so a re-emitted cell still gets back exactly the
+  // coherence it had.
+  const gauss = new Float32Array(GAUSS_LUT + 2);
+
+  for (let i = 0; i < gauss.length; i++) {
+    const r = (i / GAUSS_LUT) * rCut;
+    gauss[i] = Math.exp(-r * r * sigmaNorm);
+  }
+
+  const gaussScale = GAUSS_LUT / rCut;
+
+  // The cross-frame comparison needs frames REACH samples away in both
+  // directions, so frames pass through a ring and are emitted D frames behind
+  // the analysis.
+  //
+  // Two rings, not one, and the reason is memory. A frame is somebody's
+  // neighbour for `2D+1` frames, but a neighbour is only ever asked where it
+  // landed — `t`, `f` and whether it exists at all. Its direction and its power
+  // are its own business, wanted only when the frame itself is emitted, which
+  // is `D` frames after it was computed. Splitting them takes a slot from 21
+  // bytes a bin to 9, and at the deepest zoom, where D is 64 and there are
+  // eight of these rings live at once, that is 800 MB.
+  const D = Math.max(1, Math.round(REACH / hop));
   const R = 2 * D + 1;
+  const H = D + 1;
 
   const slot = [];
+  const heavy = [];
 
   for (let i = 0; i < R; i++) {
     slot.push({
       t: new Float32Array(bins),
       f: new Float32Array(bins),
+      ok: new Uint8Array(bins),
+    });
+  }
+
+  for (let i = 0; i < H; i++) {
+    heavy.push({
       run: new Float32Array(bins),
       rise: new Float32Array(bins),
       p: new Float32Array(bins),
-      ok: new Uint8Array(bins),
     });
   }
 
@@ -148,24 +200,33 @@ export function analyzeCells({
   const dRe = new Float32Array(fftSize);
   const dIm = new Float32Array(fftSize);
 
-  const cells = new Float32Array(CHUNK * STRIDE);
+  // The ridge map is indexed by absolute instant and by the unpadded bins every
+  // pass shares, so a cell asks it the same question however finely it was
+  // analysed — the support of a re-emitted cell is the support it already had.
+  // It is read where the cell is *drawn*, at its reassigned instant, which is
+  // what puts all of a click's frames on the one entry that saw the click.
+  const support = ridge ? ridge.support : null;
+  const mapFrames = ridge ? ridge.frames : 0;
+  const mapBins = ridge ? ridge.bins : 0;
+  const pad = fftSize / winLen;
 
-  const starts = new Uint32Array(frames + 1);
+  // Where each of this region's frames begins in `out`, plus one past the end.
+  const starts = new Uint32Array(frame1 - frame0 + 1);
 
   let count = 0;
-  let total = 0;
 
   // Residual of a neighbour's displacement perpendicular to this cell's
   // direction (dx, dy), all in normalised units. With no usable direction,
   // plain distance: an isolated dot needs a coincident neighbour to score.
   function residual(dx, dy, dlen, ddt, ddf) {
-    return dlen > 1e-12 ? Math.abs(ddt * dy - ddf * dx) / dlen : Math.hypot(ddt, ddf);
+    return dlen > 1e-12 ? Math.abs(ddt * dy - ddf * dx) / dlen : Math.sqrt(ddt * ddt + ddf * ddf);
   }
 
   function emit(e, computed) {
-    starts[e] = total + count;
+    starts[e - frame0] = count;
 
     const cur = slot[e % R];
+    const hot = heavy[e % H];
     const back = e - D >= 0 ? slot[(e - D) % R] : null;
     const fwd = e + D <= computed ? slot[(e + D) % R] : null;
 
@@ -180,9 +241,13 @@ export function analyzeCells({
         continue;
       }
 
-      const dx = cur.run[b] / tau;
-      const dy = cur.rise[b] / phi;
-      const dlen = Math.hypot(dx, dy);
+      const dx = hot.run[b] / tau;
+      const dy = hot.rise[b] / phi;
+
+      // Not `Math.hypot`: it guards against overflow these values cannot
+      // reach, and costs twelve times what the square root does. Once per
+      // cell, that is a third of a second across a full pass.
+      const dlen = Math.sqrt(dx * dx + dy * dy);
 
       // Along frequency: the better of the two unpadded-bin neighbours — a
       // cell at the edge of a lobe has one good neighbour and one that is
@@ -196,14 +261,20 @@ export function analyzeCells({
           continue;
         }
 
-        const r = residual(dx, dy, dlen, (cur.t[nb] - cur.t[b]) / tau, (cur.f[nb] - cur.f[b]) / phi);
+        const r = residual(
+          dx,
+          dy,
+          dlen,
+          (cur.t[nb] - cur.t[b]) / tau,
+          (cur.f[nb] - cur.f[b]) / phi,
+        );
 
         if (r < rB) {
           rB = r;
         }
       }
 
-      // Along time: the better of the two frames COHERENCE_REACH away.
+      // Along time: the better of the two frames REACH away.
       let rF = Infinity;
 
       for (let side = 0; side < 2; side++) {
@@ -223,27 +294,44 @@ export function analyzeCells({
       // Both tests have to pass; a missing side abstains rather than accuses.
       const r = Math.max(rB === Infinity ? 0 : rB, rF === Infinity ? 0 : rF);
 
-      const conf = r > rCut ? 0 : Math.exp(-r * r * sigmaNorm);
+      let conf = 0;
 
-      if (count === CHUNK) {
-        onCells(cells, count);
-        total += count;
-        count = 0;
+      if (r < rCut) {
+        const x = r * gaussScale;
+        const i = x | 0;
+        const fr = x - i;
+
+        conf = gauss[i] + (gauss[i + 1] - gauss[i]) * fr;
+      }
+
+      if (support) {
+        const mf = Math.min(mapFrames - 1, Math.max(0, Math.round(cur.t[b] / REACH)));
+        const mb = Math.min(mapBins - 1, Math.max(1, Math.round(b / pad)));
+
+        conf *= support[mf * mapBins + mb] / 255;
       }
 
       const at = count * STRIDE;
 
-      cells[at] = cur.t[b];
-      cells[at + 1] = f;
-      cells[at + 2] = cur.p[b];
-      cells[at + 3] = Math.atan2(cur.rise[b], cur.run[b]);
-      cells[at + 4] = conf;
+      out[at] = cur.t[b];
+      out[at + 1] = f;
+      out[at + 2] = hot.p[b];
+      out[at + 3] = Math.atan2(hot.rise[b], hot.run[b]);
+      out[at + 4] = conf;
 
       count++;
     }
   }
 
-  for (let frame = 0; frame < frames; frame++) {
+  // The frames this call has to *compute*, as opposed to emit: D beyond each
+  // end of its own stretch, clipped to the grid. Clipping is the whole point —
+  // a neighbour is missing only where the grid itself runs out, so a cell at a
+  // region boundary is judged by the same evidence it would have been given by
+  // a single call covering everything.
+  const a0 = Math.max(0, frame0 - D);
+  const a1 = Math.min(frames, frame1 + D);
+
+  for (let frame = a0; frame < a1; frame++) {
     // hop is always a whole number of samples (render.js quantises it to a
     // power of two, floored at 1), so this rounding is only defensive.
     const off = tStart + Math.round(frame * hop) + align;
@@ -258,18 +346,20 @@ export function analyzeCells({
       dRe[n] = v * dw[n];
     }
 
-    re.fill(0, winLen);
-    im.fill(0, winLen);
-    dRe.fill(0, winLen);
-    dIm.fill(0);
+    // Only the imaginary half of the derivative transform needs clearing:
+    // everything past `winLen` is zero padding the transform is told about
+    // rather than made to read, and every other input slot below it was just
+    // written.
+    dIm.fill(0, 0, winLen);
 
     // Two real sequences packed into one complex transform, unpacked per bin
     // below; the derivative window needs a transform of its own.
-    fft.transform(re, im);
-    fft.transform(dRe, dIm);
+    fft.transform(re, im, winLen);
+    fft.transform(dRe, dIm, winLen);
 
     const frameCentre = off + centre;
     const cur = slot[frame % R];
+    const hot = heavy[frame % H];
 
     for (let b = 1; b < bins; b++) {
       cur.ok[b] = 0;
@@ -318,28 +408,26 @@ export function analyzeCells({
 
       cur.t[b] = frameCentre + dt;
       cur.f[b] = b * binHz + df;
-      cur.run[b] = run;
-      cur.rise[b] = rise * hzPerRad;
-      cur.p[b] = power * scale;
+      hot.run[b] = run;
+      hot.rise[b] = rise * hzPerRad;
+      hot.p[b] = power * scale;
       cur.ok[b] = 1;
     }
 
-    if (frame >= D) {
-      emit(frame - D, frame);
+    const e = frame - D;
+
+    if (e >= frame0 && e < frame1) {
+      emit(e, frame);
     }
   }
 
-  // The tail of the pipeline: frames whose forward neighbour never arrived.
-  for (let e = Math.max(0, frames - D); e < frames; e++) {
-    emit(e, frames - 1);
+  // The tail of the pipeline: frames whose forward neighbour never arrived,
+  // which happens only where `a1` hit the end of the grid.
+  for (let e = Math.max(frame0, a1 - D); e < frame1; e++) {
+    emit(e, a1 - 1);
   }
 
-  starts[frames] = total + count;
+  starts[frame1 - frame0] = count;
 
-  if (count > 0) {
-    onCells(cells, count);
-    total += count;
-  }
-
-  return {total, starts};
+  return {count, starts};
 }

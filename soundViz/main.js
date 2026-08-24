@@ -1,6 +1,15 @@
 import {ensureMic, beginTake, endTake, isArming, audioContext} from './recorder.js';
 import * as audio from './playback.js';
-import {createRenderer, analyze, draw, clear, exportImage, sampleCell, F_MIN} from './render.js';
+import {
+  createRenderer,
+  analyze,
+  draw,
+  clear,
+  exportImage,
+  sampleCell,
+  setBusyHandler,
+  F_MIN,
+} from './render.js';
 import {fullView, isFullView, zoomFactor, attachGestures} from './zoom.js';
 
 const MIN_SAMPLES = 4096; // ~85 ms; shorter than this there is nothing to transform
@@ -24,8 +33,9 @@ const NOTE_RATIO = 2;
 // as coherence goes to zero it is a confident-looking number computed from
 // almost nothing — and the picture agrees, because it rotates hue by
 // `drive * conf` and so shows no tint there either. Placed above the measured
-// means for white noise (~0.33) and two-component loops (~0.38), and below
-// what a real ridge keeps even while beating (~0.61).
+// means for white noise and two-component loops (~0.09 and ~0.40 once ridge
+// support is folded in), and below what a real ridge keeps even while beating
+// (~0.61).
 const SWEEP_MIN_CONF = 0.4;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -69,11 +79,34 @@ const hint = document.getElementById('hint');
 const inspectEl = document.getElementById('inspect');
 const inspectHead = document.getElementById('inspect-head');
 const inspectRows = document.getElementById('inspect-rows');
+const busyEl = document.getElementById('busy');
 const closeBtn = document.getElementById('close');
 const pinEl = document.getElementById('pin');
 const playheadEl = document.getElementById('playhead');
 
 const accelerated = createRenderer(canvas);
+
+// The analysis runs on a pool of workers, so the page stays live while it is
+// going. The spinner is the only sign that anything is happening at all — it
+// sits next to the readout it is about to refine, and it animates on the
+// compositor so it keeps turning through whatever the main thread is doing.
+setBusyHandler(on => busyEl.classList.toggle('show', on));
+
+// The newest analysis in flight, so a save can wait for the cloud to settle
+// rather than exporting one that is about to be replaced.
+let analysing = null;
+
+function track(promise) {
+  const done = promise.finally(() => {
+    if (analysing === done) {
+      analysing = null;
+    }
+  });
+
+  analysing = done;
+
+  return done;
+}
 
 let rec = null; // the recording being displayed
 let viewport = null;
@@ -130,6 +163,10 @@ function setStatus(text, recording) {
   status.className = recording ? 'rec' : '';
 }
 
+// What the picture in front of you is: how far in, how much time it covers,
+// and which band. Shown from the moment a recording exists and never taken
+// away — at full view it reads `1x`, which is worth saying rather than leaving
+// the corner blank and the numbers to be guessed at.
 function showZoom() {
   // While something is playing, the status line is describing that instead —
   // panning around mid-playback should not silently retitle what you are
@@ -138,7 +175,7 @@ function showZoom() {
     return;
   }
 
-  if (!rec || isFullView(viewport, limits)) {
+  if (!rec) {
     setStatus('', false);
     return;
   }
@@ -439,19 +476,19 @@ function finish(result) {
 
   viewport = fullView(limits);
 
-  // The analysis blocks the main thread for a second or so, so hand the browser
-  // a moment to paint the status first — otherwise the only sign of life is the
-  // page going still. A timer rather than a frame callback: a backgrounded tab
-  // fires no frame callbacks at all, and a take made just before switching away
-  // would sit unanalysed until you came back.
-  setStatus('analysing…', false);
-  setTimeout(() => {
-    analyze(canvas, rec, viewport, true);
-    setStatus('', false);
-    hint.textContent =
-      'Hold to record · tap to read · drag to pan · scroll to zoom · P to play · S to save';
-    draw(canvas, viewport);
-  }, 24);
+  // The readout describes the view before there is anything in it, and the
+  // spinner beside it says the picture is on its way. Nothing here blocks: the
+  // pool does the work and this returns to the event loop immediately.
+  showZoom();
+
+  track(
+    analyze(canvas, rec, viewport, true).then(() => {
+      hint.textContent =
+        'Hold to record · tap to read · drag to pan · scroll to zoom · P to play · S to save';
+      draw(canvas, viewport);
+      showZoom();
+    }),
+  );
 }
 
 let framePending = false;
@@ -474,6 +511,13 @@ async function save() {
   saving = true;
 
   try {
+    // Exporting a cloud that is about to be replaced would write out the
+    // coarser of the two pictures, and swapping mid-export would tear it.
+    if (analysing) {
+      setStatus('saving… waiting for the analysis', false);
+      await analysing;
+    }
+
     const {blob, W, H} = await exportImage(canvas, viewport, (done, total) =>
       setStatus(`saving… ${Math.round((100 * done) / total)}%`, false),
     );
@@ -511,9 +555,13 @@ const gestures = attachGestures(canvas, {
   // budget, so most gestures never reach this at all.
   onSettle: () => {
     if (!rec || saving) return;
-    analyze(canvas, rec, viewport, false);
-    draw(canvas, viewport);
-    showZoom();
+
+    track(
+      analyze(canvas, rec, viewport, false).then(() => {
+        draw(canvas, viewport);
+        showZoom();
+      }),
+    );
   },
   onMultiTouch: abort,
   canPan,
@@ -594,8 +642,8 @@ window.addEventListener('keydown', e => {
     }
 
     viewport = fullView(limits);
-    analyze(canvas, rec, viewport, false);
     requestFrame();
+    track(analyze(canvas, rec, viewport, false).then(requestFrame));
     return;
   }
   if (e.code === 'KeyS' && rec) {
@@ -620,6 +668,14 @@ let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
+    // An export is drawing tiles through the same buffers and yielding between
+    // them, so a pass landing halfway through would change the picture it is
+    // writing out. The save ends with a redraw at whatever size the window is
+    // by then, so nothing is left stale.
+    if (saving) {
+      return;
+    }
+
     if (!rec) {
       if (accelerated) {
         clear(canvas);
@@ -629,9 +685,12 @@ window.addEventListener('resize', () => {
       return;
     }
 
-    analyze(canvas, rec, viewport, true);
-    draw(canvas, viewport);
-    showZoom();
+    track(
+      analyze(canvas, rec, viewport, true).then(() => {
+        draw(canvas, viewport);
+        showZoom();
+      }),
+    );
   }, 100);
 });
 

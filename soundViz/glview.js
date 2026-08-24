@@ -476,7 +476,6 @@ export function createView(canvas) {
   let imageHeight = 1;
 
   let count = 0;
-  let filled = 0;
   let analysis = null;
   let bgLogF = [0, 1];
   let floorDb = ABS_FLOOR;
@@ -488,6 +487,8 @@ export function createView(canvas) {
     if (accum && accum.w === w && accum.h === h) {
       return true;
     }
+
+    accumFor = null;
 
     if (accum) {
       gl.deleteTexture(accum.tex);
@@ -509,29 +510,81 @@ export function createView(canvas) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  // Which stretch of the buffer holds the cells that can reach this viewport.
+  // Which stretches of the buffer hold the cells that can reach this viewport.
   // Cells come out of the analysis in frame order and a frame's cells all lie
-  // within half a window of its centre, so the answer is one contiguous range —
-  // which is what makes it affordable to hold a cloud far larger than any one
-  // view of it needs.
-  function slice(view) {
+  // within half a window of its centre, so the visible frames are a contiguous
+  // run — which is what makes it affordable to hold a cloud far larger than any
+  // one view of it needs.
+  //
+  // One run per region of the pass, not one overall. The pass is analysed by a
+  // pool of threads, each writing its own region into the stretch its frames
+  // would fill at their widest, so the buffer has a gap wherever a region
+  // emitted fewer cells than it reserved. Regions are in frame order and there
+  // are at most a couple of dozen of them, so this is a handful of draw calls
+  // rather than one, and the gaps are never touched.
+  function slice(view, out) {
+    out.length = 0;
+
     if (!analysis || !analysis.starts) {
-      return [0, count];
+      out.push(0, count);
+      return out;
     }
 
-    const {starts, hop, winLen, frames, tStart} = analysis;
+    const {starts, regions, hop, winLen, frames, tStart} = analysis;
     const reach = winLen / 2 + hop;
 
     const lo = Math.max(0, Math.min(frames, Math.floor((view.t0 - reach - tStart) / hop)));
     const hi = Math.max(lo, Math.min(frames, Math.ceil((view.t1 + reach - tStart) / hop)));
 
-    return [starts[lo], starts[hi] - starts[lo]];
+    for (const r of regions) {
+      const a = Math.max(lo, r.f0);
+      const b = Math.min(hi, r.f1);
+
+      if (a >= b) {
+        continue;
+      }
+
+      // `starts` holds where each frame begins. One past the last frame of a
+      // region is the next region's base, not this one's end, so the region
+      // carries its own end.
+      const first = starts[a];
+      const last = b < r.f1 ? starts[b] : r.end;
+
+      if (last > first) {
+        out.push(first, last - first);
+      }
+    }
+
+    return out;
   }
 
+  const ranges = [];
+
+  // What the accumulation buffer already holds, if anything. The first analysis
+  // of a recording draws the whole cloud twice over the same full view — once
+  // to measure the exposure from it, once to show it — and at this size that is
+  // most of a second of GPU time for a second copy of a picture already in
+  // hand. Anything that changes what an accumulation would produce clears this:
+  // a new cloud, a resize, an export tile.
+  let accumFor = null;
+
   function accumulate(view) {
+    if (
+      accumFor &&
+      accumFor.t0 === view.t0 &&
+      accumFor.t1 === view.t1 &&
+      accumFor.f0 === view.f0 &&
+      accumFor.f1 === view.f1
+    ) {
+      return;
+    }
+
+    accumFor = {t0: view.t0, t1: view.t1, f0: view.f0, f1: view.f1};
+
     const l0 = Math.log(view.f0);
     const l1 = Math.log(view.f1);
-    const [first, n] = slice(view);
+
+    slice(view, ranges);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, accum.fbo);
     gl.viewport(0, 0, accum.w, accum.h);
@@ -559,19 +612,22 @@ export function createView(canvas) {
     gl.vertexAttribDivisor(cornerLoc, 0);
 
     const stride = CELL_FLOATS * 4;
-    const base = first * stride;
 
     const cellLoc = gl.getAttribLocation(accumProg, 'cell');
     const confLoc = gl.getAttribLocation(accumProg, 'conf');
     gl.bindBuffer(gl.ARRAY_BUFFER, cloud);
     gl.enableVertexAttribArray(cellLoc);
-    gl.vertexAttribPointer(cellLoc, 4, gl.FLOAT, false, stride, base);
     gl.vertexAttribDivisor(cellLoc, 1);
     gl.enableVertexAttribArray(confLoc);
-    gl.vertexAttribPointer(confLoc, 1, gl.FLOAT, false, stride, base + 16);
     gl.vertexAttribDivisor(confLoc, 1);
 
-    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);
+    for (let i = 0; i < ranges.length; i += 2) {
+      const base = ranges[i] * stride;
+
+      gl.vertexAttribPointer(cellLoc, 4, gl.FLOAT, false, stride, base);
+      gl.vertexAttribPointer(confLoc, 1, gl.FLOAT, false, stride, base + 16);
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, ranges[i + 1]);
+    }
 
     gl.vertexAttribDivisor(cellLoc, 0);
     gl.disableVertexAttribArray(cellLoc);
@@ -724,30 +780,45 @@ export function createView(canvas) {
         canvas.height = h;
       }
 
+      if (imageHeight !== h) {
+        accumFor = null;
+      }
+
       imageHeight = h;
 
       return ensureAccum(w, h);
     },
 
-    // Reserve room for the whole cloud, then fill it as the analysis produces
-    // it. Nothing is thinned and nothing is thrown away.
+    // Reserve room for the whole cloud, then take the finished regions of a
+    // pass. Nothing is thinned and nothing is thrown away.
+    //
+    // `bufferData` runs every time even when the size has not changed, and
+    // that is the point of it: it *orphans* the old storage, so the uploads
+    // below get fresh memory instead of waiting for whatever draw calls are
+    // still reading the buffer. Skipping it as an optimisation was tried and
+    // was much worse — a pass landing in the middle of a drag, with sixty
+    // frames' worth of draws queued against the same buffer, blocked the main
+    // thread for 2.2 s instead of 65 ms. Allocating a gigabyte costs 0–180 ms
+    // and only the first touch of it costs anything at all.
     begin(cells) {
       gl.bindBuffer(gl.ARRAY_BUFFER, cloud);
       gl.bufferData(gl.ARRAY_BUFFER, cells * CELL_FLOATS * 4, gl.STATIC_DRAW);
+
       count = 0;
-      filled = 0;
       analysis = null;
+      accumFor = null;
     },
 
-    push(data, n) {
+    // One region, at the cell offset it reserved for itself.
+    pushAt(at, data, n) {
       gl.bindBuffer(gl.ARRAY_BUFFER, cloud);
-      gl.bufferSubData(gl.ARRAY_BUFFER, filled, data.subarray(0, n * CELL_FLOATS));
-      filled += n * CELL_FLOATS * 4;
+      gl.bufferSubData(gl.ARRAY_BUFFER, at * CELL_FLOATS * 4, data, 0, n * CELL_FLOATS);
       count += n;
     },
 
     end(params) {
       analysis = params;
+      accumFor = null;
     },
 
     // Set the exposure from the whole recording, once. Everything after this is
@@ -823,6 +894,10 @@ export function createView(canvas) {
     // clipped rather than dropped at a tile edge, and the exposure was fixed
     // before any of this, so tiles meet without a seam.
     tile(view, w, h, height, out) {
+      // Stroke length depends on the height being drawn against, so a tile
+      // never inherits the screen's accumulation and the screen never inherits
+      // a tile's.
+      accumFor = null;
       imageHeight = height;
 
       if (!analysis || !ensureAccum(w, h)) {

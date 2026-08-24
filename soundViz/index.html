@@ -49,12 +49,41 @@
         background: rgba(0, 0, 0, 0.35);
         color: #e8f0ff;
       }
+      /* The readout and the sign that it is about to get sharper, kept
+         together so the spinner sits with the numbers rather than out at the
+         far end of the row. */
+      #readout {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 13px;
+      }
       #status {
         color: rgba(232, 240, 255, 0.65);
       }
       #status.rec {
         color: #ff5a4a;
         font-weight: 600;
+      }
+      /* Turns while the analysis pool is working. A transform animation, so it
+         is the compositor that keeps it moving and it does not stop for
+         anything the main thread is doing. */
+      #busy {
+        display: none;
+        width: 11px;
+        height: 11px;
+        border: 2px solid rgba(232, 240, 255, 0.22);
+        border-top-color: rgba(232, 240, 255, 0.8);
+        border-radius: 50%;
+        animation: spin 0.75s linear infinite;
+      }
+      #busy.show {
+        display: block;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
       }
       #inspect {
         position: fixed;
@@ -161,7 +190,10 @@
     <canvas id="view"></canvas>
     <div id="ui">
       <div id="hint">Hold anywhere to record</div>
-      <span id="status"></span>
+      <div id="readout">
+        <span id="status"></span>
+        <span id="busy" aria-hidden="true"></span>
+      </div>
     </div>
     <div id="playhead"></div>
     <div id="pin"></div>

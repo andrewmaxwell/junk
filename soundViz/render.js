@@ -1,4 +1,4 @@
-import {analyzeCells} from './reassign.js';
+import {REACH} from './ridge.js';
 import {createView} from './glview.js';
 
 export const F_MIN = 60;
@@ -10,27 +10,198 @@ const WIN_MS = 25;
 const WIN_MIN = 256;
 const WIN_MAX = 2048;
 
-const MAX_FFT = 32768;
+// How far zero padding may go. This is not a resolution limit — the window
+// decides that — it is how finely the reassignment field is *sampled* along
+// frequency, and deep into a zoom that sampling is what runs out first: the
+// bin gap is the one `plan()` cannot close by spending frames on it. Measured
+// on its own, at the 16e6 cell budget this file used to carry: the 256x view
+// went from 61 cells and a scatter of dots to 168 and structure. With the
+// budget below it is 702. It costs about 15% on the deepest settle and nothing
+// at all elsewhere, because a pass is bounded by `MAX_CELLS` and the transform
+// cost grows only with the *log* of `fftSize`.
+const MAX_FFT = 262144;
+
+// `reassign.js` holds 2·D+1 frames of `bins` cells in a ring so the coherence
+// test can reach REACH samples either side, and D grows as the hop shrinks —
+// so the deepest zoom, where the hop is 1 and the padding is at its greatest,
+// is exactly where that product explodes. Left alone at the padding above it
+// would reach 355 MB of Float32Array per pass. Grids are pushed to a coarser
+// hop until the ring fits, the same trade `plan()` already makes for the cell
+// budget.
+//
+// This only ever binds below about 200x, and what it buys there is real: at
+// 256x, 9e6 puts 357 cells on screen and 18e6 puts 702, because the larger
+// ring is what lets the hop stay at 1 alongside the maximum padding. Beyond
+// 18e6 nothing changes — 36e6 picks exactly the same grids — so this is the
+// ceiling rather than a compromise. Worst case ~250 MB of Float32Array per
+// region in flight, held only for the length of a pass.
+const MAX_RING_CELLS = 18e6;
+
+// And the same figure again for the pool as a whole, since every region in
+// flight holds a ring of its own. This one must never be spent by coarsening
+// the hop — that is detail, and detail is what the budget above exists to buy
+// — so it is spent by running *fewer regions at once* instead, which costs
+// time and nothing else. It binds only at the deepest zooms, where the rings
+// are large: eight of them at 256x measured a 4.0 GB renderer, which is enough
+// to make the machine stall in ways that look like the app's fault.
+const MAX_POOL_RING_CELLS = 72e6;
 
 // Cells cost 20 bytes each on the GPU and roughly 100 ns each to compute, so
 // this is a memory budget and a "how long you wait after letting go of the
 // button" budget at the same time. At this size the whole of a short recording
 // fits in one pass, which is what lets most panning and zooming happen with
 // nothing recomputed at all.
-const MAX_CELLS = 16000000;
+//
+// Sized for a machine with memory to spare, and it is the strongest of all the
+// detail knobs — it improves the picture at every zoom, which nothing else
+// here does. Measured on an M4 MacBook Pro, blocked main thread and the mean
+// fraction of its gap a stroke covers:
+//
+//   16M   2.3 s first pass, settles 1.2-2.4 s   fill 0.68 full view, 0.04 at 116x
+//   48M   4.5 s first pass, settles 4.8-6.1 s   fill 0.99 full view, 0.08 at 116x
+//   64M   4.9 s first pass, settles up to 11 s  no better at depth than 48M
+//
+// 48M is the knee: the full view is saturated (strokes meet), deep zoom has
+// four times the cells 16M gave it, and the draw still runs at 120 fps. Past
+// it the wait doubles and the picture does not move.
+const MAX_CELLS = 48000000;
 
+// Rendering above the display's own pixel ratio was tried, on the theory that
+// supersampling would draw finer filaments. It does the opposite: TARGET_GAP
+// is in device pixels, so a higher ratio spends the cell budget on sampling
+// time more finely and leaves less for the padding that closes the frequency
+// gap. At 256x it cost two thirds of the picture (mean luma 36.1 to 11.6,
+// lit pixels 29% to 11%). The display's own ratio is the right one.
 const MAX_DPR = 2;
 
 // Export size, as a multiple of the canvas. Rendered in tiles, so the ceiling
-// is the browser's rather than the GPU's.
-const EXPORT_SCALE = 4;
-const MAX_EXPORT_PIXELS = 120e6;
+// is the browser's rather than the GPU's — and the browser's is close: a 2D
+// canvas of 253 MP still reads back on this machine and one of 288 MP does
+// not, so the cap sits below that with room for a larger window. The scale is
+// large enough that the cap is what decides, which makes every export as big
+// as the browser will carry: 19901x10050, 3.4 s, a 116 MB PNG.
+const EXPORT_SCALE = 8;
+const MAX_EXPORT_PIXELS = 200e6;
+
+// How many threads the analysis is spread over. The transforms and the
+// per-cell arithmetic are the whole of the cost and they parallelise cleanly,
+// so this is very nearly a straight division of the wait. Capped below the
+// core count because the main thread has a picture to draw and the browser has
+// a compositor to run, and because past six the M4's efficiency cores are what
+// is being added — they finish a region about half as fast as a performance
+// core does, which is why regions are queued rather than dealt out one each.
+const POOL = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 2));
+
+// Cutting a pass finer than the pool is worth doing while the regions are
+// cheap: a region that lands on an efficiency core is then one of several its
+// neighbours can finish without it. Past two rounds the tail is longer than the
+// balance is worth.
+const MAX_REGIONS = 2 * POOL;
+
+// What a region's overlap costs, as a fraction of one of its own frames. A
+// region computes D frames beyond each end so its cells meet the same
+// neighbours a single call would have given them; those frames are transformed
+// but never emitted, and the transforms are a little under half of what a frame
+// costs — measured at 0.42 of it on a full view and 0.46 at maximum padding, so
+// one figure serves for both.
+const OVERLAP_COST = 0.5;
 
 const pow2 = v => 1 << Math.max(0, Math.round(Math.log2(v)));
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 let view = null;
 let current = null; // what the cloud in hand covers, and how finely
+let wanted = null; // what the newest pass in flight will make it, if any
+let audioFor = null; // the recording the pool has a copy of
+let ridgeFor = null; // the recording the pool has a ridge map for
+let generation = 0; // passes are discarded rather than cancelled; this says which
+
+// Somebody to tell while a pass is in flight, so the status line can show it.
+let onBusy = null;
+let busy = 0;
+
+export function setBusyHandler(fn) {
+  onBusy = fn;
+}
+
+function enter() {
+  busy++;
+  onBusy?.(true);
+}
+
+function leave() {
+  busy--;
+
+  if (busy === 0) {
+    onBusy?.(false);
+  }
+}
+
+// The pool. Workers are created on the first analysis and then kept: each one
+// holds a copy of the recording and of the ridge map, so a pass costs one
+// message per region and nothing else.
+let workers = null;
+let nextJob = 1;
+const waiting = new Map();
+
+function pool() {
+  if (!workers) {
+    workers = [];
+
+    for (let i = 0; i < POOL; i++) {
+      const worker = new Worker(new URL('./analysis-worker.js', import.meta.url), {
+        type: 'module',
+      });
+
+      worker.onmessage = ({data}) => {
+        const done = waiting.get(data.job);
+
+        if (done) {
+          waiting.delete(data.job);
+          done(data);
+        }
+      };
+
+      workers.push(worker);
+    }
+  }
+
+  return workers;
+}
+
+// Fire and forget: the recording and the ridge map, which a worker keeps.
+function tell(worker, msg) {
+  worker.postMessage(msg);
+}
+
+// Ask for something and wait for it.
+function ask(worker, msg) {
+  const job = nextJob++;
+
+  return new Promise(resolve => {
+    waiting.set(job, resolve);
+    worker.postMessage({...msg, job});
+  });
+}
+
+// Deal `jobs` out to the pool, each worker taking the next one whenever it
+// comes free. Resolves with the answers in the order the jobs were given.
+async function share(jobs) {
+  const ws = pool();
+  const results = new Array(jobs.length);
+
+  let next = 0;
+
+  await Promise.all(
+    ws.map(async worker => {
+      for (let i = next++; i < jobs.length; i = next++) {
+        results[i] = await ask(worker, jobs[i]);
+      }
+    }),
+  );
+
+  return results;
+}
 
 export function createRenderer(canvas) {
   view = createView(canvas);
@@ -48,7 +219,9 @@ export function sizeOf(canvas) {
 
 export function clear(canvas) {
   const {w, h} = sizeOf(canvas);
-  current = null;
+  current = wanted = null;
+  audioFor = ridgeFor = null;
+  generation++;
   view.resize(w, h);
   view.clear();
 }
@@ -139,6 +312,13 @@ function plan(rec, vp, w, h, winLen) {
       }
     }
 
+    // Past REACH the ring is three frames whatever the padding, so this always
+    // terminates. Coarsening the hop only removes frames, so the cell budget
+    // above stays satisfied.
+    while (hop < REACH && bins * (2 * Math.round(REACH / hop) + 1) > MAX_RING_CELLS) {
+      hop *= 2;
+    }
+
     // Anchoring to a multiple of the hop is what keeps successive grids nested.
     start -= start % hop;
 
@@ -154,11 +334,51 @@ function plan(rec, vp, w, h, winLen) {
   return best;
 }
 
-// Analyse what the viewport asks for. `calibrate` sets the exposure from the
-// whole recording, and is done once per recording: everything the picture does
-// with colour is then a property of the sound rather than of where you happen
-// to be looking.
-export function analyze(canvas, rec, viewport, calibrate) {
+// How many regions a pass is cut into.
+//
+// The overlap is a constant per region rather than a share of it, so splitting
+// further always shortens a *round* — but a round is only free while there are
+// idle threads to take it, and the seventeenth region of a pool of eight waits
+// for a second round that costs as much again. So: the time is the cost of one
+// region times the number of rounds, and this picks the count that minimises
+// it. Nothing subtler is warranted; the answer is the pool size almost
+// everywhere, and it only departs from it where the overlap is large enough to
+// matter — the deepest zooms, where the hop is 1 and D is the whole of REACH.
+function regionsFor(frames, hop, bins) {
+  const D = Math.max(1, Math.round(REACH / hop));
+  const overlap = 2 * D * OVERLAP_COST;
+
+  // Each region in flight holds a coherence ring of this many cells.
+  const ring = bins * (2 * D + 1);
+  const most = Math.max(1, Math.min(MAX_REGIONS, Math.floor(MAX_POOL_RING_CELLS / ring)));
+
+  let best = 1;
+  let cost = Infinity;
+
+  for (let r = 1; r <= most; r++) {
+    const round = Math.ceil(r / POOL) * (frames / r + overlap);
+
+    if (round < cost) {
+      cost = round;
+      best = r;
+    }
+  }
+
+  return best;
+}
+
+// Analyse what the viewport asks for, on the pool, and swap the result in when
+// it is finished. `calibrate` sets the exposure from the whole recording, and
+// is done once per recording: everything the picture does with colour is then a
+// property of the sound rather than of where you happen to be looking.
+//
+// Resolves to null when the pass was not worth running, or when a later one
+// overtook it — passes are discarded rather than cancelled, because a worker in
+// the middle of a region cannot be interrupted without a SharedArrayBuffer and
+// the page is not cross-origin isolated. Nothing outside this function ever
+// sees a half-finished cloud: a pass is staged whole in the workers and lands
+// in one piece.
+export async function analyze(canvas, rec, viewport, calibrate) {
   const {w, h} = sizeOf(canvas);
   view.resize(w, h);
 
@@ -173,49 +393,168 @@ export function analyze(canvas, rec, viewport, calibrate) {
   const chosen = plan(rec, viewport, w, h, winLen);
   const {pad, fftSize, bins, hop, frames, start} = chosen;
 
-  // Is this pass worth a second of blocked main thread? Only if the cloud in
-  // hand does not already reach across the viewport, or if the new grid would
-  // be markedly finer *at this viewport* than the one that cloud was built on.
-  // Without this a slow scroll fires a full analysis between every notch, for a
-  // gain nobody can see.
+  // Is this pass worth a pass? Only if the cloud in hand does not already reach
+  // across the viewport, or if the new grid would be markedly finer *at this
+  // viewport* than the one that cloud was built on. Without this a slow scroll
+  // fires a full analysis between every notch, for a gain nobody can see.
+  //
+  // Asked of whatever a pass in flight is about to produce, if there is one,
+  // and of the cloud in hand otherwise. Asking only about the cloud in hand
+  // would start a second identical pass behind the first, since the first has
+  // not landed yet.
   //
   // The two gaps are compared separately, and either one closing is enough. The
   // larger of the two on its own is not a fair test: deep into a zoom the
   // frequency gap is stuck at whatever the FFT cap allows and swamps the
   // comparison, hiding the fourfold gain in time that is the whole reason the
   // ridges join up down there.
-  if (!calibrate && current && viewport.t0 >= current.start && viewport.t1 <= current.end) {
-    const now = gaps(current.hop, current.fftSize, sampleRate, viewport, w, h);
+  const against = wanted || current;
+
+  if (!calibrate && against && viewport.t0 >= against.start && viewport.t1 <= against.end) {
+    const now = gaps(against.hop, against.fftSize, sampleRate, viewport, w, h);
 
     if (chosen.gap.t > now.t * WORTH_REDOING && chosen.gap.f > now.f * WORTH_REDOING) {
       return null;
     }
   }
 
-  current = {start, end: start + frames * hop, hop, fftSize};
+  const grid = {start, end: start + frames * hop, hop, fftSize};
+  const gen = ++generation;
 
-  view.begin(frames * bins);
+  wanted = grid;
+  enter();
 
-  const {total, starts} = analyzeCells({
-    samples,
-    sampleRate,
-    winLen,
-    fftSize,
-    hop,
-    frames,
-    tStart: start,
-    fMin: F_MIN,
-    fMax: sampleRate / 2,
-    onCells: (cells, k) => view.push(cells, k),
-  });
+  try {
+    // The recording, once. Every worker gets its own copy, which is a few
+    // megabytes each and saves passing it with every region.
+    if (audioFor !== rec) {
+      for (const worker of pool()) {
+        tell(worker, {type: 'audio', samples, sampleRate});
+      }
 
-  view.end({hop, binHz: sampleRate / fftSize, sampleRate, winLen, frames, starts, tStart: start});
+      audioFor = rec;
+      ridgeFor = null;
+    }
 
-  if (calibrate) {
-    view.calibrate(fullSpan(rec));
+    // The ridge map covers the whole recording on a grid of its own, so it is
+    // built once and then read by every pass. That is what keeps it out of the
+    // zoom: were it rebuilt for a viewport, a deep zoom would be asking whether
+    // ridges persist across a span a few hundred samples wide, and nothing
+    // does. One worker walks the chains and the rest are handed the answer.
+    if (ridgeFor !== rec) {
+      const ws = pool();
+      const map = await ask(ws[0], {type: 'ridge', winLen});
+
+      if (gen !== generation) {
+        return null;
+      }
+
+      for (let i = 1; i < ws.length; i++) {
+        tell(ws[i], {
+          type: 'map',
+          support: map.support,
+          frames: map.frames,
+          bins: map.bins,
+        });
+      }
+
+      ridgeFor = rec;
+    }
+
+    const count = regionsFor(frames, hop, bins);
+    const jobs = [];
+
+    for (let i = 0; i < count; i++) {
+      const frame0 = Math.round((i * frames) / count);
+      const frame1 = Math.round(((i + 1) * frames) / count);
+
+      if (frame1 > frame0) {
+        jobs.push({
+          type: 'cells',
+          winLen,
+          fftSize,
+          bins,
+          hop,
+          frames,
+          frame0,
+          frame1,
+          tStart: start,
+          fMin: F_MIN,
+          fMax: sampleRate / 2,
+        });
+      }
+    }
+
+    const parts = await share(jobs);
+
+    if (gen !== generation) {
+      return null;
+    }
+
+    // Every region owns the stretch of the buffer its frames would fill at
+    // their widest, so it knows where its cells go without waiting to hear how
+    // many its neighbours produced. The gaps that leaves — bins that held
+    // nothing, or fell outside the audible band — are simply never drawn: each
+    // region is a contiguous run of its own, and `glview.js` draws the visible
+    // frames as one range per region rather than one range overall.
+    const starts = new Uint32Array(frames);
+    const regions = [];
+
+    let total = 0;
+
+    view.begin(frames * bins);
+
+    for (const part of parts) {
+      const base = part.frame0 * bins;
+
+      view.pushAt(base, part.cells, part.count);
+
+      for (let f = part.frame0; f < part.frame1; f++) {
+        starts[f] = base + part.starts[f - part.frame0];
+      }
+
+      regions.push({
+        f0: part.frame0,
+        f1: part.frame1,
+        end: base + part.count,
+      });
+      total += part.count;
+    }
+
+    view.end({
+      hop,
+      binHz: sampleRate / fftSize,
+      sampleRate,
+      winLen,
+      frames,
+      starts,
+      regions,
+      tStart: start,
+    });
+
+    current = grid;
+
+    if (calibrate) {
+      view.calibrate(fullSpan(rec));
+    }
+
+    return {
+      winLen,
+      fftSize,
+      pad,
+      frames,
+      hop,
+      start,
+      total,
+      regions: jobs.length,
+    };
+  } finally {
+    if (gen === generation) {
+      wanted = null;
+    }
+
+    leave();
   }
-
-  return {winLen, fftSize, pad, frames, hop, start, total};
 }
 
 export function draw(canvas, viewport) {
@@ -289,5 +628,9 @@ export async function exportImage(canvas, viewport, onProgress) {
   // The screen wants its own buffer back.
   view.resize(w, h);
 
-  return {blob: await new Promise(resolve => out.toBlob(resolve, 'image/png')), W, H};
+  return {
+    blob: await new Promise(resolve => out.toBlob(resolve, 'image/png')),
+    W,
+    H,
+  };
 }
