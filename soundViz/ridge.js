@@ -100,7 +100,8 @@ const SUPPORT_HI = 6;
 // finer pass reads the same share it read before.
 export const SHARE_ROWS = 256;
 
-export const rowScaleFor = sampleRate => (SHARE_ROWS - 1) / Math.sqrt(sampleRate / 2);
+export const rowScaleFor = (sampleRate) =>
+  (SHARE_ROWS - 1) / Math.sqrt(sampleRate / 2);
 
 // A window earns its share of the energy where it explains it. `fitness` is the
 // power-weighted mean support gate over a bucket, which is already measured in
@@ -175,7 +176,9 @@ function offAxis(row, i, ddt, ddf) {
   const dy = row.dy[i];
   const len = row.dl[i];
 
-  return len > 1e-12 ? Math.abs(ddt * dy - ddf * dx) / len : Math.sqrt(ddt * ddt + ddf * ddf);
+  return len > 1e-12
+    ? Math.abs(ddt * dy - ddf * dx) / len
+    : Math.sqrt(ddt * ddt + ddf * ddf);
 }
 
 export function buildRidge({samples, sampleRate, winLen, fMin, fMax}) {
@@ -289,7 +292,10 @@ export function buildRidge({samples, sampleRate, winLen, fMin, fMax}) {
     // Both ends have to recognise the step as their own direction. Asking only
     // the one end lets a cell claim any neighbour that happens to lie along a
     // direction nothing else agrees with.
-    return offAxis(from, iFrom, ddt, ddf) < LINK_CUT && offAxis(to, iTo, ddt, ddf) < LINK_CUT;
+    return (
+      offAxis(from, iFrom, ddt, ddf) < LINK_CUT &&
+      offAxis(to, iTo, ddt, ddf) < LINK_CUT
+    );
   }
 
   for (let frame = 0; frame < frames; frame++) {
@@ -364,7 +370,9 @@ export function buildRidge({samples, sampleRate, winLen, fMin, fMax}) {
         timeRun[base + b] = cur.ok[b] ? OPEN_T : 0;
       } else {
         const run = timeRun[base - stride * bins + b];
-        timeRun[base + b] = linked(was, b, cur, b) ? Math.min(OPEN_T, run + 1) : 0;
+        timeRun[base + b] = linked(was, b, cur, b)
+          ? Math.min(OPEN_T, run + 1)
+          : 0;
       }
     }
 
@@ -372,7 +380,9 @@ export function buildRidge({samples, sampleRate, winLen, fMin, fMax}) {
     fwdF[bins - 1] = 0;
 
     for (let b = bins - 2; b >= 1; b--) {
-      fwdF[b] = linked(cur, b, cur, b + 1) ? Math.min(OPEN_F, fwdF[b + 1] + 1) : 0;
+      fwdF[b] = linked(cur, b, cur, b + 1)
+        ? Math.min(OPEN_F, fwdF[b + 1] + 1)
+        : 0;
     }
 
     let backF = 0;
@@ -572,15 +582,29 @@ export function blendScales(parts, frames, priors) {
   const share = parts.map(() => new Uint8Array(n));
   const w = new Float64Array(S);
 
+  // How much energy each bucket holds, alongside how it is divided. The shares
+  // alone cannot say whether a scale is worth analysing at a given viewport —
+  // half of nothing is still nothing — so `render.js` weights them by this.
+  // Every scale is a complete account of the sound, so their totals agree to
+  // within the blur and the mean is the honest one to keep.
+  const power = new Float32Array(n);
+
   for (let i = 0; i < n; i++) {
     let total = 0;
+    let sum = 0;
 
     for (let s = 0; s < S; s++) {
       const p = parts[s].sumP[i];
 
-      w[s] = p > 0 ? priors[s] * (parts[s].sumPG[i] / p + FIT_FLOOR) ** FIT_GAMMA : 0;
+      sum += p;
+      w[s] =
+        p > 0
+          ? priors[s] * (parts[s].sumPG[i] / p + FIT_FLOOR) ** FIT_GAMMA
+          : 0;
       total += w[s];
     }
+
+    power[i] = sum / S;
 
     if (total <= 0) {
       continue;
@@ -591,5 +615,5 @@ export function blendScales(parts, frames, priors) {
     }
   }
 
-  return share;
+  return {share, power};
 }

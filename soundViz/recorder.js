@@ -59,9 +59,9 @@ export async function ensureMic() {
   });
 
   if (!audioCtx) audioCtx = new AudioContext();
-  if (audioCtx.state === "suspended") await audioCtx.resume();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
   if (!workletLoaded) {
-    await audioCtx.audioWorklet.addModule("./capture-processor.js");
+    await audioCtx.audioWorklet.addModule('./capture-processor.js');
     workletLoaded = true;
   }
 
@@ -71,8 +71,8 @@ export async function ensureMic() {
   warmupLeft = Math.round(audioCtx.sampleRate * WARMUP_SEC);
 
   source = audioCtx.createMediaStreamSource(stream);
-  node = new AudioWorkletNode(audioCtx, "capture-processor");
-  node.port.onmessage = e => push(e.data);
+  node = new AudioWorkletNode(audioCtx, 'capture-processor');
+  node.port.onmessage = (e) => push(e.data);
   source.connect(node);
   node.connect(audioCtx.destination); // Safari needs a sink; the node emits silence.
 }
@@ -92,7 +92,7 @@ export function releaseMic() {
   node.port.onmessage = null;
   source.disconnect();
   node.disconnect();
-  stream.getTracks().forEach(t => t.stop());
+  stream.getTracks().forEach((t) => t.stop());
   stream = source = node = null;
 }
 

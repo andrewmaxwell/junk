@@ -19,7 +19,10 @@ function clamp(view, limits) {
   let {t0, t1, f0, f1} = view;
 
   const maxSpan = limits.tMax - limits.tMin;
-  let span = Math.min(Math.max(t1 - t0, Math.min(limits.minSpan, maxSpan)), maxSpan);
+  let span = Math.min(
+    Math.max(t1 - t0, Math.min(limits.minSpan, maxSpan)),
+    maxSpan,
+  );
 
   const centre = (t0 + t1) / 2;
   t0 = centre - span / 2;
@@ -38,7 +41,10 @@ function clamp(view, limits) {
   t0 = Math.max(t0, limits.tMin);
 
   const maxRatio = limits.fMax / limits.fMin;
-  let ratio = Math.min(Math.max(f1 / f0, Math.min(limits.minRatio, maxRatio)), maxRatio);
+  let ratio = Math.min(
+    Math.max(f1 / f0, Math.min(limits.minRatio, maxRatio)),
+    maxRatio,
+  );
 
   const mid = Math.sqrt(f0 * f1);
   f0 = mid / Math.sqrt(ratio);
@@ -120,8 +126,16 @@ const DRAG_SLOP = 8;
 // cells without moving any, so it reads as detail arriving rather than as the
 // picture changing.
 export function attachGestures(el, opts) {
-  const {getView, setView, getLimits, onGesture, onSettle, onMultiTouch, canPan, onDragStart} =
-    opts;
+  const {
+    getView,
+    setView,
+    getLimits,
+    onGesture,
+    onSettle,
+    onMultiTouch,
+    canPan,
+    onDragStart,
+  } = opts;
 
   const rect = () => el.getBoundingClientRect();
   const pointers = new Map();
@@ -142,7 +156,7 @@ export function attachGestures(el, opts) {
 
   el.addEventListener(
     'wheel',
-    e => {
+    (e) => {
       e.preventDefault();
 
       const r = rect();
@@ -158,7 +172,15 @@ export function attachGestures(el, opts) {
         // A trackpad pinch arrives as a wheel event with ctrlKey set and much
         // smaller deltas than a mouse wheel's notches.
         const gain = e.ctrlKey ? 0.02 : 0.0022;
-        setView(zoomAt(getView(), u, v, Math.exp(-e.deltaY * unit * gain), getLimits()));
+        setView(
+          zoomAt(
+            getView(),
+            u,
+            v,
+            Math.exp(-e.deltaY * unit * gain),
+            getLimits(),
+          ),
+        );
       }
 
       onGesture();
@@ -167,12 +189,15 @@ export function attachGestures(el, opts) {
     {passive: false},
   );
 
-  el.addEventListener('pointerdown', e => {
+  el.addEventListener('pointerdown', (e) => {
     pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
 
     // Decided here and not revisited: whether this press is allowed to become
     // a pan is a property of the view it started in.
-    drag = pointers.size === 1 && canPan() ? {x: e.clientX, y: e.clientY, moved: false} : null;
+    drag =
+      pointers.size === 1 && canPan()
+        ? {x: e.clientX, y: e.clientY, moved: false}
+        : null;
 
     if (e.pointerType !== 'touch') {
       return;
@@ -194,7 +219,7 @@ export function attachGestures(el, opts) {
     }
   });
 
-  el.addEventListener('pointermove', e => {
+  el.addEventListener('pointermove', (e) => {
     if (!pointers.has(e.pointerId)) {
       return;
     }
@@ -248,7 +273,12 @@ export function attachGestures(el, opts) {
     const u = (cx - r.left) / r.width;
     const v = (cy - r.top) / r.height;
 
-    let view = panBy(getView(), (cx - pinch.cx) / r.width, (cy - pinch.cy) / r.height, getLimits());
+    let view = panBy(
+      getView(),
+      (cx - pinch.cx) / r.width,
+      (cy - pinch.cy) / r.height,
+      getLimits(),
+    );
 
     if (pinch.dist > 0 && dist > 0) {
       view = zoomAt(view, u, v, dist / pinch.dist, getLimits());
@@ -278,7 +308,7 @@ export function attachGestures(el, opts) {
   el.addEventListener('pointerup', lift);
   el.addEventListener('pointercancel', lift);
 
-  el.addEventListener('dblclick', e => {
+  el.addEventListener('dblclick', (e) => {
     e.preventDefault();
     setView(fullView(getLimits()));
     onGesture();
@@ -288,7 +318,7 @@ export function attachGestures(el, opts) {
   // Two-finger tap, the touch equivalent of a double click.
   let lastTap = 0;
 
-  el.addEventListener('pointerup', e => {
+  el.addEventListener('pointerup', (e) => {
     if (e.pointerType !== 'touch') {
       return;
     }

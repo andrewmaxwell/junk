@@ -187,10 +187,19 @@ export function clipFor(rec, view) {
   const to = Math.min(rec.samples.length, t1 + n);
 
   const padded = rec.samples.subarray(from, to);
-  const {samples: filtered, widenedBand} = bandpass(padded, sampleRate, view.f0, view.f1, n);
+  const {samples: filtered, widenedBand} = bandpass(
+    padded,
+    sampleRate,
+    view.f0,
+    view.f1,
+    n,
+  );
 
   const out = filtered.slice(t0 - from, t1 - from);
-  const fade = Math.min(Math.round(sampleRate * EDGE_FADE_SEC), out.length >> 1);
+  const fade = Math.min(
+    Math.round(sampleRate * EDGE_FADE_SEC),
+    out.length >> 1,
+  );
 
   for (let i = 0; i < fade; i++) {
     const g = 0.5 - 0.5 * Math.cos((Math.PI * i) / fade);

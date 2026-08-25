@@ -69,12 +69,12 @@ self.onmessage = ({data}) => {
     // fitnesses are all in; the shares it returns are then copied to every
     // worker along with the maps.
     case 'blend': {
-      const share = blendScales(data.parts, data.frames, data.priors);
+      const {share, power} = blendScales(data.parts, data.frames, data.priors);
 
-      postMessage(
-        {job: data.job, share},
-        share.map(a => a.buffer),
-      );
+      postMessage({job: data.job, share, power}, [
+        ...share.map((a) => a.buffer),
+        power.buffer,
+      ]);
 
       break;
     }
@@ -84,7 +84,11 @@ self.onmessage = ({data}) => {
     case 'maps':
       data.maps.forEach((map, s) => {
         if (map) {
-          ridges[s] = {support: map.support, frames: map.frames, bins: map.bins};
+          ridges[s] = {
+            support: map.support,
+            frames: map.frames,
+            bins: map.bins,
+          };
         }
       });
 
@@ -94,9 +98,10 @@ self.onmessage = ({data}) => {
     case 'cells': {
       const {frame0, frame1, bins, scale} = data;
 
-      // Room for every frame of the region at its widest — one cell per bin.
-      // The tail goes unused wherever a bin fell outside the audible band or
-      // held no energy at all, which is what the region's own `starts` are for.
+      // Room for every frame of the region at its widest — one cell per bin of
+      // the band this pass covers. The tail goes unused wherever a bin fell
+      // outside the audible band or held no energy at all, which is what the
+      // region's own `starts` are for.
       const out = new Float32Array((frame1 - frame0) * bins * STRIDE);
 
       const ridge = ridges[scale];
@@ -111,6 +116,8 @@ self.onmessage = ({data}) => {
         frame0,
         frame1,
         tStart: data.tStart,
+        bin0: data.bin0,
+        bins,
         fMin: data.fMin,
         fMax: data.fMax,
         ridge,

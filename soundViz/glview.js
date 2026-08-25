@@ -403,9 +403,16 @@ function target(gl, w, h, internal, format, type) {
 
   const fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,
+    tex,
+    0,
+  );
 
-  const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  const ok =
+    gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
   return ok ? {tex, fbo, w, h} : null;
@@ -427,7 +434,9 @@ export function createView(canvas) {
   // floats still carry the exponent range this needs; only the mantissa is
   // shorter, and within one band the cells being summed are alike in size.
   const canBlend32 = !!gl.getExtension('EXT_float_blend');
-  const bgFilter = gl.getExtension('OES_texture_float_linear') ? gl.LINEAR : gl.NEAREST;
+  const bgFilter = gl.getExtension('OES_texture_float_linear')
+    ? gl.LINEAR
+    : gl.NEAREST;
 
   const accumProg = program(gl, ACCUM_VS, ACCUM_FS);
   const decimateProg = program(gl, QUAD_VS, DECIMATE_FS);
@@ -436,18 +445,36 @@ export function createView(canvas) {
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.bufferData(
+    gl.ARRAY_BUFFER,
+    new Float32Array([-1, -1, 3, -1, -1, 3]),
+    gl.STATIC_DRAW,
+  );
 
   const cloud = gl.createBuffer();
 
   // (along, across) signs for the two triangles of a stroke.
   const corners = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, corners);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.bufferData(
+    gl.ARRAY_BUFFER,
+    new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+    gl.STATIC_DRAW,
+  );
 
   const lut = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, lut);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, LUT_SIZE, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, buildLut());
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    LUT_SIZE,
+    1,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    buildLut(),
+  );
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -535,8 +562,14 @@ export function createView(canvas) {
     const {starts, regions, hop, winLen, frames, tStart} = sc;
     const reach = winLen / 2 + hop;
 
-    const lo = Math.max(0, Math.min(frames, Math.floor((view.t0 - reach - tStart) / hop)));
-    const hi = Math.max(lo, Math.min(frames, Math.ceil((view.t1 + reach - tStart) / hop)));
+    const lo = Math.max(
+      0,
+      Math.min(frames, Math.floor((view.t0 - reach - tStart) / hop)),
+    );
+    const hi = Math.max(
+      lo,
+      Math.min(frames, Math.ceil((view.t1 + reach - tStart) / hop)),
+    );
 
     for (const r of regions) {
       const a = Math.max(lo, r.f0);
@@ -600,7 +633,10 @@ export function createView(canvas) {
     gl.uniform2f(gl.getUniformLocation(accumProg, 'uT'), view.t0, view.t1);
     gl.uniform2f(gl.getUniformLocation(accumProg, 'uLogF'), l0, l1);
     gl.uniform2f(gl.getUniformLocation(accumProg, 'uSize'), accum.w, accum.h);
-    gl.uniform1f(gl.getUniformLocation(accumProg, 'uMaxHalf'), MAX_HALF_SCREENS * imageHeight);
+    gl.uniform1f(
+      gl.getUniformLocation(accumProg, 'uMaxHalf'),
+      MAX_HALF_SCREENS * imageHeight,
+    );
     gl.uniform1f(gl.getUniformLocation(accumProg, 'uSr'), analysis.sampleRate);
 
     const hopLoc = gl.getUniformLocation(accumProg, 'uHop');
@@ -655,7 +691,11 @@ export function createView(canvas) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, accum.tex);
     gl.uniform1i(gl.getUniformLocation(decimateProg, 'uAccum'), 0);
-    gl.uniform2f(gl.getUniformLocation(decimateProg, 'uInner'), inner[0], inner[1]);
+    gl.uniform2f(
+      gl.getUniformLocation(decimateProg, 'uInner'),
+      inner[0],
+      inner[1],
+    );
     fullScreen(decimateProg);
 
     gl.readPixels(0, 0, PROBE, PROBE, gl.RGBA, gl.FLOAT, probePixels);
@@ -730,7 +770,11 @@ export function createView(canvas) {
       let sum = 0;
       let weight = 0;
 
-      for (let k = Math.max(0, r - radius); k <= Math.min(PROBE - 1, r + radius); k++) {
+      for (
+        let k = Math.max(0, r - radius);
+        k <= Math.min(PROBE - 1, r + radius);
+        k++
+      ) {
         const g = Math.exp(-((k - r) * (k - r)) / sigma2);
         sum += level[k] * g;
         weight += g;
@@ -753,7 +797,17 @@ export function createView(canvas) {
     range = Math.min(CONTRAST_RANGE, Math.max(MIN_RANGE, peak - mid));
 
     gl.bindTexture(gl.TEXTURE_2D, bgTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, PROBE, 1, 0, gl.RED, gl.FLOAT, smoothed);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.R32F,
+      PROBE,
+      1,
+      0,
+      gl.RED,
+      gl.FLOAT,
+      smoothed,
+    );
   }
 
   function present(view, fbo, w, h) {
@@ -774,9 +828,21 @@ export function createView(canvas) {
     gl.bindTexture(gl.TEXTURE_2D, bgTex);
     gl.uniform1i(gl.getUniformLocation(presentProg, 'uBackground'), 2);
 
-    gl.uniform2f(gl.getUniformLocation(presentProg, 'uInner'), inner[0], inner[1]);
-    gl.uniform2f(gl.getUniformLocation(presentProg, 'uLogF'), Math.log(view.f0), Math.log(view.f1));
-    gl.uniform2f(gl.getUniformLocation(presentProg, 'uBgLogF'), bgLogF[0], bgLogF[1]);
+    gl.uniform2f(
+      gl.getUniformLocation(presentProg, 'uInner'),
+      inner[0],
+      inner[1],
+    );
+    gl.uniform2f(
+      gl.getUniformLocation(presentProg, 'uLogF'),
+      Math.log(view.f0),
+      Math.log(view.f1),
+    );
+    gl.uniform2f(
+      gl.getUniformLocation(presentProg, 'uBgLogF'),
+      bgLogF[0],
+      bgLogF[1],
+    );
     gl.uniform1f(gl.getUniformLocation(presentProg, 'uFloorDb'), floorDb);
     gl.uniform1f(gl.getUniformLocation(presentProg, 'uRange'), range);
 
@@ -823,7 +889,13 @@ export function createView(canvas) {
     // One region, at the cell offset it reserved for itself.
     pushAt(at, data, n) {
       gl.bindBuffer(gl.ARRAY_BUFFER, cloud);
-      gl.bufferSubData(gl.ARRAY_BUFFER, at * CELL_FLOATS * 4, data, 0, n * CELL_FLOATS);
+      gl.bufferSubData(
+        gl.ARRAY_BUFFER,
+        at * CELL_FLOATS * 4,
+        data,
+        0,
+        n * CELL_FLOATS,
+      );
     },
 
     end(params) {
@@ -866,7 +938,10 @@ export function createView(canvas) {
       }
 
       const x = Math.min(accum.w - 1, Math.max(0, Math.round(u * accum.w)));
-      const y = Math.min(accum.h - 1, Math.max(0, Math.round((1 - v) * accum.h)));
+      const y = Math.min(
+        accum.h - 1,
+        Math.max(0, Math.round((1 - v) * accum.h)),
+      );
 
       gl.disable(gl.BLEND);
       gl.bindFramebuffer(gl.FRAMEBUFFER, pick.fbo);
@@ -891,11 +966,17 @@ export function createView(canvas) {
 
       // The same background lookup the present pass makes for this pixel, so
       // the number matches the brightness it actually drew at.
-      const s = Math.min(1, Math.max(0, (Math.log(f) - bgLogF[0]) / (bgLogF[1] - bgLogF[0])));
+      const s = Math.min(
+        1,
+        Math.max(0, (Math.log(f) - bgLogF[0]) / (bgLogF[1] - bgLogF[0])),
+      );
       const at = s * (PROBE - 1);
       const i0 = Math.floor(at);
       const i1 = Math.min(PROBE - 1, i0 + 1);
-      const bg = Math.max(smoothed[i0] + (smoothed[i1] - smoothed[i0]) * (at - i0), floorDb);
+      const bg = Math.max(
+        smoothed[i0] + (smoothed[i1] - smoothed[i0]) * (at - i0),
+        floorDb,
+      );
 
       return {aboveBg: 10 * Math.log10(power) - bg, conf, drive};
     },

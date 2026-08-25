@@ -92,6 +92,8 @@ export function analyzeCells({
   frame0 = 0,
   frame1 = frames,
   tStart,
+  bin0,
+  bins,
   fMin,
   fMax,
   ridge,
@@ -137,7 +139,7 @@ export function analyzeCells({
   // picture change colour on zoom.
   const scale = (2 / winSum) ** 2 / (fftSize / winLen);
 
-  const bins = fftSize / 2;
+  const nyq = fftSize / 2;
   const binHz = sampleRate / fftSize;
   const hzPerRad = sampleRate / (2 * Math.PI);
 
@@ -148,6 +150,34 @@ export function analyzeCells({
   const phi = sampleRate / winLen; // frequency scale: one unpadded bin, Hz
   const sigmaNorm = 1 / (2 * COHERENCE_SIGMA * COHERENCE_SIGMA);
   const rCut = 4 * COHERENCE_SIGMA;
+
+  // The band.
+  //
+  // A viewport shows a slice of the spectrum, and at a deep zoom a very thin
+  // one — 2.6 kHz of 24 at 221x. Computing the whole spectrum there spends
+  // 99.8% of the budget on cells nobody can see, which is what used to make the
+  // picture *thin out* as it was zoomed into. `render.js` picks the band; this
+  // emits it.
+  //
+  // Two ranges, not one. Cells are emitted over [eLo, eHi), but the frequency
+  // half of the coherence test asks after the neighbour one unpadded bin away,
+  // so a cell at the edge of the band would be judged by a neighbour that was
+  // never computed. Computing `step` bins beyond each end is the frequency
+  // analogue of the D frames a region computes beyond each of its ends, and it
+  // has the same purpose: a cell is judged on exactly the evidence a
+  // full-spectrum pass would have given it, so a band edge is invisible in the
+  // result. Only the true ends of the spectrum are allowed a missing neighbour.
+  //
+  // Nothing else here is band-dependent. A cell's t, f, power and coherence are
+  // computed from its own bin and its neighbours, so a cell carries the same
+  // numbers whichever band it was emitted in — the same nesting guarantee the
+  // hop and the padding have, and what lets a pass at a new viewport re-emit
+  // what the last one drew rather than restating it.
+  const eLo = Math.max(1, bin0);
+  const eHi = Math.min(nyq, bin0 + bins);
+  const cLo = Math.max(1, eLo - step);
+  const cHi = Math.min(nyq, eHi + step);
+  const width = cHi - cLo;
 
   // The Gaussian, tabulated. It is evaluated once per cell — tens of millions
   // of times a pass — and `Math.exp` costs about five times what a table
@@ -184,17 +214,17 @@ export function analyzeCells({
 
   for (let i = 0; i < R; i++) {
     slot.push({
-      t: new Float32Array(bins),
-      f: new Float32Array(bins),
-      ok: new Uint8Array(bins),
+      t: new Float32Array(width),
+      f: new Float32Array(width),
+      ok: new Uint8Array(width),
     });
   }
 
   for (let i = 0; i < H; i++) {
     heavy.push({
-      run: new Float32Array(bins),
-      rise: new Float32Array(bins),
-      p: new Float32Array(bins),
+      run: new Float32Array(width),
+      rise: new Float32Array(width),
+      p: new Float32Array(width),
     });
   }
 
@@ -232,7 +262,9 @@ export function analyzeCells({
   // direction (dx, dy), all in normalised units. With no usable direction,
   // plain distance: an isolated dot needs a coincident neighbour to score.
   function residual(dx, dy, dlen, ddt, ddf) {
-    return dlen > 1e-12 ? Math.abs(ddt * dy - ddf * dx) / dlen : Math.sqrt(ddt * ddt + ddf * ddf);
+    return dlen > 1e-12
+      ? Math.abs(ddt * dy - ddf * dx) / dlen
+      : Math.sqrt(ddt * ddt + ddf * ddf);
   }
 
   function emit(e, computed) {
@@ -243,19 +275,21 @@ export function analyzeCells({
     const back = e - D >= 0 ? slot[(e - D) % R] : null;
     const fwd = e + D <= computed ? slot[(e + D) % R] : null;
 
-    for (let b = 1; b < bins; b++) {
-      if (!cur.ok[b]) {
+    for (let b = eLo; b < eHi; b++) {
+      const bi = b - cLo;
+
+      if (!cur.ok[bi]) {
         continue;
       }
 
-      const f = cur.f[b];
+      const f = cur.f[bi];
 
       if (f <= fMin || f >= fMax) {
         continue;
       }
 
-      const dx = hot.run[b] / tau;
-      const dy = hot.rise[b] / phi;
+      const dx = hot.run[bi] / tau;
+      const dy = hot.rise[bi] / phi;
 
       // Not `Math.hypot`: it guards against overflow these values cannot
       // reach, and costs twelve times what the square root does. Once per
@@ -270,16 +304,18 @@ export function analyzeCells({
       for (let s = -step; s <= step; s += 2 * step) {
         const nb = b + s;
 
-        if (nb < 1 || nb >= bins || !cur.ok[nb]) {
+        if (nb < cLo || nb >= cHi || !cur.ok[nb - cLo]) {
           continue;
         }
+
+        const ni = nb - cLo;
 
         const r = residual(
           dx,
           dy,
           dlen,
-          (cur.t[nb] - cur.t[b]) / tau,
-          (cur.f[nb] - cur.f[b]) / phi,
+          (cur.t[ni] - cur.t[bi]) / tau,
+          (cur.f[ni] - cur.f[bi]) / phi,
         );
 
         if (r < rB) {
@@ -293,11 +329,17 @@ export function analyzeCells({
       for (let side = 0; side < 2; side++) {
         const nb = side === 0 ? back : fwd;
 
-        if (!nb || !nb.ok[b]) {
+        if (!nb || !nb.ok[bi]) {
           continue;
         }
 
-        const r = residual(dx, dy, dlen, (nb.t[b] - cur.t[b]) / tau, (nb.f[b] - cur.f[b]) / phi);
+        const r = residual(
+          dx,
+          dy,
+          dlen,
+          (nb.t[bi] - cur.t[bi]) / tau,
+          (nb.f[bi] - cur.f[bi]) / phi,
+        );
 
         if (r < rF) {
           rF = r;
@@ -318,16 +360,29 @@ export function analyzeCells({
       }
 
       if (support) {
-        const mf = Math.min(mapFrames - 1, Math.max(0, Math.round(cur.t[b] / REACH)));
+        // Nearest entry, not interpolated, and that was checked rather than
+        // assumed: the map's entries are a screen-scale grid at a deep zoom, so
+        // reading them flat could in principle draw seams. It does not, because
+        // the gate is saturated wherever the energy is. Measured on synthetic
+        // speech with pauses and plosives, the map is 32% intermediate by area
+        // but only **0.03% of drawn power** reads an intermediate entry, and
+        // none at all sits beside a boundary that jumps. The intermediate
+        // entries are all in the silence. Interpolating would be four lookups
+        // and three lerps per cell, tens of millions of times a pass, to move
+        // nothing.
+        const mf = Math.min(
+          mapFrames - 1,
+          Math.max(0, Math.round(cur.t[bi] / REACH)),
+        );
         const mb = Math.min(mapBins - 1, Math.max(1, Math.round(b / pad)));
 
         conf *= support[mf * mapBins + mb] / 255;
       }
 
-      let p = hot.p[b];
+      let p = hot.p[bi];
 
       if (share) {
-        const sf = cur.t[b] / REACH;
+        const sf = cur.t[bi] / REACH;
         const i0 = sf <= 0 ? 0 : Math.min(shareFrames - 1, sf | 0);
         const i1 = Math.min(shareFrames - 1, i0 + 1);
         const ft = Math.min(1, Math.max(0, sf - i0));
@@ -351,10 +406,10 @@ export function analyzeCells({
 
       const at = count * STRIDE;
 
-      out[at] = cur.t[b];
+      out[at] = cur.t[bi];
       out[at + 1] = f;
       out[at + 2] = p;
-      out[at + 3] = Math.atan2(hot.rise[b], hot.run[b]);
+      out[at + 3] = Math.atan2(hot.rise[bi], hot.run[bi]);
       out[at + 4] = conf;
 
       count++;
@@ -399,8 +454,10 @@ export function analyzeCells({
     const cur = slot[frame % R];
     const hot = heavy[frame % H];
 
-    for (let b = 1; b < bins; b++) {
-      cur.ok[b] = 0;
+    for (let b = cLo; b < cHi; b++) {
+      const bi = b - cLo;
+
+      cur.ok[bi] = 0;
 
       const j = fftSize - b;
 
@@ -444,12 +501,12 @@ export function analyzeCells({
       const run = (ti * xr - tr * xi) / power; // Im{X_tw / X}, samples
       const rise = (dRe[b] * xr + dIm[b] * xi) / power; // Re{X_dw / X}, rad/sample
 
-      cur.t[b] = frameCentre + dt;
-      cur.f[b] = b * binHz + df;
-      hot.run[b] = run;
-      hot.rise[b] = rise * hzPerRad;
-      hot.p[b] = power * scale;
-      cur.ok[b] = 1;
+      cur.t[bi] = frameCentre + dt;
+      cur.f[bi] = b * binHz + df;
+      hot.run[bi] = run;
+      hot.rise[bi] = rise * hzPerRad;
+      hot.p[bi] = power * scale;
+      cur.ok[bi] = 1;
     }
 
     const e = frame - D;

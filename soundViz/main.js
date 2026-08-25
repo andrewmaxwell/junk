@@ -1,4 +1,10 @@
-import {ensureMic, beginTake, endTake, isArming, audioContext} from './recorder.js';
+import {
+  ensureMic,
+  beginTake,
+  endTake,
+  isArming,
+  audioContext,
+} from './recorder.js';
 import * as audio from './playback.js';
 import {
   createRenderer,
@@ -90,7 +96,7 @@ const accelerated = createRenderer(canvas);
 // going. The spinner is the only sign that anything is happening at all — it
 // sits next to the readout it is about to refine, and it animates on the
 // compositor so it keeps turning through whatever the main thread is doing.
-setBusyHandler(on => busyEl.classList.toggle('show', on));
+setBusyHandler((on) => busyEl.classList.toggle('show', on));
 
 // The newest analysis in flight, so a save can wait for the cloud to settle
 // rather than exporting one that is about to be replaced.
@@ -189,7 +195,10 @@ function showZoom() {
         : `${(ms / 1000).toFixed(2)} s`;
   const zoom = `${zoomFactor(viewport, limits).toFixed(0)}x`;
 
-  setStatus(`${zoom} · ${span} across · ${band(viewport.f0, viewport.f1)}`, false);
+  setStatus(
+    `${zoom} · ${span} across · ${band(viewport.f0, viewport.f1)}`,
+    false,
+  );
 }
 
 const inspectOpen = () => inspectEl.classList.contains('show');
@@ -229,7 +238,9 @@ function showInspectAt(x, y, title, rows) {
 
   inspectEl.style.left = `${clamp(x, half, window.innerWidth - half)}px`;
   inspectEl.style.top = `${above ? y - 14 : y + 14}px`;
-  inspectEl.style.transform = above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)';
+  inspectEl.style.transform = above
+    ? 'translate(-50%, -100%)'
+    : 'translate(-50%, 0)';
 
   pinEl.style.left = `${x}px`;
   pinEl.style.top = `${y}px`;
@@ -239,7 +250,7 @@ function showInspectAt(x, y, title, rows) {
 // The close button sits over the canvas, so its press must not reach the
 // window handler below — that would hide the readout and then immediately
 // reopen it, since the point tapped is still a point of the picture.
-closeBtn.addEventListener('pointerdown', e => {
+closeBtn.addEventListener('pointerdown', (e) => {
   e.stopPropagation();
   e.preventDefault();
   hideInspect();
@@ -268,7 +279,9 @@ function inspect(x, y) {
   const spanMs = ((viewport.t1 - viewport.t0) / rec.sampleRate) * 1000;
   const dp = clamp(Math.ceil(-Math.log10(spanMs / 4)), 0, 3);
   const timeLabel =
-    ms < 1000 ? `${ms.toFixed(dp)} ms` : `${(ms / 1000).toFixed(Math.max(dp, 2))} s`;
+    ms < 1000
+      ? `${ms.toFixed(dp)} ms`
+      : `${(ms / 1000).toFixed(Math.max(dp, 2))} s`;
 
   const rows = [['time', timeLabel]];
   const sample = sampleCell(u, v, f);
@@ -295,7 +308,10 @@ function inspect(x, y) {
     } else if (mag < 15) {
       rows.push(['sweep', 'steady', true]);
     } else {
-      rows.push(['sweep', `${sample.drive > 0 ? 'rising' : 'falling'} ${mag}%`]);
+      rows.push([
+        'sweep',
+        `${sample.drive > 0 ? 'rising' : 'falling'} ${mag}%`,
+      ]);
     }
   }
 
@@ -370,11 +386,14 @@ function togglePlay() {
   if (!clip) return;
 
   const ms = ((clip.t1 - clip.t0) / clip.sampleRate) * 1000;
-  const span = ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
+  const span =
+    ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
 
   // Say when what you are hearing is wider than what you are looking at,
   // rather than letting the difference pass as if it were not there.
-  const wider = [clip.widenedTime && 'time', clip.widenedBand && 'band'].filter(Boolean);
+  const wider = [clip.widenedTime && 'time', clip.widenedBand && 'band'].filter(
+    Boolean,
+  );
   const caveat = wider.length ? ` · wider in ${wider.join(' and ')}` : '';
 
   setStatus(`▶ ${span} · ${band(clip.f0, clip.f1)}${caveat}`, false);
@@ -455,7 +474,12 @@ function finish(result) {
     if (performance.now() > quietUntil) {
       // Distinguish "you tapped" from "the mic had not finished opening yet",
       // which is only ever the first hold and is not the user's fault.
-      setStatus(sawArming ? 'mic was still opening — hold again' : 'hold a little longer', false);
+      setStatus(
+        sawArming
+          ? 'mic was still opening — hold again'
+          : 'hold a little longer',
+        false,
+      );
 
       // A stray tap should not cost the zoom readout its place.
       nagTimer = setTimeout(showZoom, 1600);
@@ -542,7 +566,7 @@ async function save() {
 
 const gestures = attachGestures(canvas, {
   getView: () => viewport,
-  setView: v => {
+  setView: (v) => {
     viewport = v;
   },
   getLimits: () => limits,
@@ -571,7 +595,7 @@ const gestures = attachGestures(canvas, {
 });
 
 // The whole screen is the button, so this works the same under a finger.
-window.addEventListener('pointerdown', e => {
+window.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   hideInspect();
   held.add(e.pointerId);
@@ -625,7 +649,7 @@ window.addEventListener('blur', () => {
   release();
 });
 
-window.addEventListener('keydown', e => {
+window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape' && rec) {
     // One layer at a time, outermost first: the sound, then the readout, then
     // the zoom. Each of these is something you would want to back out of
@@ -658,7 +682,7 @@ window.addEventListener('keydown', e => {
   e.preventDefault();
   press(e.timeStamp);
 });
-window.addEventListener('keyup', e => {
+window.addEventListener('keyup', (e) => {
   if (e.code !== 'Space') return;
   e.preventDefault();
   release();
@@ -680,7 +704,8 @@ window.addEventListener('resize', () => {
       if (accelerated) {
         clear(canvas);
       } else {
-        hint.textContent = 'This needs WebGL2 — try a current Chrome, Safari or Firefox';
+        hint.textContent =
+          'This needs WebGL2 — try a current Chrome, Safari or Firefox';
       }
       return;
     }
@@ -697,5 +722,6 @@ window.addEventListener('resize', () => {
 if (accelerated) {
   clear(canvas);
 } else {
-  hint.textContent = 'This needs WebGL2 — try a current Chrome, Safari or Firefox';
+  hint.textContent =
+    'This needs WebGL2 — try a current Chrome, Safari or Firefox';
 }
