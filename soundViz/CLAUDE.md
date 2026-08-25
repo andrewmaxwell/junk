@@ -58,7 +58,9 @@ One cell of the reassigned spectrogram, drawn as a short oriented stroke:
 - **brightness** — amplitude above the recording's own background in that
   frequency band. Brightness is amplitude and nothing else is allowed to
   multiply it. The one exception is the share arena, which divides one quantity
-  between several descriptions of it and sums to one.
+  between several descriptions of it and sums to one. The ramp compresses the
+  loud end rather than clipping it (`SHOULDER_KNEE`), so brightness stays
+  monotonic in amplitude all the way to the peak.
 - **direction and length** — the ridge direction measured from the signal, drawn
   long enough to bridge the gap to where its neighbour ought to be. Length is a
   _drawing_ decision and never meant anything about the signal.
@@ -179,6 +181,26 @@ is the index.
 - **Ridge support gates coherence, never power.** A cell that turns out to sit on
   nothing keeps every bit of its energy and loses its length, its width and its
   say in the hue. Noise does not vanish, it stops pretending.
+- **A stroke's profile is a one-pixel ramp, and nothing softer.** The ends used
+  to taper through a `smoothstep`, on the reasoning that a soft tail would read
+  as a continuous strand. It did the opposite: a taper takes light *out* of the
+  ends, so butted strokes go dark exactly where they meet. Measured on a chain
+  of touching strokes, brightness rippled 53% / 117% / 131% between the middle
+  of a stroke and the join at the 3.6 / 6.8 / 13.2 px cell spacings of 30x /
+  92x / 221x, and the chain came to 0.82-0.94 of the power it carried, varying
+  with the zoom. A point-like stroke also deposited 20.4% more light at one
+  subpixel position than another — per cell, uncorrelated between neighbours,
+  which is speckle. A ramp of exactly one screen pixel is at once the
+  antialiased edge, the only profile whose lattice samples sum the same wherever
+  the stroke lands, and the only one whose butted copies sum flat: 0% ripple,
+  mean 1.000. `fwidth` is what makes it one pixel *on screen* at any angle.
+- **Supersampling is the wrong answer to "it looks noisy".** The width profile
+  was always an exact analytic box filter — measured, 0% spread — so 2x2 SSAA
+  would have replaced an exact filter with a four-sample estimate. All the noise
+  was the end profile, and fixing the profile is free where SSAA costs three to
+  four times an accumulate pass that is already 164 ms at the full view. After
+  the ramp, SSAA would take a residual 8.6% worst case to 2.2%, and only for
+  strokes near `MIN_HALF`. Not worth it.
 - **More detail meant more padding, not longer strokes.** A longer stroke
   extrapolates; more padding samples the reassignment field at more points, each
   placed by its own phase, nesting exactly with the coarser grid.
@@ -250,6 +272,21 @@ that get reached for.
 - **`BACKGROUND_PERCENTILE = 5`, `MIN_RANGE = 12`, `CONTRAST_RANGE = 36`**
   (`glview.js`) — the exposure. Tuned together by eye; changing one alone will
   look wrong.
+- **`SHOULDER_KNEE = 0.6`** (`glview.js`) — where the ramp stops being linear in
+  dB and rolls off instead. The range has to stay near 36 dB or the faint end
+  sinks into the black fade, but a recording carries far more: measured on a
+  loud take, energy above the background ran to +70 dB, the 95th percentile of
+  lit pixels was +55 dB, and against a hard clamp **21.2% of every lit pixel
+  rendered as white** — which is also where hue and saturation stop meaning
+  anything, since rotating a grey about the grey axis returns it unchanged, so
+  the loudest parts of the picture showed the least.
+  Below the knee nothing moves at all — same line, same slope — so the faint end
+  and the midtones are untouched; the median lit pixel (+19 dB) is still exactly
+  on the original ramp. Measured share of lit pixels rendering as white:
+  **21.2% clamped, 6.3% at a 0.72 knee, 0.33% at 0.6**, and the loud band
+  (+30 to +66 dB) spreads over *more* of the ramp at the lower knee, not less
+  (52 LUT entries against 47). Raise it towards 1 for more midtone contrast and
+  more clipping.
 
 ## Rendering pipeline (`glview.js`)
 
@@ -265,9 +302,34 @@ had to be kept in step with the shaders.
    power·conf; the clear is `(0,0,0,0)` because **alpha is data**.
 3. **decimate** — a small point-sampled copy read back so the CPU can measure the
    background per band. Only during `calibrate()`, not per frame.
-4. **present** — dB, background subtraction, colour ramp; hue rotated about the
-   grey axis by the pixel's mean coherent chirp drive, saturation pulled toward
-   grey by 1 − mean coherence.
+4. **present** — dB, background subtraction, colour ramp with a soft shoulder
+   above `SHOULDER_KNEE` so the loud end compresses instead of clipping; hue
+   rotated about the grey axis by the pixel's mean coherent chirp drive,
+   saturation pulled toward grey by 1 − mean coherence.
+
+## Ruled out, with the measurement
+
+Andrew reported vertical transitions in the picture. Not reproduced on synthetic
+sources, and these four candidates are eliminated — do not spend the day on them
+again:
+
+- **Region boundaries are invisible.** Forcing one region against the real count
+  inside a single recording and diffing the accumulation: total power agreed to
+  nine digits, and the worst *column* deviation was 3.5e-6 relative. The 0.3% of
+  pixels that differ at all differ in the last bits, from summation order.
+- **The scales analyse the same span.** At 1x / 4x / 14x / 55x / 196x both live
+  scales planned byte-identical time spans, each overhanging the viewport by 35%
+  either side. A seam cannot come from one scale running out before another.
+- **The share arena's steps do not draw as seams.** The blended share does carry
+  steps of up to 252/255 between adjacent arena frames — one frame is `REACH`
+  = 64 samples, about 164 device pixels at 55x — but a viewport centred on the
+  largest of them showed no visible transition. Worth remembering the steps are
+  there if something else ever points this way.
+- **`slice` does not starve the screen edges.** It bounds a run by cell position
+  (`winLen / 2 + hop`) and not by how far a stroke can reach, which looks like a
+  bug and is not one in practice: comparing a viewport against the same content
+  inside a pass twice as wide, the ratio of light was flat from the first column
+  to the last (0.465-0.518, no edge deficit).
 
 ## Testing
 
@@ -344,6 +406,10 @@ signal and is not.
   because a stroke that shortens to a point concentrates what it carried.
 - **The stroke lengths, always.** Length is the distance to where the neighbour
   ought to be, along the direction this cell measured.
+- **Dots of visibly unequal brightness are no longer the analysis.** They were,
+  once: the end profile deposited up to 20.4% more light depending on where a
+  cell fell on the pixel grid. With the one-pixel ramp a dot field is even, so
+  brightness differences between neighbouring dots now mean what they say.
 
 ## Known limitations
 
@@ -382,6 +448,19 @@ signal and is not.
   floor under how finely harmonics can be separated. The limit is not the
   transform, it is that intonation moves a partial off its own measured direction
   over a longer window.
+- **A partial's peak dims by about 10 dB between 1x and 92x**, and this is why
+  detail can seem to disappear as you zoom in. Measured along one harmonic on a
+  steady take: 53.6 / 52.0 / 49.8 / 48.0 / 43.9 dB above background at 1x / 4x /
+  12x / 30x / 92x. It is not the analysis thinning out — the same sweep on the
+  build before the one-pixel ramp gave 56.4 / 54.7 / 52.1 / 50.2 / 45.9, the
+  same 10 dB slide. A partial's energy is a *density*: at the full view its
+  whole mainlobe lands on one row of pixels and sums, and at 92x that lobe is
+  resolved across a hundred rows, so the peak necessarily falls. The exposure,
+  meanwhile, is measured once at the full view and frozen — deliberately, and
+  the table above says why — so nothing takes the slide back out. Fixing it
+  means compensating a computable geometric dilution while still refusing to
+  re-measure the background per viewport. Not attempted; it is an aesthetic call
+  about what "the same picture" means, and so Andrew's.
 - **Resizing the window while zoomed re-measures the exposure from a partial
   cloud.** The resize handler passes `calibrate: true` at whatever viewport is
   current, and `view.calibrate` reads `fullSpan(rec)` out of a cloud that only

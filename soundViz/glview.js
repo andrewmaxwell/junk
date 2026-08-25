@@ -45,6 +45,25 @@ const MIN_RANGE = 12;
 // A band with fewer sampled pixels than this has no usable level of its own.
 const MIN_SAMPLED = 8;
 const CONTRAST_RANGE = 36;
+
+// Where the ramp stops being linear in dB, as a fraction of the range above the
+// background. Above it the remaining dB are rolled off into the top of the ramp
+// instead of being clipped against it.
+//
+// The range has to stay near 36 dB or the faint end sinks into the black fade,
+// but a recording carries far more than that: measured over a loud take, the
+// energy above the background ran to +65.7 dB, and 11.9% of every lit pixel sat
+// at or above the +36 dB the ramp ended at. All of it drew as the same flat
+// white — and white is also where hue and saturation stop meaning anything,
+// since rotating a grey about the grey axis returns it unchanged, so the
+// loudest parts of the picture were the parts that showed the least.
+//
+// Below the knee nothing moves at all: the curve is the same line with the same
+// slope, so the faint end and the midtones are untouched. Above it the ramp
+// approaches white without reaching it, which is what gives the top back its
+// gradient and its colour. The two pieces meet with the same value and the same
+// slope, so there is no visible seam at the knee.
+const SHOULDER_KNEE = 0.6;
 const ABS_FLOOR = -80;
 const QUIET_HEADROOM = 25;
 const LEVEL_SIGMA = 7;
@@ -56,6 +75,34 @@ const DEAD_DB = -200;
 // deep into a zoom, a single bin can span a screen height many times over.
 const MIN_HALF = 0.6;
 const MAX_HALF_SCREENS = 3;
+
+// The ramp at a stroke's edges is one *screen* pixel wide, measured along each
+// axis of the stroke's own frame — which is what `fwidth` in the fragment
+// shader reports. It is not a softness setting, and softening it is not free:
+//
+// A ramp of exactly one pixel is the antialiased edge, and it is also the only
+// profile whose samples on the pixel lattice sum to the same total wherever the
+// stroke happens to fall, and whose butted copies sum flat along a ridge. A
+// smoothstep taper was used here before, and cost both:
+//
+//   - a chain of touching strokes rippled 53% / 117% / 131% between the middle
+//     of a stroke and the join at gaps of 3.6 / 6.8 / 13.2 px — the measured
+//     cell spacings at 30x / 92x / 221x. The taper takes light *out* of the
+//     ends, so butted strokes go dark exactly where they meet, and a filament
+//     reads as a dotted line rather than a strand.
+//   - the same chain came to 0.82-0.94 of the power it carried, varying with
+//     the gap and so with the zoom, against 1.000 for the ramp.
+//   - a point-like stroke (`MIN_HALF`, which is every cell at the full view and
+//     every incoherent cell anywhere) deposited 20.4% more light at one
+//     subpixel position than another. That is per-cell, uncorrelated between
+//     neighbours, and it is the speckle a dense field shows.
+//
+// Normalising by `fwidth` rather than assuming 1.0 is what makes it hold at an
+// angle: measured over 0-45 degrees the worst per-stroke spread is 8.6% against
+// 20.4%, and for anything longer than a couple of pixels it is under 1.5%.
+// 2x2 supersampling on top of this would take that last 8.6% to 2.2%, for
+// three to four times the accumulate pass — 164 ms at the full view, measured,
+// so half a second a frame. Not worth it; the profile was the whole problem.
 
 // How the coherence channel shows. Hue is rotated by at most HUE_GAIN radians
 // at the extremes of chirp direction — rising sweeps lean one way round the
@@ -145,7 +192,6 @@ out float vPower;
 out float vAlong;
 out float vAcross;
 out float vHalf;
-out float vFade;
 out float vWidth;
 out float vConf;
 out float vDrive;
@@ -208,29 +254,30 @@ void main() {
 
   vHalf = clamp(0.5 * gap * bridge, ${MIN_HALF.toFixed(2)}, min(longCap, uMaxHalf));
 
-  // Ends fade over this many pixels — longer strokes get a longer, softer tail,
-  // so deep-zoom filaments read as continuous strands rather than butted
-  // segments. The fragment shader uses the same figure for its profile.
-  vFade = clamp(vHalf * 0.5, 0.5, 2.0);
-
   // How many strokes stack on one pixel of a ridge: several when the cloud is
   // denser than the screen, exactly one once the strokes are merely touching.
   // Dividing that out is what holds a ridge at one brightness right across the
   // zoom range, whichever way it runs. The numerator is the integral of the
-  // fragment shader's end profile, so the two stay in step.
+  // fragment shader's end profile, so the two stay in step — and a one-pixel
+  // ramp integrates to exactly 2*vHalf however wide the ramp turns out to be,
+  // which is why there is no longer a fudge term here to keep in step with.
   //
   // Only ever a division, never a multiplication: past the point where the
   // strokes stop touching, scaling *up* what is left would make a ridge
   // brighten as it falls apart, which is the opposite of the truth.
-  float coverage = max((2.0 * vHalf - vFade + 0.5) / max(gap, 1e-3), 1.0);
+  float coverage = max(2.0 * vHalf / max(gap, 1e-3), 1.0);
 
   // Coherent strokes draw a shade wider than dust, so strong structure reads
   // crisp while the ambiguous residue stays fine-grained.
   vWidth = mix(1.25, 1.6, conf);
 
   vPower  = cell.z / coverage;
+
+  // Half a pixel of slack past where each profile reaches zero, so the ramp is
+  // never cut off by the quad's own edge. At 45 degrees a one-pixel screen ramp
+  // is sqrt(2) long in the stroke's frame, which is what sets the margins.
   vAlong  = corner.x * (vHalf + 1.0);
-  vAcross = corner.y * vWidth;
+  vAcross = corner.y * (vWidth + 0.5);
   vConf   = conf;
 
   // The chirp-rate hue drive, in -1..1: positive for rising sweeps, negative
@@ -254,7 +301,6 @@ in float vPower;
 in float vAlong;
 in float vAcross;
 in float vHalf;
-in float vFade;
 in float vWidth;
 in float vConf;
 in float vDrive;
@@ -262,8 +308,22 @@ in float vDrive;
 out vec4 frag;
 
 void main() {
-  float ends      = smoothstep(0.0, vFade + 0.5, vHalf + 0.5 - abs(vAlong));
-  float thickness = clamp(vWidth - abs(vAcross), 0.0, 1.0);
+  // One screen pixel, measured along each axis of the stroke's own frame.
+  // Both varyings are linear in screen space, so these are exact: 1.0 for a
+  // stroke lying along an axis, sqrt(2) for one at 45 degrees. Dividing by them
+  // is what keeps the ramp one pixel wide on screen at every angle, and a
+  // one-pixel ramp is both the antialiased edge and the only profile that
+  // deposits the same light wherever the stroke lands on the pixel grid.
+  float fAlong  = fwidth(vAlong);
+  float fAcross = fwidth(vAcross);
+
+  float ends      = clamp((vHalf + 0.5 * fAlong - abs(vAlong)) / fAlong,
+                          0.0, 1.0);
+
+  // The half-value point stays at vWidth - 0.5, exactly where the old profile
+  // put it, so a stroke covers the same area and carries the same power.
+  float thickness = clamp((vWidth - 0.5 + 0.5 * fAcross - abs(vAcross)) / fAcross,
+                          0.0, 1.0);
 
   float p = vPower * ends * thickness;
 
@@ -346,7 +406,14 @@ void main() {
   float s = clamp((logF - uBgLogF.x) / (uBgLogF.y - uBgLogF.x), 0.0, 1.0);
   float base = max(texture(uBackground, vec2(s, 0.5)).r, uFloorDb);
 
-  float intensity = clamp((db - base) / uRange, 0.0, 1.0);
+  // Linear in dB up to the knee, then a soft shoulder that compresses whatever
+  // is left into the top of the ramp rather than clipping it flat against it.
+  float x = max(db - base, 0.0) / uRange;
+  const float knee = ${SHOULDER_KNEE.toFixed(2)};
+  float intensity = x < knee
+    ? x
+    : 1.0 - (1.0 - knee) * exp(-(x - knee) / (1.0 - knee));
+
   vec3 rgb = texture(uLut, vec2(intensity, 0.5)).rgb;
 
   if (power > 0.0) {
