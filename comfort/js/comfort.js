@@ -51,11 +51,23 @@ const exposureRelief = (minutes) => (EXPOSURE_REFERENCE_MINUTES / minutes) ** 0.
 
 
 // Wind's cooling is already inside UTCI, so this scores only what UTCI has no
-// opinion about: the mechanical nuisance of walking into it. That starts later
-// than it used to. A 12 mph breeze is not a cost, and charging for it on a hot
-// day had the model calling the same wind a relief and an annoyance at once.
-const WIND_FREE = 15;
-const WIND_TOLERANCE = 25;
+// opinion about: the mechanical nuisance of walking into it.
+//
+// The free ceiling used to be 15 mph, raised there because charging for a 12
+// mph breeze on a hot day had the model calling the same wind a relief and an
+// annoyance at once. The relief is real and it still wins — UTCI takes several
+// degrees off a hot afternoon for a wind this file now charges a couple of
+// points for — but 15 mph was too high a price for avoiding that. Beaufort
+// calls it a *moderate breeze*: loose paper blows about and small branches
+// move. A day like that is not a perfect day, and the score has to be able to
+// say so, or a stiff wind and a still one are the same 100.
+//
+// So the ceiling comes down to the top of Beaufort 2, *light breeze*, and the
+// far anchor stays exactly where it was: 40 mph sustained is still the wind
+// that costs the whole score. Same shape, same endpoint, narrower free zone —
+// the move the comfort band just made.
+const WIND_FREE = 7; // top of Beaufort 2; the most wind a perfect day has
+const WIND_TOTAL = 40; // sustained mph that costs the entire score
 const GUST_WEIGHT = 0.7; // a gust is worse than its speed suggests, but is brief
 
 const RAIN_TRACE = 0.2; // mm/hr; mist you would not turn back for
@@ -65,16 +77,33 @@ const SNOW_SOFTENING = 0.6; // snow is pleasanter to walk in than the same rain
 // UV is not a thermal input — that job belongs to mean radiant temperature now.
 // What is left is sunburn, which is a real reason to put a walk off and a poor
 // reason to call an otherwise perfect 68°F afternoon uncomfortable.
-const UV_FREE = 5;
-const UV_TOLERANCE = 8; // scaled per activity by time outside
+//
+// Read off the WHO's own categories for the same reason the AQI curve is: they
+// are where the advice changes. Free through *low*, because that is the only
+// band where nobody is told to do anything. *Moderate* starts the advice to
+// cover up, and used to be free — which is how UV 5 came to be part of a
+// perfect score.
 const UV_MAX_PENALTY = 35; // a hat and sunscreen cap how bad sun alone can be
+const UV_CURVE = [
+  [2, 0], // top of "low": no advice attached, so no cost
+  [5, 5], // top of "moderate"
+  [7, 14], // top of "high"
+  [10, 30], // top of "very high"
+  [11, UV_MAX_PENALTY], // "extreme"
+];
 
 // The US AQI is a category scale wearing a number's clothing: the step from 90
 // to 110 crosses a health advisory, the step from 20 to 40 crosses nothing.
 // Interpolating between the category edges tracks that; a straight line from
 // 50 did not, and charged 40 points for air the EPA calls acceptable.
+// The back half of "Good" is not free any more, for the same reason the back
+// half of the comfort band is not: AQI 48 is air the EPA is happy with, and it
+// is still not the AQI 12 of a day worth calling perfect. Three points, which
+// is under the notability floor by design — this may nudge a 100 off its perch
+// and it may never be the headline.
 const AQI_CURVE = [
-  [50, 0], // top of "Good"
+  [25, 0], // clean air, and the only air that costs nothing
+  [50, 3], // top of "Good"
   [100, 12], // top of "Moderate"
   [150, 45], // top of "Unhealthy for sensitive groups"
   [200, 85], // top of "Unhealthy"
@@ -102,6 +131,36 @@ const STRESS_CURVE = [
   [2.4, 100],
 ];
 
+// The band is not uniformly neutral, and charging nothing across the whole of
+// it threw away the only humidity signal the model had. A walker's band is 22°F
+// wide and every point in it used to score a flat 100 — so a 71°F morning at a
+// 45°F dew point and the same morning at 67°F, which UTCI puts 8.5°F apart in
+// felt temperature, both printed 100. The dew point tile eight inches from the
+// ring said "Muggy" and the sentence under it said "Just about ideal". That is
+// the contradiction the rain tile used to have with the score, and it has the
+// same answer: the two readouts have to be reading the same number.
+//
+// So only the middle of the band is free. The outer SHOULDER_FRACTION at each
+// end is where the score gets its resolution back, and nothing new is measured
+// to do it — the felt temperature already carries the mugginess, the band was
+// rounding its own interior off to zero.
+const SHOULDER_FRACTION = 0.3; // of the band's width, at each end
+
+// The free core, in °F. Outside this the penalty starts, gently.
+function comfortCore(activity) {
+  const shoulder = (activity.band[1] - activity.band[0]) * SHOULDER_FRACTION;
+  return [activity.band[0] + shoulder, activity.band[1] - shoulder];
+}
+
+// Where stress 1.0 sits, in °F: the named UTCI category each tolerance was
+// chosen to land on. Deriving the curve from *these* rather than from the band
+// edge is what lets the core move without dragging the calibration with it —
+// stress 1.0 is still strong heat stress for a walker at 90°F felt, still
+// moderate cold stress for someone sitting at 31°F, exactly as the comments in
+// ACTIVITIES claim. All that changed is where the ramp starts.
+const heatAnchor = (activity) => activity.band[1] + activity.hotTolerance;
+const coldAnchor = (activity) => activity.band[0] - activity.coldTolerance;
+
 // Not scaled by walk length: rain soaks you in the first ten minutes, wind is a
 // nuisance the whole way regardless, and darkness is a fact rather than a dose.
 const DARKNESS_PENALTY = 14; // visibility and safety, not comfort exactly
@@ -126,7 +185,7 @@ const DRIZZLE_CODES = new Set([51, 53, 55, 56, 57]);
 // the other way round: they will happily read a book at 85°F in shade, and they
 // will be shivering in twenty minutes at 45°F.
 function defineActivity(profile) {
-  return { ...profile, uvTolerance: UV_TOLERANCE * exposureRelief(profile.minutes) };
+  return { ...profile, uvRelief: exposureRelief(profile.minutes) };
 }
 
 export const ACTIVITIES = {
@@ -141,6 +200,13 @@ export const ACTIVITIES = {
   // so each one is set to land on a named category rather than being dialled in
   // by feel. Walking: 72 + 18 = 90°F felt, just inside *strong heat stress*;
   // 50 - 42 = 8°F felt, just inside *strong cold stress*.
+  //
+  // Those two temperatures, and not the band edge or the tolerance separately,
+  // are what the penalty curve is actually pinned to. Only the middle of the
+  // band scores free — see SHOULDER_FRACTION — and the ramp runs from the edge
+  // of that core to the anchor. Writing the tolerances this way keeps the
+  // arithmetic above readable and lets the core move without any of it
+  // changing meaning.
   //
   // Cold gets the wider scale because a walker can outrun cold and cannot
   // outrun heat, and because UTCI counts the heat a clear winter sky pulls out
@@ -212,6 +278,14 @@ const clamp100 = (n) => Math.min(100, Math.max(0, n));
 // Below this a factor isn't worth mentioning as "the" reason for the score.
 const NOTABLE_PENALTY = 8;
 
+// And below this the *whole* stack is small enough that the day may still be
+// called ideal. The two are different questions, and the sentence needs both:
+// a breezy, bright, hazy day can have nothing worth naming on it — no single
+// factor reaching NOTABLE_PENALTY — while plainly not being the day anyone
+// pictures when they say perfect. Without this the copy answered the first
+// question and printed the answer to the second.
+const IDEAL_TOTAL = 4;
+
 // Piecewise-linear lookup over [x, y] breakpoints, flat outside the ends.
 function alongCurve(curve, x) {
   if (x <= curve[0][0]) return curve[0][1];
@@ -241,14 +315,28 @@ export function precipitationRate({ precipitation, interval = 3600 }) {
 export const isRaining = (conditions) => precipitationRate(conditions) > RAIN_TRACE;
 
 const PENALTIES = {
+  // One continuous curve from the edge of the core to the far end of the scale,
+  // rather than a flat band with a ramp bolted to each side. Two things fall
+  // out of measuring stress from the core instead of the band edge: the score
+  // has resolution through the shoulder, where most real weather sits, and the
+  // anchors keep their published meaning, because the denominator still ends on
+  // the same named UTCI category it always did.
+  //
+  // Heat and cold never both fire: SHOULDER_FRACTION is below half, so the core
+  // is non-empty, and anything warm enough to be in the hot shoulder is above
+  // the cold core edge and costs nothing there.
   heat(conditions, activity) {
-    const excess = feltTemperature(conditions, activity) - activity.band[1];
-    return excess <= 0 ? 0 : alongCurve(STRESS_CURVE, excess / activity.hotTolerance);
+    const core = comfortCore(activity)[1];
+    const excess = feltTemperature(conditions, activity) - core;
+    if (excess <= 0) return 0;
+    return alongCurve(STRESS_CURVE, excess / (heatAnchor(activity) - core));
   },
 
   cold(conditions, activity) {
-    const deficit = activity.band[0] - feltTemperature(conditions, activity);
-    return deficit <= 0 ? 0 : alongCurve(STRESS_CURVE, deficit / activity.coldTolerance);
+    const core = comfortCore(activity)[0];
+    const deficit = core - feltTemperature(conditions, activity);
+    if (deficit <= 0) return 0;
+    return alongCurve(STRESS_CURVE, deficit / (core - coldAnchor(activity)));
   },
 
   // The trace subtraction is the difference between "it is raining" and "there
@@ -264,12 +352,14 @@ const PENALTIES = {
   wind({ wind_speed_10m, wind_gusts_10m }) {
     const felt = Math.max(wind_speed_10m, (wind_gusts_10m ?? 0) * GUST_WEIGHT);
     const excess = felt - WIND_FREE;
-    return excess <= 0 ? 0 : clamp100(100 * (excess / WIND_TOLERANCE) ** 2);
+    return excess <= 0 ? 0 : clamp100(100 * (excess / (WIND_TOTAL - WIND_FREE)) ** 2);
   },
 
+  // The dose scaling divides the index rather than widening a tolerance: half
+  // the time outside is half the dose, and the curve is read at the UV that
+  // dose is equivalent to.
   sun({ uv_index }, activity) {
-    const excess = (uv_index ?? 0) - UV_FREE;
-    return excess <= 0 ? 0 : Math.min(UV_MAX_PENALTY, 100 * (excess / activity.uvTolerance) ** 2);
+    return alongCurve(UV_CURVE, (uv_index ?? 0) / activity.uvRelief);
   },
 
   // Omitted rather than assumed when the air-quality request fails.
@@ -375,11 +465,18 @@ export const FACTOR_LABELS = {
   gale: 'Gales',
 };
 
+// The dew point at which the tile stops hedging and says "Muggy" outright. The
+// sentence beside the ring reads the same constant, because the whole failure
+// this fixed was two readouts of the same air disagreeing in plain sight.
+const MUGGY_DEW_POINT = 65;
+
+const isMuggy = (conditions) => (conditions.dew_point_2m ?? 0) >= MUGGY_DEW_POINT;
+
 export function describeHumidity(dewPoint) {
   if (!Number.isFinite(dewPoint)) return '–';
   if (dewPoint < 50) return 'Dry';
   if (dewPoint < 60) return 'Comfortable';
-  if (dewPoint < 65) return 'Slightly muggy';
+  if (dewPoint < MUGGY_DEW_POINT) return 'Slightly muggy';
   if (dewPoint < 70) return 'Muggy';
   return 'Oppressive';
 }
@@ -437,8 +534,12 @@ const LIMITER_PHRASES = {
   ice: () => 'Freezing rain is glazing everything, so stay in',
   gale: () => 'Damaging gusts out there, so leave it for now',
   heat: (c, severe) => {
-    if (!severe) return 'Warm, but manageable at an easy pace';
-    return (c.dew_point_2m ?? 0) >= 65
+    if (!severe) {
+      return isMuggy(c)
+        ? 'Muggy enough that you will finish damp'
+        : 'Warm, but manageable at an easy pace';
+    }
+    return isMuggy(c)
       ? 'Hot and muggy, so keep it short and carry water'
       : 'Hot enough to wear on you, so go early or late';
   },
@@ -479,9 +580,30 @@ export function comfortReason(conditions, limiter, penalties = {}, activity = DE
   // have recommended one branch down.
   if (!limiter) {
     const wet = isRaining(conditions);
-    const lead = wet
-      ? `${describePrecipitation(conditions)} falling, but otherwise ideal ${activity.phrase}`
-      : `Just about ideal ${activity.phrase}`;
+    // Mugginess gets the same treatment one notch down. A dew point the tile
+    // calls "Muggy" costs real score through the band's shoulder, but a few
+    // points is under the notability floor, so the limiter is null and the
+    // sentence used to fall through to "Just about ideal" — over air the card
+    // had just called muggy. Gated on the heat penalty rather than on the dew
+    // point alone, so it can only speak when the score agrees with it: at 71°F
+    // in the shade the same air costs nothing and there is nothing to say.
+    const muggy = !wet && isMuggy(conditions) && (penalties.heat ?? 0) > 0;
+    // Several small things, none of them worth a sentence of its own. Naming
+    // any one of them would be worse than naming none — "Breezy enough to
+    // notice" as the whole story of a 93 blames a 15 mph wind for a day that
+    // is also bright and hazy — so the sentence reports the pile rather than
+    // picking a scapegoat out of it.
+    const unremarkable = Math.hypot(...Object.values(penalties)) >= IDEAL_TOTAL;
+    let lead;
+    if (wet) {
+      lead = `${describePrecipitation(conditions)} falling, but otherwise ideal ${activity.phrase}`;
+    } else if (muggy) {
+      lead = `Muggy, but otherwise fine ${activity.phrase}`;
+    } else if (unremarkable) {
+      lead = `Nothing much against it ${activity.phrase}`;
+    } else {
+      lead = `Just about ideal ${activity.phrase}`;
+    }
     return `${lead}; ${suggestClothing(conditions, activity, wet)}.`;
   }
 

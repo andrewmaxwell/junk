@@ -27,6 +27,9 @@ import { thermalStress } from '../js/thermal.js';
 import { neutral, rowFeeling, hourly } from './helpers.js';
 
 const { walk, sit } = ACTIVITIES;
+// Mirrors NOTABLE_PENALTY in the model: below this a factor is not worth
+// naming as the reason for a score.
+const NOTABLE = 8;
 const scoreOf = (conditions, activity = walk) => scoreComfort(conditions, { activity }).score;
 
 // ---------------------------------------------------------------------------
@@ -114,6 +117,129 @@ test('strong heat stress is never called Good or Great', () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// The second regression of the same shape.
+//
+// 26 Aug 2026, Florissant MO, 6:50 AM: 71 °F air, 67 °F dew point, clear, 4 mph
+// wind, AQI 52. The card scored it 100 — "Just about ideal for a walk" — with
+// its own dew point tile saying "Muggy" two inches away, and the walk was
+// reported as sweaty. UTCI had the mugginess all along: it puts this morning
+// 6.8 °F warmer in felt temperature than the same air at a 45 °F dew point.
+// The band threw it away, because every felt temperature from 50 to 72 °F
+// scored an identical zero and this one landed 1.4 °F inside the edge.
+// ---------------------------------------------------------------------------
+const MUGGY_DAWN = neutral({
+  temperature_2m: 71,
+  dew_point_2m: 67,
+  wind_speed_10m: 4,
+  wind_gusts_10m: 8,
+  cloud_cover: 0,
+  uv_index: 0,
+  us_aqi: 52,
+  weather_code: 0,
+  interval: 900,
+  shortwave_radiation: 40,
+  diffuse_radiation: 30,
+  direct_radiation: 10,
+  direct_normal_irradiance: 60,
+  soil_temperature_0cm: 70,
+});
+
+test('a muggy dawn inside the band is not a perfect score', () => {
+  const felt = feltTemperature(MUGGY_DAWN, walk);
+  assert.equal(thermalStress(felt), null, 'still inside UTCI\'s neutral band');
+  assert.ok(felt < walk.band[1], `felt ${felt}, expected inside the walk band`);
+
+  const { score, penalties } = scoreComfort(MUGGY_DAWN, { activity: walk });
+  assert.ok(penalties.heat > 0, 'the band has to charge for its own shoulder');
+  assert.ok(score < 100, `scored ${score} on air the card calls muggy`);
+  assert.ok(score >= 85, `scored ${score}; this is a good walk, just a damp one`);
+});
+
+test('the same air, dried out, costs nothing thermally', () => {
+  // The control the old model could not tell apart from the case above. If the
+  // gap ever closes, the shoulder has stopped being about mugginess and started
+  // being a tax on every warm morning.
+  const dry = { ...MUGGY_DAWN, dew_point_2m: 45 };
+  assert.equal(scoreComfort(dry, { activity: walk }).penalties.heat, 0);
+
+  // Compared on clean air, so the dew point is the only thing moving. On this
+  // morning's actual AQI of 52 the gap is smaller, but only because a penalty
+  // shared by both sides pulls them together under the root-sum-square — the
+  // thermal signal itself is untouched, which is what the assertion above says.
+  const clean = (row) => scoreOf({ ...row, us_aqi: 15 }, walk);
+  assert.ok(
+    clean(dry) - clean(MUGGY_DAWN) >= 5,
+    'the dew point has to be worth something inside the band',
+  );
+  // And a genuinely perfect morning — dry, clean, calm, no sun to speak of —
+  // is still allowed to be a 100.
+  assert.equal(clean(dry), 100);
+});
+
+test('the score never says ideal over air the tile calls muggy', () => {
+  // The contradiction itself, which is a display bug and not a scoring one: the
+  // penalty is under the notability floor, so there is no limiter and the
+  // sentence used to fall through to "Just about ideal".
+  const { limiter, penalties } = scoreComfort(MUGGY_DAWN, { activity: walk });
+  assert.equal(limiter, null, 'fixture drifted; this is the no-limiter path');
+  assert.equal(describeHumidity(MUGGY_DAWN.dew_point_2m), 'Muggy');
+
+  const reason = comfortReason(MUGGY_DAWN, limiter, penalties, walk);
+  assert.match(reason, /muggy/i, reason);
+  assert.doesNotMatch(reason, /ideal/i, reason);
+});
+
+test('sitting in the shade is not told it is muggy when it costs nothing', () => {
+  // The mugginess clause is gated on the heat penalty, so it can only speak
+  // when the score is already agreeing with it. Sitting has a higher band and
+  // this air is well inside its core.
+  const { limiter, penalties } = scoreComfort(MUGGY_DAWN, { activity: sit });
+  assert.equal(penalties.heat, 0, 'fixture drifted; this should be free for sitting');
+  assert.match(comfortReason(MUGGY_DAWN, limiter, penalties, sit), /ideal/i);
+});
+
+test('the band has a free core and the shoulder only grows outward', () => {
+  for (const activity of [walk, sit]) {
+    const [lo, hi] = activity.band;
+    const mid = (lo + hi) / 2;
+    assert.equal(scoreComfort(rowFeeling(mid, activity), { activity }).penalties.heat, 0);
+    assert.equal(scoreComfort(rowFeeling(mid, activity), { activity }).penalties.cold, 0);
+
+    // Monotone from the middle of the band out to each edge, with the edge
+    // itself costing something — that is the whole point of the shoulder.
+    let previous = -1;
+    for (let felt = mid; felt <= hi; felt += 0.5) {
+      const heat = scoreComfort(rowFeeling(felt, activity), { activity }).penalties.heat;
+      assert.ok(heat >= previous, `${activity.key} heat fell at felt ${felt} °F`);
+      previous = heat;
+    }
+    assert.ok(previous > 0, `${activity.key} band edge is still free`);
+  }
+});
+
+test('the stress anchors survived moving the ramp inward', () => {
+  // The tolerances are documented as landing stress 1.0 on a named UTCI
+  // category. Measuring the ramp from the core rather than the band edge was
+  // only safe because it kept those two temperatures fixed, so this checks the
+  // published claim and not the arithmetic that implements it.
+  for (const [activity, felt, stress] of [
+    [walk, walk.band[1] + walk.hotTolerance, 'strong heat stress'],
+    [walk, walk.band[0] - walk.coldTolerance, 'strong cold stress'],
+    [sit, sit.band[1] + sit.hotTolerance, 'very strong heat stress'],
+    [sit, sit.band[0] - sit.coldTolerance, 'moderate cold stress'],
+  ]) {
+    const row = rowFeeling(felt, activity);
+    assert.equal(thermalStress(feltTemperature(row, activity)), stress, 'fixture drifted');
+    const { penalties } = scoreComfort(row, { activity });
+    const thermal = Math.max(penalties.heat, penalties.cold);
+    assert.ok(
+      Math.abs(thermal - 50) < 3,
+      `${activity.key} at ${stress} cost ${thermal}, not the documented half`,
+    );
+  }
+});
+
 test('the neutral band is quiet', () => {
   // UTCI reports no thermal stress from 48.2 to 78.8 °F, and a walk in the
   // middle of that has nothing wrong with it.
@@ -173,9 +299,25 @@ test('each tolerance lands on a named UTCI stress category', () => {
 });
 
 test('exposure length still scales UV, which is a genuine dose', () => {
-  assert.ok(walk.uvTolerance > sit.uvTolerance, 'a shorter outing burns less');
-  assert.ok(Number.isFinite(walk.uvTolerance));
+  assert.ok(walk.uvRelief > sit.uvRelief, 'a shorter outing burns less');
+  assert.ok(Number.isFinite(walk.uvRelief));
+  // And it has to actually reach the score: the same sun costs a 30-minute walk
+  // less than it would an hour of it.
+  const base = rowFeeling(65, walk);
+  const sun = (activity) => scoreComfort({ ...base, uv_index: 8 }, { activity }).penalties.sun;
+  assert.ok(sun(walk) < alongUvForAnHour(8), `${sun(walk)}`);
 });
+
+// The curve read at face value, which is what an hour outside would cost.
+const alongUvForAnHour = (uv) => {
+  const curve = [[2, 0], [5, 5], [7, 14], [10, 30], [11, 35]];
+  for (let i = 1; i < curve.length; i++) {
+    const [x0, y0] = curve[i - 1];
+    const [x1, y1] = curve[i];
+    if (uv <= x1) return y0 + ((y1 - y0) * (uv - x0)) / (x1 - x0);
+  }
+  return curve.at(-1)[1];
+};
 
 test('sitting in the shade skips UV and darkness', () => {
   const bright = neutral({ uv_index: 11, is_day: 0 });
@@ -269,16 +411,18 @@ test('snow is gentler than the same rate of rain', () => {
   assert.ok(snow < rain, `${snow} vs ${rain}`);
 });
 
-test('wind is free until it is mechanically annoying', () => {
+test('wind is free only up to a light breeze', () => {
   const base = rowFeeling(65, walk);
   const windPenalty = (over) =>
     scoreComfort({ ...base, ...over }, { activity: walk }).penalties.wind;
-  assert.equal(
-    windPenalty({ wind_speed_10m: 12, wind_gusts_10m: 12 }),
-    0,
-    'a breeze is not a cost',
-  );
-  assert.equal(windPenalty({ wind_speed_10m: 15, wind_gusts_10m: 15 }), 0, 'exactly at the edge');
+  assert.equal(windPenalty({ wind_speed_10m: 7, wind_gusts_10m: 7 }), 0, 'exactly at the edge');
+  assert.equal(windPenalty({ wind_speed_10m: 4, wind_gusts_10m: 6 }), 0, 'a light breeze is free');
+  // A gentle breeze costs something, but not enough to be worth a sentence —
+  // it may never become the stated reason for a score.
+  const gentle = windPenalty({ wind_speed_10m: 12, wind_gusts_10m: 12 });
+  assert.ok(gentle > 0 && gentle < 8, `a 12 mph breeze cost ${gentle}`);
+  // The far anchor did not move when the near one did.
+  assert.ok(Math.abs(windPenalty({ wind_speed_10m: 40, wind_gusts_10m: 40 }) - 100) < 0.01);
   assert.ok(windPenalty({ wind_speed_10m: 30, wind_gusts_10m: 30 }) > 20);
   // A gust counts for less than its speed because it is brief.
   assert.ok(
@@ -290,8 +434,10 @@ test('wind is free until it is mechanically annoying', () => {
 test('air quality follows the EPA category edges, not a straight line', () => {
   const base = rowFeeling(65, walk);
   const air = (us_aqi) => scoreComfort({ ...base, us_aqi }, { activity: walk }).penalties.air;
-  assert.equal(air(50), 0, 'the top of "Good" is free');
-  assert.equal(air(20), 0);
+  assert.equal(air(20), 0, 'genuinely clean air is free');
+  // The top of "Good" is not free any more, but it is under the notability
+  // floor, so it can nudge a 100 and can never be the headline.
+  assert.ok(air(50) > 0 && air(50) < NOTABLE, `the top of "Good" cost ${air(50)}`);
   assert.ok(Math.abs(air(100) - 12) < 0.01, 'top of "Moderate"');
   assert.ok(Math.abs(air(150) - 45) < 0.01, 'top of "Unhealthy for sensitive groups"');
   assert.ok(air(57) < 5, `AQI 57 is acceptable air and cost ${air(57)}`);
@@ -302,11 +448,66 @@ test('air quality follows the EPA category edges, not a straight line', () => {
 test('UV is capped, because a hat exists', () => {
   const base = rowFeeling(65, walk);
   const sun = (uv_index) => scoreComfort({ ...base, uv_index }, { activity: walk }).penalties.sun;
-  assert.equal(sun(3), 0);
-  assert.equal(sun(5), 0);
+  assert.equal(sun(0), 0);
+  assert.equal(sun(2), 0, 'the top of "low" is the last free UV');
+  // "Moderate" is where the advice to cover up starts, so it is where the cost
+  // starts — gently, and never as the stated reason for the score.
+  assert.ok(sun(5) > 0 && sun(5) < NOTABLE, `UV 5 cost ${sun(5)}`);
   assert.ok(sun(11) > 0);
   assert.ok(sun(20) <= 35, `sunburn alone must not dominate: ${sun(20)}`);
   assert.equal(sun(20), sun(50), 'capped');
+});
+
+// ---------------------------------------------------------------------------
+// What 100 is allowed to mean.
+//
+// Every factor used to have a hard threshold below which it cost exactly
+// nothing, and each threshold was set where the factor starts to *bother* you
+// rather than where it stops being *perfect*. Root-sum-square then combined
+// them, and the RSS of four zeros is zero — so a day with a 15 mph wind
+// gusting to 21, UV 5, AQI 50 and a drizzle scored 100, and the card called it
+// "Just about ideal for a walk".
+// ---------------------------------------------------------------------------
+test('a pile of small annoyances is not a perfect day', () => {
+  // Felt temperature pinned to the middle of the core throughout, so this is
+  // only ever measuring the non-thermal factors.
+  const perfect = rowFeeling(61, walk, {
+    wind_speed_10m: 4,
+    wind_gusts_10m: 6,
+    uv_index: 1,
+    us_aqi: 15,
+    precipitation: 0,
+  });
+  assert.equal(scoreOf(perfect, walk), 100, 'a genuinely perfect day is still a 100');
+
+  const annoying = { ...perfect, wind_speed_10m: 15, wind_gusts_10m: 21, uv_index: 5, us_aqi: 50 };
+  const { score, limiter } = scoreComfort(annoying, { activity: walk });
+  assert.ok(score < 95, `a breezy, bright, hazy day scored ${score}`);
+  // Every one of them is still individually minor: none may be promoted to the
+  // stated reason for the score, or the card starts blaming a 15 mph wind.
+  assert.equal(limiter, null, `${limiter} was named as the reason`);
+
+  // But the sentence may not call it ideal either, which is the half of this
+  // the limiter cannot answer.
+  const reason = comfortReason(annoying, limiter, scoreComfort(annoying, { activity: walk }).penalties, walk);
+  assert.doesNotMatch(reason, /ideal/i, reason);
+  assert.match(comfortReason(perfect, null, scoreComfort(perfect, { activity: walk }).penalties, walk), /ideal/i);
+});
+
+test('a light breeze on clean air under a low sun is the last free day', () => {
+  // The boundary of "perfect", spelled out so it cannot drift silently.
+  const free = rowFeeling(61, walk, {
+    wind_speed_10m: 7,
+    wind_gusts_10m: 10,
+    uv_index: 2,
+    us_aqi: 25,
+    precipitation: 0,
+  });
+  const { penalties } = scoreComfort(free, { activity: walk });
+  for (const [factor, penalty] of Object.entries(penalties)) {
+    assert.equal(penalty, 0, `${factor} charged ${penalty} on a perfect day`);
+  }
+  assert.equal(scoreOf(free, walk), 100);
 });
 
 test('darkness is a flat cost, not a dose', () => {
