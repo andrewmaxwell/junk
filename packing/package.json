@@ -1,0 +1,11 @@
+{
+  "name": "packing-explorer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test solver.test.mjs worker.test.mjs",
+    "benchmark": "node benchmark.mjs",
+    "benchmark:time": "node benchmark-time.mjs"
+  },
+  "engines": { "node": ">=22" }
+}

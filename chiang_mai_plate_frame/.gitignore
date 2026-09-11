@@ -1,0 +1,5 @@
+.venv/
+stl/
+__pycache__/
+.DS_Store
+result.json

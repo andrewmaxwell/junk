@@ -64,6 +64,40 @@ const CONTRAST_RANGE = 36;
 // gradient and its colour. The two pieces meet with the same value and the same
 // slope, so there is no visible seam at the knee.
 const SHOULDER_KNEE = 0.6;
+
+// Geometric dilution, and the compensation for it.
+//
+// A partial's energy is a *density*, so its peak brightness falls as the
+// picture is zoomed into: at the full view its whole main lobe lands on one row
+// of pixels and sums, and at 92x that lobe is resolved across a hundred rows.
+// The exposure is measured once at the full view and then frozen — deliberately,
+// and `CLAUDE.md` says why — so nothing used to take the slide back out, and
+// this is why detail could seem to *disappear* as you zoomed in.
+//
+// The slide is a clean power law in the frequency magnification, and it was
+// measured twice on different sources before being believed:
+//
+//   9 points to 68x, harmonic stack   peak proportional to zoomF^-0.443, R2 0.936
+//   5 points to 92x, the older take   peak proportional to zoomF^-0.482, R2 0.950
+//
+// Both land on a half, so the compensation is a square root and not a fitted
+// decimal: **a partial's peak dims as the square root of the frequency zoom.**
+// Residuals against a clean 0.5 are inside 1.3 dB everywhere over 1-68x, which
+// is well under what the ramp can express.
+//
+// What this is not: it is not the background being re-measured. `uLift` is a
+// function of the viewport alone, computed against the span the background was
+// measured over, so the exposure stays a property of the recording exactly as
+// before and the full view is untouched (zoomF = 1, lift = 0 dB).
+//
+// It lifts noise along with signal, which is the honest cost — but measured, it
+// does not wash the picture out, because the dust dilutes *faster* than the
+// ridges do. Over the same sweep the peak slid 8.7 dB while the median of the
+// whole picture slid 14.7 dB, so restoring the peak still leaves the floor 6 dB
+// below where it sat at the full view. The peak-to-median gap widens with zoom
+// on its own, 33.3 dB at 1x against 39.4 dB at 68x; this only puts the absolute
+// level back.
+const DILUTION_GAIN = 0.5;
 const ABS_FLOOR = -80;
 const QUIET_HEADROOM = 25;
 const LEVEL_SIGMA = 7;
@@ -383,6 +417,7 @@ uniform vec2  uLogF;      // viewport log-frequency span
 uniform vec2  uBgLogF;    // span the background was measured over
 uniform float uFloorDb;
 uniform float uRange;
+uniform float uLift;      // dB, undoing this viewport's geometric dilution
 
 in vec2 uv;
 out vec4 frag;
@@ -408,7 +443,7 @@ void main() {
 
   // Linear in dB up to the knee, then a soft shoulder that compresses whatever
   // is left into the top of the ramp rather than clipping it flat against it.
-  float x = max(db - base, 0.0) / uRange;
+  float x = max(db + uLift - base, 0.0) / uRange;
   const float knee = ${SHOULDER_KNEE.toFixed(2)};
   float intensity = x < knee
     ? x
@@ -877,6 +912,16 @@ export function createView(canvas) {
     );
   }
 
+  // How far this viewport has diluted the picture, in dB, against the view the
+  // background was measured over. Zero at the full view, and never negative:
+  // there is nothing above the calibration span to zoom out to.
+  function liftFor(view) {
+    const span = Math.log(view.f1) - Math.log(view.f0);
+    const zoomF = span > 0 ? (bgLogF[1] - bgLogF[0]) / span : 1;
+
+    return zoomF > 1 ? DILUTION_GAIN * 10 * Math.log10(zoomF) : 0;
+  }
+
   function present(view, fbo, w, h) {
     gl.disable(gl.BLEND);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
@@ -912,6 +957,7 @@ export function createView(canvas) {
     );
     gl.uniform1f(gl.getUniformLocation(presentProg, 'uFloorDb'), floorDb);
     gl.uniform1f(gl.getUniformLocation(presentProg, 'uRange'), range);
+    gl.uniform1f(gl.getUniformLocation(presentProg, 'uLift'), liftFor(view));
 
     fullScreen(presentProg);
   }
@@ -1045,7 +1091,15 @@ export function createView(canvas) {
         floorDb,
       );
 
-      return {aboveBg: 10 * Math.log10(power) - bg, conf, drive};
+      // Plus this viewport's dilution lift, for the same reason the background
+      // lookup above is shared with the present pass: the number has to be the
+      // one the brightness on screen was drawn from.
+      return {
+        aboveBg:
+          10 * Math.log10(power) - bg + (accumFor ? liftFor(accumFor) : 0),
+        conf,
+        drive,
+      };
     },
 
     // One tile of a larger image, returned as RGBA rows top-first. Strokes are

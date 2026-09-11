@@ -553,11 +553,16 @@ function bandFor(vp, sampleRate, winLen, fMin, pad) {
 // Zooming multiplies both gaps by the same factor, so the padding that balances
 // them is the same at every zoom — only the hop moves, and only by halving.
 //
-// `budget` is this scale's share of the cells. Each scale plans its own grid
-// against its own share, independently: the scales differ in what padding
-// balances them, and a short window needs more of it to reach the same bin
-// spacing, so one grid could not have served all three.
-function plan(rec, vp, w, h, sc, cells, cost) {
+// `cells` and `cost` are the allowance this scale is planning against. Each
+// scale plans its own grid: the scales differ in what padding balances them,
+// and a short window needs more of it to reach the same bin spacing, so one
+// grid could not have served all three.
+//
+// Every feasible grid is returned rather than only the best one, coarsest
+// padding first. `plan()` takes the best; `allocate()` wants the whole list,
+// because the budget a scale can be *given* is not known until every scale has
+// said what it would do with one.
+function grids(rec, vp, w, h, sc, cells, cost) {
   const {samples, sampleRate} = rec;
   const n = samples.length;
   const {winLen, fMin} = sc;
@@ -573,7 +578,7 @@ function plan(rec, vp, w, h, sc, cells, cost) {
     2 ** Math.round(Math.log2(TARGET_GAP / pxPerSample)),
   );
 
-  let best = null;
+  const out = [];
 
   for (let pad = 1; winLen * pad <= MAX_FFT; pad *= 2) {
     const fftSize = winLen * pad;
@@ -635,28 +640,153 @@ function plan(rec, vp, w, h, sc, cells, cost) {
     // throws away padding the budget had already agreed to pay for. At the 221x
     // view that was the difference between `fftSize` 131072 and 262144: half
     // the frequency sampling, for nothing.
-    const better =
-      !best ||
-      worst < best.worst - 1e-9 ||
-      (worst < best.worst + 1e-9 && g.f < best.gap.f);
+    out.push({
+      pad,
+      fftSize,
+      bin0,
+      bins,
+      ring,
+      hop,
+      frames,
+      start,
+      worst,
+      gap: g,
 
-    if (better) {
-      best = {
-        pad,
-        fftSize,
-        bin0,
-        bins,
-        ring,
-        hop,
-        frames,
-        start,
-        worst,
-        gap: g,
-      };
+      // What this grid would spend of each budget, in the same currency the
+      // allowance above is in. `allocate()` adds these up across the scales;
+      // `room` has already checked each against the allowance on its own.
+      cost: frames * per,
+      cells: frames * bins,
+    });
+  }
+
+  return out;
+}
+
+// Is `a` a better grid than `b`? Ties go to the finer frequency sampling, for
+// the reason spelled out above: once the hop is at its one-sample floor every
+// padding above the crossover scores the same on `worst`, and a strict `<`
+// would keep the coarsest of them.
+function finer(a, b) {
+  return (
+    !b ||
+    a.worst < b.worst - 1e-9 ||
+    (a.worst < b.worst + 1e-9 && a.gap.f < b.gap.f)
+  );
+}
+
+function plan(rec, vp, w, h, sc, cells, cost) {
+  let best = null;
+
+  for (const g of grids(rec, vp, w, h, sc, cells, cost)) {
+    if (finer(g, best)) {
+      best = g;
     }
   }
 
   return best;
+}
+
+// Dealing the budget out between the scales.
+//
+// Each scale gets a fixed share of the budget to plan against — `SCALE_WEIGHTS`
+// — and that share is where this starts. But padding is quantised to powers of
+// two, so a scale takes the largest `fftSize` its share will carry and then
+// *strands the rest*: the next step up costs twice as much and does not fit.
+// Measured on a 1.5 s take at w = 3800, the whole pass came to 51M of the 84M
+// `MAX_COST` at 30x, 64M at 92x and 53M at 221x — while some other scale sat
+// one step short of a padding it could plainly have been given.
+//
+// So: plan every scale against its own share first, which makes today's
+// allocation the floor and nothing can come out coarser than it does now. Then
+// spend whatever the pass has left over, one step at a time, on **the scale
+// whose grid is currently the coarsest** — the picture is only as fine as its
+// worst scale, and that is the same score `plan()` already ranks grids by.
+// Every offer is checked against the budget of the *pass*, not of a scale, so
+// the totals hold exactly as before.
+//
+// A scale's offers are enumerated against the whole budget rather than its
+// share, because a larger allowance can buy it a finer hop as well as more
+// padding — `room` bounds the frames, and frames are what the hop spends.
+//
+// The order is deterministic given the viewport and the live set, so two passes
+// at the same view allocate identically. It can still shift when the live set
+// changes under `SCALE_FLOOR`, since the shares are renormalised — but that was
+// already true of the fixed split this starts from, and it only ever happens
+// when a scale has stopped drawing anything.
+function allocate(rec, vp, w, h, use) {
+  const weight = use.reduce((t, sc) => t + sc.weight, 0);
+
+  const active = [];
+
+  for (const sc of use) {
+    const grid = plan(
+      rec,
+      vp,
+      w,
+      h,
+      sc,
+      (MAX_CELLS * sc.weight) / weight,
+      (MAX_COST * sc.weight) / weight,
+    );
+
+    if (grid) {
+      active.push({...sc, grid});
+    }
+  }
+
+  if (!active.length) {
+    return active;
+  }
+
+  const offers = active.map((a) =>
+    grids(rec, vp, w, h, a, MAX_CELLS, MAX_COST),
+  );
+
+  let cost = active.reduce((t, a) => t + a.grid.cost, 0);
+  let cells = active.reduce((t, a) => t + a.grid.cells, 0);
+
+  for (;;) {
+    let at = -1;
+    let take = null;
+
+    for (let i = 0; i < active.length; i++) {
+      const now = active[i].grid;
+
+      // Only the coarsest scale is worth spending on, and only if it has
+      // somewhere to go. A scale with no affordable offer is passed over
+      // rather than blocking the ones behind it.
+      if (at >= 0 && now.worst <= active[at].grid.worst + 1e-9) {
+        continue;
+      }
+
+      let want = null;
+
+      for (const g of offers[i]) {
+        if (
+          finer(g, now) &&
+          cost - now.cost + g.cost <= MAX_COST &&
+          cells - now.cells + g.cells <= MAX_CELLS &&
+          finer(g, want)
+        ) {
+          want = g;
+        }
+      }
+
+      if (want) {
+        at = i;
+        take = want;
+      }
+    }
+
+    if (at < 0) {
+      return active;
+    }
+
+    cost += take.cost - active[at].grid.cost;
+    cells += take.cells - active[at].grid.cells;
+    active[at] = {...active[at], grid: take};
+  }
 }
 
 // How many regions a pass is cut into.
@@ -767,25 +897,8 @@ export async function analyze(canvas, rec, viewport, calibrate) {
     : inBand;
 
   const use = live.length ? live : [all[all.length - 1]];
-  const weight = use.reduce((t, sc) => t + sc.weight, 0);
 
-  const active = [];
-
-  for (const sc of use) {
-    const grid = plan(
-      rec,
-      viewport,
-      w,
-      h,
-      sc,
-      (MAX_CELLS * sc.weight) / weight,
-      (MAX_COST * sc.weight) / weight,
-    );
-
-    if (grid) {
-      active.push({...sc, grid});
-    }
-  }
+  const active = allocate(rec, viewport, w, h, use);
 
   if (!active.length) {
     return null;

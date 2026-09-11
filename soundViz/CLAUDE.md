@@ -101,6 +101,47 @@ on a grid of absolute instant against `sqrt(f)`. Each window is a complete
 account of the sound, so drawing all three at full power would treble the
 brightness. The shares sum to one, so the total is untouched.
 
+## How the budget is dealt out
+
+`SCALE_WEIGHTS` gives each scale a fixed share of `MAX_COST` and `MAX_CELLS` to
+plan against, and that share is where `allocate()` starts — so today's grids are
+the floor and nothing can come out coarser than it used to. But padding and hop
+are both quantised to powers of two, so a scale takes the finest grid its share
+will carry and then **strands the rest**: the next step costs twice as much and
+does not fit. Measured on a 1.5 s take at w = 3800, the whole pass came to 51M
+of the 84M at 30x, 64M at 92x and 53M at 221x, while some other scale sat one
+step short of a grid it could plainly have been given.
+
+So the leftover is spent, one step at a time, on **whichever scale's grid is
+currently the coarsest** — the picture is only as fine as its worst scale, and
+`worst` is the score `plan()` already ranks by. Every offer is checked against
+the budget of the *pass*, so the totals hold exactly as before. A scale's offers
+are enumerated against the whole budget rather than its share, because a larger
+allowance buys a finer *hop* as well as more padding — and in practice the hop
+is what it usually buys.
+
+Measured in the browser, same stationary source, two runs each:
+
+| view | what changed         | lit          | mean luma      |
+| ---- | -------------------- | ------------ | -------------- |
+| 1x   | win 256 hop 32 -> 16 | 42.3 -> 42.6 | 116.8 -> 116.6 |
+| 8x   | nothing              | 27.5 -> 27.8 | 116.1 -> 117.3 |
+| 68x  | win 2048 hop 4 -> 2  | 18.7 -> 19.1 | 156.6 -> 157.0 |
+| 333x | win 2048 hop 2 -> 1  | 0.24 -> 0.95 | 62.7 -> 76.7   |
+
+The deep zoom is where it tells: four times the lit pixels *and* 14 more luma on
+each, which is the one direction that is unambiguous — more of the picture drawn
+and what is drawn brighter. It costs about 11% on the first analysis (settled
+3.2-3.4 s against 3.7 s on a 1.35 s take) and takes the full view from 36.9M
+cells to 46.1M, which is 922 MB of the 960 MB `MAX_CELLS` allows.
+
+Deliberately **not** weighted by the arena's shares. The shares are already
+within a couple of per cent of `SCALE_WEIGHTS` where it matters, and making the
+allocation depend on content is the re-weighting `SCALE_FLOOR` refuses to do.
+The order is deterministic given the viewport and the live set; it can still
+shift when `SCALE_FLOOR` changes the live set, but that was already true of the
+fixed split, and only happens when a scale has stopped drawing anything.
+
 ## How zooming works
 
 There is no master image. The **cloud of cells is the master** — resolution
@@ -235,10 +276,12 @@ that get reached for.
   `XFM_COST` times the transforms. Sized so the full view plans as it did when
   cells were the only budget. **This is the knob to raise**, not `MAX_CELLS`;
   168e6 buys a visibly finer 30x and 92x for about twice the wait, and past
-  240e6 nothing at depth improves because the hop is at its floor.
+  240e6 nothing at depth improves because the hop is at its floor. It is a
+  budget for the _pass_, not for a scale — see `allocate()`.
 - **`MAX_CELLS = 48e6`** (`render.js`) — the _memory_ budget, 960 MB of GPU
   buffer at 20 bytes a cell. Binds at the full view and essentially nowhere else
-  now that a pass emits a band.
+  now that a pass emits a band: measured past 30x it runs at 3-7% of its own
+  ceiling, so at depth memory is free and time is not.
 - **`FREQ_MARGIN = 0.35`, `LOBE_BINS = 2`** (`render.js`) — how far past the
   viewport a pass analyses in frequency. The first is the analogue of
   `ANALYSIS_MARGIN`, a share of the visible _log_ span. The second covers
@@ -272,6 +315,12 @@ that get reached for.
 - **`BACKGROUND_PERCENTILE = 5`, `MIN_RANGE = 12`, `CONTRAST_RANGE = 36`**
   (`glview.js`) — the exposure. Tuned together by eye; changing one alone will
   look wrong.
+- **`DILUTION_GAIN = 0.5`** (`glview.js`) — how much of the geometric dilution
+  a zoomed viewport gets back. A partial's peak dims as the *square root* of the
+  frequency zoom; measured twice on different sources at exponents 0.443 and
+  0.482, which is why it is a square root and not a fitted decimal. Zero at the
+  full view by construction. Raising it past 0.5 over-brightens the deep zoom
+  and costs saturation; setting it to 0 restores the old behaviour exactly.
 - **`SHOULDER_KNEE = 0.6`** (`glview.js`) — where the ramp stops being linear in
   dB and rolls off instead. The range has to stay near 36 dB or the faint end
   sinks into the black fade, but a recording carries far more: measured on a
@@ -325,6 +374,23 @@ again:
   = 64 samples, about 164 device pixels at 55x — but a viewport centred on the
   largest of them showed no visible transition. Worth remembering the steps are
   there if something else ever points this way.
+- **A lower-sidelobe window would make it worse.** Hann has -31 dB sidelobes
+  and the ramp spans 36 dB above the background, so leakage is nominally well
+  inside the visible range — Nuttall (-71 dB) and Blackman-Harris (-92 dB) look
+  like free wins. They are not. Measured against the real `fft.js`, one frame,
+  `winLen` 1024, `fftSize` 8192: on an isolated tone Hann already puts
+  **100.000%** of the power on the ridge with the loudest stray at -81 dB, so
+  there is nothing for a low-sidelobe window to fix — reassignment folds the
+  sidelobes onto the ridge exactly as the theory promises. And on two harmonics
+  125 Hz apart, the failure mode that actually costs the picture something, the
+  power landing off-ridge is **9.2% for Hann, 28.8% for Nuttall and 51.6% for
+  Blackman-Harris**: the wider main lobe puts more components inside one window.
+  Hann is the right window and it is right for the reassignment's reasons, not
+  by inheritance.
+- **Raising `MAX_FFT` buys nothing _above about 500 Hz_.** Four times it, at
+  1048576, plans byte-identical grids at every zoom from 1x to 500x with the
+  viewport centred at 2.6 kHz. It does *not* generalise down the spectrum: see
+  the low-register limit under Known limitations.
 - **`slice` does not starve the screen edges.** It bounds a run by cell position
   (`winLen / 2 + hop`) and not by how far a stroke can reach, which looks like a
   bug and is not one in practice: comparing a viewport against the same content
@@ -413,8 +479,23 @@ signal and is not.
 
 ## Known limitations
 
-- **Past about 100x it is the _time_ sampling that limits the picture, and
-  nothing here can fix it.** This used to be the other way round; the band
+- **The bottom two octaves cannot be deep-zoomed in frequency, and this is
+  structural.** The gaps are wildly unequal across the spectrum at a deep zoom,
+  which nothing here used to say. Measured at 333x, w = 2800 x 1414, the worst
+  on-screen gap by where the viewport sits: **14 px at 2.6 kHz, 29 px at 700 Hz,
+  48 px at 300 Hz, 120 px at 120 Hz.** The cause is the log axis: bin spacing is
+  `sampleRate / fftSize` in Hz, so its size in *pixels* goes as `1/f`, and the
+  bottom octave is some forty times worse off than the top. At 120 Hz and 333x
+  the viewport is 2.2 Hz tall, so filling a 1414 px screen would want bins about
+  0.0016 Hz apart — an `fftSize` near 30 million. Raising `MAX_FFT` one step to
+  524288 does halve that view's worst gap, 119.9 to 60.0 px, but it is a trade
+  and not a gift: `plan()` pays for it by doubling the hop, so gapT goes 14.4 to
+  28.8 and the cost is flat at 32M. There is no setting that fixes the bottom of
+  the picture. Worth knowing before reading a deep zoom down there as thin
+  analysis — it is thin *sampling*, and it is arithmetic.
+- **Past about 100x it is the _time_ sampling that limits the picture** — above
+  about 500 Hz, where the entry above stops biting — **and nothing here can fix
+  it.** This used to be the other way round; the band
   inverted it. Frequency sampling now runs to `MAX_FFT` cheaply, so at 221x the
   frequency gap is 3.9 px while the time gap is 13.2. The hop is at 1 sample and
   cannot go below it — 3.0 ms of a 48 kHz recording is 144 samples, and a screen
@@ -448,19 +529,21 @@ signal and is not.
   floor under how finely harmonics can be separated. The limit is not the
   transform, it is that intonation moves a partial off its own measured direction
   over a longer window.
-- **A partial's peak dims by about 10 dB between 1x and 92x**, and this is why
-  detail can seem to disappear as you zoom in. Measured along one harmonic on a
-  steady take: 53.6 / 52.0 / 49.8 / 48.0 / 43.9 dB above background at 1x / 4x /
-  12x / 30x / 92x. It is not the analysis thinning out — the same sweep on the
-  build before the one-pixel ramp gave 56.4 / 54.7 / 52.1 / 50.2 / 45.9, the
-  same 10 dB slide. A partial's energy is a *density*: at the full view its
-  whole mainlobe lands on one row of pixels and sums, and at 92x that lobe is
-  resolved across a hundred rows, so the peak necessarily falls. The exposure,
-  meanwhile, is measured once at the full view and frozen — deliberately, and
-  the table above says why — so nothing takes the slide back out. Fixing it
-  means compensating a computable geometric dilution while still refusing to
-  re-measure the background per viewport. Not attempted; it is an aesthetic call
-  about what "the same picture" means, and so Andrew's.
+- **A partial's peak used to dim by about 10 dB between 1x and 92x.** Fixed;
+  the entry is kept because the reasoning is still load-bearing. A partial's
+  energy is a *density*: at the full view its whole main lobe lands on one row
+  of pixels and sums, and at 92x that lobe is resolved across a hundred rows, so
+  the peak necessarily falls. The exposure is measured once and frozen, so
+  nothing took the slide back out, and this is why detail could seem to
+  disappear as you zoomed in. `DILUTION_GAIN` in `glview.js` puts it back — see
+  the comment there; it is a function of the viewport alone, so the background
+  is still never re-measured and the full view is untouched to the bit.
+  Measured after: the peak holds inside -2.2 to +0.5 dB over 1x to 68x, against
+  a 8.7 dB slide before. The cost is **saturation, not clipping**: no pixel
+  renders as white at any zoom (0.00% measured, the shoulder absorbs it), but
+  brightening moves pixels up a ramp that desaturates towards the top, and mean
+  chroma over lit pixels fell 0.628 to 0.502 at 68x and 0.582 to 0.488 at 333x.
+  `SHOULDER_KNEE` is the knob that trades it back if that reads wrong.
 - **Resizing the window while zoomed re-measures the exposure from a partial
   cloud.** The resize handler passes `calibrate: true` at whatever viewport is
   current, and `view.calibrate` reads `fullSpan(rec)` out of a cloud that only
