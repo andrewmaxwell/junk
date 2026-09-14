@@ -55,6 +55,9 @@
   button.primary{background:var(--accent);color:var(--accent-text);border-color:var(--accent);}
   button:disabled{opacity:.5;cursor:default;}
   .stage{position:relative;width:100%;aspect-ratio:1;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+  /* The sphere is shown as a 2:1 map, so the stage matches it rather than
+     leaving half the square empty. */
+  .stage.map{aspect-ratio:2;}
   canvas{width:100%;height:100%;display:block;}
   .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:16px;}
   .stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px;}

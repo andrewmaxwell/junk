@@ -29,6 +29,14 @@ import {
   containerContacts,
   containmentExcess,
 } from './shapes.js';
+import {
+  fibonacciSphere,
+  scatterSphere,
+  relaxOnSphere,
+  measureOnSphere,
+  settledOnSphere,
+  hopOnSphere,
+} from './sphere.js';
 
 export const DEFAULT_CONFIG = {
   itemShape: 'square',
@@ -154,6 +162,9 @@ function boundingWidth(shape, theta) {
   return w * 2;
 }
 
+// Perturbation sizes, from "nudge one piece" to "rearrange a neighbourhood".
+export const MOVE_SCALES = [0.15, 0.5, 1.5];
+
 function clamp(v, limit) {
   return v > limit ? limit : v < -limit ? -limit : v;
 }
@@ -205,6 +216,15 @@ export class PackingSolver {
     return CONTAINER_SHAPES[this.config.containerShape];
   }
 
+  // Items on a sphere live *on* the surface, in unit vectors rather than plane
+  // coordinates, so seeding, relaxation, scoring and perturbation each take a
+  // different route. Everything outside those -- the scale search, the restart
+  // and polish schedule, the history -- is shared untouched.
+  get onSphere() {
+    return this.containerShape.space === 'sphere';
+  }
+
+
   get totalItemArea() {
     return this.config.count * this.itemShape.area;
   }
@@ -247,7 +267,16 @@ export class PackingSolver {
   // reach only by luck; later attempts scatter, to find everything the lattice
   // cannot reach.
   seedLayout(first) {
-    return this.attemptIndex === 0 ? this.latticeLayout() : this.scatterLayout(first);
+    if (this.attemptIndex !== 0) return this.scatterFor(first);
+    return this.onSphere
+      ? fibonacciSphere(this.config.count, this.itemShape)
+      : this.latticeLayout();
+  }
+
+  scatterFor(extent) {
+    return this.onSphere
+      ? scatterSphere(this.config.count, this.itemShape, this.rand)
+      : this.scatterLayout(extent);
   }
 
   latticeLayout() {
@@ -311,9 +340,12 @@ export class PackingSolver {
     const reseed = !this.polishing && cfg.reseedAfterFailures > 0 &&
       this.probeFailures >= cfg.reseedAfterFailures;
     if (reseed) {
-      this.items = this.scatterLayout(scale);
+      this.items = this.scatterFor(scale);
     } else if (this.attemptBest) {
-      const ratio = scale / this.attemptBest.scale;
+      // A position on the sphere is a unit vector, so it does not depend on the
+      // radius at all: compressing the container leaves the layout exactly
+      // where it was and simply makes every cap subtend more of it.
+      const ratio = this.onSphere ? 1 : scale / this.attemptBest.scale;
       this.items = this.attemptBest.items.map((it) => ({
         ...it,
         x: it.x * ratio,
@@ -326,7 +358,10 @@ export class PackingSolver {
     this.progressEnergy = Infinity;
     // The aligned first start can often settle by sliding alone. Unlock
     // rotation on a plateau; scattered restarts use all degrees of freedom.
-    this.rotationActive = cfg.rotationPolicy === 'free' || this.stagedFinished || this.attemptIndex > 0 || this.itemShape.type === 'circle';
+    // On a sphere there is no rigid lattice to protect, so orientation is free
+    // from the start; the staged sliding warm-up is a planar concern.
+    this.rotationActive = cfg.rotationPolicy === 'free' || this.onSphere
+      || this.stagedFinished || this.attemptIndex > 0 || this.itemShape.type === 'circle';
     this.T = Math.min(
       cfg.maxTemperature,
       cfg.startTemperature * cfg.reheatFactor ** this.probeFailures,
@@ -338,6 +373,16 @@ export class PackingSolver {
   // bodies involved, which is what lets polygons turn to face their neighbours
   // instead of relying on random jolts to find a good orientation.
   relax(container) {
+    if (container.type === 'sphere') {
+      const { relaxIterations, correctionBias, maxAngularCorrection } = this.config;
+      relaxOnSphere(this.items, container.R, {
+        relaxIterations,
+        correctionBias,
+        limit: this.violationLimit,
+        maxAngular: this.rotationActive ? maxAngularCorrection : 0,
+      });
+      return;
+    }
     const items = this.items;
     const { relaxIterations, correctionBias, maxAngularCorrection } = this.config;
     const contacts = this._contacts || (this._contacts = []);
@@ -389,6 +434,10 @@ export class PackingSolver {
   // budget across many contacts).
   measureViolation(container) {
     const items = this.items;
+    if (container.type === 'sphere') {
+      const { total, worst } = measureOnSphere(items, container.R);
+      return { total, worst, energy: total / this.itemShape.radius };
+    }
     let total = 0;
     let worst = 0;
     for (let i = 0; i < items.length; i++) {
@@ -416,6 +465,9 @@ export class PackingSolver {
   // the solver targets, otherwise a perfectly good layout whose shapes rest in
   // exact contact reads as "not settled" because of float residue.
   isSettled(item, container, tol = this.violationLimit) {
+    if (container.type === 'sphere') {
+      return settledOnSphere(this.items, item, container.R, tol);
+    }
     if (containmentExcess(item, container) > tol) return false;
     for (const other of this.items) {
       if (other === item) continue;
@@ -426,14 +478,30 @@ export class PackingSolver {
   }
 
   // Search neighbouring basins at a fixed container size. Different move scales
-  // explore individual orientations and larger coordinated rearrangements.
-  // A hop is accepted only after settling, never just because its raw jitter
-  // happens to reduce an overlap -- unless `hopRelaxIterations` is 0, which
-  // removes the settling step entirely. Failed hops preserve the incumbent
-  // exactly.
+  // explore individual orientations and larger coordinated rearrangements. The
+  // move itself depends on the space; judging it does not.
   basinHop(container) {
-    const before = this.items.map(({ x, y, theta }) => ({ x, y, theta }));
+    // Each space saves exactly its own degrees of freedom, so a rollback
+    // restores the incumbent without inventing coordinates it does not have.
+    const before = this.items.map(container.type === 'sphere'
+      ? ({ x, y, z, tx, ty, tz }) => ({ x, y, z, tx, ty, tz })
+      : ({ x, y, theta }) => ({ x, y, theta }));
     const initialEnergy = this.measureViolation(container).energy;
+    // Each space draws its own move, including the amplitude, so neither
+    // disturbs the other's random sequence.
+    const heat = Math.min(2, this.T);
+    if (container.type === 'sphere') {
+      hopOnSphere(this.items, this.rand, heat, container.R, MOVE_SCALES);
+    } else {
+      this.planarHop(heat);
+    }
+    return this.finishHop(container, before, initialEnergy);
+  }
+
+  // Displace a cluster of neighbours together, turning the group as it goes.
+  // A group move is what turns one arrangement into a differently-shaped one;
+  // jiggling pieces individually only rearranges the one already there.
+  planarHop(heat) {
     const anchor = Math.floor(this.rand() * this.items.length);
     const center = this.items[anchor];
     const count = 1 + Math.floor(this.rand() * Math.max(1, this.items.length * 0.35));
@@ -441,7 +509,7 @@ export class PackingSolver {
       index, distance: Math.hypot(it.x - center.x, it.y - center.y),
     })).sort((a, b) => a.distance - b.distance).slice(0, count);
     const radius = this.itemShape.radius;
-    const amplitude = [0.15, 0.5, 1.5][Math.floor(this.rand() * 3)] * Math.min(2, this.T);
+    const amplitude = MOVE_SCALES[Math.floor(this.rand() * MOVE_SCALES.length)] * heat;
     const dx = (this.rand() - 0.5) * 2 * radius * amplitude;
     const dy = (this.rand() - 0.5) * 2 * radius * amplitude;
     const angle = (this.rand() - 0.5) * Math.PI * amplitude;
@@ -457,6 +525,14 @@ export class PackingSolver {
       item.y = cy + x * s + y * c + dy;
       if (item.shape.type !== 'circle') item.theta += angle;
     }
+  }
+
+  // Settle whatever the perturbation produced and decide whether to keep it. A
+  // hop is accepted only after settling, never just because its raw jitter
+  // happens to reduce an overlap -- unless `hopRelaxIterations` is 0, which
+  // removes the settling step entirely. Failed hops restore the incumbent
+  // exactly.
+  finishHop(container, before, initialEnergy) {
     // Measured up front so a zero relaxation budget still yields a verdict
     // rather than reading `worst` off an undefined.
     let violation = this.measureViolation(container);

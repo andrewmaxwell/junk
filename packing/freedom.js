@@ -22,6 +22,7 @@
 
 import { testOverlap } from './geometry.js';
 import { containmentExcess } from './shapes.js';
+import { looseOnSphere } from './sphere.js';
 
 const DIRECTIONS = 16;
 
@@ -30,6 +31,10 @@ const DIRECTIONS = 16;
 // that pieces resting in contact are not read as overlapping.
 export function findLoose(items, container, { play = 0.02, tolerance = 1e-4 } = {}) {
   if (!Array.isArray(items) || !container) return [];
+  if (container.type === 'sphere') {
+    if (!items.length) return [];
+    return looseOnSphere(items, container.R, play, tolerance * items[0].shape.radius);
+  }
   return items.map((_, i) => isLoose(items, i, container, play, tolerance));
 }
 

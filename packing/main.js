@@ -10,18 +10,21 @@ const els = Object.fromEntries([
   'statEff', 'logList', 'bestEmpty', 'bestCaption', 'status', 'runInfo', 'liveTitle',
 ].map((id) => [id, $(id)]));
 
+const stages = document.querySelectorAll('.stage');
+
 // One restart is worth a dozen tries in practice, and nobody wants to tune it.
 const ATTEMPTS = 12;
 const COUNT_MIN = Number(els.nItems.min);
 const COUNT_MAX = Number(els.nItems.max);
 
-for (const [select, table] of [[els.itemShape, ITEM_SHAPES], [els.containerShape, CONTAINER_SHAPES]]) {
-  for (const [key, shape] of Object.entries(table)) {
-    const option = document.createElement('option');
-    option.value = key;
-    option.textContent = shape.name;
-    select.appendChild(option);
-  }
+const option = (key, name) => {
+  const el = document.createElement('option');
+  el.value = key;
+  el.textContent = name;
+  return el;
+};
+for (const [select, table] of [[els.containerShape, CONTAINER_SHAPES], [els.itemShape, ITEM_SHAPES]]) {
+  select.replaceChildren(...Object.entries(table).map(([key, shape]) => option(key, shape.name)));
 }
 // The controls live in the URL, so a refresh keeps the run and a link shares it.
 const clamp = (value, lo, hi) => Math.min(hi, Math.max(lo, value));
@@ -60,6 +63,9 @@ function syncControls() {
   els.aspect.value = String(config.aspect);
   els.aspectVal.textContent = config.aspect.toFixed(1);
   els.aspectField.style.display = CONTAINER_SHAPES[config.containerShape].usesAspect ? 'block' : 'none';
+  // The sphere draws as a 2:1 map; every other container is framed square.
+  const isMap = CONTAINER_SHAPES[config.containerShape].space === 'sphere';
+  for (const stage of stages) stage.classList.toggle('map', isMap);
   els.nItems.value = String(config.count);
   els.nDec.disabled = config.count <= COUNT_MIN;
   els.nInc.disabled = config.count >= COUNT_MAX;

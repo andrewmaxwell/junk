@@ -5,6 +5,7 @@ import { ITEM_SHAPES, CONTAINER_SHAPES } from './shapes.js';
 import { circleCircle, testOverlap, worldVerts, polygonInertia } from './geometry.js';
 import { validateLayout } from './validate.js';
 import { findLoose } from './freedom.js';
+import { shapeAngle, sphereGeometry, overlapPair, dot } from './sphere.js';
 
 const circle = (x, y) => ({ x, y, theta: 0, shape: ITEM_SHAPES.circle });
 const square = (x, y, theta = Math.PI / 4) => ({ x, y, theta, shape: ITEM_SHAPES.square });
@@ -86,6 +87,118 @@ test('coincident circle tie-breaking is deterministic; generated seed is reusabl
   assert.deepEqual(a.items, b.items);
 });
 
+// The Tammes problem has proven optima, so a sphere run can be checked against
+// a real answer rather than against itself: N caps fit on the smallest sphere
+// when their centres reach the largest possible minimum separation.
+const TAMMES = { 4: Math.acos(-1 / 3), 6: Math.PI / 2, 12: Math.acos(1 / Math.sqrt(5)) };
+
+function tammesScale(count, area) {
+  const theta = TAMMES[count] / 2;
+  return 2 * Math.sqrt(Math.PI) * Math.sqrt(area / (2 * Math.PI * (1 - Math.cos(theta))));
+}
+
+test('caps on a sphere reach the proven Tammes optima', () => {
+  const area = ITEM_SHAPES.circle.area;
+  for (const count of [4, 6, 12]) {
+    const solver = new PackingSolver({ containerShape: 'sphere', itemShape: 'circle',
+      count, seed: 7, attempts: 3 });
+    while (solver.step());
+    const best = solver.best;
+    assert.ok(best, `n=${count} found a packing`);
+
+    const target = tammesScale(count, area);
+    assert.ok(best.scale >= target * 0.999, `n=${count} cannot beat the proven bound`);
+    assert.ok(best.scale <= target * 1.01, `n=${count} scale ${best.scale} vs optimal ${target}`);
+
+    const theta = shapeAngle(ITEM_SHAPES.circle, best.container.R);
+    for (let i = 0; i < best.items.length; i++) {
+      const p = best.items[i];
+      assert.ok(Math.abs(Math.hypot(p.x, p.y, p.z) - 1) < 1e-9, 'centres stay on the surface');
+      for (let j = i + 1; j < best.items.length; j++) {
+        const sep = Math.acos(Math.max(-1, Math.min(1, dot(p, best.items[j]))));
+        // The solver's tolerance is a length, so compare arc lengths to it.
+        const depth = (2 * theta - sep) * best.container.R;
+        assert.ok(depth <= solver.violationLimit, `n=${count} caps do not overlap`);
+      }
+    }
+  }
+});
+
+// Projected onto a sphere, the Platonic solids are exact tilings, so each of
+// these packings has a *proven* optimum: the pieces cover the sphere completely,
+// which is the area lower bound the solver already knows it can never beat.
+// That is a far stronger check than a tolerance band, and it exercises sizing,
+// the separating-axis test and the rotational half of contact resolution at
+// once -- a tiling only closes up if every piece is turned to face its
+// neighbours correctly.
+const TILINGS = [
+  ['triangle', 4, 'tetrahedron'],
+  ['triangle', 8, 'octahedron'],
+  ['triangle', 20, 'icosahedron'],
+  ['square', 6, 'cube'],
+  ['pentagon', 12, 'dodecahedron'],
+];
+
+test('regular polygons on a sphere find the Platonic tilings exactly', () => {
+  for (const [itemShape, count, name] of TILINGS) {
+    const solver = new PackingSolver({ containerShape: 'sphere', itemShape, count, seed: 11 });
+    while (solver.step());
+    assert.ok(solver.best, `${name}: found a packing`);
+    const bound = solver.scaleLowerBound;
+    assert.ok(solver.best.scale <= bound * 1.001,
+      `${name}: scale ${solver.best.scale} should reach the bound ${bound}`);
+    assert.ok(solver.best.scale >= bound * 0.999, `${name}: cannot beat complete coverage`);
+  }
+});
+
+// Orientation is parallel-transported rather than recomputed from a global
+// convention, so the frame has to survive thousands of rotations intact.
+test('a transported facing stays a unit tangent', () => {
+  const solver = new PackingSolver({ containerShape: 'sphere', itemShape: 'hexagon',
+    count: 9, seed: 4 });
+  for (let i = 0; i < 3000 && solver.step(); i++);
+  for (const it of solver.items) {
+    assert.ok(Math.abs(Math.hypot(it.x, it.y, it.z) - 1) < 1e-9, 'position stays on the sphere');
+    assert.ok(Math.abs(Math.hypot(it.tx, it.ty, it.tz) - 1) < 1e-9, 'facing stays a unit vector');
+    assert.ok(Math.abs(it.x * it.tx + it.y * it.ty + it.z * it.tz) < 1e-9, 'facing stays tangent');
+  }
+});
+
+// The bounding-cap reject in `overlapPair` reads like a pure optimisation and
+// is not: face-normal SAT is incomplete for near-antipodal cones, and this is
+// what keeps those out of its hands. Guard it so it cannot be tidied away.
+test('near-antipodal pieces never register as overlapping', () => {
+  for (const key of ['square', 'hexagon', 'triangle', 'pentagon']) {
+    const shape = ITEM_SHAPES[key];
+    // A small sphere makes the pieces as large, and the test as hard, as the
+    // solver will ever make them.
+    const g = sphereGeometry(shape, 1.05);
+    for (let k = 0; k < 40; k++) {
+      const phi = (k / 40) * Math.PI * 2;
+      const tilt = 0.02 * Math.cos(phi * 3);
+      const a = { x: 0, y: 0, z: 1, tx: 1, ty: 0, tz: 0, shape };
+      const b = {
+        x: Math.sin(tilt) * Math.cos(phi), y: Math.sin(tilt) * Math.sin(phi), z: -Math.cos(tilt),
+        tx: Math.cos(phi), ty: Math.sin(phi), tz: 0, shape,
+      };
+      assert.equal(overlapPair(g, a, b), null, `${key}: antipodal pieces at phi=${phi}`);
+    }
+  }
+});
+
+test('a sphere warm start keeps the layout and only grows the caps', () => {
+  const solver = new PackingSolver({ containerShape: 'sphere', itemShape: 'circle',
+    count: 6, seed: 3 });
+  while (!solver.best) solver.step();
+  const held = solver.attemptBest.items.map(({ x, y, z }) => ({ x, y, z }));
+  solver.beginProbe(solver.best.scale * 0.9);
+  // A position on a sphere does not depend on its radius, so compression must
+  // leave every centre exactly where it was.
+  solver.items.forEach((item, i) => {
+    assert.ok(Math.hypot(item.x - held[i].x, item.y - held[i].y, item.z - held[i].z) < 1e-12);
+  });
+});
+
 test('a rejected basin hop restores every coordinate and rotation', () => {
   const solver = new PackingSolver({ itemShape: 'circle', containerShape: 'rect', count: 4, seed: 1 });
   solver.items = [circle(-0.5, -0.5), circle(0.5, -0.5), circle(-0.5, 0.5), circle(0.5, 0.5)];
@@ -98,7 +211,8 @@ test('a rejected basin hop restores every coordinate and rotation', () => {
 
 test('every supported shape/container combination finds a valid layout', () => {
   for (const itemShape of Object.keys(ITEM_SHAPES)) {
-    for (const containerShape of Object.keys(CONTAINER_SHAPES)) {
+    for (const [containerShape, container] of Object.entries(CONTAINER_SHAPES)) {
+      if (container.space === 'sphere') continue; // covered by the sphere tests
       const solver = new PackingSolver({ itemShape, containerShape, count: 3, attempts: 1,
         iterationsPerAttempt: 1000, seed: 17, aspect: 1.8 });
       while (solver.step());

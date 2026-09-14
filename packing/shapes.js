@@ -9,6 +9,7 @@
 // makes `scale` directly comparable across containers, and makes the packing
 // efficiency simply (total item area) / scale^2.
 
+import { SPHERE_R0 } from './sphere.js';
 import {
   shoelaceArea,
   regularPolygonVerts,
@@ -111,11 +112,20 @@ export const CONTAINER_SHAPES = {
   },
   triangle: regularContainer('Triangle', 3),
   hexagon: regularContainer('Hexagon', 6),
+  // The one curved-space container: items live *on* the surface rather than
+  // inside an outline, as spherical caps and regular spherical polygons.
+  // Normalised to unit area like the rest -- here that is surface area.
+  sphere: {
+    name: 'Sphere (surface)',
+    usesAspect: false,
+    space: 'sphere',
+    build: (scale) => ({ type: 'sphere', R: scale * SPHERE_R0, area: scale * scale }),
+  },
 };
 
 // Half-extent used to frame the container on screen.
 export function containerRadius(container) {
-  if (container.type === 'circle') return container.R;
+  if (container.type === 'circle' || container.type === 'sphere') return container.R;
   let m = 0;
   for (const [x, y] of container.verts) m = Math.max(m, Math.abs(x), Math.abs(y));
   return m;
