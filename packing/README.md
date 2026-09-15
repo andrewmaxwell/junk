@@ -22,6 +22,18 @@ restarts with a new random seed, as does Run again once a search has finished.
 The actual seed is shown below the attempt log and can be passed to
 `PackingSolver` to reproduce a run.
 
+The search uses several CPU cores: one module worker per core, less one left for
+the page, up to eight. Restarts are already independent -- no attempt hands the
+next anything but the global best -- so the workers never talk to each other;
+each runs the full restart budget from its own seed, and the page keeps the best
+layout any of them finds. Worker `i` runs seed `seed + i`, and only worker 0 opens
+from the aligned lattice (`latticeStart`), because that opening is the same
+whatever the seed. One worker at a time streams its live layout to the
+current-search view; the others report progress a few times a second, and the
+view hands over when the watched one finishes. As soon as any worker reaches the
+area lower bound, the rest are stopped. "s CPU" below the log sums compute time
+over all workers.
+
 The controls are mirrored into the query string (`?container=&item=&n=&aspect=`),
 so a refresh keeps the current problem and a URL can be shared or bookmarked.
 
@@ -178,7 +190,7 @@ Node 22+; no npm dependencies are required.
 npm test
 node benchmark.mjs --quick
 node benchmark.mjs
-node benchmark-time.mjs --seeds 5 --ms 2000 --attempts 5 --output results.json
+node benchmark-time.mjs --seeds 5 --ms 2000 --attempts 5 --output benchmark-results.json
 ```
 
 `npm test` covers analytic geometry examples, invalid numeric input, immediate
@@ -208,6 +220,7 @@ parallel-transported facing stays a unit tangent after thousands of rotations,
 and that near-antipodal pieces never register as overlapping -- the second
 because the bounding-cap reject that makes it true reads like a pure
 optimisation and is not.
+
 Worker protocol tests use Node worker threads with a small `self` adapter; the
 app also needs browser testing for its DOM/Canvas integration.
 
@@ -244,8 +257,8 @@ node benchmark-time.mjs --rotation free
 node benchmark-time.mjs --order alternating
 ```
 
-The saved `benchmark-results.json` records the run used for the accompanying
-`BENCHMARK_RESULTS.md`. Rerun it to measure this machine/runtime afresh.
+No results are checked in: timings depend on hardware and go stale with every
+solver change, so rerun it to measure the current code on this machine.
 
 ## Reference provenance and numerical limits
 
@@ -261,7 +274,8 @@ constructions, not proved optima; see the discussion in
 The feasible tolerance is a worst penetration of `1e-4 × item circumradius`.
 Tiny negative gaps can result from accepting this numerical contact tolerance;
 they do not beat a theorem. Saved results are rechecked with `validateLayout`,
-which rejects nonfinite data but shares the collision routines with the solver.
+which rejects nonfinite data (and, on a sphere, positions off the surface or
+facings that are not unit tangents) but shares the collision routines with the solver.
 It is a consistency check, not an independent proof of geometry correctness.
 
 The basin-hopping approach is informed by
@@ -279,9 +293,16 @@ since more physical contact handling is not automatically better optimization.
 - `geometry.js`, `shapes.js`: convex shapes, collision and containment queries.
 - `sphere.js`: the curved-space geometry -- caps, great-circle separation,
   seeding, perturbation and freedom on a sphere's surface.
+- `freedom.js`: loose-piece (rattler) detection for the highlighted colouring.
 - `solver.js`: search, feasibility repair, and saved results; no DOM dependencies.
-- `worker.js`: owns the solver, yields between ~8 ms compute batches, and sends
-  display snapshots at up to ~30 Hz. Reset/pause cancel queued work.
-- `main.js`: controls, URL state, and rendering; command IDs discard stale worker messages.
+- `worker.js`: owns one solver, yields between ~8 ms compute batches, and sends
+  display snapshots at up to ~30 Hz when watched, ~4 Hz otherwise. Reset/pause
+  cancel queued work.
+- `pool.js`: runs one worker per core, seeds them apart, merges their reports,
+  and hands the live view between them; command IDs discard stale messages.
+- `main.js`: controls, URL state, and rendering.
 - `render.js`: draws snapshots without collision testing on the main thread.
-- `validate.js`: saved-layout consistency checks.
+- `validate.js`: saved-layout consistency checks, flat and spherical.
+- `benchmark.mjs`, `benchmark-time.mjs`, `benchmark-cases.js`: quality gate,
+  time-to-target measurement, and their shared reference cases.
+- `solver.test.mjs`, `worker.test.mjs`: `npm test`.

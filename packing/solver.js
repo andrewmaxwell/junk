@@ -44,6 +44,10 @@ export const DEFAULT_CONFIG = {
   aspect: 1,
   count: 12,
   attempts: 12,
+  // Whether the first attempt starts from the aligned lattice. A parallel
+  // search gives that opening to one worker only, since it begins the same
+  // way whatever the seed.
+  latticeStart: true,
 
   // --- outer loop: scale search ---
   iterationsPerAttempt: 3000,
@@ -110,6 +114,8 @@ export const DEFAULT_CONFIG = {
   seed: null,
 };
 
+const clamp = (v, limit) => (v > limit ? limit : v < -limit ? -limit : v);
+
 // Resolve one contact by splitting the correction between translation and
 // rotation in proportion to each body's effective mass along the contact
 // normal: k = 1/m + (r x n)^2 / I. With infinite inertia this reduces exactly
@@ -163,11 +169,7 @@ function boundingWidth(shape, theta) {
 }
 
 // Perturbation sizes, from "nudge one piece" to "rearrange a neighbourhood".
-export const MOVE_SCALES = [0.15, 0.5, 1.5];
-
-function clamp(v, limit) {
-  return v > limit ? limit : v < -limit ? -limit : v;
-}
+const MOVE_SCALES = [0.15, 0.5, 1.5];
 
 // Small deterministic PRNG so a run can be reproduced from its seed.
 function mulberry32(seed) {
@@ -184,11 +186,6 @@ function mulberry32(seed) {
 export class PackingSolver {
   constructor(config = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.reset();
-  }
-
-  configure(patch) {
-    this.config = { ...this.config, ...patch };
     this.reset();
   }
 
@@ -224,7 +221,6 @@ export class PackingSolver {
     return this.containerShape.space === 'sphere';
   }
 
-
   get totalItemArea() {
     return this.config.count * this.itemShape.area;
   }
@@ -256,7 +252,12 @@ export class PackingSolver {
     this.probeFailures = 0;
     this.attemptConverged = false;
     this.stagedFinished = false;
-    const first = this.scaleLowerBound * cfg.initialSlack;
+    this.startShrink();
+  }
+
+  // Seed a fresh layout at the initial slack and start shrinking it.
+  startShrink() {
+    const first = this.scaleLowerBound * this.config.initialSlack;
     this.items = this.seedLayout(first);
     this.beginProbe(first);
   }
@@ -266,8 +267,12 @@ export class PackingSolver {
   // optimal packings of equal shapes usually resemble and which random starts
   // reach only by luck; later attempts scatter, to find everything the lattice
   // cannot reach.
+  get latticeAttempt() {
+    return this.attemptIndex === 0 && this.config.latticeStart;
+  }
+
   seedLayout(first) {
-    if (this.attemptIndex !== 0) return this.scatterFor(first);
+    if (!this.latticeAttempt) return this.scatterFor(first);
     return this.onSphere
       ? fibonacciSphere(this.config.count, this.itemShape)
       : this.latticeLayout();
@@ -279,30 +284,22 @@ export class PackingSolver {
       : this.scatterLayout(extent);
   }
 
+  // Rest the shape on a flat edge rather than a vertex, and pitch the grid by
+  // its bounding box, so squares start as a true grid rather than as diamonds
+  // that have to be untangled first.
   latticeLayout() {
     const shape = this.itemShape;
     const count = this.config.count;
-    const items = [];
-    {
-      // Rest the shape on a flat edge rather than a vertex, and pitch the grid
-      // by its bounding box, so squares start as a true grid rather than as
-      // diamonds that have to be untangled first.
-      const theta = shape.sides ? Math.PI / shape.sides : 0;
-      const pitch = boundingWidth(shape, theta) * 1.02;
-      const cols = Math.ceil(Math.sqrt(count));
-      const rows = Math.ceil(count / cols);
-      for (let i = 0; i < count; i++) {
-        const r = Math.floor(i / cols);
-        const c = i % cols;
-        items.push({
-          x: (c - (cols - 1) / 2) * pitch,
-          y: (r - (rows - 1) / 2) * pitch,
-          theta,
-          shape,
-        });
-      }
-      return items;
-    }
+    const theta = shape.sides ? Math.PI / shape.sides : 0;
+    const pitch = boundingWidth(shape, theta) * 1.02;
+    const cols = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / cols);
+    return Array.from({ length: count }, (_, i) => ({
+      x: (i % cols - (cols - 1) / 2) * pitch,
+      y: (Math.floor(i / cols) - (rows - 1) / 2) * pitch,
+      theta,
+      shape,
+    }));
   }
 
   // Pieces dropped near the middle of a container of side `extent`, for
@@ -361,7 +358,7 @@ export class PackingSolver {
     // On a sphere there is no rigid lattice to protect, so orientation is free
     // from the start; the staged sliding warm-up is a planar concern.
     this.rotationActive = cfg.rotationPolicy === 'free' || this.onSphere
-      || this.stagedFinished || this.attemptIndex > 0 || this.itemShape.type === 'circle';
+      || this.stagedFinished || !this.latticeAttempt || this.itemShape.type === 'circle';
     this.T = Math.min(
       cfg.maxTemperature,
       cfg.startTemperature * cfg.reheatFactor ** this.probeFailures,
@@ -387,6 +384,7 @@ export class PackingSolver {
     const { relaxIterations, correctionBias, maxAngularCorrection } = this.config;
     const contacts = this._contacts || (this._contacts = []);
     const limit = this.violationLimit;
+    const angularLimit = this.rotationActive ? maxAngularCorrection : 0;
 
     for (let it = 0; it < relaxIterations; it++) {
       // The deepest violation this pass had to correct. Tracking it costs
@@ -394,7 +392,6 @@ export class PackingSolver {
       // stop after one or two passes while a hard one keeps the whole budget,
       // so `relaxIterations` can be a generous cap rather than a fixed price.
       let worst = 0;
-      const angularLimit = this.rotationActive ? maxAngularCorrection : 0;
       // Reverse each sweep to avoid always privileging the same pieces.
       const reverse = this.config.relaxationOrder === 'alternating' && this.sweepIndex++ % 2 === 1;
       for (let ii = 0; ii < items.length; ii++) {
@@ -581,12 +578,11 @@ export class PackingSolver {
           this.attemptBest = null;
           this.shrinkStep = cfg.initialStep;
           this.probeFailures = 0;
-          const first = this.scaleLowerBound * cfg.initialSlack;
-          this.items = this.seedLayout(first);
-          this.beginProbe(first);
+          this.startShrink();
           if (this.iteration >= cfg.iterationsPerAttempt) this.finishAttempt();
           return !this.done;
-        } else this.basinHop(container);
+        }
+        this.basinHop(container);
         this.stuckCounter = 0;
         violation = this.measureViolation(container);
         this.progressEnergy = violation.energy;
@@ -641,21 +637,15 @@ export class PackingSolver {
     this.beginProbe(this.attemptBest.scale * (1 - this.shrinkStep));
   }
 
+  // `best` needs no update here: every successful probe already promoted itself
+  // the moment it was found.
   finishAttempt() {
     const cfg = this.config;
-    const attemptBest = this.attemptRecord;
     this.history.push({
       attempt: this.attemptIndex + 1,
-      scale: attemptBest ? attemptBest.scale : null,
+      scale: this.attemptRecord?.scale ?? null,
       polish: this.polishing,
     });
-    if (attemptBest && (!this.best || attemptBest.scale < this.best.scale)) {
-      this.best = {
-        scale: attemptBest.scale,
-        items: attemptBest.items,
-        container: this.makeContainer(attemptBest.scale),
-      };
-    }
     if (this.polishing) {
       this.done = true;
       return;

@@ -110,6 +110,8 @@ test('caps on a sphere reach the proven Tammes optima', () => {
     assert.ok(best.scale >= target * 0.999, `n=${count} cannot beat the proven bound`);
     assert.ok(best.scale <= target * 1.01, `n=${count} scale ${best.scale} vs optimal ${target}`);
 
+    assert.ok(validateLayout(best.items, best.container, solver.config.feasibleTolerance).ok,
+      `n=${count} passes layout validation`);
     const theta = shapeAngle(ITEM_SHAPES.circle, best.container.R);
     for (let i = 0; i < best.items.length; i++) {
       const p = best.items[i];
@@ -148,7 +150,21 @@ test('regular polygons on a sphere find the Platonic tilings exactly', () => {
     assert.ok(solver.best.scale <= bound * 1.001,
       `${name}: scale ${solver.best.scale} should reach the bound ${bound}`);
     assert.ok(solver.best.scale >= bound * 0.999, `${name}: cannot beat complete coverage`);
+    assert.ok(validateLayout(solver.best.items, solver.best.container, solver.config.feasibleTolerance).ok,
+      `${name}: passes layout validation`);
   }
+});
+
+test('sphere validation rejects overlaps and off-surface or non-tangent frames', () => {
+  const container = CONTAINER_SHAPES.sphere.build(3);
+  const cap = (x, y, z, tx, ty, tz) => ({ x, y, z, tx, ty, tz, shape: ITEM_SHAPES.square });
+  const apart = [cap(0, 0, 1, 1, 0, 0), cap(0, 0, -1, 1, 0, 0)];
+  assert.ok(validateLayout(apart, container).ok);
+  const stacked = [cap(0, 0, 1, 1, 0, 0), cap(0, 0, 1, 0, 1, 0)];
+  assert.match(validateLayout(stacked, container).problems[0], /overlap/);
+  assert.equal(validateLayout([cap(0, 0, 2, 1, 0, 0)], container).ok, false, 'off the surface');
+  assert.equal(validateLayout([cap(0, 0, 1, 0, 0, 1)], container).ok, false, 'facing not tangent');
+  assert.equal(validateLayout([cap(0, 0, NaN, 1, 0, 0)], container).ok, false, 'nonfinite');
 });
 
 // Orientation is parallel-transported rather than recomputed from a global

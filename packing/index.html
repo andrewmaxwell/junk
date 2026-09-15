@@ -64,7 +64,7 @@
   .stat .label{font-size:12px;color:var(--text-dim);}
   .stat .value{font-size:18px;font-weight:600;margin-top:2px;}
   .log{margin-top:16px;font-size:13px;color:var(--text-dim);}
-  .log ol{padding-left:18px;margin:6px 0 0;}
+  .log ol{padding-left:18px;margin:6px 0 0;max-height:240px;overflow-y:auto;}
   .log li.best{color:var(--ok);font-weight:600;}
   #aspectField{display:none;}
   .views{display:grid;grid-template-columns:2fr 1fr;gap:16px;align-items:start;}
@@ -117,7 +117,7 @@
   <p id="status" role="status">Preparing the search&hellip;</p>
   <div class="views">
     <div>
-      <h2 class="view-title" id="liveTitle">Search in progress</h2>
+      <h2 class="view-title" id="liveTitle">Current search</h2>
       <div class="stage"><canvas id="cvs" aria-label="Current packing arrangement"></canvas></div>
     </div>
     <div class="best-view">
@@ -134,7 +134,7 @@
   </p>
 
   <div class="stats-grid">
-    <div class="stat"><div class="label">Attempt</div><div class="value" id="statAttempt">—</div></div>
+    <div class="stat"><div class="label">Restarts done</div><div class="value" id="statAttempt">—</div></div>
     <div class="stat"><div class="label">Search heat</div><div class="value" id="statTemp">—</div></div>
     <div class="stat"><div class="label">Probing scale</div><div class="value" id="statScale">—</div></div>
     <div class="stat"><div class="label">This attempt's best</div><div class="value" id="statAttemptBest">—</div></div>

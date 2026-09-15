@@ -150,6 +150,9 @@ export function polygonInertia(verts, mass) {
   return den === 0 ? 0 : (mass * num) / (6 * den);
 }
 
+// Relative tolerance for treating vertices as equally extreme.
+const SUPPORT_EPS = 0.01;
+
 // Deepest point of a placed item along direction (nx, ny), in world space.
 //
 // When several vertices are equally extreme -- a flat face resting against
@@ -182,9 +185,6 @@ export function supportPoint(item, nx, ny, worldV, out) {
   out[1] = sy / n;
   return out;
 }
-
-// Relative tolerance for treating vertices as equally extreme.
-const SUPPORT_EPS = 0.01;
 
 const SUPPORT_A = [0, 0];
 const SUPPORT_B = [0, 0];

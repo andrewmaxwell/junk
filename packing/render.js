@@ -49,12 +49,8 @@ export class Renderer {
     const rect = this.canvas.getBoundingClientRect();
     const w = Math.max(1, Math.round(rect.width * dpr));
     const h = Math.max(1, Math.round(rect.height * dpr));
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      this.canvas.width = w;
-      this.canvas.height = h;
-      return true;
-    }
-    return false;
+    if (this.canvas.width !== w) this.canvas.width = w;
+    if (this.canvas.height !== h) this.canvas.height = h;
   }
 
   draw(snapshot) {
@@ -65,14 +61,14 @@ export class Renderer {
 
     if (!snapshot) return;
     const { container, items, settled, loose } = snapshot;
-    const cx = w / 2;
-    const cy = h / 2;
-    const s = (Math.min(w, h) / 2) * 0.92 / containerRadius(container);
-
     if (container.type === 'sphere') {
       this.drawSphereMap(snapshot, w, h);
       return;
     }
+
+    const cx = w / 2;
+    const cy = h / 2;
+    const s = (Math.min(w, h) / 2) * 0.92 / containerRadius(container);
     this.drawContainer(container, cx, cy, s);
     for (let i = 0; i < items.length; i++) {
       this.drawItem(items[i], cx, cy, s, this.itemColor(i, settled, loose));

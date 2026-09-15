@@ -47,12 +47,15 @@ export const CASES = [
 
 // Sources are reference metadata only. The solver never receives targets or
 // reference layouts. Perfect-square cases also follow directly from area plus
-// a grid construction. Square-in-circle cases below are reference constructions,
+// a grid construction. Square-in-circle cases above are reference constructions,
 // not claims that the cited arrangements have been proved optimal.
 for (const c of CASES) {
   c.reference = c.container === 'circle' && c.item === 'circle'
     ? 'https://www.packomania.com/cci/'
-    : c.container === 'rect'
-      ? 'https://www.combinatorics.org/ojs/index.php/eljc/article/view/v10i1r8'
-      : 'https://pmc.ncbi.nlm.nih.gov/articles/PMC6394747/';
+    : c.container === 'circle'
+      ? 'https://pmc.ncbi.nlm.nih.gov/articles/PMC6394747/'
+      : c.source === 'proven'
+        ? 'https://www.combinatorics.org/ojs/index.php/eljc/article/view/v10i1r8'
+        // Best known, not proved: Erich Friedman's squares-in-squares survey.
+        : 'https://erich-friedman.github.io/packing/squinsqu/';
 }

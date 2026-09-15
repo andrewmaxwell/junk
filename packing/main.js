@@ -1,6 +1,7 @@
-// DOM/rendering only. Search state arrives from a dedicated module worker.
+// DOM/rendering only. Search state arrives from a pool of module workers.
 import { ITEM_SHAPES, CONTAINER_SHAPES } from './shapes.js';
 import { Renderer } from './render.js';
+import { SearchPool, poolSize } from './pool.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
@@ -12,7 +13,7 @@ const els = Object.fromEntries([
 
 const stages = document.querySelectorAll('.stage');
 
-// One restart is worth a dozen tries in practice, and nobody wants to tune it.
+// Restarts per worker. A dozen is plenty in practice, and nobody wants to tune it.
 const ATTEMPTS = 12;
 const COUNT_MIN = Number(els.nItems.min);
 const COUNT_MAX = Number(els.nItems.max);
@@ -74,10 +75,8 @@ syncControls();
 
 const renderer = new Renderer($('cvs'));
 const bestRenderer = new Renderer($('bestCvs'));
-let worker;
 let state = null;
 let running = false;
-let commandId = 0;
 let frameId = null;
 let errorMessage = '';
 
@@ -86,35 +85,22 @@ function queueRedraw() {
   frameId = requestAnimationFrame(() => { frameId = null; redraw(); });
 }
 
-function createWorker() {
-  worker?.terminate();
-  worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
-  worker.onmessage = ({ data }) => {
-    // Ignore snapshots queued before the most recent reset/pause/play command.
-    if (data.commandId !== commandId) return;
-    if (data.type === 'error') { fail(data.message); return; }
-    state = data;
-    running = data.running;
+const pool = new SearchPool({
+  size: poolSize(navigator.hardwareConcurrency),
+  createWorker: () => new Worker(new URL('./worker.js', import.meta.url), { type: 'module' }),
+  onUpdate: (merged) => {
+    state = merged;
+    running = merged.running;
     queueRedraw();
-  };
-  worker.onerror = (event) => {
-    event.preventDefault();
-    fail('The search worker could not run. Serve this folder over HTTP and press Reset to retry.');
-  };
-  worker.onmessageerror = () => fail('The search update could not be read. Press Reset to retry.');
-}
+  },
+  onError: fail,
+});
 
 function fail(message) {
   errorMessage = message;
   running = false;
-  worker?.terminate();
-  worker = null;
+  pool.terminate();
   queueRedraw();
-}
-
-function send(type, extra = {}) {
-  commandId++;
-  worker.postMessage({ type, commandId, ...extra });
 }
 
 const fmt = (value) => value == null || !Number.isFinite(value) ? '—' : value.toFixed(3);
@@ -127,8 +113,9 @@ function redraw() {
   els.bestCaption.textContent = state?.best
     ? `Scale ${fmt(state.best.scale)} · ${(state.efficiency * 100).toFixed(1)}% filled · ${describeLoose(state.best.loose)}`
     : 'Waiting for a feasible arrangement.';
-  els.liveTitle.textContent = state?.done && state.best ? 'Search complete · best packing' : 'Current search';
-  els.statAttempt.textContent = state ? `${Math.min(state.attemptIndex + (state.done ? 0 : 1), config.attempts)} / ${config.attempts}` : '—';
+  els.liveTitle.textContent = state?.done && state.best ? 'Search complete · best packing'
+    : state?.workers > 1 ? `Current search · worker ${state.watched + 1} of ${state.workers}` : 'Current search';
+  els.statAttempt.textContent = state ? `${state.attemptsDone} / ${state.attemptsTotal}` : '—';
   els.statTemp.textContent = state && !state.done ? `${Math.round(state.temperature * 100)}%` : '—';
   els.statScale.textContent = state && !state.done ? fmt(state.scale) : '—';
   els.statAttemptBest.textContent = fmt(state?.attemptBestScale);
@@ -139,19 +126,19 @@ function redraw() {
   els.status.textContent = errorMessage || (!state ? 'Preparing the search…' : state.done
     ? state.best ? 'Search finished. Try another run to explore different arrangements.' : 'No feasible packing found. Try another run.'
     : running ? 'Trying smaller containers and new arrangements…' : 'Search paused.');
-  els.runInfo.textContent = state ? `Seed ${state.seed} · ${(state.elapsedMs / 1000).toFixed(2)} s computing · ${state.iterations.toLocaleString()} iterations · ${state.acceptedHops}/${state.hops} hops accepted` : '';
-  renderLog(state?.history || []);
+  els.runInfo.textContent = state ? `Seed ${state.seed} · ${state.workers} worker${state.workers === 1 ? '' : 's'} · ${(state.elapsedMs / 1000).toFixed(2)} s CPU · ${state.iterations.toLocaleString()} iterations · ${state.acceptedHops}/${state.hops} hops accepted` : '';
+  renderLog(state?.history || [], state?.workers ?? 1);
 }
 
 // Rattlers are the interesting case, so say so plainly rather than printing a
 // zero that reads like a missing value.
 function describeLoose(loose) {
-  const n = loose ? loose.filter(Boolean).length : 0;
   if (!loose) return 'wedge unknown';
+  const n = loose.filter(Boolean).length;
   return n === 0 ? 'every piece wedged in' : `${n} piece${n === 1 ? '' : 's'} still loose`;
 }
 
-function renderLog(history) {
+function renderLog(history, workers) {
   if (els.logList.childElementCount === history.length) return;
   let bestIndex = -1;
   let bestScale = Infinity;
@@ -161,7 +148,8 @@ function renderLog(history) {
   els.logList.replaceChildren(...history.map((h, i) => {
     const li = document.createElement('li');
     const phase = h.polish ? 'Final polish' : `Attempt ${h.attempt}`;
-    li.textContent = `${phase}: ${h.scale == null ? 'no feasible packing found' : `scale ${h.scale.toFixed(3)}`}`;
+    const who = workers > 1 ? `Worker ${h.worker + 1} · ` : '';
+    li.textContent = `${who}${phase}:${h.scale == null ? 'no feasible packing found' : `scale ${h.scale.toFixed(3)}`}`;
     if (i === bestIndex) li.className = 'best';
     return li;
   }));
@@ -173,14 +161,12 @@ function restart(patch = {}) {
   config = { ...config, ...patch };
   syncControls();
   writeUrl();
-  const start = true;
   errorMessage = '';
   state = null;
-  running = start;
+  running = true;
   els.logList.replaceChildren();
   try {
-    if (!worker) createWorker();
-    send('reset', { config, start });
+    pool.reset(config);
   } catch (error) { fail(error.message); }
   queueRedraw();
 }
@@ -188,7 +174,8 @@ function restart(patch = {}) {
 els.playBtn.addEventListener('click', () => {
   if (state?.done) { restart(); return; }
   running = !running;
-  send(running ? 'play' : 'pause');
+  if (running) pool.play();
+  else pool.pause();
   queueRedraw();
 });
 els.resetBtn.addEventListener('click', () => restart());
@@ -209,6 +196,6 @@ els.aspect.addEventListener('change', () => restart({ aspect: Number(els.aspect.
 
 window.addEventListener('resize', queueRedraw);
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', queueRedraw);
-window.addEventListener('pagehide', () => { worker?.terminate(); worker = null; });
+window.addEventListener('pagehide', () => pool.terminate());
 window.addEventListener('pageshow', (event) => { if (event.persisted) restart(); });
 restart();

@@ -30,9 +30,8 @@ const DIRECTIONS = 16;
 // fraction of its radius; `tolerance` matches the solver's feasibility limit so
 // that pieces resting in contact are not read as overlapping.
 export function findLoose(items, container, { play = 0.02, tolerance = 1e-4 } = {}) {
-  if (!Array.isArray(items) || !container) return [];
+  if (!Array.isArray(items) || !items.length || !container) return [];
   if (container.type === 'sphere') {
-    if (!items.length) return [];
     return looseOnSphere(items, container.R, play, tolerance * items[0].shape.radius);
   }
   return items.map((_, i) => isLoose(items, i, container, play, tolerance));

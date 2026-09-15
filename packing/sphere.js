@@ -179,16 +179,16 @@ export function sphereGeometry(shape, R) {
   };
 }
 
-// Vertices of one spherical polygon, as unit vectors, wound so that the
-// item's own centre lies on the positive side of every edge plane.
-export function polygonVerts(item, g) {
+// `count` unit vectors evenly spaced on the circle at angular radius `angle`
+// around an item, starting from its facing and wound counter-clockwise.
+function ringAround(item, angle, count) {
   const t = { x: item.tx, y: item.ty, z: item.tz };
   const s = cross(item, t);
-  const c = Math.cos(g.angle);
-  const r = Math.sin(g.angle);
+  const c = Math.cos(angle);
+  const r = Math.sin(angle);
   const out = [];
-  for (let k = 0; k < g.shape.sides; k++) {
-    const a = (k * TWO_PI) / g.shape.sides;
+  for (let k = 0; k < count; k++) {
+    const a = (k * TWO_PI) / count;
     const ca = Math.cos(a) * r;
     const sa = Math.sin(a) * r;
     out.push({
@@ -199,6 +199,10 @@ export function polygonVerts(item, g) {
   }
   return out;
 }
+
+// Vertices of one spherical polygon, as unit vectors, wound so that the
+// item's own centre lies on the positive side of every edge plane.
+const polygonVerts = (item, g) => ringAround(item, g.angle, g.shape.sides);
 
 // --- overlap ----------------------------------------------------------------
 
@@ -321,7 +325,7 @@ function resolveSphereContact(a, b, res, R, bias, maxAngular) {
   const lambda = (res.depth * bias) / (ta.k + tb.k);
   slideItem(a, ta.nt, -lambda * a.shape.invMass, R);
   slideItem(b, tb.nt, lambda * b.shape.invMass, R);
-  if (maxAngular > 0) {
+  if (useInertia) {
     spinItem(a, -clampMag(ta.c * lambda * ta.inertia, maxAngular));
     spinItem(b, clampMag(tb.c * lambda * tb.inertia, maxAngular));
   }
@@ -504,24 +508,8 @@ function clearOnSphere(g, items, self, probe, tol) {
 // Outline of one piece as unit vectors. A polygon's edges are great-circle
 // arcs, which are not straight lines on a map, so they are subdivided.
 export function itemOutline(item, g, segments) {
+  if (g.isCircle) return ringAround(item, g.angle, segments);
   const out = [];
-  if (g.isCircle) {
-    const t = { x: item.tx, y: item.ty, z: item.tz };
-    const s = cross(item, t);
-    const c = Math.cos(g.angle);
-    const r = Math.sin(g.angle);
-    for (let k = 0; k < segments; k++) {
-      const a = (k * TWO_PI) / segments;
-      const ca = Math.cos(a) * r;
-      const sa = Math.sin(a) * r;
-      out.push({
-        x: item.x * c + t.x * ca + s.x * sa,
-        y: item.y * c + t.y * ca + s.y * sa,
-        z: item.z * c + t.z * ca + s.z * sa,
-      });
-    }
-    return out;
-  }
   const verts = polygonVerts(item, g);
   const per = Math.max(2, Math.round(segments / verts.length));
   for (let i = 0; i < verts.length; i++) {

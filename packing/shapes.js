@@ -16,7 +16,7 @@ import {
   rectVerts,
   polygonInertia,
   supportPoint,
-  worldVerts as worldVertsOf,
+  worldVerts,
 } from './geometry.js';
 
 // Items behave as unit-density rigid bodies during relaxation, so each shape
@@ -123,9 +123,9 @@ export const CONTAINER_SHAPES = {
   },
 };
 
-// Half-extent used to frame the container on screen.
+// Half-extent used to frame a flat container on screen.
 export function containerRadius(container) {
-  if (container.type === 'circle' || container.type === 'sphere') return container.R;
+  if (container.type === 'circle') return container.R;
   let m = 0;
   for (const [x, y] of container.verts) m = Math.max(m, Math.abs(x), Math.abs(y));
   return m;
@@ -135,17 +135,44 @@ export function containerRadius(container) {
 // immediately, avoiding an extra temporary vector per support query.
 const SCRATCH = [0, 0];
 
+// The vertex of `verts` furthest from the origin, and that distance.
+function farthestVertex(verts) {
+  let d = 0;
+  let x = 0;
+  let y = 0;
+  for (const [vx, vy] of verts) {
+    const dv = Math.hypot(vx, vy);
+    if (dv > d) {
+      d = dv;
+      x = vx;
+      y = vy;
+    }
+  }
+  return { d, x, y };
+}
+
+// How far an item (with world `verts`, or null for a circle) pokes through one
+// half-plane of a convex container. Negative when it is clear of that wall.
+function planeExcess(item, verts, p) {
+  if (!verts) return item.x * p.nx + item.y * p.ny + item.shape.radius - p.d;
+  let m = -Infinity;
+  for (const [x, y] of verts) {
+    const v = x * p.nx + y * p.ny;
+    if (v > m) m = v;
+  }
+  return m - p.d;
+}
+
 // Contacts between an item and the container wall it is poking through.
 //
 // Each contact is {nx, ny, ex, px, py}: an outward wall normal, how far the
 // item sticks out along it, and where. Results are appended to `out` (which the
 // caller clears); the list is reused between contact queries.
 export function containerContacts(item, container, out) {
-  const isCircle = item.shape.type === 'circle';
-  const verts = isCircle ? null : worldVertsOf(item);
+  const verts = worldVerts(item);
 
   if (container.type === 'circle') {
-    if (isCircle) {
+    if (!verts) {
       const d = Math.hypot(item.x, item.y);
       const ex = d + item.shape.radius - container.R;
       if (ex <= 0) return out;
@@ -156,37 +183,17 @@ export function containerContacts(item, container, out) {
       return out;
     }
     // Polygon in a circle: the most distant vertex defines the contact.
-    let maxD = 0;
-    let fx = 0;
-    let fy = 0;
-    for (const [x, y] of verts) {
-      const d = Math.hypot(x, y);
-      if (d > maxD) {
-        maxD = d;
-        fx = x;
-        fy = y;
-      }
-    }
-    const ex = maxD - container.R;
+    const far = farthestVertex(verts);
+    const ex = far.d - container.R;
     if (ex <= 0) return out;
-    out.push({ nx: fx / maxD, ny: fy / maxD, ex, px: fx, py: fy });
+    out.push({ nx: far.x / far.d, ny: far.y / far.d, ex, px: far.x, py: far.y });
     return out;
   }
 
   // Convex container: every violated half-plane is its own contact, so an item
   // wedged into a corner is corrected against both walls.
   for (const p of container.planes) {
-    let ex;
-    if (isCircle) {
-      ex = item.x * p.nx + item.y * p.ny + item.shape.radius - p.d;
-    } else {
-      let m = -Infinity;
-      for (const [x, y] of verts) {
-        const v = x * p.nx + y * p.ny;
-        if (v > m) m = v;
-      }
-      ex = m - p.d;
-    }
+    const ex = planeExcess(item, verts, p);
     if (ex <= 0) continue;
     const sp = supportPoint(item, p.nx, p.ny, verts, SCRATCH);
     out.push({ nx: p.nx, ny: p.ny, ex, px: sp[0], py: sp[1] });
@@ -197,29 +204,12 @@ export function containerContacts(item, container, out) {
 // The largest distance by which an item pokes outside the container, or 0 when
 // it is fully inside. Used for scoring, where contact geometry is irrelevant.
 export function containmentExcess(item, container) {
-  const isCircle = item.shape.type === 'circle';
+  const verts = worldVerts(item);
   if (container.type === 'circle') {
-    const r = item.shape.radius;
-    if (isCircle) return Math.max(0, Math.hypot(item.x, item.y) + r - container.R);
-    let maxD = 0;
-    for (const [x, y] of worldVertsOf(item)) maxD = Math.max(maxD, Math.hypot(x, y));
-    return Math.max(0, maxD - container.R);
+    const reach = verts ? farthestVertex(verts).d : Math.hypot(item.x, item.y) + item.shape.radius;
+    return Math.max(0, reach - container.R);
   }
-  const verts = isCircle ? null : worldVertsOf(item);
   let worst = 0;
-  for (const p of container.planes) {
-    let ex;
-    if (isCircle) {
-      ex = item.x * p.nx + item.y * p.ny + item.shape.radius - p.d;
-    } else {
-      let m = -Infinity;
-      for (const [x, y] of verts) {
-        const v = x * p.nx + y * p.ny;
-        if (v > m) m = v;
-      }
-      ex = m - p.d;
-    }
-    if (ex > worst) worst = ex;
-  }
+  for (const p of container.planes) worst = Math.max(worst, planeExcess(item, verts, p));
   return worst;
 }
