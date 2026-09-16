@@ -12,16 +12,40 @@
     "desc": "Watch the inner workings of a tiny GPT doing inference"
   },
   {
+    "filePath": "mowFast",
+    "title": "MowFast",
+    "year": 2026,
+    "desc": "A game where you have to mow every patch in as few moves as you can."
+  },
+  {
     "filePath": "optics",
     "title": "Optics Simulator",
     "year": 2026,
     "desc": "Play with lenses"
   },
   {
+    "filePath": "packing",
+    "title": "Packing Explorer",
+    "year": 2026,
+    "desc": "How efficiently can copies of a shape be packed into a container?"
+  },
+  {
+    "filePath": "soundViz",
+    "title": "SoundViz",
+    "year": 2026,
+    "desc": "Record sound and see it"
+  },
+  {
     "filePath": "perf",
     "title": "Total Compute Estimator",
     "year": 2026,
     "desc": "Measures your machine's power."
+  },
+  {
+    "filePath": "treeGame",
+    "title": "Tree Game",
+    "year": 2026,
+    "desc": "Build a tree and grow fruit."
   },
   {
     "filePath": "polygonPhysics",

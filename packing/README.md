@@ -1,3 +1,5 @@
+Packing Explorer - 2026 - How efficiently can copies of a shape be packed into a container?
+
 # Packing explorer
 
 A browser-only packing experiment, mostly 2D: how tightly do N copies of a shape
@@ -91,7 +93,7 @@ for explicit experiments, not enabled by default.
 ### Packing on a sphere
 
 The sphere container is normalised to unit area exactly like the flat ones, with
-its *surface* area being the thing normalised: a sphere built at `scale` has
+its _surface_ area being the thing normalised: a sphere built at `scale` has
 surface area `scale*scale` and radius `scale/(2*sqrt(pi))`. `scale`, the area
 lower bound and the efficiency figure therefore keep the meaning they have
 everywhere else, and a sphere result is directly comparable with a disc result.
@@ -131,7 +133,7 @@ Two traps live in there, both guarded by tests:
 
 Orientation is the part with real teeth. Transport on a sphere is
 path-dependent, and no continuous tangent frame exists on the whole sphere, so
-any convention that *recomputed* a frame from position would make pieces snap
+any convention that _recomputed_ a frame from position would make pieces snap
 around as they crossed its seam. Instead each item carries a unit tangent saying
 which way it faces, and since every motion here is a rotation of the sphere, the
 same rotation is applied to the facing -- parallel transport, for one extra line
@@ -139,7 +141,7 @@ per motion and no quaternions. Contact resolution then works in the tangent
 plane at each piece's own centre, where the planar mass/inertia split applies
 unchanged, and the resulting slide and spin are applied back as rotations.
 
-That last step uses the shape's *flat* second moment, not its spherical one.
+That last step uses the shape's _flat_ second moment, not its spherical one.
 They agree for small pieces and drift apart as a piece grows relative to the
 sphere, so it is an approximation -- in how fast a contact is corrected, though,
 not in whether one is detected.
@@ -147,7 +149,7 @@ not in whether one is detected.
 The surface is drawn as a cylindrical equal-area map -- longitude across, sine
 of latitude down -- rather than as a 3D ball, so every cap is visible at once
 and nothing hides behind a horizon. Equal-area matters here beyond cartographic
-good manners: it means the fraction of the rectangle covered by caps *is* the
+good manners: it means the fraction of the rectangle covered by caps _is_ the
 efficiency the stats report. Any aspect ratio stays equal-area, since scaling x
 and y differently multiplies every area by the same constant, so the 2:1
 rectangle is chosen for looks; it puts the least shape distortion around 37
@@ -166,7 +168,7 @@ Caps have no orientation, so the rotation machinery is simply unused for them.
 
 ## Loose pieces
 
-A finished packing usually contains a few *rattlers*: pieces with room to move
+A finished packing usually contains a few _rattlers_: pieces with room to move
 even though the layout as a whole cannot shrink any further. Eight circles in a
 circle is the textbook case, seven wedged into a ring with the eighth rattling
 in the middle. Those pieces are drawn in a third colour, and the caption under
@@ -211,7 +213,7 @@ For polygons it is the Platonic solids, which projected onto a sphere are exact
 tilings -- 4, 8 and 20 triangles, 6 squares, 12 pentagons. Each covers the sphere
 completely, so its optimum is the area lower bound the solver already knows it
 can never beat, and the test asserts it is reached. That is a stiffer check than
-a tolerance band: a tiling only closes up if every piece is also *turned* to face
+a tolerance band: a tiling only closes up if every piece is also _turned_ to face
 its neighbours, so it exercises sizing, the separating-axis test and the
 rotational half of contact resolution at once. All five are found exactly.
 
