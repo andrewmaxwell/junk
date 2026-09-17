@@ -15,7 +15,6 @@
  *   viscosity: number,
  *   dt: number,
  *   buoyantForce: number, // includes gravity
- *   vorticity: number,
  *   iterations: number,
  *   regions: Region[],
  * }} SimParams
@@ -47,7 +46,6 @@ export const makeSim = (params) => {
   // be overwritten later.
   const pressure = new Float32Array(size);
   const divergence = new Float32Array(size);
-  const curl = new Float32Array(size);
   // Holds the round trip in `macCormack`: the forward advection traced back.
   const reverted = new Float32Array(size);
 
@@ -184,59 +182,6 @@ export const makeSim = (params) => {
   }
 
   /**
-   * Even with the advection fixed below, a grid this coarse still bleeds
-   * angular momentum. Vorticity confinement measures the swirl that survived
-   * and pushes it back up: the force runs along the gradient of |curl|, so
-   * every vortex pulls its own circulation back toward its center instead of
-   * letting it spread out and flatten.
-   *
-   * This one is a dial, not a correction. It injects energy rather than
-   * recovering something the discretization lost, so too much turns the flow
-   * into a field of permanent pinwheels that no longer respond to buoyancy.
-   */
-  function applyVorticity() {
-    const {dt, vorticity} = params;
-    if (!vorticity) return;
-
-    for (let j = 1; j <= N; j++) {
-      const row = res * j;
-      const above = row - res;
-      const below = row + res;
-      for (let i = 1; i <= N; i++) {
-        const index = row + i;
-        curl[index] =
-          (yVel[index + 1] -
-            yVel[index - 1] -
-            xVel[below + i] +
-            xVel[above + i]) /
-          2;
-      }
-    }
-
-    // The gradient needs a curl value on each side, so this stops one cell
-    // short of the ring `curl` was written on.
-    for (let j = 2; j < N; j++) {
-      const row = res * j;
-      const above = row - res;
-      const below = row + res;
-      for (let i = 2; i < N; i++) {
-        const index = row + i;
-        const gradX =
-          (Math.abs(curl[index + 1]) - Math.abs(curl[index - 1])) / 2;
-        const gradY =
-          (Math.abs(curl[below + i]) - Math.abs(curl[above + i])) / 2;
-        // Normalizing makes the force depend on the direction of the gradient
-        // but not its steepness, so faint vortices get confined as firmly as
-        // strong ones. The epsilon covers perfectly uniform neighborhoods.
-        const scale =
-          (vorticity * dt * curl[index]) / (Math.hypot(gradX, gradY) + 1e-12);
-        xVel[index] += gradY * scale;
-        yVel[index] -= gradX * scale;
-      }
-    }
-  }
-
-  /**
    * One semi-Lagrangian pass: trace each cell back along the velocity field
    * and bilinearly sample `src` where it lands. `direction` of -1 traces the
    * other way, which is how `macCormack` re-derives where a value came from.
@@ -346,7 +291,6 @@ export const makeSim = (params) => {
     iterate: () => {
       applyRegions();
       applyBuoyancy();
-      applyVorticity();
 
       swapBuffers();
       diffuse(xVel, xVelPrev, params.viscosity, -1, 1);
