@@ -171,10 +171,19 @@ diagram being redrawn:
   computation actually reaches it, and the eye lands on the one thing that is
   the point.
 
-Edge geometry is precomputed once into per-sign, per-|weight|-bucket `Path2D`s
-(~32 stroke calls per matrix); only color/opacity changes per step. Live edge
-glow is modulated per matrix (not per individual edge) for performance — the
-nodes carry the true per-scalar activation colors.
+**Edges come in two layers**, because one layer cannot do both jobs. The
+*structure* layer is precomputed once into per-sign, per-|weight|-bucket
+`Path2D`s (~16 stroke calls per matrix) and drawn dim: its alpha can only be
+modulated per matrix, since per-edge alpha across every weight would be hundreds
+of thousands of stroke calls a frame — so on its own it reads as texture that
+pulses, not as information. The *signal* layer on top is true per-edge: for each
+matrix, the few most-activated destination units and the few sources
+contributing most to each, ranked by **activation x weight** rather than
+|weight| (a large weight fed by a dead unit moves nothing, and this product is
+what actually lands in the destination). That set is recomputed once per
+generated token, so the per-frame cost is a few hundred short lines — the change
+also roughly doubled the frame rate, since the dim wash now draws half as many
+buckets. The legend calls the two layers out.
 
 ## Run it
 
@@ -240,9 +249,28 @@ coherent. Current run:
 
 ```
 bigram baseline on val : 5.2950 nats (ppl 199.3)
-best val               : 4.4966 nats (ppl  89.7) at step 13500
-                         -> +0.798 nats, 55% lower perplexity
+best val               : 4.2281 nats (ppl  68.6) at step 26750
+                         -> +1.067 nats, 66% lower perplexity
 ```
+
+`DROPOUT` (default 0.1) and `LR_DECAY_STEPS` (default 40000, separate from the
+`MAX_STEPS` cap) are the two knobs that got it there. Both came out of a sweep,
+and only one of them for the reason expected:
+
+| dropout | LR decay | val ppl | nats/word |
+|--------:|---------:|--------:|----------:|
+|     0.0 |      30k |    89.7 |    4.9499 |
+|     0.0 |      16k |    91.1 |    4.9674 |
+|     0.1 |      16k |    81.3 |    4.8413 |
+|     0.2 |      16k |    89.9 |    4.9522 |
+| **0.1** | **40k**  | **68.6**| **4.6544**|
+
+Dropout was a config field the model never implemented; adding it is worth ~9%
+perplexity at 0.1 and nothing at 0.2. **Annealing the LR sooner did not help on
+its own** (row 2 is slightly worse than row 1) — the plausible story that the
+old runs "never reached the low-LR phase" is not what was holding them back.
+What mattered was dropout *plus* enough steps to use it: at `LR_DECAY_STEPS=16k`
+the 0.1 run was still improving when it hit the 30k cap.
 
 **Comparing runs with different `N_WORDS` is a trap.** Loss is per *token*, and a
 bigger vocab means fewer, more informative tokens — so per-token perplexity rises

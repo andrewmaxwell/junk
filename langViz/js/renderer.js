@@ -12,14 +12,27 @@
 // * Edge GEOMETRY is precomputed once after weights load. Each weight matrix is
 //   split into sign (+/-) and ~16 |weight| buckets, each a single Path2D, so a
 //   redraw is ~32 stroke() calls per matrix — only color/alpha changes per step.
-// * Per-edge live "glow" at true per-edge resolution would be hundreds of
-//   thousands of stroke calls, so we modulate edge alpha per MATRIX by its live
-//   source*dest activation. NODES carry the true per-scalar activation colors, so
-//   the data path is still read accurately, just with edges glowing per matrix.
+// * Edges are drawn in TWO layers. The bucketed wash above is structure only,
+//   kept dim: its alpha can only be modulated per MATRIX (per-edge would be
+//   hundreds of thousands of stroke calls a frame), so on its own it reads as
+//   texture that pulses rather than as information. On top of it goes a small
+//   live layer at true per-edge resolution — for each matrix, the few
+//   most-activated destination units and the few sources contributing most to
+//   each, ranked by activation x weight rather than |weight|, because a large
+//   weight fed by a dead unit moves nothing. That set is recomputed once per
+//   generated token, so the per-frame cost is a few hundred short lines.
 
 const NB = 16;            // |weight| buckets per sign
-const EDGE_BUCKET_FLOOR = 5; // skip the weakest ~30% of weights so edges read as
-                             // distinct strands, not a solid hairball
+const EDGE_BUCKET_FLOOR = 8; // Skip the weaker half of each matrix. What remains
+                             // is drawn dim, as STRUCTURE ("this is a dense
+                             // linear map"); the bright per-edge layer below
+                             // carries the actual signal. Before, the wash was
+                             // the only edge layer, its glow modulated per
+                             // MATRIX rather than per edge — so it read as
+                             // texture that pulsed, not as information.
+const EDGE_WASH = 0.42;      // how far the static wash is pulled back
+const LIVE_DST = 6;          // destination units traced back from, per matrix
+const LIVE_SRC = 10;         // strongest contributing sources kept per destination
 const CX = 150;           // x spacing between column slots (world units)
 const SPINE_H = 210;      // height of the residual spine column (world units)
 const ATTN_H = 230;       // attention branch band height
@@ -266,6 +279,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     }
     return {
       src, dst, name, block, pos, neg, maxAbs, activity: 0,
+      W, din, dout, live: [],   // `live` = the edges actually carrying signal now
       midX: (src.x + dst.x) / 2,
       bbox: { x0: Math.min(src.x, dst.x), x1: Math.max(src.x, dst.x), y0: Math.min(src.yc - src.h / 2, dst.yc - dst.h / 2), y1: Math.max(src.yc + src.h / 2, dst.yc + dst.h / 2) },
     };
@@ -508,6 +522,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       cN.activity = clamp((norm(cN.src) + norm(cN.dst)) * 0.5, 0, 1);
     }
 
+    computeLiveEdges();
     topOutputs = snap.topOutputs || [];
     attnData = snap.attention || null;          // [layer][head][query][key]
     attnTokens = snap.windowTokens || [];
@@ -524,7 +539,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
 
   function reset() {
     for (const c of columns) { c.display.fill(0); c.prev.fill(0); c.value.fill(0); c.scale = 1e-3; c.meanAbs = 0; }
-    for (const m of matrices) m.activity = 0;
+    for (const m of matrices) { m.activity = 0; m.live = []; }
     for (const cN of connectors) cN.activity = 0;
     topOutputs = [];
     attnData = null; attnTokens = []; attnLastPos = 0;
@@ -535,6 +550,49 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     waveActive = false;
     updateAttnDom();
     updateOutputDom();
+  }
+
+  // ---- which individual weights are actually carrying this token? ----
+  //
+  // The bucketed wash can only be modulated per MATRIX, because per-edge alpha
+  // would be hundreds of thousands of stroke calls a frame. But the honest
+  // question — "which weights matter right now" — has a small answer: for each
+  // matrix, take the few most-activated destination units and trace back the
+  // few sources contributing most to each. The quantity that matters is
+  // activation x weight, not |weight|: a large weight fed by a dead unit moves
+  // nothing, and this is the product that actually lands in the destination.
+  //
+  // Computed once per generated token (activations only change then), so the
+  // per-frame cost is just stroking a few hundred short lines.
+  function computeLiveEdges() {
+    for (const m of matrices) {
+      const { W, din, dout, src, dst } = m;
+      const live = [];
+      // the LIVE_DST destination units with the largest |activation|
+      const picks = [];
+      for (let j = 0; j < dout; j++) {
+        const a = Math.abs(dst.value[j]);
+        if (picks.length < LIVE_DST) { picks.push({ j, a }); if (picks.length === LIVE_DST) picks.sort((p, q) => p.a - q.a); }
+        else if (a > picks[0].a) { picks[0] = { j, a }; picks.sort((p, q) => p.a - q.a); }
+      }
+      let maxC = 1e-9;
+      for (const { j } of picks) {
+        // the LIVE_SRC sources contributing most to that unit
+        const cand = [];
+        for (let i = 0; i < din; i++) {
+          const c = src.value[i] * W[i * dout + j];
+          const ac = Math.abs(c);
+          if (cand.length < LIVE_SRC) { cand.push({ i, c, ac }); if (cand.length === LIVE_SRC) cand.sort((p, q) => p.ac - q.ac); }
+          else if (ac > cand[0].ac) { cand[0] = { i, c, ac }; cand.sort((p, q) => p.ac - q.ac); }
+        }
+        for (const { i, c, ac } of cand) {
+          if (ac > maxC) maxC = ac;
+          live.push({ sy: src.ys[i], dy: dst.ys[j], c, ac });
+        }
+      }
+      m.live = live;
+      m.liveMax = maxC;
+    }
   }
 
   // -------------------------------------------------------------- drawing ----
@@ -589,6 +647,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     drawSpine();
     drawBoxes();
     for (const m of matrices) { if (overlaps(m.bbox, vr)) drawMatrixEdges(m, edgeF, sc); }
+    for (const m of matrices) { if (overlaps(m.bbox, vr)) drawLiveEdges(m, sc); }
     drawConnectors(vr, sc);
     drawGhosts(sc);
     drawAttribution();
@@ -666,10 +725,31 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     // near-invisible anyway; the nodes still carry every activation.
     for (let bk = EDGE_BUCKET_FLOOR; bk < NB; bk++) {
       const base = (bk + 0.5) / NB;
-      const a = clamp(base * base * 0.6 * glow * edgeF, 0, 0.62);
+      const a = clamp(base * base * 0.6 * glow * edgeF * EDGE_WASH, 0, 0.62);
       if (a < 0.01) continue;
       ctx.strokeStyle = rgba(C_EPOS, a); ctx.stroke(m.pos[bk]);
       ctx.strokeStyle = rgba(C_ENEG, a); ctx.stroke(m.neg[bk]);
+    }
+  }
+
+  // The bright layer: true per-edge, true sign, thickness by contribution.
+  function drawLiveEdges(m, sc) {
+    if (!m.live.length) return;
+    const pass = waveFront === Infinity ? 1
+      : clamp((waveFront - m.midX) / (CX * 0.8) + 0.5, 0, 1);
+    if (pass <= 0.02) return;
+    const glow = 0.45 + 0.55 * waveGlow(m.midX);
+    const inv = 1 / m.liveMax;
+    for (const e of m.live) {
+      const t = e.ac * inv;                 // share of the strongest contribution
+      if (t < 0.06) continue;
+      ctx.strokeStyle = rgba(e.c >= 0 ? C_EPOS : C_ENEG,
+        clamp((0.12 + 0.72 * t * t) * pass * glow, 0, 0.95));
+      ctx.lineWidth = (0.4 + 1.5 * t) / sc;
+      ctx.beginPath();
+      ctx.moveTo(m.src.x, e.sy);
+      ctx.lineTo(m.dst.x, e.dy);
+      ctx.stroke();
     }
   }
 
@@ -1450,7 +1530,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   // Small, unintrusive key (bottom-left, screen space): node activation colormap,
   // edge sign colors, and the per-head attention swatches.
   function drawLegend() {
-    const w = 138, h = 80, x = 16, y = cssH - h - 52; // clear of the stage rail
+    const w = 152, h = 94, x = 16, y = cssH - h - 52; // clear of the stage rail
     ctx.fillStyle = 'rgba(12,10,8,0.6)';
     roundRectScreen(x, y, w, h, 7); ctx.fill();
     ctx.strokeStyle = 'rgba(150,135,105,0.26)'; ctx.lineWidth = 1; ctx.stroke();
@@ -1478,9 +1558,14 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     ctx.fillText('−weight', x + 30, ey2);
 
     // attention head swatches
-    ctx.fillText('heads', x + 84, ey);
-    let hx = x + 84;
+    ctx.fillText('heads', x + 92, ey);
+    let hx = x + 92;
     for (let hh = 0; hh < H; hh++) { ctx.fillStyle = rgba(headColors[hh], 0.95); ctx.fillRect(hx, ey2 - 4, 9, 9); hx += 12; }
+    // the edge layers: dim = the whole matrix, bright = what is carrying signal
+    ctx.fillStyle = 'rgba(175,165,146,0.8)';
+    ctx.fillText('dim edges = structure', x + 10, y + 76);
+    ctx.fillStyle = 'rgba(205,195,175,0.9)';
+    ctx.fillText('bright = act \u00d7 weight', x + 10, y + 87);
   }
 
   // canvas path helpers (current transform)

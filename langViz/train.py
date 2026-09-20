@@ -45,6 +45,18 @@ MAX_STEPS = int(os.environ.get("MAX_STEPS", 30000))
 MIN_STEPS = 3000
 SEED = 1337
 
+# Dropout was a config field the model never actually implemented. It only ever
+# runs during training (nn.Dropout is identity under .eval()), so it adds no
+# parameters, changes nothing in the exported weights, and the browser forward
+# pass is unaffected.
+DROPOUT = float(os.environ.get("DROPOUT", 0.1))
+
+# Horizon for the cosine decay, separate from the step cap. These used to be the
+# same number, so with MAX_STEPS=30000 and early stopping around step ~14k the
+# LR only ever fell from 6e-4 to ~3.2e-4 — the run ended before the low-LR
+# annealing phase that usually delivers a good share of the final gain.
+LR_DECAY_STEPS = int(os.environ.get("LR_DECAY_STEPS", 16000))
+
 # Held-out split. There was none, which meant the only visible signal was
 # TRAINING loss — so nobody could tell underfitting from memorisation, and the
 # plateau test below was watching the wrong number. The tail of the corpus is
@@ -121,6 +133,8 @@ class CausalSelfAttention(nn.Module):
         self.W_K = nn.Linear(D_MODEL, D_MODEL)
         self.W_V = nn.Linear(D_MODEL, D_MODEL)
         self.W_O = nn.Linear(D_MODEL, D_MODEL)
+        self.attn_drop = nn.Dropout(DROPOUT)
+        self.resid_drop = nn.Dropout(DROPOUT)
         mask = torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)).view(
             1, 1, BLOCK_SIZE, BLOCK_SIZE
         )
@@ -134,9 +148,10 @@ class CausalSelfAttention(nn.Module):
         att = (q @ k.transpose(-2, -1)) / math.sqrt(HEAD_DIM)
         att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
         att = F.softmax(att, dim=-1)
+        att = self.attn_drop(att)
         y = att @ v                                   # [B, nh, T, hd]
         y = y.transpose(1, 2).contiguous().view(B, T, C)
-        return self.W_O(y)
+        return self.resid_drop(self.W_O(y))
 
 
 class MLP(nn.Module):
@@ -144,9 +159,10 @@ class MLP(nn.Module):
         super().__init__()
         self.up = nn.Linear(D_MODEL, D_FF)
         self.down = nn.Linear(D_FF, D_MODEL)
+        self.drop = nn.Dropout(DROPOUT)
 
     def forward(self, x):
-        return self.down(F.gelu(self.up(x)))
+        return self.drop(self.down(F.gelu(self.up(x))))
 
 
 class Block(nn.Module):
@@ -169,13 +185,14 @@ class TinyGPT(nn.Module):
         self.tok_emb = nn.Embedding(VOCAB_SIZE, D_MODEL)
         self.pos_emb = nn.Embedding(BLOCK_SIZE, D_MODEL)
         self.blocks = nn.ModuleList([Block() for _ in range(N_LAYERS)])
+        self.drop = nn.Dropout(DROPOUT)
         self.ln_f = nn.LayerNorm(D_MODEL)
         # tied output embedding: LM head is tok_emb transposed, no separate params.
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
         pos = torch.arange(T, device=idx.device)
-        x = self.tok_emb(idx) + self.pos_emb(pos)[None, :, :]
+        x = self.drop(self.tok_emb(idx) + self.pos_emb(pos)[None, :, :])
         for blk in self.blocks:
             x = blk(x)
         x = self.ln_f(x)
@@ -292,7 +309,7 @@ def get_lr(step):
     """Linear warmup then cosine decay to MIN_LR."""
     if step < WARMUP_STEPS:
         return LEARNING_RATE * step / max(1, WARMUP_STEPS)
-    r = min(1.0, (step - WARMUP_STEPS) / max(1, MAX_STEPS - WARMUP_STEPS))
+    r = min(1.0, (step - WARMUP_STEPS) / max(1, LR_DECAY_STEPS - WARMUP_STEPS))
     return MIN_LR + 0.5 * (LEARNING_RATE - MIN_LR) * (1 + math.cos(math.pi * r))
 
 
@@ -362,7 +379,7 @@ def export(model, vocab):
         "head_dim": HEAD_DIM,
         "d_ff": D_FF,
         "block_size": BLOCK_SIZE,
-        "dropout": 0.0,
+        "dropout": DROPOUT,
         "tied_embeddings": True,
         "weight_layout": "y = x @ W + b, W is [in, out]; embeddings are [rows, d_model]",
         "dtype": "float16",
@@ -393,7 +410,7 @@ def main():
         device = "cuda"
     else:
         device = "cpu"
-    print(f"device: {device}")
+    print(f"device: {device} | dropout {DROPOUT} | lr decay over {LR_DECAY_STEPS} steps")
 
     vocab, stoi, data, per_token = build_data()
     VOCAB_SIZE = len(vocab)

@@ -6,7 +6,7 @@
   "head_dim": 24,
   "d_ff": 384,
   "block_size": 64,
-  "dropout": 0.0,
+  "dropout": 0.1,
   "tied_embeddings": true,
   "weight_layout": "y = x @ W + b, W is [in, out]; embeddings are [rows, d_model]",
   "dtype": "float16",
