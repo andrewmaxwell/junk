@@ -25,7 +25,7 @@ import torch.nn.functional as F
 # ----------------------------------------------------------------------------
 # Vocabulary: top-N whole "words" (+ punctuation), plus a character fallback so
 # any out-of-vocab word can be spelled out as pieces -> there is no <UNK>.
-N_WORDS = int(os.environ.get("N_WORDS", 3500))  # whole-word slots before fallback
+N_WORDS = int(os.environ.get("N_WORDS", 8000))  # whole-word slots before fallback
 VOCAB_SIZE = None         # set once the vocab is built (words + chars + "##" pieces)
 
 D_MODEL = 96
@@ -41,9 +41,19 @@ LEARNING_RATE = 6e-4
 MIN_LR = 6e-5
 WARMUP_STEPS = 200
 WEIGHT_DECAY = 0.01
-MAX_STEPS = int(os.environ.get("MAX_STEPS", 6000))
+MAX_STEPS = int(os.environ.get("MAX_STEPS", 30000))
 MIN_STEPS = 3000
 SEED = 1337
+
+# Held-out split. There was none, which meant the only visible signal was
+# TRAINING loss — so nobody could tell underfitting from memorisation, and the
+# plateau test below was watching the wrong number. The tail of the corpus is
+# held out as one contiguous block (not random windows) so no validation
+# context ever appears in a training window.
+VAL_FRACTION = 0.05
+EVAL_EVERY = 250        # steps between validation passes
+EVAL_BATCHES = 40       # fixed batches per validation pass (same ones each time)
+PATIENCE = 8            # validation passes without improvement before stopping
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIBLE_PATH = os.path.join(HERE, "..", "jibberjabber", "bible.txt")
@@ -226,16 +236,56 @@ def build_data():
     print(f"whole-word coverage: {covered / len(tokens) * 100:.1f}% "
           f"(the rest is spelled out, no <UNK>)")
 
+    per_token = np.array([len(encode_token(t, stoi)) for t in tokens], dtype=np.int64)
     ids = np.array(encode(text, stoi), dtype=np.int64)
-    print(f"encoded stream: {len(ids):,} tokens | vocab size {len(vocab)}")
-    return vocab, stoi, torch.from_numpy(ids)
+    print(f"encoded stream: {len(ids):,} tokens | vocab size {len(vocab)} "
+          f"| {len(ids) / len(tokens):.4f} ids per surface token (corpus mean)")
+    return vocab, stoi, torch.from_numpy(ids), per_token
 
 
-def get_batch(data, device):
-    ix = torch.randint(0, len(data) - BLOCK_SIZE - 1, (BATCH_SIZE,))
+def get_batch(data, device, generator=None):
+    ix = torch.randint(0, len(data) - BLOCK_SIZE - 1, (BATCH_SIZE,), generator=generator)
     x = torch.stack([data[i : i + BLOCK_SIZE] for i in ix])
     y = torch.stack([data[i + 1 : i + 1 + BLOCK_SIZE] for i in ix])
     return x.to(device), y.to(device)
+
+
+@torch.no_grad()
+def evaluate(model, data, device):
+    """Mean loss over a FIXED set of validation batches (same seed every call),
+    so successive numbers are comparable rather than sampling noise."""
+    model.eval()
+    gen = torch.Generator().manual_seed(4242)
+    total = 0.0
+    for _ in range(EVAL_BATCHES):
+        x, y = get_batch(data, device, gen)
+        _, loss = model(x, y)
+        total += loss.item()
+    model.train()
+    return total / EVAL_BATCHES
+
+
+def bigram_baseline(train_ids, val_ids, vocab_size, k=0.1):
+    """Add-k bigram fitted on train, scored on val. The bar the transformer has
+    to clear: if 4 layers and 64 tokens of context can't decisively beat "what
+    usually follows the previous token", the model is not using its context and
+    no amount of sampling tuning will make the output coherent."""
+    counts = {}
+    a = train_ids[:-1].tolist()
+    b = train_ids[1:].tolist()
+    for x, y in zip(a, b):
+        row = counts.setdefault(x, {})
+        row[y] = row.get(y, 0) + 1
+    totals = {x: sum(r.values()) for x, r in counts.items()}
+    nll = 0.0
+    va = val_ids[:-1].tolist()
+    vb = val_ids[1:].tolist()
+    for x, y in zip(va, vb):
+        row = counts.get(x)
+        num = (row.get(y, 0) if row else 0) + k
+        den = (totals.get(x, 0)) + k * vocab_size
+        nll -= math.log(num / den)
+    return nll / max(1, len(va))
 
 
 def get_lr(step):
@@ -337,22 +387,59 @@ def main():
     torch.manual_seed(SEED)
     np.random.seed(SEED)
 
-    device = "cpu"
+    if torch.backends.mps.is_available():
+        device = "mps"
+    elif torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
     print(f"device: {device}")
 
-    vocab, stoi, data = build_data()
+    vocab, stoi, data, per_token = build_data()
     VOCAB_SIZE = len(vocab)
+
+    # contiguous held-out tail (see VAL_FRACTION)
+    n_val = int(len(data) * VAL_FRACTION)
+    train_data, val_data = data[: len(data) - n_val], data[len(data) - n_val :]
+    print(f"split: {len(train_data):,} train / {len(val_data):,} val tokens")
+    # ids-per-surface-word ON THE VAL SLICE. Losses are per TOKEN, and a bigger
+    # vocab means fewer, more informative tokens — so per-token perplexity rises
+    # even when the model improves, and only a per-surface-word number can be
+    # compared between vocab settings. It must be measured on the val slice, not
+    # the corpus: the held-out tail is far more name-dense than average (1.31 vs
+    # 1.19 ids/word at vocab 3598), and using the corpus mean here flips the
+    # sign of a close comparison.
+    cum = np.cumsum(per_token)
+    n_val_words = int((cum > len(data) - n_val).sum())
+    expansion = n_val / max(n_val_words, 1)
+    print(f"val slice: {n_val_words:,} surface words, {expansion:.4f} ids/word")
+    bigram_nll = bigram_baseline(train_data, val_data, VOCAB_SIZE)
+    print(f"bigram baseline on val: {bigram_nll:.4f} nats (ppl {math.exp(bigram_nll):.1f})")
     model = TinyGPT().to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"model params: {n_params:,}")
 
+    # Weight decay belongs on matmul weights only; decaying LayerNorm gains and
+    # biases (and the tied embedding, which is also the output head) just drags
+    # them toward zero for no regularisation benefit.
+    decay, no_decay = [], []
+    for name, prm in model.named_parameters():
+        (no_decay if prm.ndim < 2 or "emb" in name else decay).append(prm)
     opt = torch.optim.AdamW(
-        model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
+        [
+            {"params": decay, "weight_decay": WEIGHT_DECAY},
+            {"params": no_decay, "weight_decay": 0.0},
+        ],
+        lr=LEARNING_RATE,
     )
+    print(f"params: {sum(p.numel() for p in decay):,} decayed / "
+          f"{sum(p.numel() for p in no_decay):,} not")
 
     t0 = time.time()
-    recent = []          # smoothed-loss plateau detection
-    best_smoothed = float("inf")
+    recent = []
+    best_val = float("inf")
+    best_state = None
+    best_step = 0
     no_improve = 0
     final_loss = None
 
@@ -360,7 +447,7 @@ def main():
         lr = get_lr(step)
         for grp in opt.param_groups:
             grp["lr"] = lr
-        x, y = get_batch(data, device)
+        x, y = get_batch(train_data, device)
         _, loss = model(x, y)
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -369,24 +456,50 @@ def main():
 
         recent.append(loss.item())
         final_loss = loss.item()
-        if step % 100 == 0:
-            smoothed = sum(recent[-100:]) / len(recent[-100:])
-            print(f"step {step:5d} | loss {loss.item():.4f} | avg100 {smoothed:.4f} | lr {lr:.2e}")
-            if smoothed < best_smoothed - 0.01:
-                best_smoothed = smoothed
+
+        # Early stopping now watches VALIDATION loss, with the best weights kept.
+        # The old test watched a 100-step average of TRAINING loss and required a
+        # 0.01 improvement to reset its counter — but late in training the gain
+        # per 100 steps is far below 0.01, so it fired on noise not long after
+        # MIN_STEPS and the run never reached its step budget.
+        if step % EVAL_EVERY == 0:
+            val = evaluate(model, val_data, device)
+            smoothed = sum(recent[-EVAL_EVERY:]) / len(recent[-EVAL_EVERY:])
+            flag = ""
+            if val < best_val - 1e-3:
+                best_val = val
+                best_step = step
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
                 no_improve = 0
+                flag = "  *best"
             else:
                 no_improve += 1
-            if step >= MIN_STEPS and no_improve >= 5:
-                print(f"plateau detected at step {step}; stopping.")
+            print(f"step {step:6d} | train {smoothed:.4f} | val {val:.4f} "
+                  f"(ppl {math.exp(val):6.1f}) | vs bigram {bigram_nll - val:+.3f} "
+                  f"| lr {lr:.2e}{flag}")
+            if step >= MIN_STEPS and no_improve >= PATIENCE:
+                print(f"validation loss stopped improving at step {step}; "
+                      f"stopping (best was step {best_step}).")
                 break
+
+    if best_state is not None:
+        print(f"restoring best weights from step {best_step} (val {best_val:.4f})")
+        model.load_state_dict(best_state)
 
     train_time = time.time() - t0
     print(f"\ntraining done: {step} steps in {train_time:.1f}s "
-          f"({train_time / step * 1000:.1f} ms/step), final loss {final_loss:.4f}")
+          f"({train_time / step * 1000:.1f} ms/step), final train loss {final_loss:.4f}")
+    print(f"best val loss {best_val:.4f} (ppl {math.exp(best_val):.1f}) at step {best_step}")
+    print(f"bigram baseline {bigram_nll:.4f} (ppl {math.exp(bigram_nll):.1f}) "
+          f"-> model is {bigram_nll - best_val:+.3f} nats better "
+          f"({(1 - math.exp(best_val) / math.exp(bigram_nll)) * 100:.0f}% lower perplexity)")
+    print(f"per SURFACE WORD (the only figure comparable across vocab sizes): "
+          f"{best_val * expansion:.4f} nats  [vocab {VOCAB_SIZE}, "
+          f"{expansion:.4f} ids/word on val]")
 
     # ---- sanity-check generations ----
     prompt = "Thus saith the LORD "
+    model.eval()
     pids = torch.tensor([encode(prompt, stoi)], dtype=torch.long, device=device)
 
     greedy = model.generate(pids, max_new_tokens=60, temperature=None)[0].tolist()
@@ -401,7 +514,8 @@ def main():
     size = export(model, vocab)
 
     print("\n========== SUMMARY ==========")
-    print(f"training: {step} steps, {train_time:.1f}s, final loss {final_loss:.4f}")
+    print(f"training: {step} steps, {train_time:.1f}s, best val {best_val:.4f} "
+          f"(ppl {math.exp(best_val):.1f}) vs bigram ppl {math.exp(bigram_nll):.1f}")
     print(f"weights.bin size: {size:,} bytes")
 
 

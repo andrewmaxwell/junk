@@ -24,7 +24,8 @@ const CX = 150;           // x spacing between column slots (world units)
 const SPINE_H = 210;      // height of the residual spine column (world units)
 const ATTN_H = 230;       // attention branch band height
 const MLP_H = 250;        // mlp branch band height
-const GAP = 26;           // gap between spine and a branch band (small offset only)
+const GAP = 130;          // gap between spine and a branch band. Wide enough that
+                          // the ghost lanes below the spine sit in clear space.
 const OUT_H = 560;        // vertical spread of the 25 output nodes
 const N_OUT = 25;
 
@@ -32,18 +33,21 @@ const N_OUT = 25;
 // window tokens are faint parallel lanes just below it that never interact —
 // except at each attention, where this token pulls in a blend of their values.
 const N_GHOST = 5;        // how many of the most-attended other tokens to show
-const GHOST_Y0 = 22;      // y of the first ghost lane (just below the spine line)
-const GHOST_DY = 13;      // spacing between ghost lanes
+const GHOST_Y0 = 120;     // y of the first ghost lane (below the spine NODES, not
+                          // inside them — SPINE_H/2 is 105)
+const GHOST_DY = 16;      // spacing between ghost lanes
 const C_GHOST = [150, 140, 120];  // faint neutral lane color
 const C_PULL = [232, 196, 130];   // warm color for values pulled in at attention
 
 // attention panel (one per block, in the empty space above the attention branch):
 // H stacked heat strips showing how the current token attends back over the window
-const ATTN_PANEL_GAP = 260; // gap from attention band top up to the panel bottom
+const ATTN_PANEL_GAP = 350; // gap from attention band top up to the panel bottom.
+                            // Holds the panel's explainer plates; sized so they
+                            // clear the column labels below them.
                             // (leaves a lane for the attn column labels + the
                             // zoom-in explainer plates above them, clear of panel)
 const ATTN_ROW_H = 13;      // height of one head's strip
-const ATTN_ROW_GAP = 5;
+const ATTN_ROW_GAP = 14;  // leaves a clear lane for each row's token label
 
 // diverging activation colormap endpoints (blue -neg, near-black ~0, orange +pos)
 const C_ZERO = [34, 32, 28];
@@ -140,7 +144,9 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
 
   // attention panels live above each attention branch; rows stack upward
   const attnPanelBottom = yAttn - ATTN_H / 2 - ATTN_PANEL_GAP;
-  const attnPanelTop = attnPanelBottom - H * attnRowStep - 8;
+  // -30: the top head's most-attended-token label sits above its row, so the
+  // panel's top edge (where the "attends to →" caption goes) must clear it.
+  const attnPanelTop = attnPanelBottom - H * attnRowStep - 30;
   const attnRowY = (h) => attnPanelBottom - (h + 0.5) * attnRowStep;
 
   // spine columns are shared across block boundaries (slots 0,4,8,...,4L)
@@ -211,6 +217,8 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   let topOutputs = []; // [{token, prob, sampled}] current
   let attnData = null, attnTokens = [], attnLastPos = 0; // current step's attention
   let lensData = null; // [stage][{id, prob}] logit-lens guess at each depth
+  let attribData = null;   // direct logit attribution for the token just produced
+  let attribBy = [];       // [block] -> { attn, mlp } contribution in logits
   let ghostList = [];     // [{k, token}] the other tokens shown as parallel lanes
   let ghostBlockW = [];   // [block] -> Float32Array(ghostList.length): pull weight
   const ghostY = (i) => GHOST_Y0 + i * GHOST_DY;
@@ -228,10 +236,11 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       y0 = Math.min(y0, c.yc - c.h / 2); y1 = Math.max(y1, c.yc + c.h / 2);
     }
     x1 = Math.max(x1, outX + 650);  // just enough room on the right for the output token labels
+    x0 = Math.min(x0, -260);        // the "input" label + ghost token names sit left of the spine
     // include the explainer plates' regions (a banner above the titles, a row of
     // plates below the MLP bands) so the fit-to-view doesn't clip them
     y0 = Math.min(y0, -OUT_H / 2, attnPanelTop - 130);
-    y1 = Math.max(y1, OUT_H / 2, yMlp + MLP_H / 2 + 260);
+    y1 = Math.max(y1, OUT_H / 2, yMlp + MLP_H / 2 + 470);
     const m = 80;
     return { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m };
   })();
@@ -282,12 +291,101 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     canvas.height = Math.round(cssH * dpr);
   }
 
-  function resetView() {
-    const w = worldBounds.x1 - worldBounds.x0, h = worldBounds.y1 - worldBounds.y0;
-    view.scale = Math.min(cssW / w, cssH / h);
-    view.tx = -worldBounds.x0 * view.scale + (cssW - w * view.scale) / 2;
-    view.ty = -worldBounds.y0 * view.scale + (cssH - h * view.scale) / 2;
+  // ------------------------------------------------------ camera & stages ----
+  // The network is ~6500 world units wide but only ~1000 tall, so "fit it all"
+  // pins the scale at ~0.25 on any 16:9 screen: the overview is a thin unreadable
+  // band with dead space above and below it, and no amount of vertical tuning
+  // changes that — the width is what binds. So fit-everything is the ESTABLISHING
+  // shot only. `stages` are named world rects the camera frames one at a time,
+  // each chosen to fill the screen at a readable scale.
+  const TOP_INSET = 132;   // the fixed #io context box overlays the top
+  const BOTTOM_INSET = 96; // the stage rail + the legend overlay the bottom
+  const RIGHT_INSET = 228; // the logit-lens rail sits down the right edge
+  const RAIL_MIN_W = 760;  // below this the rail is hidden (CSS), so claim no space
+
+  // Target view that frames `rect` inside the usable (un-overlaid) viewport.
+  function fitRect(rect, pad = 1.04) {
+    const vw = Math.max(cssW - (cssW >= RAIL_MIN_W ? RIGHT_INSET : 0), 1);
+    const vh = Math.max(cssH - TOP_INSET - BOTTOM_INSET, 1);
+    const w = (rect.x1 - rect.x0) * pad, h = (rect.y1 - rect.y0) * pad;
+    const scale = clamp(Math.min(vw / w, vh / h), 0.05, 8);
+    const cx = (rect.x0 + rect.x1) / 2, cy = (rect.y0 + rect.y1) / 2;
+    return {
+      scale,
+      tx: vw / 2 - cx * scale,
+      ty: TOP_INSET + vh / 2 - cy * scale,
+    };
   }
+
+  // Reading order along the spine: input → (attention, MLP) per block → output.
+  const stages = [{ name: 'overview', rect: worldBounds }];
+  stages.push({
+    name: 'input',
+    rect: { x0: -320, x1: slotX(2.2), y0: -280, y1: ghostY(N_GHOST - 1) + 620 },
+  });
+  for (let b = 0; b < L; b++) {
+    const s0 = b * 8;
+    stages.push({
+      name: `block ${b} · attention`,
+      rect: { x0: slotX(s0 - 0.2), x1: slotX(s0 + 4.2),
+        y0: attnPanelTop - 70, y1: yAttn + ATTN_H / 2 + 90 },
+    });
+    stages.push({
+      name: `block ${b} · MLP`,
+      rect: { x0: slotX(s0 + 3.8), x1: slotX(s0 + 8.2),
+        y0: -SPINE_H / 2 - 60, y1: yMlp + MLP_H / 2 + 470 },
+    });
+  }
+  stages.push({
+    name: 'output',
+    rect: { x0: lnF.x - 160, x1: outX + 700, y0: -OUT_H / 2 - 110, y1: OUT_H / 2 + 60 },
+  });
+
+  let stageIndex = 0;          // -1 once the user pans/zooms by hand
+  let camAnim = null;          // { from, to, t0, dur }
+  const CAM_MS = 620;
+  let onStageChange = null;    // set by the host so it can update the rail
+
+  function applyView(v) { view.scale = v.scale; view.tx = v.tx; view.ty = v.ty; }
+
+  function flyTo(target, animate = true) {
+    if (!animate) { camAnim = null; applyView(target); return; }
+    camAnim = {
+      from: { scale: view.scale, tx: view.tx, ty: view.ty },
+      to: target, t0: performance.now(), dur: CAM_MS,
+    };
+  }
+
+  function gotoStage(i, animate = true) {
+    if (!stages.length) return;
+    stageIndex = ((i % stages.length) + stages.length) % stages.length;
+    flyTo(fitRect(stages[stageIndex].rect), animate);
+    if (onStageChange) onStageChange(stageIndex, stages[stageIndex].name);
+  }
+  const nextStage = () => gotoStage(stageIndex < 0 ? 0 : stageIndex + 1);
+  const prevStage = () => gotoStage(stageIndex < 0 ? 0 : stageIndex - 1);
+
+  // Any manual pan/zoom drops out of stage mode (and kills the fly-to).
+  function freeLook() {
+    camAnim = null;
+    if (stageIndex !== -1) { stageIndex = -1; if (onStageChange) onStageChange(-1, 'free'); }
+  }
+
+  function advanceCamera(now) {
+    if (!camAnim) return;
+    const t = clamp((now - camAnim.t0) / camAnim.dur, 0, 1);
+    const e = t * t * (3 - 2 * t); // smoothstep: no overshoot, settles cleanly
+    const { from, to } = camAnim;
+    // interpolate scale geometrically so the zoom feels linear, not rushed-then-slow
+    applyView({
+      scale: from.scale * Math.pow(to.scale / from.scale, e),
+      tx: lerp(from.tx, to.tx, e),
+      ty: lerp(from.ty, to.ty, e),
+    });
+    if (t >= 1) camAnim = null;
+  }
+
+  function resetView(animate = false) { gotoStage(0, animate); }
 
   const toWorld = (sx, sy) => ({ x: (sx - view.tx) / view.scale, y: (sy - view.ty) / view.scale });
   function viewRect() {
@@ -302,6 +400,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     e.preventDefault();
     const r = canvas.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
+    freeLook();
     const before = toWorld(mx, my);
     const f = Math.exp(-e.deltaY * 0.0015);
     view.scale = clamp(view.scale * f, 0.05, 8);
@@ -317,6 +416,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     const r = canvas.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
     if (dragging) {
+      if (mx !== lastPX || my !== lastPY) freeLook();
       view.tx += mx - lastPX; view.ty += my - lastPY; lastPX = mx; lastPY = my;
       hideNeuronTip();
       return;
@@ -324,7 +424,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     updateHover(mx, my, e.clientX, e.clientY);
   });
   const endDrag = () => { dragging = false; };
-  canvas.addEventListener('dblclick', () => resetView());
+  canvas.addEventListener('dblclick', () => resetView(true));
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
   canvas.addEventListener('pointerleave', () => { hoverNeuron = null; hideNeuronTip(); });
@@ -403,13 +503,17 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     let maxAct = 1e-9;
     for (const m of matrices) { m.rawAct = m.src.meanAbs * m.dst.meanAbs; if (m.rawAct > maxAct) maxAct = m.rawAct; }
     for (const m of matrices) m.activity = m.rawAct / maxAct;
-    for (const cN of connectors) cN.activity = clamp((cN.src.meanAbs + cN.dst.meanAbs) * 0.5, 0, 1);
+    for (const cN of connectors) {
+      const norm = (c) => c.meanAbs / Math.max(c.scale, 1e-3);
+      cN.activity = clamp((norm(cN.src) + norm(cN.dst)) * 0.5, 0, 1);
+    }
 
     topOutputs = snap.topOutputs || [];
     attnData = snap.attention || null;          // [layer][head][query][key]
     attnTokens = snap.windowTokens || [];
     attnLastPos = snap.lastPos || 0;
     lensData = (snap.activations && snap.activations.lens) || null;
+    setAttribution(snap.attribution || null, snap.token);
     computeGhosts();
     updateLensDom();
     updateAttnDom();
@@ -425,6 +529,8 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     topOutputs = [];
     attnData = null; attnTokens = []; attnLastPos = 0;
     lensData = null;
+    attribData = null; attribBy = [];
+    if (railEl) railEl.classList.remove('on');
     ghostList = []; ghostBlockW = [];
     waveActive = false;
     updateAttnDom();
@@ -436,11 +542,15 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
 
   function advance(now) {
     nowT = now;
+    advanceCamera(now);
     if (waveActive) {
+      // Deliberately NOT clamped at t=1: the front keeps travelling past the
+      // right edge for WAVE_TAIL longer so the trailing glow decays off-screen
+      // instead of the whole network snapping dark at the end of a step.
       const t = (now - waveStart) / waveDuration;
-      wavePos = lerp(waveX0 - CX, waveX1 + CX, clamp(t, 0, 1));
+      wavePos = lerp(waveX0 - CX, waveX1 + CX, t);
       waveFront = wavePos;
-      if (t >= 1) { waveActive = false; }
+      if (t >= 1 + WAVE_TAIL) { waveActive = false; }
     } else {
       waveFront = Infinity;
     }
@@ -451,10 +561,15 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     }
   }
 
+  // Wave shape. A symmetric Gaussian lights the path ahead of the front exactly
+  // as much as behind it, which reads as a blob sliding across the network. An
+  // asymmetric kernel — tight leading edge, long exponential tail — reads as
+  // energy FLOWING left to right, which is what is actually happening.
+  const WAVE_TAIL = 0.45; // extra sweep past the right edge, in wave durations
   const waveGlow = (x) => {
     if (waveFront === Infinity) return 0;
-    const d = (waveFront - x) / (CX * 1.4);
-    return Math.exp(-d * d);
+    const d = (waveFront - x) / CX;      // >0 once the front has passed x
+    return d < 0 ? Math.exp(-d * d * 2.4) : Math.exp(-d * 0.52);
   };
 
   function frame() {
@@ -476,9 +591,11 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     for (const m of matrices) { if (overlaps(m.bbox, vr)) drawMatrixEdges(m, edgeF, sc); }
     drawConnectors(vr, sc);
     drawGhosts(sc);
+    drawAttribution();
     drawNodes(vr, sc);
     drawHoverRing(sc);
     drawAttention(sc);
+    drawOutputBloom();
     drawOutput(sc);
 
     // screen-space overlays
@@ -512,8 +629,20 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       ctx.fill();
       ctx.strokeStyle = rgba([140, 122, 92], 0.26);
       ctx.stroke();
-      blob(bx.attn, lerpRGB([74, 96, 140], C_POS, act), 0.5 + 0.4 * act);
-      blob(bx.mlp, lerpRGB([100, 78, 132], C_POS, act), 0.5 + 0.4 * act);
+      // Tint each branch by how much it moved the produced token's logit, so the
+      // blocks that actually decided the answer glow from across the overview.
+      // Falls back to raw activity before the first attribution arrives.
+      const per = attribBy[bx.b];
+      const mx = attribData ? Math.max(attribData.maxAbs, 1e-6) : 1;
+      const tint = (base, v) => {
+        if (!per) return { c: lerpRGB(base, C_POS, act), a: 0.5 + 0.4 * act };
+        const t = clamp(Math.abs(v) / mx, 0, 1);
+        return { c: lerpRGB(base, attribColor(v), t), a: 0.45 + 0.75 * t };
+      };
+      const ta = tint([74, 96, 140], per ? per.attn : 0);
+      const tm = tint([100, 78, 132], per ? per.mlp : 0);
+      blob(bx.attn, ta.c, ta.a);
+      blob(bx.mlp, tm.c, tm.a);
     }
   }
   function blob(r, c, a) {
@@ -602,6 +731,64 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     }
   }
 
+  // Attribution arrives as a flat list of parts; the canvas wants it per block.
+  function setAttribution(a, token) {
+    attribData = a;
+    attribBy = [];
+    if (!a) return;
+    for (let b = 0; b < L; b++) attribBy[b] = { attn: 0, mlp: 0 };
+    for (const p of a.parts) {
+      if (p.block >= 0 && attribBy[p.block]) attribBy[p.block][p.kind] = p.value;
+    }
+    updateAttribPanel(token);
+  }
+
+  // signed contribution -> color: warm = pushed TOWARD the produced token,
+  // cool = pushed away. Same blue/orange convention as the node colormap.
+  const attribColor = (v) => (v >= 0 ? C_POS : C_NEG);
+
+  // Per-branch readout drawn in world space, under each branch's watermark: a
+  // bar diverging from a center tick (right = pushed toward the token the model
+  // produced, left = away) plus the signed logit contribution. This is the
+  // "which branch actually decided it" view the activations alone can't give.
+  function drawAttribution() {
+    if (!attribData || !attribBy.length) return;
+    const maxAbs = Math.max(attribData.maxAbs, 1e-6);
+    const FULL = CX * 0.8;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (const bx of blockBoxes) {
+      const per = attribBy[bx.b];
+      if (!per) continue;
+      // Both readouts sit just OUTSIDE their band, in free space: inside the
+      // band they landed on the node columns and the Q/K/V labels.
+      for (const kind of ['attn', 'mlp']) {
+        const v = per[kind];
+        const isAttn = kind === 'attn';
+        const x = (isAttn ? bx.attn.x0 : bx.mlp.x0) + CX * 0.4;
+        const y = isAttn ? yAttn + ATTN_H / 2 + 16 : yMlp + MLP_H / 2 + 14;
+        const passed = waveFront === Infinity ? 1
+          : clamp((waveFront - x) / (CX * 0.8) + 0.5, 0, 1);
+        if (passed <= 0.01) continue;
+        const t = clamp(Math.abs(v) / maxAbs, 0, 1);
+        const col = attribColor(v);
+        // track, then the signed bar out from a center tick
+        ctx.fillStyle = rgba([70, 64, 52], 0.5 * passed);
+        ctx.fillRect(x - FULL, y, FULL * 2, 10);
+        ctx.fillStyle = rgba(col, 0.9 * passed);
+        ctx.fillRect(v >= 0 ? x : x - t * FULL, y, t * FULL, 10);
+        ctx.fillStyle = rgba([210, 200, 180], 0.55 * passed);
+        ctx.fillRect(x - 0.8, y - 3, 1.6, 16);
+        // the attention label reads upward (the lens chips sit below it),
+        // the MLP label downward
+        ctx.font = '21px ui-monospace, Menlo, monospace';
+        ctx.fillStyle = rgba(col, 0.95 * passed);
+        ctx.textBaseline = isAttn ? 'bottom' : 'top';
+        ctx.fillText(`${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`, x, isAttn ? y - 4 : y + 14);
+      }
+    }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  }
+
   // Draw the ghost lanes (faint parallel streams = the other tokens) and, at each
   // block, the warm "value pull" curves fanning from those lanes up into that
   // block's attention output — the ONE place tokens influence each other.
@@ -639,7 +826,38 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
         ctx.quadraticCurveTo((sx + tx) / 2, (sy + yAttn) / 2 - 30, tx, yAttn);
         ctx.stroke();
       }
+      drawPullParticles(b, w, sx, tx, passed, sc);
     }
+  }
+
+  // Particles riding the value-pull curves. The curve alone says "these tokens
+  // are connected here"; the particles say information is MOVING along it right
+  // now — the one moment in the whole forward pass where one token's content
+  // reaches another. Rate is fixed but brightness/size scale with how much this
+  // token actually attends to that lane, so the strong lanes carry visibly more.
+  const PULL_PERIOD = 1500; // ms for one particle to traverse a curve
+  function drawPullParticles(b, w, sx, tx, passed, sc) {
+    const cx = (sx + tx) / 2;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < ghostList.length; i++) {
+      const wi = w[i]; if (wi < 0.06) continue;
+      const sy = ghostY(i);
+      const cy = (sy + yAttn) / 2 - 30;
+      for (let n = 0; n < 2; n++) {
+        // stagger by lane and block so they don't march in lockstep
+        const u = ((nowT / PULL_PERIOD) + n * 0.5 + i * 0.17 + b * 0.31) % 1;
+        const iu = 1 - u;
+        const px = iu * iu * sx + 2 * iu * u * cx + u * u * tx;
+        const py = iu * iu * sy + 2 * iu * u * cy + u * u * yAttn;
+        const fade = Math.sin(Math.PI * u); // ease in at the lane, out at attention
+        ctx.fillStyle = rgba(C_PULL, clamp((0.3 + 0.7 * wi) * fade * passed, 0, 0.95));
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(2.2 + 4.5 * wi, 2 / sc), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
   }
 
   // Per-block attention panels: for each head, a heat strip over the window
@@ -693,13 +911,43 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     }
   }
 
-  function drawOutput(sc) {
+  // Additive bloom under the output column — the one place in the piece where
+  // the eye should land. Radial gradients composited with 'lighter' rather than
+  // an offscreen blur pass: cheaper, no ctx.filter dependency, and it reads as
+  // light rather than as a soft copy of the dot. It swells as the wave arrives,
+  // so the answer lights up when the computation actually reaches it.
+  function drawOutputBloom() {
     if (!topOutputs.length) return;
     const maxP = topOutputs[0].prob || 1;
-    ctx.lineWidth = 1 / sc;
+    const arrive = waveFront === Infinity ? 1
+      : clamp((waveFront - outX) / (CX * 1.2) + 0.5, 0, 1);
+    if (arrive <= 0.01) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < topOutputs.length && i < N_OUT; i++) {
       const o = topOutputs[i], y = outYs[i];
       const t = clamp(o.prob / maxP, 0, 1);
+      if (t < 0.05 && !o.sampled) continue;
+      const r = lerp(3, 13, t) * (o.sampled ? 5.5 : 3.2);
+      const col = o.sampled ? [255, 226, 158] : C_POS;
+      const peak = (o.sampled ? 0.62 : 0.22) * (0.35 + 0.65 * t) * arrive;
+      const g = ctx.createRadialGradient(outX, y, 0, outX, y, r);
+      g.addColorStop(0, rgba(col, peak));
+      g.addColorStop(0.42, rgba(col, peak * 0.3));
+      g.addColorStop(1, rgba(col, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(outX, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawOutput(sc) {
+    if (!topOutputs.length) return;
+    const maxP = topOutputs[0].prob || 1;
+    for (let i = 0; i < topOutputs.length && i < N_OUT; i++) {
+      const o = topOutputs[i], y = outYs[i];
+      const t = clamp(o.prob / maxP, 0, 1);
+      ctx.lineWidth = 1 / sc; // reset: the sampled node below thickens it
       ctx.strokeStyle = rgba(C_POS, (0.1 + 0.65 * t) * 0.8);
       ctx.beginPath(); ctx.moveTo(lnF.x, lerp(-SPINE_H / 2, SPINE_H / 2, i / N_OUT)); ctx.lineTo(outX, y); ctx.stroke();
       const r = lerp(3, 13, t);
@@ -755,9 +1003,10 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       mkWL('wl-mark-m', 'MLP', mx, yMlp, F_BRANCH);
       mkWL('wl-mark-m-sub', 'think per token', mx, yMlp + F_BRANCH * 0.82, F_SUB);
     }
-    // input: below the spine's left end (clear of the embedding lens chip above it)
-    mkWL('wl-io', '▸ input', slotX(0), SPINE_H / 2 + 30, F_IO, 'translate(0,-50%)');
-    mkWL('wl-io-sub', `this token · ${D} dims`, slotX(0), SPINE_H / 2 + 30 + F_IO * 0.7, F_SUB, 'translate(0,-50%)');
+    // input: to the LEFT of the spine's start, pointing into it. (It used to sit
+    // below the spine, which is where the ghost lanes now run.)
+    mkWL('wl-io', 'input ▸', slotX(0) - 34, 0, F_IO, 'translate(-100%,-50%)');
+    mkWL('wl-io-sub', `this token · ${D} dims`, slotX(0) - 34, F_IO * 0.7, F_SUB, 'translate(-100%,-50%)');
     mkWL('wl-io', 'output', outX, -OUT_H / 2 - 54, F_IO);
     mkWL('wl-io-sub', 'next-token probabilities', outX, -OUT_H / 2 - 54 + F_IO * 0.72, F_SUB);
 
@@ -779,7 +1028,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     // space), the way the attention labels sit outside their band.
     for (const m of matrices) {
       if (m.name !== 'W_down') continue;
-      const yb = yMlp + MLP_H / 2;
+      const yb = yMlp + MLP_H / 2 + 44; // below the attribution readout
       mkWL('wl-col', '↓ proj', m.midX, yb + 34, F_COL);
       mkWL('wl-gloss', `shrink ${FF}→${D}`, m.midX, yb + 58, F_SUB);
     }
@@ -799,15 +1048,16 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   }
   function buildDescriptions() {
     if (!worldInner || !blockBoxes.length) return;
-    // --- attention branch (block 0): plates sit in the lane above the labels ---
-    const aBot = yAttn - ATTN_H / 2 - 80; // bottom of the plate, clear above labels
-    const up = 'translate(-50%,-100%)';
+    // --- attention branch (block 0): plates hang directly under the attention
+    // panel, filling the lane between it and the column labels ---
+    const aBot = attnPanelBottom + 30; // TOP of the plate now (it grows downward)
+    const up = 'translate(-50%,0)';
     mkDesc(`<b>LayerNorm.</b> Rescales the token's ${D} numbers to mean 0, spread 1, then ×/＋ learned weights — a stable range before the branch reads it.`, slotX(1), aBot, up);
     mkDesc(`<b>Q · K · V.</b> Three learned views of the token. <b>Query</b> = what I'm looking for, <b>Key</b> = what I advertise, <b>Value</b> = what I'll hand over. Query·Key scores the match.`, slotX(2), aBot, up);
     mkDesc(`<b>Weighted values.</b> Each token's Value, blended by how well the query matched its Key. The one place other tokens' information enters this one.`, slotX(3), aBot, up);
     // --- MLP branch (block 0): plates sit below the band AND below the ↓proj
     // label row, so they never collide with it ---
-    const mTop = yMlp + MLP_H / 2 + 78;
+    const mTop = yMlp + MLP_H / 2 + 122;
     const dn = 'translate(-50%,0)';
     mkDesc(`<b>LayerNorm.</b> Same operation as before — restandardizes the token before the MLP reads it.`, slotX(5), mTop, dn);
     mkDesc(`<b>↑ proj.</b> Expands ${D}→${FF}, giving the nonlinearity room to detect many features at once.`, slotX(6), mTop, dn);
@@ -815,12 +1065,12 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     // --- shared: input, residual, "other tokens" in the wide far-left open space;
     // wider plates (fewer lines) stacked with generous gaps so they never touch ---
     const ix = slotX(0), tl = 'translate(0,0)', LW = 280;
-    const byc = SPINE_H / 2 + 30 + F_IO * 0.7 + 22; // = top of the input plate
+    const byc = ghostY(N_GHOST - 1) + 40; // top of the input plate: below the ghost lanes
     mkDesc(`<b>Input.</b> Just the <i>last</i> token of the window, as a ${D}-dim vector (word + position). The earlier tokens are processed too, but reach this one only through Attention.`, ix, byc, tl, LW);
     mkDesc(`<b>Residual stream.</b> The token's running ${D}-dim vector (this spine). Every block reads a copy and adds its edit back — a shared scratchpad. That additivity is why deep nets train, and why the running guess is readable at any depth.`, ix, byc + 150, tl, LW);
     mkDesc(`<b>The other tokens.</b> These faint lanes are the window's other tokens, each on its own identical journey. They never interact — <i>except</i> at Attention, where this token pulls in a warm blend of their values (brighter = attended more).`, ix, byc + 315, tl, LW);
     // final norm sits in the far-right open space below the spine
-    mkDesc(`<b>Final LayerNorm.</b> One last restandardize before the vector is compared against every word's embedding to score the next token.`, lnF.x, SPINE_H / 2 + 30, dn);
+    mkDesc(`<b>Final LayerNorm.</b> One last restandardize before the vector is compared against every word's embedding to score the next token.`, lnF.x, byc, dn);
     // --- "why 4 blocks": a banner in the open band above the titles ---
     const cx = (blockBoxes[0].x0 + blockBoxes[blockBoxes.length - 1].x1) / 2;
     mkDesc(`<b>Why ${L} blocks?</b> All ${L} are identical in structure (each with its own learned weights). Depth = repeated refinement — watch the logit-lens guess above the spine sharpen from block to block.`, cx, attnPanelTop - 30, 'translate(-50%,-100%)', 360);
@@ -839,7 +1089,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
         const yc = attnRowY(h);
         const hEl = mkWL('wl-attn-h', `h${h}`, x0 - 9, yc, 12, 'translate(-100%,-50%)');
         hEl.style.color = rgba(headColors[h], 0.95);
-        const tokEl = mkWL('wl-attn-tok', '', x0, yc - ATTN_ROW_H, 12);
+        const tokEl = mkWL('wl-attn-tok', '', x0, yc - ATTN_ROW_H / 2 - 3, 12, 'translate(-50%,-100%)');
         tokEl.style.display = 'none';
         heads.push({ tokEl });
       }
@@ -930,6 +1180,10 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
 
   // Refresh chip text from the latest lensData (called once per generated token).
   const LENS_BAR_W = 210 - 8;
+  // 0.4% must not print as "0%" — at the embedding the top guess takes ~all the
+  // mass and the runners-up are tiny but real.
+  const fmtPct = (p) => (p >= 0.095 ? `${(p * 100).toFixed(0)}%`
+    : p >= 0.001 ? `${(p * 100).toFixed(1)}%` : '<0.1%');
   function updateLensDom() {
     if (!lensEls.length || !lensData) return;
     const finalTop = lensData[lensData.length - 1];
@@ -944,10 +1198,164 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
         rows[r].row.style.display = '';
         rows[r].row.classList.toggle('locked', o.id === finalId);
         rows[r].tok.textContent = dispToken(vocab[o.id]);
-        rows[r].pct.textContent = `${(o.prob * 100).toFixed(0)}%`;
+        rows[r].pct.textContent = fmtPct(o.prob);
         rows[r].bar.style.width = `${clamp(o.prob / maxP, 0, 1) * LENS_BAR_W}px`;
       }
     }
+    updateLensRail(finalId);
+  }
+
+  // ---- logit-lens rail (screen space, right edge) ----
+  // The in-world chips are contextual — they only read once you've zoomed to a
+  // block boundary. This is the same data as a permanent, always-legible column:
+  // the model's running next-token guess at every depth, so "more layers =
+  // iterative refinement of the prediction" is visible without touching the view.
+  const railEl = document.getElementById('lensRail');
+  const railCells = [];
+  let railFoot = null;
+  const RAIL_BAR_W = 196;
+  function buildLensRail() {
+    if (!railEl || railCells.length) return;
+    const cap = document.createElement('div');
+    cap.className = 'lr-cap';
+    cap.textContent = 'next-token guess by depth ↓';
+    railEl.appendChild(cap);
+    for (let i = 0; i <= L; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'lr-cell';
+      const hdr = document.createElement('div');
+      hdr.className = 'lr-h';
+      const name = document.createElement('span');
+      name.textContent = i === 0 ? 'embedding' : `after block ${i - 1}`;
+      const tag = document.createElement('span');
+      tag.className = 'lr-tag';
+      hdr.append(name, tag);
+      cell.appendChild(hdr);
+      const rows = [];
+      for (let r = 0; r < 3; r++) {
+        const row = document.createElement('div'); row.className = 'lr-row';
+        const bar = document.createElement('div'); bar.className = 'lr-bar';
+        const tok = document.createElement('span'); tok.className = 'lr-tok';
+        const pct = document.createElement('span'); pct.className = 'lr-pct';
+        row.append(bar, tok, pct);
+        cell.appendChild(row);
+        rows.push({ row, bar, tok, pct });
+      }
+      railEl.appendChild(cell);
+      railCells.push({ cell, tag, rows });
+    }
+    railFoot = document.createElement('div');
+    railFoot.className = 'lr-foot';
+    railEl.appendChild(railFoot);
+    buildAttribPanel();
+  }
+
+  // ---- attribution panel (shares the right rail with the lens) ----
+  // The lens answers "what is it guessing"; this answers "what made it guess
+  // that". Same data as the in-world bars, ranked, so the winner is readable at
+  // a glance without hunting across four blocks.
+  const ATTRIB_ROWS = 5;
+  const attribRows = [];
+  let attribCap = null, attribFoot = null;
+  function buildAttribPanel() {
+    if (!railEl || attribRows.length) return;
+    const div = document.createElement('div'); div.className = 'lr-div';
+    railEl.appendChild(div);
+    attribCap = document.createElement('div');
+    attribCap.className = 'at-cap';
+    railEl.appendChild(attribCap);
+    for (let i = 0; i < ATTRIB_ROWS; i++) {
+      const row = document.createElement('div'); row.className = 'at-row';
+      const name = document.createElement('span'); name.className = 'at-name';
+      const track = document.createElement('span'); track.className = 'at-track';
+      const bar = document.createElement('span'); bar.className = 'at-bar';
+      const tick = document.createElement('span'); tick.className = 'at-tick';
+      track.append(bar, tick);
+      const val = document.createElement('span'); val.className = 'at-val';
+      row.append(name, track, val);
+      railEl.appendChild(row);
+      attribRows.push({ row, name, bar, val });
+    }
+    attribFoot = document.createElement('div');
+    attribFoot.className = 'at-foot';
+    railEl.appendChild(attribFoot);
+  }
+
+  function updateAttribPanel(token) {
+    if (!attribRows.length) return;
+    if (!attribData) {
+      for (const r of attribRows) r.row.style.display = 'none';
+      if (attribCap) attribCap.textContent = '';
+      if (attribFoot) attribFoot.textContent = '';
+      return;
+    }
+    if (attribCap) {
+      // Names the token explicitly, because it is the SAMPLED token — which at
+      // temperature 0.8 is often not the lens's top-1. Attributing what the
+      // model actually said is the more useful question; naming it avoids the
+      // two panels looking like they disagree.
+      attribCap.innerHTML = `why it said <b>${escapeHtml(dispToken(token) || '?')}</b>`;
+    }
+    // rank by magnitude — a large negative push is as interesting as a positive
+    const ranked = attribData.parts.slice().sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    const maxAbs = Math.max(attribData.maxAbs, 1e-6);
+    for (let i = 0; i < attribRows.length; i++) {
+      const p = ranked[i], r = attribRows[i];
+      if (!p) { r.row.style.display = 'none'; continue; }
+      r.row.style.display = '';
+      r.name.textContent = p.label.replace('block ', 'b');
+      const t = clamp(Math.abs(p.value) / maxAbs, 0, 1);
+      const half = t * 50; // percent of the track's half-width
+      r.bar.style.left = p.value >= 0 ? '50%' : `${50 - half}%`;
+      r.bar.style.width = `${half}%`;
+      r.bar.style.background = rgba(attribColor(p.value), 0.85);
+      r.val.textContent = `${p.value >= 0 ? '+' : '−'}${Math.abs(p.value).toFixed(1)}`;
+      r.val.style.color = rgba(attribColor(p.value), 0.95);
+    }
+    if (attribFoot) {
+      attribFoot.textContent = 'right = toward · left = away';
+    }
+  }
+
+  // `decidedAt` — the shallowest depth from which the top guess is the final
+  // answer and NEVER changes again. Deliberately not "the first depth that
+  // happens to match": the lens routinely hits the right token early, wanders
+  // off at the next block, and comes back. Only the start of the unbroken run to
+  // the end means the model has actually committed. That single number is the
+  // story — function words lock in at the embedding, content words often not
+  // until the last block — and the last depth always matches, so it always exists.
+  function updateLensRail(finalId) {
+    if (!railCells.length || !lensData) return;
+    let decidedAt = lensData.length - 1;
+    for (let i = lensData.length - 1; i >= 0; i--) {
+      const t = lensData[i];
+      if (!t || !t[0] || t[0].id !== finalId) break;
+      decidedAt = i;
+    }
+    for (let i = 0; i < railCells.length; i++) {
+      const top = lensData[i] || [];
+      const maxP = top[0] ? top[0].prob || 1 : 1;
+      const { cell, tag, rows } = railCells[i];
+      cell.classList.toggle('decided', i === decidedAt);
+      tag.textContent = i === decidedAt ? 'locked in' : '';
+      for (let r = 0; r < rows.length; r++) {
+        const o = top[r];
+        if (!o) { rows[r].row.style.display = 'none'; continue; }
+        rows[r].row.style.display = '';
+        rows[r].row.classList.toggle('locked', o.id === finalId);
+        rows[r].tok.textContent = dispToken(vocab[o.id]);
+        rows[r].pct.textContent = fmtPct(o.prob);
+        rows[r].bar.style.width = `${clamp(o.prob / maxP, 0, 1) * RAIL_BAR_W}px`;
+      }
+    }
+    if (railFoot) {
+      railFoot.innerHTML = decidedAt <= 0
+        ? 'guess set at the <b>embedding</b>'
+        : decidedAt >= lensData.length - 1
+          ? 'not settled until the <b>last block</b>'
+          : `decided by <b>block ${decidedAt - 1}</b>`;
+    }
+    railEl.classList.add('on');
   }
 
   // Keep the world DOM layer's transform identical to the canvas's, and fade the
@@ -963,6 +1371,18 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       if (!lensData) { lensEls[i].el.style.opacity = '0'; continue; }
       const passed = waveFront === Infinity ? 1 : clamp((waveFront - slotX(i * 8)) / (CX * 0.8) + 0.5, 0, 1);
       lensEls[i].el.style.opacity = (0.55 + 0.45 * passed).toFixed(3);
+    }
+    // the rail is screen-space, but it still reads the same wave: each depth's
+    // cell lights as the sweep reaches that point in the network
+    for (let i = 0; i < railCells.length; i++) {
+      const lit = lensData && (waveFront === Infinity || waveFront > slotX(i * 8));
+      railCells[i].cell.classList.toggle('lit', !!lit);
+    }
+    for (let b = 0; b < attnEls.length; b++) {
+      const { x0, x1, heads } = attnEls[b];
+      const passed = waveFront === Infinity ? 1
+        : clamp((waveFront - (x0 + x1) / 2) / (CX * 0.8) + 0.5, 0, 1);
+      for (let h = 0; h < heads.length; h++) heads[h].tokEl.style.opacity = passed.toFixed(3);
     }
   }
 
@@ -1030,7 +1450,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   // Small, unintrusive key (bottom-left, screen space): node activation colormap,
   // edge sign colors, and the per-head attention swatches.
   function drawLegend() {
-    const w = 138, h = 80, x = 16, y = cssH - h - 16;
+    const w = 138, h = 80, x = 16, y = cssH - h - 52; // clear of the stage rail
     ctx.fillStyle = 'rgba(12,10,8,0.6)';
     roundRectScreen(x, y, w, h, 7); ctx.fill();
     ctx.strokeStyle = 'rgba(150,135,105,0.26)'; ctx.lineWidth = 1; ctx.stroke();
@@ -1075,20 +1495,31 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
 
   // ----------------------------------------------------------------- API -----
   let raf = 0;
+  // keep whatever stage is framed filling the new viewport (free-look is left alone)
+  function refit() {
+    if (stageIndex >= 0) flyTo(fitRect(stages[stageIndex].rect), false);
+  }
   function start() {
     resize(); resetView();
     buildLensChips();
+    buildLensRail();
     buildWorldLabels();
     buildDescriptions();
     buildAttnDom();
     buildOutputDom();
     if (!raf) raf = requestAnimationFrame(frame);
     if (window.ResizeObserver) {
-      new ResizeObserver(() => { resize(); updateArcs(); }).observe(canvas);
+      new ResizeObserver(() => { resize(); updateArcs(); refit(); }).observe(canvas);
     } else {
-      window.addEventListener('resize', () => { resize(); updateArcs(); });
+      window.addEventListener('resize', () => { resize(); updateArcs(); refit(); });
     }
   }
 
-  return { start, pushStep, reset, resetView, setSpeed, resize, updateArcs, view, worldBounds };
+  return {
+    start, pushStep, reset, resetView, setSpeed, resize, updateArcs, view, worldBounds,
+    // stage navigation (the app is explorable, not just ambient)
+    stages, gotoStage, nextStage, prevStage,
+    get stageIndex() { return stageIndex; },
+    set onStageChange(fn) { onStageChange = fn; },
+  };
 }

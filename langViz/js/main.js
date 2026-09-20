@@ -15,6 +15,40 @@ const TEMPERATURE = 0.8;
 const TOP_K = 40;
 const LOOP_AFTER = 96; // restart from the prompt after this many tokens
 
+// The stage rail + arrow keys. Fitting the whole network on screen pins the
+// scale near 0.25, so the overview can only be an establishing shot — these are
+// the framings that actually fill the viewport, in reading order along the spine.
+function buildStageRail(renderer) {
+  const nav = document.getElementById('stages');
+  if (!nav) return;
+  const buttons = renderer.stages.map((st, i) => {
+    if (i === 1) nav.appendChild(Object.assign(document.createElement('span'), {className: 'sep'}));
+    const b = document.createElement('button');
+    b.type = 'button';
+    // "block 2 · attention" -> "2 attn": the rail has to stay one short row
+    b.textContent = st.name
+      .replace(/^block (\d+) · attention$/, '$1 attn')
+      .replace(/^block (\d+) · MLP$/, '$1 mlp');
+    b.title = st.name;
+    b.addEventListener('click', () => renderer.gotoStage(i));
+    nav.appendChild(b);
+    return b;
+  });
+  const highlight = (i) => {
+    buttons.forEach((b, n) => b.classList.toggle('on', n === i));
+    if (i >= 0) buttons[i].scrollIntoView({block: 'nearest', inline: 'center'});
+  };
+  renderer.onStageChange = highlight; // set-only hook on the renderer
+  highlight(renderer.stageIndex);
+
+  window.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'ArrowRight') { renderer.nextStage(); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { renderer.prevStage(); e.preventDefault(); }
+    else if (e.key === 'Escape' || e.key === '0') { renderer.gotoStage(0); e.preventDefault(); }
+  });
+}
+
 async function init() {
   const loaded = await loadModel('.');
   const tokenizer = makeTokenizer(loaded.config.vocab);
@@ -32,6 +66,7 @@ async function init() {
 
   renderer.start();
   renderer.setSpeed(WAVE_MS);
+  buildStageRail(renderer);
   let promptLen = gen.reset(PROMPT).length;
 
   // fade the hint out
@@ -104,13 +139,12 @@ async function init() {
       // gen.length now counts the just-pushed token; the window preceded it
       const startAbs = gen.length - 1 - snap.windowTokens.length;
       setStrip(snap.windowTokens, snap.token, startAbs);
-      console.log(snap.windowTokens.join(' '));
     }
     setTimeout(tick, STEP_MS);
   }
   setTimeout(tick, 500); // let the first frame settle before the wave starts
 
-  // dev handles (no UI): renderer for screenshot framing, parity vs parity.py
+  // dev handles: renderer for screenshot framing, parity vs parity.py
   window.__viz = renderer;
   window.__parityCheck = function (text = 'Thus saith the LORD') {
     const ids = tokenizer.encode(text);
@@ -125,6 +159,31 @@ async function init() {
     }));
     console.table(top);
     return {ids, top};
+  };
+  // Attribution is claimed to be EXACT, so make that checkable: the parts plus
+  // the ln_f bias must reproduce the token's logit to float precision.
+  window.__attribCheck = function (text = 'Thus saith the LORD', tokenId = null) {
+    const ids = tokenizer.encode(text);
+    const {logits, activations} = model.forward(ids);
+    const target =
+      tokenId == null
+        ? logits.indexOf(Math.max(...logits))
+        : tokenId;
+    const a = model.attribute(activations, target);
+    const err = Math.abs(a.verify - logits[target]);
+    console.table(
+      a.parts
+        .map((p) => ({part: p.label, logits: +p.value.toFixed(4)}))
+        .concat([
+          {part: 'ln_f bias', logits: +a.bias.toFixed(4)},
+          {part: '= TOTAL', logits: +a.verify.toFixed(4)},
+          {part: 'actual logit', logits: +logits[target].toFixed(4)},
+        ]),
+    );
+    console.log(
+      `token ${target} ${JSON.stringify(tokenizer.idToToken(target))} · reconstruction error ${err.toExponential(2)}`,
+    );
+    return {tokenId: target, error: err, parts: a.parts};
   };
 }
 

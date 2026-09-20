@@ -6,7 +6,8 @@
 //     out.png  output path           (default /tmp/langviz.png)
 //     waitMs   settle time before shot (default 6000)
 //     zoom     "steps,cx,cy" wheel-zoom toward screen point, OR
-//              "@x0,y0,x1,y1" to frame an exact world-coordinate rect (optional)
+//              "@x0,y0,x1,y1" to frame an exact world-coordinate rect, OR
+//              "stage:N" to frame the renderer's Nth named stage (optional)
 //     WxH      viewport size          (default 1600x900)
 //
 // Prints any browser console errors so regressions surface without eyeballing.
@@ -90,6 +91,16 @@ if (OUT === 'parity') {
   process.exit(0);
 }
 
+// attribution mode: `node tools/shot.mjs attrib "Thus saith the LORD"` checks
+// that direct logit attribution reconstructs the token's logit exactly.
+if (OUT === 'attrib') {
+  await page.waitForTimeout(1500);
+  const r = await page.evaluate((t) => window.__attribCheck(t), process.argv[3] || 'Thus saith the LORD');
+  for (const p of r.parts) console.log(`  ${p.label.padEnd(16)} ${p.value.toFixed(4).padStart(9)}`);
+  console.log('reconstruction error:', r.error.toExponential(2));
+  await browser.close(); server.close(); process.exit(0);
+}
+
 // perf mode: `node tools/shot.mjs perfcheck` measures effective render FPS by
 // counting requestAnimationFrame fires over 1.5s (drops if a frame draws slowly).
 if (OUT === 'perfcheck') {
@@ -104,7 +115,16 @@ if (OUT === 'perfcheck') {
 
 await page.waitForTimeout(WAIT);
 
-if (ZOOM && ZOOM.startsWith('@')) {
+if (ZOOM && ZOOM.startsWith('stage:')) {
+  // frame one of the renderer's named stages, exactly as the rail does
+  const i = +ZOOM.slice(6);
+  const name = await page.evaluate((n) => {
+    window.__viz.gotoStage(n, false);
+    return window.__viz.stages[window.__viz.stageIndex].name;
+  }, i);
+  console.log('stage:', i, name);
+  await page.waitForTimeout(400);
+} else if (ZOOM && ZOOM.startsWith('@')) {
   const [x0, y0, x1, y1] = ZOOM.slice(1).split(',').map(Number);
   await page.evaluate(({ r, vw, vh }) => {
     const v = window.__viz.view;

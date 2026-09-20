@@ -81,6 +81,8 @@ export function makeGenerator(model, tokenizer) {
       token: tokenizer.idToToken(sampled),
       // viz payload
       activations: fwd.activations,
+      // which part of the model pushed toward the token it actually produced
+      attribution: model.attribute(fwd.activations, sampled),
       attention: fwd.attention,
       windowTokens: window.map((id) => tokenizer.idToToken(id)),
       lastPos: window.length - 1,

@@ -128,6 +128,9 @@ export function makeModel({ config, tensors }) {
       activations.layers.push({
         ln1, q, k, v, attnOut, residual_mid,
         ln2, mlp_pre, mlp_post: up, residual: x.slice(),
+        // what this block actually WROTE to the stream — the two additive terms
+        // direct logit attribution decomposes the final logit into.
+        attn_write: proj, mlp_write: down,
       });
     }
 
@@ -136,6 +139,21 @@ export function makeModel({ config, tensors }) {
 
     // tied LM head: logits = xf[last] @ tok_emb^T
     const last = T - 1;
+    activations.lastPos = last;
+
+    // Freeze the final LayerNorm's scale at the value this forward pass produced.
+    // LayerNorm is not linear, but with `inv` held fixed it is AFFINE — which is
+    // what makes the attribution below exact rather than an approximation.
+    {
+      const o = last * D;
+      let mean = 0;
+      for (let i = 0; i < D; i++) mean += x[o + i];
+      mean /= D;
+      let varr = 0;
+      for (let i = 0; i < D; i++) { const dx = x[o + i] - mean; varr += dx * dx; }
+      varr /= D;
+      activations.lnfInv = 1 / Math.sqrt(varr + LN_EPS);
+    }
     const logits = new Float32Array(V);
     for (let vi = 0; vi < V; vi++) {
       let s = 0;
@@ -188,5 +206,62 @@ export function makeModel({ config, tensors }) {
     return { logits, attention, activations };
   }
 
-  return { forward, config };
+  // ---- direct logit attribution: WHICH part of the model chose this token ----
+  //
+  // The residual stream is a plain sum of what each part wrote to it:
+  //
+  //   x = embedding + Σ_b (attn_write_b + mlp_write_b)
+  //
+  // and the logit for token v is LN_f(x) · e_v. LayerNorm is not linear, but
+  // holding its scale `inv` at the value the real forward pass produced makes it
+  // affine, and an affine map distributes over that sum. So define the folded
+  // unembedding direction  d_k = inv · ln_f.w_k · e_vk , and every component c
+  // contributes exactly  Σ_k (c_k − mean(c)) · d_k  logits, with the ln_f bias as
+  // a single shared constant. The parts SUM TO THE LOGIT — no approximation, no
+  // free-floating "importance score". (`verify` re-derives the total so the
+  // decomposition can be checked against `logits[tokenId]` directly.)
+  //
+  // Read it as: positive = this part pushed the model toward saying that token,
+  // negative = pushed it away.
+  function attribute(activations, tokenId) {
+    const tokEmb = g('tok_emb');
+    const lnfW = g('ln_f.w'), lnfB = g('ln_f.b');
+    const last = activations.lastPos, inv = activations.lnfInv;
+    const e = tokenId * D;
+
+    const dir = new Float32Array(D);
+    let bias = 0;
+    for (let k = 0; k < D; k++) {
+      dir[k] = inv * lnfW[k] * tokEmb[e + k];
+      bias += lnfB[k] * tokEmb[e + k];
+    }
+
+    // one component's contribution, read at the last position
+    const contrib = (vec) => {
+      const o = last * D;
+      let mean = 0;
+      for (let k = 0; k < D; k++) mean += vec[o + k];
+      mean /= D;
+      let s = 0;
+      for (let k = 0; k < D; k++) s += (vec[o + k] - mean) * dir[k];
+      return s;
+    };
+
+    const parts = [{ label: 'embedding', kind: 'emb', block: -1, value: contrib(activations.embeddings) }];
+    for (let l = 0; l < L; l++) {
+      const lay = activations.layers[l];
+      parts.push({ label: `block ${l} · attn`, kind: 'attn', block: l, value: contrib(lay.attn_write) });
+      parts.push({ label: `block ${l} · MLP`, kind: 'mlp', block: l, value: contrib(lay.mlp_write) });
+    }
+
+    let maxAbs = 1e-9, verify = bias;
+    for (const p of parts) {
+      verify += p.value;
+      const a = Math.abs(p.value);
+      if (a > maxAbs) maxAbs = a;
+    }
+    return { tokenId, parts, bias, maxAbs, verify };
+  }
+
+  return { forward, attribute, config };
 }
