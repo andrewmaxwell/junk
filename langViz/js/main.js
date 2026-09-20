@@ -68,7 +68,9 @@ async function init() {
   renderer.setSpeed(WAVE_MS);
   buildStageRail(renderer);
   let prompt = DEFAULT_PROMPT;
-  let paused = false;
+  let editing = false;     // the prompt box has focus
+  let userPaused = false;  // the user asked it to stop
+  const isPaused = () => editing || userPaused;
   let promptLen = gen.reset(prompt).length;
 
   // fade the hint out
@@ -149,16 +151,46 @@ async function init() {
     if (!promptHintEl || !promptEl) return;
     const n = tokenizer.encode(promptEl.value.trim()).length;
     const dirty = promptEl.value.trim() !== prompt;
-    promptHintEl.textContent = paused
+    promptHintEl.textContent = editing
       ? `${n} token${n === 1 ? '' : 's'} · ${dirty ? '↵ to run' : 'esc to resume'}`
       : `${n} token${n === 1 ? '' : 's'}`;
-    promptHintEl.classList.toggle('armed', paused && dirty);
+    promptHintEl.classList.toggle('armed', editing && dirty);
   }
+
+  // ---- transport ----
+  // Generation is a clock running at STEP_MS. Everything else in the piece —
+  // the lens rail, the attribution panel, the neuron inspector — is worth
+  // reading for longer than one tick, so being able to stop the clock and
+  // advance it by hand is what makes the rest of it usable.
+  const btnPlay = document.getElementById('btnPlay');
+  const btnStep = document.getElementById('btnStep');
+  function syncTransport() {
+    if (btnPlay) {
+      btnPlay.textContent = userPaused ? 'play' : 'pause';
+      btnPlay.classList.toggle('armed', userPaused);
+    }
+    showTokenCount();
+  }
+  function setPaused(v) { userPaused = v; syncTransport(); }
+  function stepOnce() {
+    if (editing) return;
+    if (!userPaused) setPaused(true); // stepping implies stopping
+    advanceOne();
+  }
+  if (btnPlay) btnPlay.addEventListener('click', () => setPaused(!userPaused));
+  if (btnStep) btnStep.addEventListener('click', stepOnce);
+  // keydown on the prompt input calls stopPropagation, so typing a space or a
+  // period in the box never reaches this
+  window.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === ' ') { setPaused(!userPaused); e.preventDefault(); }
+    else if (e.key === '.') { stepOnce(); e.preventDefault(); }
+  });
 
   if (promptEl) {
     promptEl.value = prompt;
     showTokenCount();
-    promptEl.addEventListener('focus', () => { paused = true; showTokenCount(); });
+    promptEl.addEventListener('focus', () => { editing = true; showTokenCount(); });
     promptEl.addEventListener('input', showTokenCount);
     promptEl.addEventListener('keydown', (e) => {
       e.stopPropagation(); // the stage rail listens for arrow keys on window
@@ -166,28 +198,24 @@ async function init() {
         const text = promptEl.value.trim() || DEFAULT_PROMPT;
         promptEl.value = text;
         restart(text);
-        paused = false;
+        editing = false;
         promptEl.blur();
         showTokenCount();
       } else if (e.key === 'Escape') {
         promptEl.value = prompt; // discard the edit
-        paused = false;
+        editing = false;
         promptEl.blur();
         showTokenCount();
       }
     });
     promptEl.addEventListener('blur', () => {
       promptEl.value = prompt; // an uncommitted edit is not what is running
-      paused = false;
+      editing = false;
       showTokenCount();
     });
   }
 
-  function tick() {
-    if (paused) {
-      setTimeout(tick, 120); // stay responsive without advancing
-      return;
-    }
+  function advanceOne() {
     if (gen.length >= LOOP_AFTER) {
       promptLen = gen.reset(prompt).length;
       renderer.reset();
@@ -203,7 +231,12 @@ async function init() {
       const startAbs = gen.length - 1 - snap.windowTokens.length;
       setStrip(snap.windowTokens, snap.token, startAbs);
     }
-    setTimeout(tick, STEP_MS);
+  }
+
+  function tick() {
+    if (!isPaused()) advanceOne();
+    // poll faster while stopped so resuming feels immediate
+    setTimeout(tick, isPaused() ? 120 : STEP_MS);
   }
   setTimeout(tick, 500); // let the first frame settle before the wave starts
 

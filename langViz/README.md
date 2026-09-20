@@ -7,8 +7,8 @@ trained on the KJV bible, running **inference entirely in the browser** in vanil
 JS. The page is a near-chrome-free ambient piece: it auto-generates KJV-flavored text
 one token at a time from a fixed prompt (looping every ~96 tokens) and renders a
 **pannable/zoomable visualization of the whole network lighting up as it infers.**
-On-screen controls are a **prompt box** at the top and a **stage rail** along
-the bottom; temperature and top-k are fixed constants in `js/main.js`.
+On-screen controls are a **prompt box** and transport at the top and a **stage
+rail** along the bottom; temperature and top-k are fixed constants in `js/main.js`.
 
 The tokenizer is word-level with a **character fallback**: the ~8k most common
 words/punctuation are whole tokens (99.3% of the corpus), and any rarer word is
@@ -203,8 +203,17 @@ Generation starts on load and loops on its own.
   The counter shows how many tokens your text encodes — a quick way to see the
   tokenizer at work, since a rare word costs one token per letter. There is
   nothing to validate: the character fallback means any input is representable.
+- **`space`** stops and restarts generation, **`.`** generates exactly one more
+  token (and stops the clock if it was running). Everything else in the piece —
+  the lens rail, the attribution panel, the neuron inspector — is worth reading
+  for longer than one tick, so being able to stop the clock is what makes the
+  rest of it usable. The `pause`/`step` buttons do the same thing.
 - **← / →** (or the stage rail) walks the network stage by stage; `Esc` or `0`
   returns to the overview.
+
+  Being stopped for editing and being stopped on purpose are tracked
+  separately, so blurring the prompt box never resumes a generation you paused
+  deliberately.
 
 Temperature (0.8), top-k (40) and pacing are constants at the top of
 `js/main.js`. `window.__setPrompt(text)` does the same thing from the console.

@@ -168,6 +168,20 @@
     font: 10px ui-monospace, Menlo, monospace; white-space: nowrap;
   }
   #promptHint.armed { color: rgba(245,200,120,0.95); }
+  /* transport: generation is a clock, and you need to be able to stop it to
+     read the lens rail or hover a neuron before the next token overwrites it */
+  #promptBar button {
+    flex: 0 0 auto; cursor: pointer; pointer-events: auto;
+    padding: 4px 9px; border-radius: 5px;
+    font: 11px ui-monospace, Menlo, monospace;
+    background: rgba(0,0,0,0.35); color: rgba(206,196,176,0.9);
+    border: 1px solid rgba(150,135,105,0.3);
+  }
+  #promptBar button:hover { color: rgba(245,225,190,1); border-color: rgba(190,172,136,0.6); }
+  #promptBar button.armed {
+    background: rgba(245,200,120,0.92); border-color: rgba(255,224,150,0.9);
+    color: rgba(18,14,10,1); font-weight: 600;
+  }
   #io .tag {
     display: block; margin-bottom: 5px; text-align: center;
     color: rgba(158,148,128,0.7); font: 10px ui-monospace, Menlo, monospace;
@@ -256,6 +270,8 @@
       <label for="prompt">prompt</label>
       <input id="prompt" type="text" spellcheck="false" autocomplete="off" />
       <span id="promptHint"></span>
+      <button id="btnPlay" type="button" title="pause / resume (space)">pause</button>
+      <button id="btnStep" type="button" title="generate one token (.)">step</button>
     </div>
     <span class="tag">model context — <b>prompt</b> + generated · highlighted = newest · arcs = where it just looked</span>
     <div id="strip"></div>
@@ -263,7 +279,7 @@
   </div>
   <aside id="lensRail" aria-label="logit lens by depth"></aside>
   <nav id="stages" aria-label="network stages"></nav>
-  <div id="hint">← → to step through the network · drag to pan · scroll to zoom · double-click for the overview · hover an MLP neuron</div>
+  <div id="hint">space pause · . step one token · ← → walk the network · drag to pan · scroll to zoom · hover an MLP neuron</div>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
