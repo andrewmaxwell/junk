@@ -7,8 +7,8 @@ trained on the KJV bible, running **inference entirely in the browser** in vanil
 JS. The page is a near-chrome-free ambient piece: it auto-generates KJV-flavored text
 one token at a time from a fixed prompt (looping every ~96 tokens) and renders a
 **pannable/zoomable visualization of the whole network lighting up as it infers.**
-The only on-screen control is a **stage rail** along the bottom; prompt,
-temperature and top-k are fixed constants in `js/main.js`.
+On-screen controls are a **prompt box** at the top and a **stage rail** along
+the bottom; temperature and top-k are fixed constants in `js/main.js`.
 
 The tokenizer is word-level with a **character fallback**: the ~8k most common
 words/punctuation are whole tokens (99.3% of the corpus), and any rarer word is
@@ -195,10 +195,19 @@ python3 -m http.server 8000
 # then open http://localhost:8000/
 ```
 
-Generation starts on load and loops on its own. Use **← / →** (or the stage rail
-at the bottom) to walk the network stage by stage; `Esc` returns to the overview.
-To change the prompt, temperature (0.8), top-k (40), or pacing, edit the constants
-at the top of `js/main.js`.
+Generation starts on load and loops on its own.
+
+- **Type in the prompt box** and press `↵` to generate from your own text.
+  Focusing the box pauses generation, so the strip you are reading stops being
+  overwritten mid-thought; `↵` commits and resumes, `Esc` discards and resumes.
+  The counter shows how many tokens your text encodes — a quick way to see the
+  tokenizer at work, since a rare word costs one token per letter. There is
+  nothing to validate: the character fallback means any input is representable.
+- **← / →** (or the stage rail) walks the network stage by stage; `Esc` or `0`
+  returns to the overview.
+
+Temperature (0.8), top-k (40) and pacing are constants at the top of
+`js/main.js`. `window.__setPrompt(text)` does the same thing from the console.
 
 There are also npm scripts (run from the repo root) for development:
 

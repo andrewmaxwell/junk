@@ -140,6 +140,34 @@
     border: 1px solid rgba(150,135,105,0.22);
     color: rgba(214,202,180,0.92); pointer-events: none; z-index: 3;
   }
+  /* prompt box: the piece stops being a loop you watch and becomes something
+     you can ask questions of. #io is pointer-events:none so the network stays
+     draggable underneath; only this row takes input. */
+  #promptBar {
+    display: flex; align-items: center; gap: 7px; pointer-events: auto;
+    margin-bottom: 6px;
+  }
+  #promptBar label {
+    flex: 0 0 auto; color: rgba(158,148,128,0.7);
+    font: 10px ui-monospace, Menlo, monospace;
+    text-transform: uppercase; letter-spacing: 0.09em;
+  }
+  #prompt {
+    flex: 1 1 auto; min-width: 0; box-sizing: border-box;
+    padding: 4px 8px; border-radius: 5px;
+    background: rgba(0,0,0,0.35); color: rgba(245,200,120,0.95);
+    border: 1px solid rgba(150,135,105,0.3);
+    font: 13px ui-monospace, Menlo, monospace;
+  }
+  #prompt:focus {
+    outline: none; border-color: rgba(245,200,120,0.75);
+    background: rgba(0,0,0,0.6);
+  }
+  #promptHint {
+    flex: 0 0 auto; color: rgba(158,148,128,0.65);
+    font: 10px ui-monospace, Menlo, monospace; white-space: nowrap;
+  }
+  #promptHint.armed { color: rgba(245,200,120,0.95); }
   #io .tag {
     display: block; margin-bottom: 5px; text-align: center;
     color: rgba(158,148,128,0.7); font: 10px ui-monospace, Menlo, monospace;
@@ -224,6 +252,11 @@
   <canvas id="viz"></canvas>
   <div id="world"><div id="worldInner"></div></div>
   <div id="io">
+    <div id="promptBar">
+      <label for="prompt">prompt</label>
+      <input id="prompt" type="text" spellcheck="false" autocomplete="off" />
+      <span id="promptHint"></span>
+    </div>
     <span class="tag">model context — <b>prompt</b> + generated · highlighted = newest · arcs = where it just looked</span>
     <div id="strip"></div>
     <canvas id="arcs"></canvas>

@@ -312,22 +312,25 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   // changes that — the width is what binds. So fit-everything is the ESTABLISHING
   // shot only. `stages` are named world rects the camera frames one at a time,
   // each chosen to fill the screen at a readable scale.
-  const TOP_INSET = 132;   // the fixed #io context box overlays the top
+  const TOP_INSET = 132;   // fallback; the real value is measured from #io below
   const BOTTOM_INSET = 96; // the stage rail + the legend overlay the bottom
   const RIGHT_INSET = 228; // the logit-lens rail sits down the right edge
   const RAIL_MIN_W = 760;  // below this the rail is hidden (CSS), so claim no space
 
   // Target view that frames `rect` inside the usable (un-overlaid) viewport.
   function fitRect(rect, pad = 1.04) {
+    // Measured, not hardcoded: #io grows and shrinks (the prompt row, and the
+    // strip rewrapping), and a stale constant would frame content under it.
+    const top = ioEl ? ioEl.getBoundingClientRect().bottom + 14 : TOP_INSET;
     const vw = Math.max(cssW - (cssW >= RAIL_MIN_W ? RIGHT_INSET : 0), 1);
-    const vh = Math.max(cssH - TOP_INSET - BOTTOM_INSET, 1);
+    const vh = Math.max(cssH - top - BOTTOM_INSET, 1);
     const w = (rect.x1 - rect.x0) * pad, h = (rect.y1 - rect.y0) * pad;
     const scale = clamp(Math.min(vw / w, vh / h), 0.05, 8);
     const cx = (rect.x0 + rect.x1) / 2, cy = (rect.y0 + rect.y1) / 2;
     return {
       scale,
       tx: vw / 2 - cx * scale,
-      ty: TOP_INSET + vh / 2 - cy * scale,
+      ty: top + vh / 2 - cy * scale,
     };
   }
 

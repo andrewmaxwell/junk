@@ -8,7 +8,7 @@ import {makeModel} from './model.js';
 import {makeGenerator} from './generate.js';
 import {makeRenderer} from './renderer.js';
 
-const PROMPT = 'Thus saith the LORD ';
+const DEFAULT_PROMPT = 'Thus saith the LORD';
 const STEP_MS = 1100; // time between generated tokens
 const WAVE_MS = 820; // how long the wave takes to sweep the network
 const TEMPERATURE = 0.8;
@@ -67,7 +67,9 @@ async function init() {
   renderer.start();
   renderer.setSpeed(WAVE_MS);
   buildStageRail(renderer);
-  let promptLen = gen.reset(PROMPT).length;
+  let prompt = DEFAULT_PROMPT;
+  let paused = false;
+  let promptLen = gen.reset(prompt).length;
 
   // fade the hint out
   const hint = document.getElementById('hint');
@@ -124,9 +126,70 @@ async function init() {
     0,
   );
 
+  // ---- prompt box ----
+  // Start generating from whatever you type. Editing pauses the loop, so the
+  // strip you are reading stops being overwritten mid-thought; committing
+  // resets and resumes. The tokenizer has a character fallback, so any input
+  // is representable and there is nothing to validate.
+  const promptEl = document.getElementById('prompt');
+  const promptHintEl = document.getElementById('promptHint');
+
+  function restart(text) {
+    prompt = text;
+    promptLen = gen.reset(prompt).length;
+    renderer.reset();
+    setStrip(
+      gen.ids.map((id) => tokenizer.idToToken(id)),
+      null,
+      0,
+    );
+  }
+
+  function showTokenCount() {
+    if (!promptHintEl || !promptEl) return;
+    const n = tokenizer.encode(promptEl.value.trim()).length;
+    const dirty = promptEl.value.trim() !== prompt;
+    promptHintEl.textContent = paused
+      ? `${n} token${n === 1 ? '' : 's'} · ${dirty ? '↵ to run' : 'esc to resume'}`
+      : `${n} token${n === 1 ? '' : 's'}`;
+    promptHintEl.classList.toggle('armed', paused && dirty);
+  }
+
+  if (promptEl) {
+    promptEl.value = prompt;
+    showTokenCount();
+    promptEl.addEventListener('focus', () => { paused = true; showTokenCount(); });
+    promptEl.addEventListener('input', showTokenCount);
+    promptEl.addEventListener('keydown', (e) => {
+      e.stopPropagation(); // the stage rail listens for arrow keys on window
+      if (e.key === 'Enter') {
+        const text = promptEl.value.trim() || DEFAULT_PROMPT;
+        promptEl.value = text;
+        restart(text);
+        paused = false;
+        promptEl.blur();
+        showTokenCount();
+      } else if (e.key === 'Escape') {
+        promptEl.value = prompt; // discard the edit
+        paused = false;
+        promptEl.blur();
+        showTokenCount();
+      }
+    });
+    promptEl.addEventListener('blur', () => {
+      promptEl.value = prompt; // an uncommitted edit is not what is running
+      paused = false;
+      showTokenCount();
+    });
+  }
+
   function tick() {
+    if (paused) {
+      setTimeout(tick, 120); // stay responsive without advancing
+      return;
+    }
     if (gen.length >= LOOP_AFTER) {
-      promptLen = gen.reset(PROMPT).length;
+      promptLen = gen.reset(prompt).length;
       renderer.reset();
       setStrip(
         gen.ids.map((id) => tokenizer.idToToken(id)),
@@ -146,6 +209,7 @@ async function init() {
 
   // dev handles: renderer for screenshot framing, parity vs parity.py
   window.__viz = renderer;
+  window.__setPrompt = (t) => restart(t);
   window.__parityCheck = function (text = 'Thus saith the LORD') {
     const ids = tokenizer.encode(text);
     const {logits} = model.forward(ids);
