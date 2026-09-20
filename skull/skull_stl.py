@@ -3,6 +3,29 @@
 Head CT DICOM -> two printable STLs, the skull halved down the midsagittal
 plane, sinuses left open at the cut.
 
+WHAT IS IN THIS PARTICULAR SCAN. It is a TMJ (jaw joint) study, not the whole
+head: 166 mm running from mid-neck up to about the orbital roof, on a 203 mm
+field of view. Two consequences, both unavoidable and both fine to print:
+
+  - There is no skull vault. The model stops above the orbits, so this is a
+    face, jaw, skull base and the top of the cervical spine, not a cranium.
+  - The back of the head runs off the field of view. Real occipital bone
+    reaches the edge of the image, so the model is flat-walled at the back.
+    pad() turns that clipping into a clean flat face rather than a ragged one.
+
+The mandible survives as one piece with the rest only because the mouth is
+closed and the teeth occlude -- that contact is the single bridge holding it on.
+On raw HU, raising BONE_HU to 300 breaks it and remove_floating then throws the
+entire 40 cm^3 jaw away as debris. Labelling a smoothed copy (see
+remove_floating) holds the bridge together well past that, but this is the
+failure to check for first if a whole jaw ever goes missing.
+
+There is also a 79 mm titanium fixation plate screwed to the right mandible,
+3.3 cm^3 of it, pinned at the scanner's 3071 HU ceiling. It is real hardware and
+it prints as part of the model. It is also the source of most of the streaking
+in this study, and of the fact that the right half and the left differ by 14% in
+volume -- the plate and its artifact are all on one side.
+
     pip3 install pydicom numpy scipy scikit-image trimesh pylibjpeg pylibjpeg-libjpeg
     python3 skull_stl.py
 
@@ -32,16 +55,19 @@ Five things that matter, each of which was measured rather than guessed:
    (a hard staircase, 26% of edges over 30 degrees) and is dragged inward
    enough to erode 36 cm^3 of bone.
 
-3. The volume is resampled to cubic voxels, because the scan is 0.44 mm
+3. The volume is resampled to cubic voxels, because the scan is 0.396 mm
    in-plane but 0.625 mm between slices. The interpolation has to be CUBIC:
    marching cubes is itself linear, so linear upsampling reproduces the very
-   same isosurface and buys nothing but triangles.
+   same isosurface and buys nothing but triangles. On this scan that resample
+   also carries a rotation -- see straighten().
 
-4. Denoising is a sub-millimetre Gaussian on HU values, not a mesh filter.
-   Taubin afterwards is close to free -- 20 iterations move the surface 0.008 mm
-   on average and change the volume by 0.4 cm^3 out of 333 (measured on the
-   uncut skull) -- so it is only there to take the last of the tessellation
-   hash off.
+4. Denoising is a sub-millimetre Gaussian on HU values, not a mesh filter, and
+   it is the setting that decides how much detail survives -- see PRESMOOTH_MM.
+   Taubin afterwards is close to free: on this scan 20 iterations move the
+   surface 0.015 mm on average, 0.079 mm at the very most, and leave the volume
+   unchanged at 165.0 cm^3. It has converged by then and is removing nothing,
+   so it is only there to take the last of the tessellation hash off. When the
+   model looks over-smoothed, Taubin is not the culprit; the Gaussian is.
 
 5. The isolevel is offset half a unit below the integer threshold. Raw HU values
    are integers, so asking for exactly 140.0 puts voxels precisely ON the
@@ -64,25 +90,106 @@ from pathlib import Path
 import numpy as np
 
 # ----------------------------------------------------------------- settings
-DICOM_DIR = "/Users/andrew/Downloads/DICOM 2"
-SERIES = "0.6 Ax Head"      # 280 slices @ 0.625 mm; the other series in this
-                            # study are 2.5-5 mm, far too coarse to print
-OUTPUT = "/Users/andrew/junk/skull_{side}.stl"   # absolute, so the files land in
+DICOM_DIR = "/Users/andrew/Downloads/DICOM"
+SERIES = "TMJ CLOSED STND"  # 266 slices @ 0.625 mm, STANDARD kernel.
+                            #
+                            # This study has three series thin enough to print,
+                            # all covering the same 166 mm and all 0.396 mm
+                            # in-plane, so the choice is entirely about kernel:
+                            #
+                            #   TMJ CLOSED STND  266 @ 0.625  STANDARD
+                            #   TMJ CLOSED BONE  531 @ 0.3125 BONE
+                            #   BONE MAR         255 @ 0.65   BONE + metal
+                            #                                 artifact reduction
+                            #
+                            # The BONE kernel is a sharpening filter. It is the
+                            # right thing to LOOK at and the wrong thing to
+                            # threshold: at 140 HU it breaks the volume into
+                            # 3107 disconnected pieces against STND's 204 (MAR,
+                            # also BONE-kernel, is worst at 7144). That noise
+                            # becomes surface, and remove_floating below only
+                            # deletes the specks that are fully detached -- the
+                            # ones touching real bone stay as warts.
+                            #
+                            # Losing MAR costs something real: there is a full
+                            # arch of dental restorations in here (59k voxels
+                            # pinned at the 3071 HU ceiling) throwing visible
+                            # streaks. But the streaks are mostly DARK, so they
+                            # sit below the threshold and are largely invisible
+                            # to marching cubes -- the metal slice is only 8%
+                            # more above-threshold area in STND than in MAR.
+                            # Trading a 35x noise increase for that is a bad
+                            # deal. The BONE series' finer 0.3125 mm slice
+                            # spacing is likewise not worth it: it is an
+                            # overlapping reconstruction of the same 0.625 mm
+                            # thick slices, so it carries no extra information.
+OUTPUT = "/Users/andrew/junk/skull/aug2025/skull_{side}.stl"   # absolute, so the files land in
                                                  # the same place whatever
                                                  # directory you run from
 
-# Bone threshold. Chosen by sweeping 75..300 HU and taking the minimum of the
-# mesh genus (its number of holes and tunnels), which is a decent proxy for
-# "amount of stuff that is not really there": below ~100 HU, dense soft tissue
-# and CT noise add spurious flakes and bridges (genus 229 at 75 HU, and 3197
-# disconnected specks instead of ~120); above ~150 HU, real thin bone starts
-# perforating (genus 177 at 150, 196 at 300). The basin bottoms out at 140.
-BONE_HU = 140
+# Bone threshold.
+#
+# The genus sweep that picked 140 for the previous scan is nearly FLAT here --
+# 463 at 140, 474 at 200, 495 at 260 -- so it cannot choose between them, and
+# 140 is the wrong end of that flat basin. Raw HU values step from soft tissue
+# to cortical bone over two or three voxels, and a threshold down at 140 sits in
+# that ramp rather than on the bone: it picks up the partial-volume halo, which
+# pads every surface outward and welds anything within a voxel of anything else.
+# On this scan that is what fused the tooth crowns into one continuous ridge and
+# rounded the fixation plate's screws into anonymous bumps.
+#
+# 200 sits above the ramp. Teeth separate into crowns, the screws read as
+# screws, and the outer cortical surface lands where the bone actually is --
+# the kept volume drops 325 -> 294 cm^3, and most of that 10% is halo rather
+# than bone. The cost is real though: the thinnest structures, orbital and
+# sinus walls, start to perforate, and those are the fragile parts of a print.
+# 140 is the safer value if a wall blows out somewhere that matters.
+#
+# What makes 200 safe at all is the smoothed labelling in remove_floating: on
+# raw HU the mandible hangs on by one tooth-contact bridge that breaks in this
+# range, and the whole 40 cm^3 jaw gets deleted as debris. Read that comment
+# before raising this further.
+BONE_HU = 200
 
-PRESMOOTH_MM = 0.5          # Gaussian sigma on HU. Past ~0.6 mm, thin bone
+PRESMOOTH_MM = 0.3          # Gaussian sigma on HU. Past ~0.6 mm, thin bone
                             # (orbital walls, nasal conchae) blurs below the
                             # threshold and disappears.
+                            #
+                            # 0.5 was too much for this scan and showed: tooth
+                            # cusps fused into one mass, vertebrae came out as
+                            # featureless blobs, no trabecular or sutural
+                            # texture anywhere. A 203 mm field of view over a
+                            # 512 matrix with a STANDARD kernel is already
+                            # band-limited around 0.6-0.7 mm FWHM, and a 0.5 mm
+                            # sigma (1.18 mm FWHM) on top of that roughly
+                            # doubles the blur -- it was throwing away most of
+                            # what the scanner resolved. 0.3 keeps the detail
+                            # and still suppresses the noise that matters.
+                            #
+                            # It cannot go to 0: the dental metal throws a
+                            # streak dense enough to cross 140 HU, and unsmoothed
+                            # it becomes a slab of false bone bridging the upper
+                            # arch. 0.25 already removes it, so 0.3 has margin.
 TAUBIN_ITERATIONS = 20      # returns flatten out around here
+
+# How far the head is off square in the scanner, in degrees. Unlike the previous
+# scan this one is NOT straight, so the volume is rotated before it is cut --
+# see straighten() for why this cannot be left to the plane search.
+#
+# Both angles were found by maximising the same mirror-overlap score that
+# midsagittal() uses, over a grid of whole-volume rotations. The maximum is
+# smooth and interior, not an artefact of the search bounds:
+#
+#     roll    -3.00  -2.75  -2.50  -2.25      yaw    +1.00  +1.50  +2.00
+#     score   0.5459 0.5497 0.5468 0.5450     score  0.5430 0.5497 0.5465
+#
+# Leaving both at 0 scores 0.4769. PITCH is deliberately absent: it is rotation
+# about the left-right axis, which slides the midsagittal plane along itself and
+# so cannot affect the cut.
+ROLL_DEG = -2.75            # about the front-back axis (tilts head toward a
+                            # shoulder); costs ~4 mm across the 166 mm of height
+YAW_DEG = 1.50              # about the vertical axis (turns head to a side);
+                            # costs ~2 mm across the 156 mm of depth
 
 AIR_HU = -1024.0
 ISOLEVEL = BONE_HU - 0.5
@@ -154,7 +261,24 @@ def remove_floating(vol, spacing):
 
     voxel_mm3 = float(np.prod(spacing))
     print(f"\nFinding solid regions >= {BONE_HU} HU ...")
-    labels, n = ndimage.label(vol >= BONE_HU, structure=np.ones((3, 3, 3), np.uint8))
+
+    # Label a SMOOTHED copy, but blank the debris in the real volume. Deciding
+    # what is connected to what is a question about shape, and asking it of raw
+    # HU means asking it of the noise too: a single voxel flickering over 140 HU
+    # either welds a speck onto the skull or splits a real structure off it.
+    # Smoothing first cut the region count on this scan from 204 to 118, and it
+    # is what makes the isolevel safe to raise -- labelling raw, BONE_HU=300
+    # broke the one tooth-contact bridge holding the mandible on and
+    # remove_floating deleted the entire 40 cm^3 jaw as debris. Smoothed, the
+    # largest thing dropped stays around 3 cm^3 all the way up to 260 HU.
+    #
+    # The surface itself is NOT taken from this copy. It comes from the real
+    # volume, smoothed exactly once, after the resample -- so this robustness
+    # costs no sharpness. (It is also why presmooth() still exists separately.)
+    smooth = ndimage.gaussian_filter(vol, [PRESMOOTH_MM / s for s in spacing],
+                                     mode="nearest")
+    labels, n = ndimage.label(smooth >= BONE_HU, structure=np.ones((3, 3, 3), np.uint8))
+    del smooth
 
     counts = np.bincount(labels.ravel())
     counts[0] = 0
@@ -178,8 +302,8 @@ def trim(vol, keep_mask):
     The margin is measured from the >=140 HU mask, but the surface can sit a
     little outside that mask: what borders the bone is soft tissue at 50-100 HU,
     not air, so blurring a 1000+ HU cortical plate into it lifts nearby voxels
-    over the isolevel. 10 voxels (4.4 mm) is well past anything a 0.5 mm sigma
-    reaches. 4 voxels was very nearly enough too -- widening it changed the mesh
+    over the isolevel. 10 voxels (4.0 mm here) is well past anything a 0.5 mm
+    sigma reaches. 4 voxels was very nearly enough too -- widening it changed the mesh
     by 0.4 cm^3 out of 305 and moved no bound -- but the headroom is free.
     """
     box = []
@@ -200,12 +324,16 @@ def midsagittal(keep_mask):
     stray mastoid speck shifts it by millimetres. Scoring how well the skull
     maps onto its own mirror image uses every voxel instead.
 
-    Only the plane's POSITION is searched, not its tilt. This scan was checked
-    for that -- rotating the mask +-6 degrees in yaw or roll made the mirror
-    overlap monotonically worse (0.825 unrotated, 0.767 at 2 degrees), so the
-    head is already square in the scanner and a straight axial-grid cut is the
-    right one. A tilted head would need the volume rotated first, and the
-    printed message below is what would tell you.
+    Only the plane's POSITION is searched, not its tilt -- straighten() has
+    already turned the head square by the time this runs, so all that is left to
+    find is where along X the plane sits. Expect an overlap around 0.55 here; it
+    was 0.477 before the rotation, and a number back down at that level means
+    ROLL_DEG/YAW_DEG no longer match the data.
+
+    The score is lower than the previous scan's 0.825 for a reason that is not a
+    problem: this volume includes the cervical spine and a mandible full of
+    dental work, neither of which is as bilaterally symmetric as a cranium.
+    Only the peak location matters, not its height.
     """
     xs = np.nonzero(keep_mask.any(axis=(0, 1)))[0]
     centre = int((xs[0] + xs[-1]) // 2)
@@ -248,17 +376,75 @@ def halves(vol, x0):
 
 
 # ------------------------------------------------------- resample / denoise
-def to_isotropic(vol, spacing):
+def straighten(vol, spacing):
+    """Rotate the head square and resample to cubic voxels, in ONE pass.
+
+    The plane search in midsagittal() only slides the plane sideways, it cannot
+    tilt it. That was fine for the previous scan, which was already square, but
+    this head is rolled 2.75 degrees, and a plane parallel to the voxel grid
+    when the skull is not simply cannot be the midsagittal plane: over 166 mm of
+    height it enters about 4 mm to one side of the midline and leaves 4 mm to
+    the other. The halves would be visibly unequal and the cut would miss the
+    nasal septum and the sella. So the VOLUME is turned instead, and the
+    grid-aligned cut then is the right one.
+
+    Rotating and resampling are folded into a single affine_transform rather
+    than done as three consecutive ndimage calls, because each cubic pass blurs.
+    Scored against the very rotation this was fitted to, the three-pass version
+    reaches 0.5497 mirror overlap and this one 0.5488 -- the difference is that
+    the three-pass mask has been smeared enough to overlap itself slightly
+    better, which is exactly the blur being avoided.
+
+    The output grid is sized from the rotated corners of the input, so nothing
+    is turned out of the array, and the two grids share a centre.
+    """
     from scipy import ndimage
 
     iso = min(spacing)
-    print(f"\nResampling to isotropic {iso:.3f} mm (cubic) ...")
-    vol = ndimage.zoom(vol, [s / iso for s in spacing], order=3, mode="nearest")
-    print(f"  {vol.shape}")
 
-    sigma = PRESMOOTH_MM / iso
+    def rot(a, b, deg):
+        t = np.deg2rad(deg)
+        r = np.eye(3)
+        r[a, a] = r[b, b] = np.cos(t)
+        r[a, b], r[b, a] = -np.sin(t), np.sin(t)
+        return r
+
+    # Array axes are (z, y, x): roll turns in the z-x plane, yaw in the y-x one.
+    R = rot(1, 2, YAW_DEG) @ rot(0, 2, ROLL_DEG)
+
+    extent = np.array(vol.shape) * np.array(spacing)      # mm
+    corners = np.array([[sz * ((i >> k) & 1) for k, sz in enumerate(extent)]
+                        for i in range(8)]) @ R.T
+    out_shape = tuple(int(np.ceil(s / iso)) + 1
+                      for s in corners.max(0) - corners.min(0))
+
+    # affine_transform maps OUTPUT indices back to INPUT indices, so the matrix
+    # is the inverse of the transform being applied: out index -> mm -> rotate
+    # back -> in index.
+    M = (iso * np.diag(1.0 / np.array(spacing))) @ R.T
+    offset = ((np.array(vol.shape) - 1) / 2.0
+              - M @ ((np.array(out_shape) - 1) / 2.0))
+
+    print(f"\nStraightening (roll {ROLL_DEG:+.2f}, yaw {YAW_DEG:+.2f} deg) and "
+          f"resampling to isotropic {iso:.3f} mm (cubic) ...")
+    vol = ndimage.affine_transform(vol, M, offset=offset, output_shape=out_shape,
+                                   order=3, cval=AIR_HU)
+    print(f"  {vol.shape}")
+    return vol, (iso, iso, iso)
+
+
+def presmooth(vol, spacing):
+    """Gaussian on HU values -- see point 4 in the module docstring.
+
+    Run on the whole volume before it is halved, not on each half. Smoothing a
+    half would run the filter's edge handling along the cut plane and soften the
+    very face that pad() exists to keep flat.
+    """
+    from scipy import ndimage
+
+    sigma = PRESMOOTH_MM / spacing[0]
     print(f"Pre-smoothing HU, sigma {PRESMOOTH_MM} mm ({sigma:.2f} voxels) ...")
-    return ndimage.gaussian_filter(vol, sigma, mode="nearest"), (iso, iso, iso)
+    return ndimage.gaussian_filter(vol, sigma, mode="nearest")
 
 
 # ---------------------------------------------------------------------- pad
@@ -364,19 +550,34 @@ def report(side, mesh):
 
 def main():
     vol, spacing = load_series()
+
+    # Debris is labelled on the ORIGINAL grid, before straighten() inflates the
+    # volume ~1.6x. Labelling is the memory high-water mark of the whole script
+    # (an int32 label array the size of the volume), and doing it here rather
+    # than after the resample keeps that off the big array for free.
     vol, keep_mask = remove_floating(vol, spacing)
+    del keep_mask
+
+    vol, spacing = straighten(vol, spacing)
+
+    # The debris is already AIR_HU, so a plain threshold now recovers what
+    # labelling would: everything left above 140 HU is the one kept solid, give
+    # or take a skin of voxels the cubic interpolation lifted over the line
+    # alongside real bone. trim() only wants bounds and midsagittal() only wants
+    # a mirror score, and neither can tell the difference.
+    keep_mask = vol >= BONE_HU
     vol, keep_mask = trim(vol, keep_mask)
+    vol = presmooth(vol, spacing)
     x0 = midsagittal(keep_mask)
     del keep_mask
 
     for side, half, start in halves(vol, x0):
         print(f"\n{'-' * 20} {side} half {'-' * 20}")
-        sub, sub_spacing = to_isotropic(half, spacing)
-        sub = pad(sub)
+        sub = pad(half)
         # pad() put 2 voxels in front of the data, and this half started at
         # `start` in the trimmed volume, so shift by the difference to land
         # back in the trimmed volume's own coordinates.
-        mesh = build_mesh(sub, sub_spacing, (start - 2) * spacing[2])
+        mesh = build_mesh(sub, spacing, (start - 2) * spacing[2])
         del sub
         report(side, mesh)
 

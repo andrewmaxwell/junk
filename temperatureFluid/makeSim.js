@@ -379,6 +379,8 @@ export const makeSim = (params) => {
   function macCormack(dst, src, kind) {
     const dt = params.dt;
     advectPass(dst, src, kind, 1);
+    // The reverse pass samples ghosts, so refresh them from the forward result.
+    boundFor(kind)(dst);
     advectPass(reverted, dst, kind, -1);
 
     const ox = offsetX(kind);
@@ -478,15 +480,8 @@ export const makeSim = (params) => {
     const deficit = before - after;
     if (deficit === 0) return;
 
-    // Total room available in the direction the correction has to move.
-    let headroom = 0;
-    for (let j = 1; j <= N; j++) {
-      const row = res * j;
-      for (let i = 1; i <= N; i++) {
-        const v = temp[row + i];
-        headroom += deficit > 0 ? 1 - v : v;
-      }
-    }
+    // Reuse the total: sum(1 - T) = N * N - sum(T).
+    const headroom = deficit > 0 ? N * N - after : after;
     if (!(headroom > 0)) return;
 
     const scale = deficit / headroom;
