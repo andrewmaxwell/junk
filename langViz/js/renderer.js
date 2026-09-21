@@ -109,7 +109,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   const arcsCanvas = document.getElementById('arcs');
   const arcsCtx = arcsCanvas ? arcsCanvas.getContext('2d') : null;
   let arcCenters = [];   // window position -> {x, y} screen coords within #io
-  let arcOrigin = null;  // {x, y} of the just-produced token (arc source)
+  let arcOrigin = null;  // {x, y} of the last input token (arc source)
   let arcBaseY = 0;      // baseline y the arcs spring from
 
   // World DOM layer: children positioned in world coords, transformed in lockstep
@@ -692,7 +692,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       ctx.strokeStyle = rgba([140, 122, 92], 0.26);
       ctx.stroke();
       // Tint each branch by how much it moved the produced token's logit, so the
-      // blocks that actually decided the answer glow from across the overview.
+      // blocks with large direct logit contributions glow in the overview.
       // Falls back to raw activity before the first attribution arrives.
       const per = attribBy[bx.b];
       const mx = attribData ? Math.max(attribData.maxAbs, 1e-6) : 1;
@@ -833,7 +833,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   // Per-branch readout drawn in world space, under each branch's watermark: a
   // bar diverging from a center tick (right = pushed toward the token the model
   // produced, left = away) plus the signed logit contribution. This is the
-  // "which branch actually decided it" view the activations alone can't give.
+  // "which branch directly contributed to this logit" view the activations alone can't give.
   function drawAttribution() {
     if (!attribData || !attribBy.length) return;
     const maxAbs = Math.max(attribData.maxAbs, 1e-6);
@@ -1091,7 +1091,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     mkWL('wl-io', 'input ▸', slotX(0) - 34, 0, F_IO, 'translate(-100%,-50%)');
     mkWL('wl-io-sub', `this token · ${D} dims`, slotX(0) - 34, F_IO * 0.7, F_SUB, 'translate(-100%,-50%)');
     mkWL('wl-io', 'output', outX, -OUT_H / 2 - 54, F_IO);
-    mkWL('wl-io-sub', 'next-token probabilities', outX, -OUT_H / 2 - 54 + F_IO * 0.72, F_SUB);
+    mkWL('wl-io-sub', 'model probabilities · T=1', outX, -OUT_H / 2 - 54 + F_IO * 0.72, F_SUB);
 
     for (const c of columns) {
       if (c.kind === 'spine') continue;
@@ -1220,7 +1220,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       if (!o) { el.style.display = 'none'; continue; }
       el.style.display = '';
       el.classList.toggle('sampled', !!o.sampled);
-      el.textContent = `${dispToken(o.token)}  ${(o.prob * 100).toFixed(1)}%`;
+      el.textContent = `${dispToken(o.token)}  ${(o.prob * 100).toFixed(1)}%${o.rank > N_OUT ? ` · rank ${o.rank}` : ''}`;
     }
   }
 
@@ -1229,7 +1229,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   // LayerNorm + tied unembedding. One chip sits above the spine at each block
   // boundary, so you watch the guess go from a vague/common word at the embedding
   // to the real answer by the last block. A guess that already matches the FINAL
-  // top-1 is gold — the layer where the decision locks in. As world DOM the chips
+  // top-1 is gold — retrospective agreement, not a causal decision point. As world DOM the chips
   // pan/zoom with the network and CSS handles their layout.
   const LENS_ANCHOR_Y = -SPINE_H / 2 - 16; // bottom-center anchor, just above the spine
   function buildLensChips() {
@@ -1330,6 +1330,10 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     railFoot = document.createElement('div');
     railFoot.className = 'lr-foot';
     railEl.appendChild(railFoot);
+    const note = document.createElement('div');
+    note.className = 'lr-foot';
+    note.textContent = 'Intermediate readouts are probes, not calibrated confidence.';
+    railEl.appendChild(note);
     buildAttribPanel();
   }
 
@@ -1377,7 +1381,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       // temperature 0.8 is often not the lens's top-1. Attributing what the
       // model actually said is the more useful question; naming it avoids the
       // two panels looking like they disagree.
-      attribCap.innerHTML = `why it said <b>${escapeHtml(dispToken(token) || '?')}</b>`;
+      attribCap.innerHTML = `logit contributions to <b>${escapeHtml(dispToken(token) || '?')}</b>`;
     }
     // rank by magnitude — a large negative push is as interesting as a positive
     const ranked = attribData.parts.slice().sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
@@ -1396,17 +1400,12 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       r.val.style.color = rgba(attribColor(p.value), 0.95);
     }
     if (attribFoot) {
-      attribFoot.textContent = 'right = toward · left = away';
+      attribFoot.textContent = 'signed logit terms · not causal effects';
     }
   }
 
-  // `decidedAt` — the shallowest depth from which the top guess is the final
-  // answer and NEVER changes again. Deliberately not "the first depth that
-  // happens to match": the lens routinely hits the right token early, wanders
-  // off at the next block, and comes back. Only the start of the unbroken run to
-  // the end means the model has actually committed. That single number is the
-  // story — function words lock in at the embedding, content words often not
-  // until the last block — and the last depth always matches, so it always exists.
+  // Retrospective agreement of the lens top-1 with the final top-1.
+  // This does not establish causal commitment or make later blocks dispensable.
   function updateLensRail(finalId) {
     if (!railCells.length || !lensData) return;
     let decidedAt = lensData.length - 1;
@@ -1420,7 +1419,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       const maxP = top[0] ? top[0].prob || 1 : 1;
       const { cell, tag, rows } = railCells[i];
       cell.classList.toggle('decided', i === decidedAt);
-      tag.textContent = i === decidedAt ? 'locked in' : '';
+      tag.textContent = i === decidedAt ? 'matches onward' : '';
       for (let r = 0; r < rows.length; r++) {
         const o = top[r];
         if (!o) { rows[r].row.style.display = 'none'; continue; }
@@ -1433,10 +1432,10 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     }
     if (railFoot) {
       railFoot.innerHTML = decidedAt <= 0
-        ? 'guess set at the <b>embedding</b>'
+        ? 'top guess matches from <b>embedding</b>'
         : decidedAt >= lensData.length - 1
-          ? 'not settled until the <b>last block</b>'
-          : `decided by <b>block ${decidedAt - 1}</b>`;
+          ? 'top guess matches at <b>last block</b>'
+          : `top guess matches from <b>block ${decidedAt - 1}</b>`;
     }
     railEl.classList.add('on');
   }
@@ -1491,7 +1490,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     arcBaseY += 3;
   }
 
-  // Attention arcs on the real words: from the just-produced token back to the
+  // Attention arcs on the real words: from the last INPUT token back to the
   // window tokens its query attended to (final layer, one arc per head·target;
   // color = head, thickness/opacity ∝ weight). Drawn in the padding lane below
   // the text. The per-block heat strips still cover the other layers.
@@ -1504,12 +1503,23 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     if (!layer) return;
     // ramp arcs in as the step computes, with a floor so they never fully blink out
     const reveal = 0.45 + 0.55 * (waveActive ? clamp((nowT - waveStart) / waveDuration, 0, 1) : 1);
-    const ox = arcOrigin.x, oy = arcBaseY;
+    const ox = arcOrigin.x, oy = arcOrigin.y + 3;
     for (let h = 0; h < H; h++) {
       const arow = layer[h] && layer[h][attnLastPos];
       if (!arow) continue;
-      let rmax = 1e-6;
-      for (let k = 0; k < arcCenters.length; k++) if (arcCenters[k] && arow[k] > rmax) rmax = arow[k];
+      // Normalize against the strongest *drawn* target, not the whole row: the
+      // self-link is excluded from the arcs, and in the final layer it is often
+      // most of the mass, so including it scaled every real target under the
+      // 0.12 threshold and the head's arcs vanished entirely.
+      let rmax = 1e-6, offSelf = 0;
+      for (let k = 0; k < arcCenters.length; k++) {
+        if (!arcCenters[k] || k === attnLastPos) continue;
+        offSelf += arow[k] || 0;
+        if (arow[k] > rmax) rmax = arow[k];
+      }
+      // ...but a head that really does just look at itself shouldn't now shout
+      // about its 0.3% runner-up, so the whole head fades by its off-self mass.
+      const headAlpha = 0.3 + 0.7 * clamp(offSelf, 0, 1);
       const cand = [];
       for (let k = 0; k < arcCenters.length; k++) {
         if (!arcCenters[k] || k === attnLastPos) continue;
@@ -1519,13 +1529,22 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       cand.sort((p, q) => q.wgt - p.wgt);
       for (let c = 0; c < cand.length && c < 6; c++) {
         const t = arcCenters[cand[c].k], wgt = cand[c].wgt;
-        const dip = oy + 8 + Math.min(26, Math.abs(ox - t.x) * 0.14);
+        const dip = arcBaseY + 8 + Math.min(26, Math.abs(ox - t.x) * 0.14);
+        const alpha = (0.12 + 0.6 * wgt) * reveal * headAlpha;
         arcsCtx.beginPath();
         arcsCtx.moveTo(ox, oy);
-        arcsCtx.quadraticCurveTo((ox + t.x) / 2, dip, t.x, oy);
+        arcsCtx.quadraticCurveTo((ox + t.x) / 2, dip, t.x, t.y + 3);
         arcsCtx.lineWidth = 0.6 + 2.4 * wgt;
-        arcsCtx.strokeStyle = rgba(headColors[h], (0.12 + 0.6 * wgt) * reveal);
+        arcsCtx.strokeStyle = rgba(headColors[h], alpha);
         arcsCtx.stroke();
+        // A dot on the target. Once the strip wraps, an arc reaches its token
+        // from below and passes under the line beneath it; without the dot the
+        // end of the curve reads as floating in the gap rather than pointing
+        // at a word.
+        arcsCtx.beginPath();
+        arcsCtx.arc(t.x, t.y + 3, 1 + 1.6 * wgt, 0, Math.PI * 2);
+        arcsCtx.fillStyle = rgba(headColors[h], Math.min(1, alpha * 1.6));
+        arcsCtx.fill();
       }
     }
   }

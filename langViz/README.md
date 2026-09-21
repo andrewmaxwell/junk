@@ -5,10 +5,10 @@ Language Model Visualizer - 2026 - Watch the inner workings of a tiny GPT doing 
 A tiny GPT (4 layers, d_model 96, 4 heads, ~8.1k-token vocab, ~1.2M params)
 trained on the KJV bible, running **inference entirely in the browser** in vanilla
 JS. The page is a near-chrome-free ambient piece: it auto-generates KJV-flavored text
-one token at a time from a fixed prompt (looping every ~96 tokens) and renders a
+one token at a time from a fixed prompt (looping every 96 generated tokens) and renders a
 **pannable/zoomable visualization of the whole network lighting up as it infers.**
 On-screen controls are a **prompt box** and transport at the top and a **stage
-rail** along the bottom; temperature and top-k are fixed constants in `js/main.js`.
+rail** along the bottom; the sampling constants are fixed in `js/main.js`.
 
 The tokenizer is word-level with a **character fallback**: the ~8k most common
 words/punctuation are whole tokens (99.3% of the corpus), and any rarer word is
@@ -50,12 +50,10 @@ Three overlays make the "what is it actually doing" legible at a glance:
   - the **lens rail** (screen space, down the right edge) is the always-legible
     copy — five cells, embedding → after each block, lit in turn by the wave. The
     shallowest cell from which the top guess is the final answer and never
-    changes again is flagged `locked in`, and the footer names it (`decided by
-    block 1`). Note *never changes again*, not *first matches*: the lens often
-    hits the right token early, wanders off, and comes back, and only the start
-    of the unbroken run means the model has committed. That number is the story —
-    function words commit at the embedding, content words often not until the
-    last block. It lives on the right because the per-stage camera
+    changes again is flagged `matches onward`. This is retrospective top-1
+    agreement, not evidence of causal commitment: later blocks can still change
+    the scores substantially. Intermediate lens probabilities are probes, not
+    calibrated confidence. It lives on the right because the per-stage camera
     framings are height-limited, so horizontal room is what's actually spare —
     and `fitRect` reserves its width so nothing is framed underneath it.
   - the in-world **chips** above the spine at each block boundary are the same
@@ -76,21 +74,23 @@ Three overlays make the "what is it actually doing" legible at a glance:
   the reconstruction error — it's ~1e-6, i.e. float32 rounding). It shows up in
   three places:
   - each branch's **blob is tinted** by how much it moved the produced token, so
-    from the overview you can see which blocks decided the answer glowing warm;
+    from the overview you can see which blocks directly contributed to the sampled token’s logit glowing warm;
   - a **bar + signed number** just outside each branch (right/orange = pushed
     toward the token, left/blue = pushed away);
-  - a ranked **"why it said X"** panel under the lens in the right rail.
+  - a ranked **"logit contributions to X"** panel under the lens in the right rail.
 
   Attribution is computed for the token the model *actually produced* — the
-  sampled one, which at temperature 0.8 is often not the lens's top-1. That's
+  sampled one, which under min-p sampling is often not the lens's top-1. That's
   the more useful question ("why did it say that?"), and the panel names the
   token so the two readouts don't look like they disagree. Typical result for
-  this model: the **MLPs dominate** and the late blocks do the deciding —
-  `"Thus saith the LORD"` → `","` decomposes as block 3's MLP +6.78, block 1's
-  MLP +2.54, and block 0's attention actually pushing *against* at −0.12.
+  this model: the **MLPs dominate**. `"Thus saith the LORD"` → `"of"` (the
+  argmax, which is what `__attribCheck` targets) decomposes as MLPs +2.26,
+  +2.78, +2.90, +1.55 = **+9.50** against attention's +0.64, +0.26, +0.78,
+  +1.11 = +2.79, with the raw embedding pushing *against* the answer at −0.68.
+  Reconstruction error 2.45e-7.
 - **Attention arcs** (on the text strip itself): the model's input window is the
-  reading text, and the just-produced token sends **arcs back to the tokens it
-  attended to** — the intuitive "this word looked at those words" view. One arc
+  reading text, and the last input token sends **arcs back to the tokens it
+  attended to while predicting the next token** — the intuitive "this word looked at those words" view. One arc
   per (head, target), colored by head, thickness/opacity ∝ weight. It shows the
   final layer's heads; the per-block heat panels cover the rest.
 
@@ -201,8 +201,8 @@ Generation starts on load and loops on its own.
   Focusing the box pauses generation, so the strip you are reading stops being
   overwritten mid-thought; `↵` commits and resumes, `Esc` discards and resumes.
   The counter shows how many tokens your text encodes — a quick way to see the
-  tokenizer at work, since a rare word costs one token per letter. There is
-  nothing to validate: the character fallback means any input is representable.
+  tokenizer at work, since a rare word costs one token per letter. The counter also identifies unsupported characters and prompts longer than
+  the 64-token context. The fallback covers English letters, not arbitrary Unicode.
 - **`space`** stops and restarts generation, **`.`** generates exactly one more
   token (and stops the clock if it was running). Everything else in the piece —
   the lens rail, the attribution panel, the neuron inspector — is worth reading
@@ -215,7 +215,8 @@ Generation starts on load and loops on its own.
   separately, so blurring the prompt box never resumes a generation you paused
   deliberately.
 
-Temperature (0.8), top-k (40) and pacing are constants at the top of
+Temperature (1.0), min-p (0.08), the repetition penalty (0.6) and pacing are
+constants at the top of
 `js/main.js`. `window.__setPrompt(text)` does the same thing from the console.
 
 There are also npm scripts (run from the repo root) for development:
@@ -230,6 +231,16 @@ node langViz/tools/shot.mjs /tmp/x.png 6000 stage:2      # ... framing a named s
 node langViz/tools/shot.mjs parity "Thus saith the LORD"  # browser-side logits
 node langViz/tools/shot.mjs attrib "Thus saith the LORD"  # attribution + reconstruction error
 ```
+
+Sweeps write beside the shipped artifacts unless redirected:
+
+```bash
+OUT_DIR=/tmp/sweep OUT_TAG=6layer N_LAYERS=6 python3 -u train.py
+EXTRA_CORPUS="moby-dick.txt,alice-in-wonderland.txt" EXTRA_WEIGHT=0.25 python3 -u train.py
+```
+
+Each run ends with a one-line `RESULT {...}` JSON record (tag, hyperparams,
+best val, nats/word) for collecting a table across runs.
 
 ## Files
 
@@ -252,7 +263,16 @@ weights.bin       float16 params, model_config.json = hyperparams + vocab + mani
 ## Training
 
 `npm run langviz:train` (or `python3 train.py`). Requires `torch` + `numpy`.
-`MAX_STEPS` and `N_WORDS` are environment overrides.
+Environment overrides: `MAX_STEPS`, `N_WORDS`, `N_LAYERS`, `DROPOUT`,
+`LR_DECAY_STEPS`, `DECAY_EMB`, `EXTRA_CORPUS`, `EXTRA_WEIGHT`, and
+`OUT_TAG`/`OUT_DIR` (which redirect the exported artifacts so a sweep cannot
+clobber the `weights.bin` the page loads).
+
+> **`LR_DECAY_STEPS` used to default to 16000, which did not reproduce this
+> model.** The sweep below picked decay over 40000 (val ppl 68.6), but a default
+> `python3 train.py` ran 16000 and landed on ppl 81.3 — the third row, not the
+> last one. The default is now 40000 and a fresh run reproduces the shipped
+> `weights.bin` to a mean absolute difference of 1e-6.
 
 The corpus is ~890k surface tokens of KJV → ~1.06M ids after the character
 fallback. The last **5%** is held out as one *contiguous* block (not random
@@ -290,6 +310,11 @@ old runs "never reached the low-LR phase" is not what was holding them back.
 What mattered was dropout *plus* enough steps to use it: at `LR_DECAY_STEPS=16k`
 the 0.1 run was still improving when it hit the 30k cap.
 
+`MAX_STEPS` now defaults to 50000 rather than 30000. On the KJV-only config this
+changes nothing — early stopping fires on patience around step 28750, well under
+either cap — but with `EXTRA_CORPUS` set the run is still improving at step
+36000, so the old cap would have truncated it.
+
 **Comparing runs with different `N_WORDS` is a trap.** Loss is per *token*, and a
 bigger vocab means fewer, more informative tokens — so per-token perplexity rises
 even when the model improves. Only nats per *surface word* can be compared, and
@@ -310,16 +335,140 @@ Scoring both checkpoints on identical held-out text, word for word:
 > steps is far below 0.01, so it fired on noise shortly after `MIN_STEPS` and the
 > run ended around step ~3.5k. Validation loss was still improving at step 12k.
 
+### What doesn't work (measured, so you don't retry it)
+
+Four follow-up experiments, all against `A_base` as the control — the fixed
+defaults above, which reproduce the shipped weights. Generation columns are at
+matched decoding (`min-p 0.08` + `rep 0.6`), 5 prompts x 6 seeds x 96 tokens.
+
+| run | change | val ppl | nats/word | wellformed3 | copied4 |
+|---|---|---:|---:|---:|---:|
+| `A_base` | control | 68.6 | 4.6544 | 86.0% | 55.1% |
+| `B_embdecay` | `DECAY_EMB=1` | 67.9 | 4.6436 | 85.3% | 55.0% |
+| `C_6layer` | `N_LAYERS=6`, +18% params | 67.2 | 4.6314 | 84.9% | 55.3% |
+| `E_data25` | +660k words of prose, 25% of batches | 67.4 | 4.6358 | 85.0% | 55.0% |
+| `F_data50` | same, 50% of batches | 72.1 | 4.7101 | 85.2% | 54.7% |
+
+Not one improves generation. The best of them moves perplexity 2% (inside
+single-seed noise; every run here used `SEED=1337`) and the worst is 5% behind
+the control. For scale, the dropout + LR-decay sweep above moved ppl
+89.7 -> 68.6.
+
+**Weight decay on the tied embedding (`DECAY_EMB`).** The premise was that 53%
+of the 8097 vocab rows are tokens seen fewer than 10 times, they hold 34% of the
+model's parameters, and — because embeddings are tied — each is a live output
+direction competing in every softmax. Decay was supposed to shrink the starved
+rows relative to the trained ones. It doesn't. Measured row norms by token
+frequency, B vs A:
+
+| token freq | rows | \|e\| A | \|e\| B | B/A |
+|---|---:|---:|---:|---:|
+| <10x (rare) | 4331 | 9.722 | 8.672 | 0.892 |
+| 10-99x | 2969 | 9.567 | 8.528 | 0.891 |
+| 100-999x | 670 | 9.564 | 8.524 | 0.891 |
+| 1000x+ | 127 | 9.613 | 8.578 | 0.892 |
+
+Identical shrinkage in every band. AdamW's decoupled decay applies uniformly
+each step whether or not a row got a gradient, so on a tied model it is
+**approximately a global logit temperature change, not a regulariser that
+discriminates undertrained rows**. The flag is kept (default off) only because
+this table is easier to trust than to re-derive.
+
+The premise was wrong anyway: those rare rows supply **0.1% of generated
+tokens** (3 of 2880). They are not injecting noise — they are simply *inert*.
+A third of the model does nothing for the output you actually see, which is an
+allocation problem, not a grammar one.
+
+**Depth (`N_LAYERS=6`).** +18% params, +50% training time, 2% better
+perplexity, slightly *worse* generation. The renderer handles it correctly with
+no changes (six blocks, six lens cells, the stage rail and attribution panel
+both extend automatically) — so if you want six blocks for the *visual*, the
+cost is 2.46MB -> 2.91MB of `weights.bin` and nothing else. Just don't expect
+better text.
+
+**More data (`EXTRA_CORPUS`).** The most promising hypothesis on paper: at
+~890k words the default run sees the KJV ~116 times and copies 55% of its
+4-grams verbatim. But sampling other prose for 25% of batches still leaves the
+KJV seen ~87 times, and `copied4` did not move. Reducing memorisation needs
+**fewer KJV epochs**, not a side dish — and the extra prose is 16-19% OOV under
+a KJV vocabulary, so it inflates to ~2.0 ids/word against the KJV's 1.05 and
+over half of what it adds is character-fallback spelling rather than grammar.
+
+The dose-response settles it: **68.6 → 67.4 → 72.1** val ppl at 0% / 25% / 50%.
+A quarter is noise, a half is a real loss — the validation slice is KJV, so past
+some point dilution just costs register fit. Generation barely moves at either
+(85.0% and 85.2% well-formed against the control's 86.0%). The one genuine
+effect is on **repetition**, which falls monotonically with more data
+(2.9% → 1.0% → 0.5% `rep4`) — but the repetition penalty already buys that for
+free, without a retrain.
+
+The `EXTRA_CORPUS` path is kept because it is correctly built (vocabulary from
+the KJV alone, validation slice and bigram baseline untouched, so val loss stays
+comparable across runs) and because a *larger corpus in the same register* is
+still the one untested lever with a real mechanism behind it. Mixed-register
+prose is not that lever.
+
+The one thing that did survive: **the 6-layer model's logit lens has a longer,
+more legible climb**, and `neuron_labels.json` is now rejected with a console
+warning when its `n_layers`/`d_ff` disagree with the model — previously a labels
+file with too few layers made the hover inspector report the extra blocks as
+"this unit rarely fires" rather than admitting it had no data.
+
 ### Sampling
 
-`TEMPERATURE = 0.8`, `TOP_K = 40` in `js/main.js`. These were compared against
-top-p, lower temperatures and a repetition penalty, and won. Worth knowing
-before you try to "fix" the output by turning the temperature down: **it makes
-things worse in a non-obvious way.** Low temperature falls into the genealogy
-attractor (`the son of X the son of Y`), which is the most memorized text in the
-corpus and the most dense in rare proper nouns — and every rare name has to be
-spelled out letter by letter. Measured on the older model, spelled-out letters
-went from 3.6% of generated tokens at `T=0.8` to **32%** at `T=0.6`.
+`TEMPERATURE = 1.0`, `MIN_P = 0.08`, `REP_PENALTY = 0.6` in `js/main.js`
+(`MIN_P = 0` falls back to `TOP_K`). The strip caption is generated from these
+constants rather than written out in `index.html`, so it cannot go stale.
+
+**Min-p** keeps every token within `MIN_P` x the top token's probability. Unlike
+top-k the cut is data-dependent — one candidate where the model is certain,
+hundreds where it isn't — which is both better output and a more honest thing to
+show. `step()` returns that count as `candidates`.
+
+The **repetition penalty** subtracts a flat logit from whole words used in the
+last `REP_WINDOW` tokens. It deliberately **exempts character-fallback pieces**:
+spelling `Melchizedek` has to reuse letters, and penalising them would push the
+model off rare names one letter at a time. It still costs something — the
+fallback rate rises from 3.6% to 4.7% of tokens, because a penalised whole word
+is sometimes replaced by a spelled-out rare one.
+
+Worth knowing before you try to "fix" the output by turning the temperature
+down: **it makes things worse in a non-obvious way.** Low temperature falls into
+the genealogy attractor (`the son of X the son of Y`), the most memorized text
+in the corpus and the most dense in rare proper nouns — and every rare name has
+to be spelled out letter by letter. Measured on the older model, spelled-out
+letters went from 3.6% of generated tokens at `T=0.8` to **32%** at `T=0.6`.
+
+#### Why these numbers, and the ceiling behind them
+
+Decoding was tuned against two measured quantities, 5 prompts x 8 seeds x 96
+tokens per config, scored on the corpus itself:
+
+- `wellformed3` — share of generated surface 3-grams that occur **verbatim in
+  the KJV**. A 3-gram that appears in the corpus is by construction well-formed
+  in this register, so this is a usable proxy for "grammatical".
+- `copied4` — share of generated 4-grams copied verbatim. How much of that
+  well-formedness is **recall rather than composition**.
+
+The second number is what makes the first interpretable, and across a 20-point
+grid of `MIN_P` x `REP_PENALTY` the two are correlated at **r = 0.975**: every
++1pt of verbatim copying buys +0.51pt of "grammaticality".
+
+**That is the real finding. For a model this size, "more grammatical" and "more
+plagiarised" are the same axis.** Decoding slides you along the line; it cannot
+move the line. Tightening min-p to 0.15 reaches 91.8% well-formed — by reciting
+67.3% of its 4-grams straight from the corpus. The shipped setting is picked to
+raise grammar *without* raising copying, which is the only honest kind of win
+available:
+
+| decoding | wellformed3 | copied4 | rep4 | letters |
+|---|---:|---:|---:|---:|
+| `topk40 T0.8` (old default) | 84.6% | 55.2% | 2.9% | 3.6% |
+| **`min-p 0.08` + `rep 0.6`** | **85.7%** | **54.7%** | **1.3%** | 4.7% |
+| `min-p 0.15`, no penalty | 91.8% | 67.3% | 7.4% | 3.5% |
+
+So: grammar up ~1pt, copying flat, and self-repetition **cut to under half**.
+The repetition drop is the part you actually see on screen.
 
 ## Parity check (JS vs Python)
 
@@ -344,11 +493,11 @@ Both print the input token ids and the top-10 `(index, token, logit)`. They matc
 to ~5 decimal places, e.g. for `"Thus saith the LORD"` (ids `[235, 96, 2, 24]`):
 
 ```
-   1  ','            16.03879
-   4  'of'           15.53561
-  11  ';'            14.62724
- 414  'concerning'   13.87159
-  34  'God'          13.78929
+   4  'of'           15.58495
+  11  ';'            15.00569
+   1  ','            14.82339
+  34  'God'          12.61220
+  14  'unto'         12.53661
    ...
 ```
 
@@ -363,3 +512,37 @@ to ~5 decimal places, e.g. for `"Thus saith the LORD"` (ids `[235, 96, 2, 24]`):
 > `parity.py` use the tanh approximation at inference. The difference is far below
 > float16 tolerance and does not affect output quality — `parity.py` is the
 > apples-to-apples reference for the JS forward pass.
+
+## Interpretation and behavior notes
+
+- Attention arcs originate at the underlined **last input token**, whose query
+  produced the displayed attention. The highlighted token is its sampled output
+  and has not yet passed through the model in this snapshot. Self-attention is
+  shown in the heat strips; the text arcs omit self-links — and are scaled
+  against the strongest *drawn* target, since a final-layer head often puts most
+  of its mass on the self-link. A head whose attention is mostly self-directed is
+  faded as a whole, so a big arc still means a big share of what went elsewhere.
+  Each arc ends in a dot on its target: once the strip wraps, an arc reaches a
+  token on an earlier line from below, and the dot is what ties it to a word.
+- The output column shows the model distribution at temperature 1; generation
+  samples at temperature 1.0 with min-p 0.08 and a 0.6 repetition penalty, so
+  the sampled token can rank below the displayed rows. If it ranks below 25,
+  it replaces the last displayed row and is labeled with its actual rank.
+- Attribution is an additive decomposition of a logit with the observed final
+  normalization scale fixed. It is not the causal effect of removing a component,
+  and positive logit terms do not alone establish increased probability.
+- The loop counts generated tokens independently of prompt length. Long prompts
+  use their last 64 tokens, including on the initial display.
+- Enter commits a prompt and resumes generation; Escape discards edits and
+  preserves an intentional pause. Space on a focused button activates that button.
+
+- The strip **wraps** rather than shrinking to one line, so a full 64-token
+  window stays readable and the sampled token is never pushed off the end; arcs
+  re-measure against the wrapped positions.
+- The prompt box and transport are disabled until the model has loaded, so an
+  edit typed during startup can't be overwritten by initialization.
+
+Regression checks: `node --test tools/generate.test.mjs` — covers the sliding
+window and rank-25 display, plus min-p's data-dependent cut, that the repetition
+penalty never alters the *displayed* temperature-1 distribution, and that it
+exempts character-fallback pieces.

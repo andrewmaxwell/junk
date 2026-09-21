@@ -75,7 +75,7 @@
   }
   /* the wave sweeping the network lights each depth in turn */
   #lensRail .lr-cell.lit { background: rgba(20,17,12,0.92); border-color: rgba(200,178,130,0.5); }
-  /* the depth where the final answer FIRST becomes the top guess */
+  /* the depth from which the lens top guess keeps matching the final top guess */
   #lensRail .lr-cell.decided { border-left-color: rgba(255,200,90,0.95); }
   #lensRail .lr-h {
     font-size: 9px; color: rgba(186,176,156,0.72); padding: 0 7px 2px;
@@ -131,11 +131,11 @@
   #neuronTip .nt-ctx { color: rgba(172,162,142,0.9); font-style: italic; margin-top: 4px; }
   #neuronTip .nt-dim { color: rgba(150,140,120,0.72); margin-top: 4px; font-size: 11px; }
   /* The model's input window + the token it just produced, with attention arcs
-     drawn (on the #arcs overlay canvas) from the new word back to what it looked
+     drawn (on the #arcs overlay canvas) from the last input token back to what it looked
      at. One box: the reading text and the attention view are the same thing. */
   #io {
     position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
-    max-width: 94vw; box-sizing: border-box; padding: 7px 16px 48px;
+    max-width: 94vw; box-sizing: border-box; padding: 7px 16px 62px;
     border-radius: 10px; background: rgba(12,10,8,0.55);
     border: 1px solid rgba(150,135,105,0.22);
     color: rgba(214,202,180,0.92); pointer-events: none; z-index: 3;
@@ -188,13 +188,28 @@
     text-transform: uppercase; letter-spacing: 0.09em;
   }
   #io .tag b { color: rgba(245,200,120,0.9); }
-  /* the token row — one line, scaled to fit so arcs align to real word positions */
+  /* Wrap long context windows so the sampled token stays visible. */
   #strip {
-    position: relative; z-index: 1; white-space: nowrap; text-align: center;
+    position: relative; z-index: 1; white-space: normal; overflow-wrap: anywhere; text-align: center;
     font: 14px/1.5 ui-monospace, Menlo, monospace;
+  }
+  @media (min-width: 760px) { #io { left: calc((100% - 240px) / 2); max-width: calc(100vw - 270px); } }
+  @media (max-width: 759px) {
+    #io { width: 94vw; padding-left: 8px; padding-right: 8px; }
+    #promptBar { flex-wrap: wrap; }
+    #prompt { flex-basis: 65%; }
+    #promptHint { margin-right: auto; }
+    #strip { font-size: 12px; }
   }
   #strip .p { color: rgba(245,200,120,0.95); }   /* prompt — the input seed */
   #strip .g { color: rgba(206,196,176,0.92); }   /* generated so far */
+  /* pointer-events:auto so the query token's title tooltip actually fires —
+     #io as a whole is pointer-events:none so the network stays draggable. */
+  #strip .query {
+    text-decoration: underline; text-underline-offset: 4px;
+    pointer-events: auto; cursor: help;
+  }
+  .model-note { position: absolute; bottom: 5px; left: 8px; right: 8px; text-align: center; color: #aa9e88; font: 9px/1.3 ui-monospace, Menlo, monospace; }
   #strip .n {                                    /* the token just produced */
     color: #0a0806; background: rgba(255,224,150,0.96);
     border-radius: 3px; padding: 0 2px;
@@ -268,13 +283,14 @@
   <div id="io">
     <div id="promptBar">
       <label for="prompt">prompt</label>
-      <input id="prompt" type="text" spellcheck="false" autocomplete="off" />
+      <input id="prompt" disabled type="text" spellcheck="false" autocomplete="off" />
       <span id="promptHint"></span>
-      <button id="btnPlay" type="button" title="pause / resume (space)">pause</button>
-      <button id="btnStep" type="button" title="generate one token (.)">step</button>
+      <button id="btnPlay" disabled type="button" title="pause / resume (space)">pause</button>
+      <button id="btnStep" disabled type="button" title="generate one token (.)">step</button>
     </div>
-    <span class="tag">model context — <b>prompt</b> + generated · highlighted = newest · arcs = where it just looked</span>
+    <span class="tag"><b>prompt</b> + generated · underlined = query · highlighted = next token</span>
     <div id="strip"></div>
+    <span class="model-note"><span id="samplingNote">64-token context · KJV-trained</span><br>Arcs: last input token’s final-layer attention</span>
     <canvas id="arcs"></canvas>
   </div>
   <aside id="lensRail" aria-label="logit lens by depth"></aside>

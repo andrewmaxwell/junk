@@ -29,7 +29,7 @@ N_WORDS = int(os.environ.get("N_WORDS", 8000))  # whole-word slots before fallba
 VOCAB_SIZE = None         # set once the vocab is built (words + chars + "##" pieces)
 
 D_MODEL = 96
-N_LAYERS = 4
+N_LAYERS = int(os.environ.get("N_LAYERS", 4))
 N_HEADS = 4
 HEAD_DIM = D_MODEL // N_HEADS   # 24
 D_FF = 384
@@ -41,7 +41,10 @@ LEARNING_RATE = 6e-4
 MIN_LR = 6e-5
 WARMUP_STEPS = 200
 WEIGHT_DECAY = 0.01
-MAX_STEPS = int(os.environ.get("MAX_STEPS", 30000))
+# The cap has to leave room for the whole cosine anneal: the shipped model's
+# best val landed at step 26750 with LR_DECAY_STEPS=40000, i.e. still improving
+# when the old 30000 cap cut it off.
+MAX_STEPS = int(os.environ.get("MAX_STEPS", 50000))
 MIN_STEPS = 3000
 SEED = 1337
 
@@ -51,11 +54,23 @@ SEED = 1337
 # pass is unaffected.
 DROPOUT = float(os.environ.get("DROPOUT", 0.1))
 
+# Whether to apply weight decay to tok_emb. It is excluded by default on the
+# usual reasoning that decaying an input embedding regularises nothing — but
+# here the embedding is TIED, so it is also the output head, and 53% of its
+# 8097 rows are tokens seen fewer than 10 times in the corpus. Nothing pulls
+# those undertrained rows toward zero across ~116 epochs, and each one is a
+# live output direction competing in every softmax.
+DECAY_EMB = os.environ.get("DECAY_EMB", "0") == "1"
+
 # Horizon for the cosine decay, separate from the step cap. These used to be the
 # same number, so with MAX_STEPS=30000 and early stopping around step ~14k the
 # LR only ever fell from 6e-4 to ~3.2e-4 — the run ended before the low-LR
 # annealing phase that usually delivers a good share of the final gain.
-LR_DECAY_STEPS = int(os.environ.get("LR_DECAY_STEPS", 16000))
+#
+# The default was 16000, which did NOT reproduce the shipped model: the sweep in
+# README.md picked dropout 0.1 + decay over 40000 (val ppl 68.6), but a default
+# `python3 train.py` ran decay over 16000 and landed on ppl 81.3 instead.
+LR_DECAY_STEPS = int(os.environ.get("LR_DECAY_STEPS", 40000))
 
 # Held-out split. There was none, which meant the only visible signal was
 # TRAINING loss — so nobody could tell underfitting from memorisation, and the
@@ -69,8 +84,30 @@ PATIENCE = 8            # validation passes without improvement before stopping
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIBLE_PATH = os.path.join(HERE, "..", "jibberjabber", "bible.txt")
-WEIGHTS_PATH = os.path.join(HERE, "weights.bin")
-CONFIG_PATH = os.path.join(HERE, "model_config.json")
+
+# Extra training text, comma-separated paths relative to jibberjabber/. The KJV
+# is only ~890k words and the default run sees it ~116 times, so the model is
+# far past its data and leans on recall. Extra prose is appended to the TRAIN
+# split only, and the vocabulary is still built from the KJV alone — so the
+# vocab, the held-out slice and therefore the reported val loss stay exactly
+# comparable to a KJV-only run. Words the extra text introduces are simply
+# spelled out through the character fallback.
+EXTRA_CORPUS = [x for x in os.environ.get("EXTRA_CORPUS", "").split(",") if x]
+
+# Share of training batches drawn from the extra corpus rather than the KJV.
+# Concatenating the two pools instead would let the extra prose set the mix by
+# its raw size -- and because it is 16-19% out-of-vocab under a KJV vocabulary
+# it inflates to ~2.0 ids per word against the KJV's 1.05, so it would take 61%
+# of the steps and over half of THOSE tokens would be character-fallback
+# spelling rather than grammar. Sampling per batch sets the ratio directly.
+EXTRA_WEIGHT = float(os.environ.get("EXTRA_WEIGHT", 0.25))
+# OUT_TAG redirects the exported artifacts (sweeps must not clobber the shipped
+# weights.bin / model_config.json that the page loads).
+OUT_TAG = os.environ.get("OUT_TAG", "")
+OUT_DIR = os.environ.get("OUT_DIR", HERE)
+_suffix = f".{OUT_TAG}" if OUT_TAG else ""
+WEIGHTS_PATH = os.path.join(OUT_DIR, f"weights{_suffix}.bin")
+CONFIG_PATH = os.path.join(OUT_DIR, f"model_config{_suffix}.json")
 
 # Convention for exported weight matrices: we store every linear weight in the
 # math layout  y = x @ W + b , i.e. W has shape [in_features, out_features].
@@ -257,7 +294,22 @@ def build_data():
     ids = np.array(encode(text, stoi), dtype=np.int64)
     print(f"encoded stream: {len(ids):,} tokens | vocab size {len(vocab)} "
           f"| {len(ids) / len(tokens):.4f} ids per surface token (corpus mean)")
-    return vocab, stoi, torch.from_numpy(ids), per_token
+
+    # Extra prose, encoded with the KJV vocabulary (so out-of-vocab words are
+    # spelled out). Train split only -- see EXTRA_CORPUS.
+    extra = []
+    for rel in EXTRA_CORPUS:
+        path = os.path.join(HERE, "..", "jibberjabber", rel)
+        with open(path, "r", encoding="utf-8") as f:
+            etext = f.read()
+        etoks = tokenize(etext)
+        eids = encode(etext, stoi)
+        oov = sum(1 for t in etoks if t not in present)
+        print(f"  + {rel}: {len(etoks):,} words -> {len(eids):,} ids "
+              f"({oov / max(1, len(etoks)) * 100:.1f}% spelled out)")
+        extra.extend(eids)
+    extra_ids = torch.from_numpy(np.array(extra, dtype=np.int64)) if extra else None
+    return vocab, stoi, torch.from_numpy(ids), per_token, extra_ids
 
 
 def get_batch(data, device, generator=None):
@@ -410,15 +462,22 @@ def main():
         device = "cuda"
     else:
         device = "cpu"
-    print(f"device: {device} | dropout {DROPOUT} | lr decay over {LR_DECAY_STEPS} steps")
+    print(f"device: {device} | layers {N_LAYERS} | dropout {DROPOUT} | "
+          f"lr decay over {LR_DECAY_STEPS} steps | decay tok_emb {DECAY_EMB}")
 
-    vocab, stoi, data, per_token = build_data()
+    vocab, stoi, data, per_token, extra_ids = build_data()
     VOCAB_SIZE = len(vocab)
 
     # contiguous held-out tail (see VAL_FRACTION)
     n_val = int(len(data) * VAL_FRACTION)
     train_data, val_data = data[: len(data) - n_val], data[len(data) - n_val :]
-    print(f"split: {len(train_data):,} train / {len(val_data):,} val tokens")
+    if extra_ids is not None:
+        # Kept as a SEPARATE pool sampled at EXTRA_WEIGHT, not concatenated --
+        # see EXTRA_WEIGHT. The validation slice is untouched KJV, so val loss
+        # stays comparable to a KJV-only run.
+        print(f"extra corpus: {len(extra_ids):,} tokens, sampled for "
+              f"{EXTRA_WEIGHT * 100:.0f}% of batches")
+    print(f"split: {len(train_data):,} KJV train / {len(val_data):,} val tokens")
     # ids-per-surface-word ON THE VAL SLICE. Losses are per TOKEN, and a bigger
     # vocab means fewer, more informative tokens — so per-token perplexity rises
     # even when the model improves, and only a per-surface-word number can be
@@ -430,6 +489,8 @@ def main():
     n_val_words = int((cum > len(data) - n_val).sum())
     expansion = n_val / max(n_val_words, 1)
     print(f"val slice: {n_val_words:,} surface words, {expansion:.4f} ids/word")
+    # fitted on the KJV train split only (never the extra pool) so this bar
+    # means the same thing whether or not EXTRA_CORPUS is set
     bigram_nll = bigram_baseline(train_data, val_data, VOCAB_SIZE)
     print(f"bigram baseline on val: {bigram_nll:.4f} nats (ppl {math.exp(bigram_nll):.1f})")
     model = TinyGPT().to(device)
@@ -437,11 +498,19 @@ def main():
     print(f"model params: {n_params:,}")
 
     # Weight decay belongs on matmul weights only; decaying LayerNorm gains and
-    # biases (and the tied embedding, which is also the output head) just drags
-    # them toward zero for no regularisation benefit.
+    # biases just drags them toward zero for no regularisation benefit.
+    #
+    # tok_emb is the interesting case and is controlled by DECAY_EMB. It is
+    # tied, so it doubles as the output head, and over half its rows belong to
+    # tokens seen fewer than 10 times — undertrained directions that still
+    # compete in every softmax. pos_emb stays undecayed either way: all 64 rows
+    # are seen every single step, so there are no starved rows to shrink.
     decay, no_decay = [], []
     for name, prm in model.named_parameters():
-        (no_decay if prm.ndim < 2 or "emb" in name else decay).append(prm)
+        if name.startswith("tok_emb"):
+            (decay if DECAY_EMB else no_decay).append(prm)
+        else:
+            (no_decay if prm.ndim < 2 or "emb" in name else decay).append(prm)
     opt = torch.optim.AdamW(
         [
             {"params": decay, "weight_decay": WEIGHT_DECAY},
@@ -464,7 +533,9 @@ def main():
         lr = get_lr(step)
         for grp in opt.param_groups:
             grp["lr"] = lr
-        x, y = get_batch(train_data, device)
+        pool = (extra_ids if (extra_ids is not None
+                              and np.random.rand() < EXTRA_WEIGHT) else train_data)
+        x, y = get_batch(pool, device)
         _, loss = model(x, y)
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -530,6 +601,15 @@ def main():
     # ---- export ----
     size = export(model, vocab)
 
+    print("\nRESULT " + json.dumps({
+        "tag": OUT_TAG or "default", "extra_corpus": EXTRA_CORPUS, "extra_weight": EXTRA_WEIGHT,
+        "n_layers": N_LAYERS, "n_words": N_WORDS, "dropout": DROPOUT,
+        "decay_emb": DECAY_EMB, "lr_decay_steps": LR_DECAY_STEPS,
+        "vocab_size": VOCAB_SIZE, "params": n_params,
+        "best_val": best_val, "best_step": best_step, "stopped_at": step,
+        "val_ppl": math.exp(best_val), "bigram_ppl": math.exp(bigram_nll),
+        "nats_per_word": best_val * expansion, "train_time_s": train_time,
+    }))
     print("\n========== SUMMARY ==========")
     print(f"training: {step} steps, {train_time:.1f}s, best val {best_val:.4f} "
           f"(ppl {math.exp(best_val):.1f}) vs bigram ppl {math.exp(bigram_nll):.1f}")

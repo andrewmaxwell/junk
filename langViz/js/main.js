@@ -1,6 +1,6 @@
 // langViz — the visualization IS the app. Full-page canvas that auto-generates
 // from a fixed prompt and shows each token flowing left->right through the model
-// until the output tokens light up. No chrome, no controls.
+// until the output tokens light up, with prompt, transport and stage controls.
 
 import {loadModel} from './weights.js';
 import {makeTokenizer} from './tokenizer.js';
@@ -11,8 +11,16 @@ import {makeRenderer} from './renderer.js';
 const DEFAULT_PROMPT = 'Thus saith the LORD';
 const STEP_MS = 1100; // time between generated tokens
 const WAVE_MS = 820; // how long the wave takes to sweep the network
-const TEMPERATURE = 0.8;
-const TOP_K = 40;
+// Sampling. MIN_P replaces top-k: it keeps every token within MIN_P x the top
+// token's probability, so the candidate set narrows when the model is sure and
+// widens when it isn't. REP_PENALTY subtracts a flat logit from whole words
+// used in the last REP_WINDOW tokens (character-fallback pieces are exempt).
+// Set MIN_P to 0 to fall back to TOP_K. Retuned after each retrain.
+const TEMPERATURE = 1.0;
+const MIN_P = 0.08;
+const REP_PENALTY = 0.6;
+const REP_WINDOW = 48;
+const TOP_K = 40; // only used when MIN_P is 0
 const LOOP_AFTER = 96; // restart from the prompt after this many tokens
 
 // The stage rail + arrow keys. Fitting the whole network on screen pins the
@@ -49,21 +57,51 @@ function buildStageRail(renderer) {
   });
 }
 
+// The strip caption states the sampling actually in force. It used to be hard
+// coded in index.html and went stale the moment these constants changed.
+function describeSampling(config) {
+  const cut = MIN_P > 0 ? `min-p ${MIN_P}` : `top ${TOP_K}`;
+  const pen = REP_PENALTY > 0 ? ` \u00b7 rep ${REP_PENALTY}` : '';
+  return `${config.block_size}-token context \u00b7 KJV-trained \u00b7 `
+       + `sampling T=${TEMPERATURE} / ${cut}${pen}`;
+}
+
 async function init() {
   const loaded = await loadModel('.');
+  const note = document.getElementById('samplingNote');
+  if (note) note.textContent = describeSampling(loaded.config);
   const tokenizer = makeTokenizer(loaded.config.vocab);
   const model = makeModel(loaded);
   const gen = makeGenerator(model, tokenizer);
   // optional: per-neuron max-activating labels (neuron_labels.py). Tolerate absence.
+  //
+  // The file is keyed only by layer/unit index, so one left over from a
+  // different architecture still loads and the inspector then reports confident
+  // nonsense — and a file with too FEW layers is worse than none, because the
+  // tooltip's missing-entry path reads "this unit rarely fires" rather than
+  // admitting it has no data. Check the shape and drop it if it disagrees.
   const neuronLabels = await fetch('./neuron_labels.json')
     .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null);
+    .catch(() => null)
+    .then((n) => {
+      if (!n) return null;
+      const { n_layers: nl, d_ff: ff } = loaded.config;
+      if (n.n_layers === nl && n.d_ff === ff) return n;
+      console.warn(
+        `neuron_labels.json is for ${n.n_layers}x${n.d_ff}, model is ${nl}x${ff}` +
+        ' — ignoring it (re-run neuron_labels.py). Hover inspector disabled.',
+      );
+      return null;
+    });
   const renderer = makeRenderer(
     document.getElementById('viz'),
     loaded,
     neuronLabels,
   );
 
+  for (const id of ['prompt', 'btnPlay', 'btnStep']) {
+    document.getElementById(id).disabled = false;
+  }
   renderer.start();
   renderer.setSpeed(WAVE_MS);
   buildStageRail(renderer);
@@ -104,35 +142,31 @@ async function init() {
         ? ' '
         : '';
       const cls = windowStartAbs + i < promptLen ? 'p' : 'g';
-      html += `${space}<span class="${cls}" data-w="${i}">${esc(glyph(tok))}</span>`;
+      const origin = sampledTok != null && i === windowTokens.length - 1;
+      html += `${space}<span class="${cls}${origin ? ' query' : ''}" data-w="${i}"${origin ? ' data-origin="1" title="This input token attends to the context to predict the highlighted next token"' : ''}>${esc(glyph(tok))}</span>`;
     }
     if (sampledTok != null) {
       const prev = windowTokens.length
         ? windowTokens[windowTokens.length - 1]
         : null;
       const space = tokenizer.needsSpaceBefore(prev, sampledTok) ? ' ' : '';
-      html += `${space}<span class="n" data-origin="1">${esc(glyph(sampledTok))}</span>`;
+      html += `${space}<span class="n">${esc(glyph(sampledTok))}</span>`;
     }
     strip.innerHTML = html;
-    // scale the single line down to fit (so arcs to every token stay on screen)
-    strip.style.fontSize = '14px';
-    const avail = strip.clientWidth,
-      need = strip.scrollWidth;
-    if (need > avail && avail > 0)
-      strip.style.fontSize = `${Math.max(9, (14 * avail) / need).toFixed(1)}px`;
+    // Let long windows wrap instead of shrinking or hiding the sampled token.
     renderer.updateArcs();
   }
-  setStrip(
-    gen.ids.map((id) => tokenizer.idToToken(id)),
-    null,
-    0,
-  );
+  function showInputWindow() {
+    const start = Math.max(0, gen.length - model.config.block_size);
+    setStrip(gen.ids.slice(start).map((id) => tokenizer.idToToken(id)), null, start);
+  }
+  showInputWindow();
 
   // ---- prompt box ----
   // Start generating from whatever you type. Editing pauses the loop, so the
   // strip you are reading stops being overwritten mid-thought; committing
-  // resets and resumes. The tokenizer has a character fallback, so any input
-  // is representable and there is nothing to validate.
+  // resets and resumes. The English character fallback does not cover every
+  // Unicode character; unsupported tokens are called out in the counter.
   const promptEl = document.getElementById('prompt');
   const promptHintEl = document.getElementById('promptHint');
 
@@ -140,20 +174,19 @@ async function init() {
     prompt = text;
     promptLen = gen.reset(prompt).length;
     renderer.reset();
-    setStrip(
-      gen.ids.map((id) => tokenizer.idToToken(id)),
-      null,
-      0,
-    );
+    showInputWindow();
   }
 
   function showTokenCount() {
     if (!promptHintEl || !promptEl) return;
-    const n = tokenizer.encode(promptEl.value.trim()).length;
+    const encoded = tokenizer.encode(promptEl.value.trim());
+    const n = encoded.length;
+    const unknown = encoded.filter(id => id === 0).length;
+    const detail = `${n > model.config.block_size ? ` · last ${model.config.block_size} used` : ''}${unknown ? ` · ${unknown} unsupported` : ''}`;
     const dirty = promptEl.value.trim() !== prompt;
     promptHintEl.textContent = editing
-      ? `${n} token${n === 1 ? '' : 's'} · ${dirty ? '↵ to run' : 'esc to resume'}`
-      : `${n} token${n === 1 ? '' : 's'}`;
+      ? `${n} token${n === 1 ? '' : 's'}${detail} · ${dirty ? '↵ to run' : 'esc to return'}`
+      : `${n} token${n === 1 ? '' : 's'}${detail}`;
     promptHintEl.classList.toggle('armed', editing && dirty);
   }
 
@@ -183,6 +216,7 @@ async function init() {
   // period in the box never reaches this
   window.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === ' ' && e.target.closest?.('button')) return; // native button activation
     if (e.key === ' ') { setPaused(!userPaused); e.preventDefault(); }
     else if (e.key === '.') { stepOnce(); e.preventDefault(); }
   });
@@ -198,6 +232,7 @@ async function init() {
         const text = promptEl.value.trim() || DEFAULT_PROMPT;
         promptEl.value = text;
         restart(text);
+        setPaused(false);
         editing = false;
         promptEl.blur();
         showTokenCount();
@@ -216,16 +251,13 @@ async function init() {
   }
 
   function advanceOne() {
-    if (gen.length >= LOOP_AFTER) {
-      promptLen = gen.reset(prompt).length;
-      renderer.reset();
-      setStrip(
-        gen.ids.map((id) => tokenizer.idToToken(id)),
-        null,
-        0,
-      );
+    if (gen.generatedCount >= LOOP_AFTER) {
+      restart(prompt);
     } else {
-      const snap = gen.step({temperature: TEMPERATURE, topk: TOP_K});
+      const snap = gen.step({
+        temperature: TEMPERATURE, topk: TOP_K,
+        minp: MIN_P, repPenalty: REP_PENALTY, repWindow: REP_WINDOW,
+      });
       renderer.pushStep(snap);
       // gen.length now counts the just-pushed token; the window preceded it
       const startAbs = gen.length - 1 - snap.windowTokens.length;
@@ -242,7 +274,12 @@ async function init() {
 
   // dev handles: renderer for screenshot framing, parity vs parity.py
   window.__viz = renderer;
-  window.__setPrompt = (t) => restart(t);
+  window.__setPrompt = (t) => {
+    const text = String(t).trim() || DEFAULT_PROMPT;
+    restart(text);
+    if (promptEl) promptEl.value = text;
+    showTokenCount();
+  };
   window.__parityCheck = function (text = 'Thus saith the LORD') {
     const ids = tokenizer.encode(text);
     const {logits} = model.forward(ids);
