@@ -1,13 +1,25 @@
-export const makeNeuralNet = (/** @type {number[]} */ layerSizes) =>
+/**
+ * `scale` is the initial weight magnitude, and it matters more than it looks.
+ * Too small and every random brain sits in the flat middle of the sigmoid,
+ * ignoring its inputs -- so a population of them has no variation in how they
+ * react to what they see, and selection has nothing to grip. It can only tune
+ * the constant term, which means evolving a nice circle and stopping there.
+ */
+export const makeNeuralNet = (
+  /** @type {number[]} */ layerSizes,
+  scale = 1,
+) =>
   layerSizes.map((l, i) => ({
     values: new Float32Array(l),
     deltas: new Float32Array(l),
     biases: i
-      ? new Float32Array(l).map(() => Math.random() - 0.5)
+      ? new Float32Array(l).map(() => (Math.random() - 0.5) * scale)
       : new Float32Array(0),
     weights: i
       ? Array.from({length: l}, () =>
-          new Float32Array(layerSizes[i - 1]).map(() => Math.random() - 0.5),
+          new Float32Array(layerSizes[i - 1]).map(
+            () => (Math.random() - 0.5) * scale,
+          ),
         )
       : [],
   }));
@@ -98,3 +110,13 @@ export function train(
 //     w.weights.forEach((r, j) => layers[i + 1].weights[j].set(r));
 //   });
 // };
+
+export const cloneNeuralNet = (
+  /** @type {ReturnType<typeof makeNeuralNet>} */ layers,
+) =>
+  layers.map((l) => ({
+    values: new Float32Array(l.values.length),
+    deltas: new Float32Array(l.deltas.length),
+    biases: Float32Array.from(l.biases),
+    weights: l.weights.map((r) => Float32Array.from(r)),
+  }));

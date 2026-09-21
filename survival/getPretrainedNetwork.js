@@ -3,7 +3,11 @@ import {Food} from './Food.js';
 import {train} from './nn.js';
 import {SpatialHashGrid} from './SpatialHashGrid.js';
 
-export const getPretrainedNetwork = (params) => {
+export const getPretrainedNetwork = (rawParams) => {
+  // Reference brain only, and a purely reactive one: it is trained with the
+  // memory slots held at zero, so giving it live memory feedback would feed it
+  // inputs it never saw in training.
+  const params = {...rawParams, memorySize: 0};
   const hashGrid = new SpatialHashGrid();
 
   const agent = new Agent(params, 0, 0);
@@ -19,7 +23,8 @@ export const getPretrainedNetwork = (params) => {
     hashGrid.update(closeFood, x, y);
 
     const {inputs} = agent.lookAround(hashGrid, params);
-    const input = [Math.random(), ...inputs]; // make energy level random
+    // memory slots padded with zeros -- this reference net has no memory to use
+    const input = [Math.random(), ...inputs, ...agent.memory];
 
     const fraction = (0.5 - angle / (2 * Math.PI)) % 1;
     const expected = [fraction + (fraction < 0 ? 1 : 0)];

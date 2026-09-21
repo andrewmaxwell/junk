@@ -76,7 +76,7 @@ export class SpatialHashGrid {
         const key = cx + ',' + cy;
         const cellArray = this.cells.get(key);
         if (!cellArray) continue;
-        results.push(...cellArray);
+        for (const obj of cellArray) results.push(obj);
       }
     }
     return results;
@@ -84,7 +84,7 @@ export class SpatialHashGrid {
 
   getAll() {
     const items = [];
-    for (const arr of this.cells.values()) items.push(...arr);
+    for (const arr of this.cells.values()) for (const o of arr) items.push(o);
     return items;
   }
 

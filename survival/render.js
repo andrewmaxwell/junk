@@ -37,15 +37,15 @@ const drawAgents = (ctx, params, agents) => {
   }
   ctx.globalAlpha = 1;
 
-  if (oldest) {
+  if (oldest?.inputs) {
     for (let i = 0; i < oldest.inputs.length; i++) {
-      if (oldest.inputs[i] === 1) continue;
+      if (oldest.inputs[i] === 0) continue;
       ctx.strokeStyle = i % 2 ? 'red' : 'green';
       ctx.beginPath();
       ctx.arc(
         oldest.x,
         oldest.y,
-        oldest.inputs[i] * params.sightDistance,
+        (1 - oldest.inputs[i]) * params.sightDistance,
         (Math.floor(i / 2) / 5 - 0.5) * 2 * Math.PI + oldest.angle,
         (Math.floor(i / 2 + 1) / 5 - 0.5) * 2 * Math.PI + oldest.angle,
       );

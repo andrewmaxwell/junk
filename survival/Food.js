@@ -1,4 +1,5 @@
 export const addFood = (hashGrid, params, x, y) => {
+  if (Math.hypot(x, y) > params.worldRadius) return;
   if (hashGrid.isOccupied(x, y, params.foodRad)) return;
   hashGrid.insert(new Food(params, x, y));
 };
