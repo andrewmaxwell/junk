@@ -3,6 +3,12 @@
   <head>
     <meta name=viewport content="width=device-width,initial-scale=1">
     <title>Grouptimizer</title>
+    <meta name="theme-color" content="#222222">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="favicon-32.png" sizes="32x32">
+    <link rel="icon" href="icon-192.png" sizes="192x192">
+    <link rel="apple-touch-icon" href="icon-192.png">
     <style>
       * {font-family: sans-serif; box-sizing: border-box}
       body {background: #222; color: white; margin: 0; padding: 12px; padding-bottom: 320px}
@@ -50,5 +56,10 @@
 		<canvas id="statCanvas" style="position: fixed; bottom: 5px; left: 5px; pointer-events: none"></canvas>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.4/xlsx.full.min.js" integrity="sha512-gtII6Z4fZyONX9GBrF28JMpodY4vIOI0lBjAtN/mcK7Pz19Mu1HHIRvXH6bmdChteGpEccxZxI0qxXl9anY60w==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script type="module" src="main.js"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+      }
+    </script>
   </body>
 </html>
