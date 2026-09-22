@@ -47,7 +47,7 @@ export const defaults = {
       speed: 0.7,
     }),
   ],
-  view: {brightness: 1, stepsPerFrame: 3},
+  view: {brightness: 1, glow: 0.8, colorDrift: 0, agentDots: 0},
   brush: {radius: 15, attraction: 1},
 };
 
@@ -72,7 +72,12 @@ export const speciesRanges = {
 
 /** @type {Record<string, Record<string, [number, number, number?]>>} */
 export const sharedRanges = {
-  view: {brightness: [0.2, 5], stepsPerFrame: [1, 10, 1]},
+  view: {
+    brightness: [0.2, 5],
+    glow: [0, 3],
+    colorDrift: [0, 1],
+    agentDots: [0, 0.5],
+  },
   brush: {radius: [2, 60], attraction: [0, 5]},
 };
 

@@ -8,6 +8,7 @@ import {
 import {createUniforms} from './uniforms.js';
 import {createSorter} from './sorter.js';
 import {createRenderer} from './renderer.js';
+import {params} from './params.js';
 
 const NUM_AGENTS = 1_000_000;
 const SORT_INTERVAL = 32; // steps between agent re-sorts
@@ -33,7 +34,7 @@ export const createSimulation = async (gpu, canvas, mouse) => {
     createRenderer(gpu, uniforms.buffer),
   ]);
 
-  const state = {width: 0, height: 0, numAgents: NUM_AGENTS, frame: 0};
+  const state = {width: 0, height: 0, numAgents: NUM_AGENTS, frame: 0, hue: 0};
   let buffers = [];
   let groups, deposit;
   let parity = 0; // which trail buffer is current
@@ -82,7 +83,7 @@ export const createSimulation = async (gpu, canvas, mouse) => {
       ]),
     );
     sorter.resize(agents, state.numAgents, state.width, state.height);
-    renderer.setTrails(trails);
+    renderer.resize(trails, agents, state.numAgents, state.width, state.height);
     parity = 0;
 
     uniforms.write(state, mouse);
@@ -111,10 +112,16 @@ export const createSimulation = async (gpu, canvas, mouse) => {
     parity = 1 - parity;
   };
 
-  const draw = () => {
+  /** dt: ms since the last draw, for the color drift. */
+  const draw = (dt) => {
+    state.hue =
+      (state.hue + (dt / 1000) * params.view.colorDrift) % (2 * Math.PI);
     uniforms.write(state, mouse);
-    renderer.draw(parity);
+    renderer.draw(parity, params.view.agentDots > 0);
   };
 
-  return {reset, step, draw};
+  /** Resolves when all GPU work submitted so far has finished. */
+  const done = () => device.queue.onSubmittedWorkDone();
+
+  return {reset, step, draw, done};
 };

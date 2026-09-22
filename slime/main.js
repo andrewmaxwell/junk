@@ -1,5 +1,6 @@
 import {initGpu} from './gpu.js';
-import {params, setParams} from './params.js';
+import {setParams} from './params.js';
+import {createPacer} from './pacer.js';
 import {createGui} from './gui.js';
 import {presets, randomSpecies} from './presets.js';
 import {decodeParams, onUrlChange, syncUrl} from './share.js';
@@ -10,9 +11,16 @@ const canvas = document.querySelector('canvas');
 const mouse = trackPointer(canvas);
 const sim = await createSimulation(await initGpu(canvas), canvas, mouse);
 
-const loop = () => {
-  for (let i = 0; i < params.view.stepsPerFrame; i++) sim.step();
-  sim.draw();
+const pacer = createPacer();
+let lastFrame = performance.now();
+const loop = (now) => {
+  const steps = pacer.stepsFor(now);
+  const start = performance.now();
+  for (let i = 0; i < steps; i++) sim.step();
+  const stepped = sim.done();
+  sim.draw(Math.min(100, now - lastFrame));
+  pacer.measure(steps, start, stepped, sim.done());
+  lastFrame = now;
   requestAnimationFrame(loop);
 };
 

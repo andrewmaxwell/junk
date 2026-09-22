@@ -1,6 +1,6 @@
 import {params} from './params.js';
 
-const HEADER_FLOATS = 12;
+const HEADER_FLOATS = 16;
 const SPECIES_FLOATS = 16;
 
 // Mirrors the Params struct in shaders/params.wgsl.
@@ -16,7 +16,7 @@ export const createUniforms = (device) => {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
-  const write = ({width, height, numAgents, frame}, mouse) => {
+  const write = ({width, height, numAgents, frame, hue}, mouse) => {
     const {view, brush} = params;
     const cellsPerPixel = width / innerWidth;
     u[0] = width;
@@ -31,6 +31,9 @@ export const createUniforms = (device) => {
     f[9] = view.brightness;
     f[10] = mouse.lastX * cellsPerPixel;
     f[11] = mouse.lastY * cellsPerPixel;
+    f[12] = view.glow;
+    f[13] = hue;
+    f[14] = view.agentDots;
 
     params.species.forEach((sp, s) => {
       const o = HEADER_FLOATS + s * SPECIES_FLOATS;
