@@ -12,18 +12,17 @@ const mouse = trackPointer(canvas);
 const sim = await createSimulation(await initGpu(canvas), canvas, mouse);
 
 const pacer = createPacer();
-let lastFrame = performance.now();
 const loop = (now) => {
   const steps = pacer.stepsFor(now);
   const start = performance.now();
   for (let i = 0; i < steps; i++) sim.step();
   const stepped = sim.done();
-  sim.draw(Math.min(100, now - lastFrame));
+  sim.draw();
   pacer.measure(steps, start, stepped, sim.done());
-  lastFrame = now;
   requestAnimationFrame(loop);
 };
 
+await sim.calibrate(); // with default params, before any from the URL
 setParams(decodeParams(location.hash.slice(1)));
 sim.reset();
 requestAnimationFrame(loop);
@@ -42,7 +41,6 @@ const gui = createGui({
   onChange: syncUrl,
   applyPreset: (name) => apply({species: presets[name]}, ['species']),
   randomize: () => apply({species: randomSpecies()}, ['species']),
-  copyLink: () => navigator.clipboard.writeText(location.href),
   isCustom: 'species' in decodeParams(location.hash.slice(1)),
 });
 onUrlChange((overrides) => {

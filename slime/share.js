@@ -1,7 +1,7 @@
 import {defaults, flatten, params} from './params.js';
 
 // The URL hash holds every param that differs from its default, e.g.
-// #species.1.distance=12&view.brightness=1.5, so the address is always a
+// #species.1.distance=12&brush.radius=20, so the address is always a
 // shareable link to the current settings.
 
 const format = (v) => {
@@ -11,9 +11,12 @@ const format = (v) => {
 };
 
 const defaultValues = new Map(flatten(defaults));
+// UI state rather than part of a look, so not shared.
+const unshared = new Set(['brush.tool']);
 
 export const encodeParams = () =>
   flatten(params)
+    .filter(([path]) => !unshared.has(path))
     .map(([path, v]) => [path, format(v)])
     .filter(([path, v]) => v !== format(defaultValues.get(path)))
     .map(([path, v]) => `${path}=${v}`)
@@ -24,7 +27,7 @@ export const decodeParams = (hash) => {
   const overrides = {};
   for (const [path, text] of new URLSearchParams(hash)) {
     const fallback = defaultValues.get(path);
-    if (fallback === undefined) continue;
+    if (fallback === undefined || unshared.has(path)) continue;
     let value = text;
     if (typeof fallback !== 'string') {
       value = Array.isArray(fallback)

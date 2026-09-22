@@ -1,6 +1,6 @@
 import {params} from './params.js';
 
-const HEADER_FLOATS = 16;
+const HEADER_FLOATS = 12;
 const SPECIES_FLOATS = 16;
 
 // Mirrors the Params struct in shaders/params.wgsl.
@@ -16,8 +16,8 @@ export const createUniforms = (device) => {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
-  const write = ({width, height, numAgents, frame, hue}, mouse) => {
-    const {view, brush} = params;
+  const write = ({width, height, numAgents, frame}, mouse) => {
+    const {brush} = params;
     const cellsPerPixel = width / innerWidth;
     u[0] = width;
     u[1] = height;
@@ -25,18 +25,13 @@ export const createUniforms = (device) => {
     u[3] = frame;
     f[4] = mouse.x * cellsPerPixel;
     f[5] = mouse.y * cellsPerPixel;
-    u[6] = {off: 0, paint: brush.tool === 'walls' ? 2 : 1, erase: 3}[
-      mouse.mode
-    ];
+    const tool = {food: 1, walls: 2, eraser: 3}[brush.tool] ?? 1;
+    u[6] = {off: 0, paint: tool, erase: 3}[mouse.mode];
     f[7] = brush.radius * cellsPerPixel;
     f[8] = brush.attraction;
-    f[9] = view.brightness;
+    f[9] = brush.appetite * 1e-3; // food eaten per agent per step
     f[10] = mouse.lastX * cellsPerPixel;
     f[11] = mouse.lastY * cellsPerPixel;
-    f[12] = view.glow;
-    f[13] = hue;
-    f[14] = view.agentDots;
-    f[15] = brush.appetite * 1e-3; // food eaten per agent per step
 
     params.species.forEach((sp, s) => {
       const o = HEADER_FLOATS + s * SPECIES_FLOATS;

@@ -1,3 +1,4 @@
+import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {params, sharedRanges, speciesRanges} from './params.js';
 import {presets} from './presets.js';
 
@@ -10,10 +11,10 @@ export const createGui = ({
   onChange,
   applyPreset,
   randomize,
-  copyLink,
   isCustom,
 }) => {
-  const gui = new /** @type {any} */ (window).dat.GUI();
+  const gui = new GUI({title: 'Slime'});
+  if (innerWidth < 600) gui.close(); // don't cover a phone screen
   const controllers = [];
 
   const actions = {
@@ -22,16 +23,6 @@ export const createGui = ({
       randomize();
       markCustom();
     },
-    'copy link': async () => {
-      const copied = await copyLink().then(
-        () => true,
-        () => false,
-      );
-      copyButton.name(
-        copied ? 'link copied!' : "couldn't copy, use the address bar",
-      );
-      setTimeout(() => copyButton.name('copy link'), 2000);
-    },
     reset,
     'clear drawing': clearDrawing,
   };
@@ -39,7 +30,6 @@ export const createGui = ({
     .add(actions, 'preset', [...Object.keys(presets), CUSTOM])
     .onChange((name) => name !== CUSTOM && applyPreset(name));
   gui.add(actions, 'randomize');
-  const copyButton = gui.add(actions, 'copy link');
   gui.add(actions, 'reset');
   gui.add(actions, 'clear drawing');
 
@@ -52,7 +42,7 @@ export const createGui = ({
   const add = (folder, target, key, range, isSpecies) => {
     const c = range
       ? folder.add(target, key, ...range)
-      : folder.addColor(target, key);
+      : folder.addColor(target, key, 255);
     c.onChange(() => {
       if (isSpecies) markCustom();
       onChange();
@@ -61,14 +51,14 @@ export const createGui = ({
   };
 
   params.species.forEach((sp, i) => {
-    const folder = gui.addFolder(`Species ${i + 1}`);
+    const folder = gui.addFolder(`Species ${i + 1}`).close();
     add(folder, sp, 'color', null, true);
     for (const [key, range] of Object.entries(speciesRanges)) {
       add(folder, sp, key, range, true);
     }
   });
   for (const [group, ranges] of Object.entries(sharedRanges)) {
-    const folder = gui.addFolder(title(group));
+    const folder = gui.addFolder(title(group)).close();
     for (const [key, range] of Object.entries(ranges)) {
       add(folder, params[group], key, range, false);
     }

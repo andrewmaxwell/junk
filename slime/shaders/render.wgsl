@@ -1,4 +1,4 @@
-// Draws the scene in linear color, before glow and tone mapping (see post.wgsl).
+// Draws the scene in linear color, before tone mapping (see post.wgsl).
 @group(0) @binding(1) var<storage, read> trail: array<trail4>; // one channel per species, then food/wall
 @group(0) @binding(2) var<storage, read> agents: array<vec4f>; // x, y, angle, species
 
@@ -25,13 +25,15 @@ struct Dot {
   @location(0) color: vec3f,
 }
 
-// One point per agent, added on top of the trails.
+const AGENT_DOTS = 0.25; // brightness of each agent's point
+
+// One point per agent, added faintly on top of the trails.
 @vertex
 fn agentDot(@builtin(vertex_index) i: u32) -> Dot {
   let a = agents[i];
   let size = vec2f(f32(p.width), f32(p.height));
   let clip = (a.xy + 0.5) / size * vec2f(2.0, -2.0) + vec2f(-1.0, 1.0);
-  return Dot(vec4f(clip, 0.0, 1.0), p.species[u32(a.w)].color * p.agentDots);
+  return Dot(vec4f(clip, 0.0, 1.0), p.species[u32(a.w)].color * AGENT_DOTS);
 }
 
 @fragment

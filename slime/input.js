@@ -1,6 +1,6 @@
 /**
- * Tracks the pointer over the canvas, in CSS pixels. Left-drag paints (food
- * or walls, per the brush tool); right-drag or shift-drag erases. lastX/lastY is where the brush was at
+ * Tracks the pointer over the canvas, in CSS pixels. Left-drag (or touch)
+ * paints with the brush tool; right-drag or shift-drag erases whatever the tool. lastX/lastY is where the brush was at
  * the last simulation step, so each step paints the whole segment since then.
  */
 export const trackPointer = (canvas) => {
