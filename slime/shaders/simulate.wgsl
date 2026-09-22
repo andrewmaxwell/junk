@@ -105,7 +105,8 @@ fn diffuse(@builtin(global_invocation_id) id: vec3u) {
   let y = i32(id.y);
   let sum = cellValue(x, y) + cellValue(x + 1, y) + cellValue(x - 1, y) +
     cellValue(x, y + 1) + cellValue(x, y - 1);
-  var v = sum / 5.0 * (1.0 - p.fadeSpeed);
+  let fade = vec4f(p.species[0].fadeSpeed, p.species[1].fadeSpeed, p.species[2].fadeSpeed, 0.0);
+  var v = sum / 5.0 * (1.0 - fade);
   if (p.mouseDown > 0.5 &&
       distance(vec2f(id.xy) + 0.5, vec2f(p.mouseX, p.mouseY)) < p.brushRadius) {
     v = vec4f(vec3f(p.brushValue), 0.0);

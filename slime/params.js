@@ -1,7 +1,7 @@
 export const NUM_SPECIES = 3; // keep in sync with shaders/params.wgsl
 
-const species = (color, overrides) => ({
-  color,
+export const defaultSpecies = {
+  color: [255, 255, 255],
   distance: 3,
   radius: 3,
   angle: 0.75,
@@ -10,28 +10,40 @@ const species = (color, overrides) => ({
   scattering: 0.1,
   strength: 0.04,
   maxStrength: 0.2,
+  fadeSpeed: 0.15,
   others: -0.5, // how much this species follows (+) or avoids (-) the others' trails
-  ...overrides,
-});
+};
 
-// Tunable parameters, grouped the same way as the GUI folders.
-export const params = {
+// Also the "colonies" preset.
+export const defaults = {
   species: [
-    species([255, 90, 30]),
-    species([30, 150, 255], {distance: 8, radius: 1, angle: 0.5, speed: 1.5}),
-    species([190, 255, 60], {
+    {...defaultSpecies, color: [255, 90, 30]},
+    {
+      ...defaultSpecies,
+      color: [30, 150, 255],
+      distance: 8,
+      radius: 1,
+      angle: 0.5,
+      speed: 1.5,
+    },
+    {
+      ...defaultSpecies,
+      color: [190, 255, 60],
       distance: 2,
       angle: 1.2,
       turnSpeed: 0.5,
       speed: 0.7,
-    }),
+    },
   ],
-  world: {fadeSpeed: 0.15, brightness: 1, stepsPerFrame: 2},
+  view: {brightness: 1, stepsPerFrame: 2},
   brush: {radius: 4, value: 100},
 };
 
+// Tunable parameters, grouped the same way as the GUI folders.
+export const params = structuredClone(defaults);
+
 /** @type {Record<string, [number, number, number?]>} */
-const speciesRanges = {
+export const speciesRanges = {
   distance: [-10, 10],
   radius: [0, 6, 1],
   angle: [0, Math.PI],
@@ -40,32 +52,42 @@ const speciesRanges = {
   scattering: [0, 1],
   strength: [0, 0.1],
   maxStrength: [0, 1],
+  fadeSpeed: [0, 0.3],
   others: [-2, 2],
 };
 
 /** @type {Record<string, Record<string, [number, number, number?]>>} */
-const sharedRanges = {
-  world: {fadeSpeed: [0, 0.2], brightness: [0.2, 5], stepsPerFrame: [1, 10, 1]},
+export const sharedRanges = {
+  view: {brightness: [0.2, 5], stepsPerFrame: [1, 10, 1]},
   brush: {radius: [1, 50], value: [0, 100]},
 };
 
-const title = (s) => s[0].toUpperCase() + s.slice(1);
+const isLeaf = (v) => typeof v !== 'object' || typeof v[0] === 'number';
 
-const addControls = (folder, target, ranges) => {
-  for (const [key, range] of Object.entries(ranges)) {
-    folder.add(target, key, ...range);
+/**
+ * Sets the given groups of params back to their defaults, then applies
+ * overrides (a partial params object; species can be an array or keyed by
+ * index). Mutates in place, since the GUI holds references into params.
+ */
+export const setParams = (overrides = {}, groups = Object.keys(defaults)) => {
+  const assign = (target, base, over) => {
+    for (const key of Object.keys(base)) {
+      if (isLeaf(base[key])) {
+        target[key] = structuredClone(over?.[key] ?? base[key]);
+      } else {
+        assign(target[key], base[key], over?.[key]);
+      }
+    }
+  };
+  for (const group of groups) {
+    assign(params[group], defaults[group], overrides[group]);
   }
 };
 
-export const createGui = (reset) => {
-  const gui = new /** @type {any} */ (window).dat.GUI();
-  params.species.forEach((sp, i) => {
-    const folder = gui.addFolder(`Species ${i + 1}`);
-    folder.addColor(sp, 'color');
-    addControls(folder, sp, speciesRanges);
-  });
-  for (const [group, ranges] of Object.entries(sharedRanges)) {
-    addControls(gui.addFolder(title(group)), params[group], ranges);
-  }
-  gui.add({reset}, 'reset');
-};
+/** Flattens params into [path, value] pairs, e.g. ['species.0.speed', 1]. */
+export const flatten = (obj, prefix = '') =>
+  Object.entries(obj).flatMap(([key, value]) =>
+    isLeaf(value)
+      ? [[prefix + key, value]]
+      : flatten(value, `${prefix}${key}.`),
+  );

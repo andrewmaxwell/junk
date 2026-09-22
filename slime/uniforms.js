@@ -1,7 +1,7 @@
 import {params} from './params.js';
 
 const HEADER_FLOATS = 12;
-const SPECIES_FLOATS = 12;
+const SPECIES_FLOATS = 16; // 13 used, padded to a 16-byte multiple
 
 // Mirrors the Params struct in shaders/params.wgsl.
 export const createUniforms = (device) => {
@@ -17,19 +17,18 @@ export const createUniforms = (device) => {
   });
 
   const write = ({width, height, numAgents, frame}, mouse) => {
-    const {world, brush} = params;
+    const {view, brush} = params;
     const cellsPerPixel = width / innerWidth;
     u[0] = width;
     u[1] = height;
     u[2] = numAgents;
     u[3] = frame;
-    f[4] = world.fadeSpeed;
-    f[5] = mouse.x * cellsPerPixel;
-    f[6] = mouse.y * cellsPerPixel;
-    f[7] = mouse.down ? 1 : 0;
-    f[8] = brush.radius * cellsPerPixel;
-    f[9] = brush.value;
-    f[10] = world.brightness;
+    f[4] = mouse.x * cellsPerPixel;
+    f[5] = mouse.y * cellsPerPixel;
+    f[6] = mouse.down ? 1 : 0;
+    f[7] = brush.radius * cellsPerPixel;
+    f[8] = brush.value;
+    f[9] = view.brightness;
 
     params.species.forEach((sp, s) => {
       const o = HEADER_FLOATS + s * SPECIES_FLOATS;
@@ -46,6 +45,7 @@ export const createUniforms = (device) => {
       f[o + 9] = sp.strength;
       f[o + 10] = sp.maxStrength;
       f[o + 11] = sp.others;
+      f[o + 12] = sp.fadeSpeed;
     });
     device.queue.writeBuffer(buffer, 0, data);
   };
