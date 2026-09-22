@@ -1,7 +1,7 @@
 import {params} from './params.js';
 
 const HEADER_FLOATS = 12;
-const SPECIES_FLOATS = 16; // 13 used, padded to a 16-byte multiple
+const SPECIES_FLOATS = 16;
 
 // Mirrors the Params struct in shaders/params.wgsl.
 export const createUniforms = (device) => {
@@ -25,10 +25,12 @@ export const createUniforms = (device) => {
     u[3] = frame;
     f[4] = mouse.x * cellsPerPixel;
     f[5] = mouse.y * cellsPerPixel;
-    f[6] = mouse.down ? 1 : 0;
+    u[6] = {off: 0, food: 1, erase: 2}[mouse.mode];
     f[7] = brush.radius * cellsPerPixel;
-    f[8] = brush.value;
+    f[8] = brush.attraction;
     f[9] = view.brightness;
+    f[10] = mouse.lastX * cellsPerPixel;
+    f[11] = mouse.lastY * cellsPerPixel;
 
     params.species.forEach((sp, s) => {
       const o = HEADER_FLOATS + s * SPECIES_FLOATS;
@@ -44,8 +46,10 @@ export const createUniforms = (device) => {
       f[o + 8] = sp.scattering;
       f[o + 9] = sp.strength;
       f[o + 10] = sp.maxStrength;
-      f[o + 11] = sp.others;
-      f[o + 12] = sp.fadeSpeed;
+      f[o + 11] = sp.fadeSpeed;
+      f[o + 12] = sp.follow1;
+      f[o + 13] = sp.follow2;
+      f[o + 14] = sp.follow3;
     });
     device.queue.writeBuffer(buffer, 0, data);
   };

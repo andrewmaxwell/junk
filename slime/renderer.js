@@ -1,15 +1,13 @@
 import {bindGroup, bindGroupLayout, loadShader} from './gpu.js';
 
-// Draws a trail buffer to the canvas through a color gradient.
-export const createRenderer = async (
-  {device, context, format},
-  uniformBuffer,
-) => {
+// Draws a trail buffer to the canvas, blending the species colors.
+export const createRenderer = async (gpu, uniformBuffer) => {
+  const {device, context, format} = gpu;
   const layout = bindGroupLayout(device, GPUShaderStage.FRAGMENT, [
     'uniform',
     'read-only-storage',
   ]);
-  const module = await loadShader(device, 'render');
+  const module = await loadShader(gpu, 'render');
   const pipeline = device.createRenderPipeline({
     layout: device.createPipelineLayout({bindGroupLayouts: [layout]}),
     vertex: {module, entryPoint: 'vs'},

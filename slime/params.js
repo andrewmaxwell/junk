@@ -11,32 +11,44 @@ export const defaultSpecies = {
   strength: 0.04,
   maxStrength: 0.2,
   fadeSpeed: 0.15,
-  others: -0.5, // how much this species follows (+) or avoids (-) the others' trails
 };
+
+/**
+ * Builds species i. followN is how much it follows (+) or avoids (-) species
+ * N's trail; by default 1 for its own trail and `others` for the rest.
+ */
+export const makeSpecies = (i, {others = -0.5, ...overrides} = {}) => ({
+  ...defaultSpecies,
+  ...Object.fromEntries(
+    Array.from({length: NUM_SPECIES}, (_, j) => [
+      `follow${j + 1}`,
+      j === i ? 1 : others,
+    ]),
+  ),
+  ...overrides,
+});
 
 // Also the "colonies" preset.
 export const defaults = {
   species: [
-    {...defaultSpecies, color: [255, 90, 30]},
-    {
-      ...defaultSpecies,
+    makeSpecies(0, {color: [255, 90, 30]}),
+    makeSpecies(1, {
       color: [30, 150, 255],
       distance: 8,
       radius: 1,
       angle: 0.5,
       speed: 1.5,
-    },
-    {
-      ...defaultSpecies,
+    }),
+    makeSpecies(2, {
       color: [190, 255, 60],
       distance: 2,
       angle: 1.2,
       turnSpeed: 0.5,
       speed: 0.7,
-    },
+    }),
   ],
-  view: {brightness: 1, stepsPerFrame: 2},
-  brush: {radius: 4, value: 100},
+  view: {brightness: 1, stepsPerFrame: 3},
+  brush: {radius: 15, attraction: 1},
 };
 
 // Tunable parameters, grouped the same way as the GUI folders.
@@ -53,13 +65,15 @@ export const speciesRanges = {
   strength: [0, 0.1],
   maxStrength: [0, 1],
   fadeSpeed: [0, 0.3],
-  others: [-2, 2],
+  follow1: [-2, 2],
+  follow2: [-2, 2],
+  follow3: [-2, 2],
 };
 
 /** @type {Record<string, Record<string, [number, number, number?]>>} */
 export const sharedRanges = {
   view: {brightness: [0.2, 5], stepsPerFrame: [1, 10, 1]},
-  brush: {radius: [1, 50], value: [0, 100]},
+  brush: {radius: [2, 60], attraction: [0, 5]},
 };
 
 const isLeaf = (v) => typeof v !== 'object' || typeof v[0] === 'number';

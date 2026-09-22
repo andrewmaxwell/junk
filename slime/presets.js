@@ -1,8 +1,10 @@
-import {defaults, defaultSpecies, speciesRanges} from './params.js';
+import {defaults, makeSpecies, NUM_SPECIES, speciesRanges} from './params.js';
 
-// Each preset overrides params.species; unlisted values use defaultSpecies.
-const preset = (...species) =>
-  species.map((sp) => ({...defaultSpecies, ...sp}));
+// Each preset overrides params.species; unlisted values use makeSpecies' defaults.
+const preset = (...species) => species.map((sp, i) => makeSpecies(i, sp));
+
+// Rock-paper-scissors: each species chases the next and flees the previous.
+const chaser = {distance: 6, radius: 1, speed: 1.5, angle: 0.6, fadeSpeed: 0.1};
 
 export const presets = {
   colonies: defaults.species,
@@ -63,6 +65,11 @@ export const presets = {
     {color: [40, 220, 200], others: 0.8, distance: 6, radius: 1, speed: 1.5},
     {color: [200, 80, 255], others: 0.8, distance: 6, radius: 1, speed: 1.5},
   ),
+  chase: preset(
+    {...chaser, color: [255, 70, 70], follow2: 1.5, follow3: -1.5},
+    {...chaser, color: [70, 255, 90], follow3: 1.5, follow1: -1.5},
+    {...chaser, color: [80, 120, 255], follow1: 1.5, follow2: -1.5},
+  ),
   foam: preset(
     {
       color: [255, 150, 200],
@@ -103,7 +110,6 @@ const randomRanges = {
   strength: [0.02, 0.08],
   maxStrength: [0.1, 0.5],
   fadeSpeed: [0.05, 0.2],
-  others: [-1.5, 1],
 };
 
 const hsl = (h, s, l) => {
@@ -126,6 +132,10 @@ export const randomSpecies = () => {
     }
     const [minR, maxR] = speciesRanges.radius;
     sp.radius = Math.round(between(minR, Math.min(maxR, 3)));
+    for (let j = 0; j < NUM_SPECIES; j++) {
+      const [min, max] = i === j ? [0.5, 1.5] : [-1.5, 1];
+      sp[`follow${j + 1}`] = Number(between(min, max).toPrecision(3));
+    }
     return sp;
   });
 };

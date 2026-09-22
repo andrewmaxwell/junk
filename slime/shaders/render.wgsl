@@ -1,4 +1,4 @@
-@group(0) @binding(1) var<storage, read> trail: array<vec4f>; // one channel per species
+@group(0) @binding(1) var<storage, read> trail: array<trail4>; // one channel per species, then food
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
@@ -11,8 +11,8 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
 @fragment
 fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let c = vec2u(pos.xy);
-  let v = trail[c.y * p.width + c.x];
-  var color = vec3f(0.0);
+  let v = vec4f(trail[c.y * p.width + c.x]);
+  var color = vec3f(v.w * 0.1); // food shows as a faint gray
   for (var s = 0u; s < NUM_SPECIES; s++) {
     color += p.species[s].color * v[s];
   }

@@ -8,7 +8,6 @@ import {
 import {createUniforms} from './uniforms.js';
 import {createSorter} from './sorter.js';
 import {createRenderer} from './renderer.js';
-import {NUM_SPECIES} from './params.js';
 
 const NUM_AGENTS = 1_000_000;
 const SORT_INTERVAL = 32; // steps between agent re-sorts
@@ -23,14 +22,14 @@ export const createSimulation = async (gpu, canvas, mouse) => {
     'storage', // trail out
     'storage', // deposit
   ]);
-  const module = await loadShader(device, 'simulate');
+  const module = await loadShader(gpu, 'simulate');
   const pipelines = computePipelines(device, layout, module, [
     'initAgents',
     'updateAgents',
     'diffuse',
   ]);
   const [sorter, renderer] = await Promise.all([
-    createSorter(device, uniforms.buffer),
+    createSorter(gpu, uniforms.buffer),
     createRenderer(gpu, uniforms.buffer),
   ]);
 
@@ -55,7 +54,8 @@ export const createSimulation = async (gpu, canvas, mouse) => {
   const reset = () => {
     buffers.forEach((b) => b.destroy());
     // Full device resolution, unless that exceeds the GPU's buffer limit.
-    const maxCells = adapter.limits.maxStorageBufferBindingSize / 16;
+    const trailBytes = gpu.f16 ? 8 : 16; // four channels per cell
+    const maxCells = adapter.limits.maxStorageBufferBindingSize / trailBytes;
     const scale = Math.min(
       devicePixelRatio,
       Math.sqrt(maxCells / (innerWidth * innerHeight)),
@@ -67,10 +67,10 @@ export const createSimulation = async (gpu, canvas, mouse) => {
     const cells = state.width * state.height;
     const agents = storageBuffer(device, state.numAgents * 16);
     const trails = [
-      storageBuffer(device, cells * 16),
-      storageBuffer(device, cells * 16),
+      storageBuffer(device, cells * trailBytes),
+      storageBuffer(device, cells * trailBytes),
     ];
-    deposit = storageBuffer(device, cells * 4 * NUM_SPECIES);
+    deposit = storageBuffer(device, cells * 4); // packed per-species counts
     buffers = [agents, ...trails, deposit];
     groups = [0, 1].map((i) =>
       bindGroup(device, layout, [
@@ -104,6 +104,8 @@ export const createSimulation = async (gpu, canvas, mouse) => {
       ],
     ]);
     encoder.clearBuffer(deposit);
+    // This step painted the stroke up to here; the next one continues from it.
+    [mouse.lastX, mouse.lastY] = [mouse.x, mouse.y];
     if (state.frame % SORT_INTERVAL === 0) sorter.encode(encoder);
     device.queue.submit([encoder.finish()]);
     parity = 1 - parity;

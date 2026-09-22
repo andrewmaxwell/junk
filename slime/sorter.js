@@ -9,14 +9,15 @@ import {
 const TILE = 16; // keep in sync with shaders/sort.wgsl
 
 // Reorders agents by screen tile so the agent pass reads memory coherently.
-export const createSorter = async (device, uniformBuffer) => {
+export const createSorter = async (gpu, uniformBuffer) => {
+  const {device} = gpu;
   const layout = bindGroupLayout(device, GPUShaderStage.COMPUTE, [
     'uniform',
     'read-only-storage',
     'storage',
     'storage',
   ]);
-  const module = await loadShader(device, 'sort');
+  const module = await loadShader(gpu, 'sort');
   const pipelines = computePipelines(device, layout, module, [
     'countTiles',
     'scanTiles',

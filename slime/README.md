@@ -1,6 +1,10 @@
 WebGPU Slime Mold - 2026 - Lots of parameters to play with.
 
-Runs on the GPU with WebGPU compute shaders: 1M agents at full device resolution, spawned in a disc in the middle. Three species each lay their own trail channel and have their own color and behavior; `others` sets how much a species follows (+) or avoids (-) the other species' trails. Drag on the canvas to paint; with the default brush value the paint repels agents (values above `maxStrength` push them away).
+Runs on the GPU with WebGPU compute shaders: 1M agents at full device resolution, spawned in a disc in the middle. Three species each lay their own trail channel and have their own color and behavior. `follow1`–`follow3` set how much a species follows (+) or avoids (-) each species' trail, including its own, so species can chase, flee, or ignore each other.
+
+Drag on the canvas to paint food, which attracts every species and stays until erased; right-drag or shift-drag erases it.
+
+Performance: the trail is stored as f16 where supported, deposits are packed per-species counts in one u32 per cell, the blur goes through workgroup shared memory, and agents are periodically sorted by screen tile so their trail reads are cache-friendly. About 2.6 ms per step for 1M agents on a 3024×1656 grid (Apple Silicon).
 
 Pick a look from the **preset** menu or hit **randomize**. The URL hash always holds the current settings (only the ones that differ from the defaults), so the address bar, or **copy link**, gives a shareable link.
 
