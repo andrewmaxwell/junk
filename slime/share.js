@@ -4,10 +4,11 @@ import {defaults, flatten, params} from './params.js';
 // #species.1.distance=12&view.brightness=1.5, so the address is always a
 // shareable link to the current settings.
 
-const format = (v) =>
-  Array.isArray(v)
-    ? v.map(Math.round).join(',')
-    : String(Number(v.toPrecision(4)));
+const format = (v) => {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) return v.map(Math.round).join(',');
+  return String(Number(v.toPrecision(4)));
+};
 
 const defaultValues = new Map(flatten(defaults));
 
@@ -24,12 +25,17 @@ export const decodeParams = (hash) => {
   for (const [path, text] of new URLSearchParams(hash)) {
     const fallback = defaultValues.get(path);
     if (fallback === undefined) continue;
-    const value = Array.isArray(fallback)
-      ? text.split(',').map(Number)
-      : Number(text);
-    const values = [value].flat();
-    if (values.some((n) => !Number.isFinite(n))) continue;
-    if (Array.isArray(fallback) && values.length !== fallback.length) continue;
+    let value = text;
+    if (typeof fallback !== 'string') {
+      value = Array.isArray(fallback)
+        ? text.split(',').map(Number)
+        : Number(text);
+      const values = [value].flat();
+      if (values.some((n) => !Number.isFinite(n))) continue;
+      if (Array.isArray(fallback) && values.length !== fallback.length) {
+        continue;
+      }
+    }
 
     const keys = path.split('.');
     let target = overrides;

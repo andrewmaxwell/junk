@@ -25,7 +25,9 @@ export const createUniforms = (device) => {
     u[3] = frame;
     f[4] = mouse.x * cellsPerPixel;
     f[5] = mouse.y * cellsPerPixel;
-    u[6] = {off: 0, food: 1, erase: 2}[mouse.mode];
+    u[6] = {off: 0, paint: brush.tool === 'walls' ? 2 : 1, erase: 3}[
+      mouse.mode
+    ];
     f[7] = brush.radius * cellsPerPixel;
     f[8] = brush.attraction;
     f[9] = view.brightness;
@@ -34,6 +36,7 @@ export const createUniforms = (device) => {
     f[12] = view.glow;
     f[13] = hue;
     f[14] = view.agentDots;
+    f[15] = brush.appetite * 1e-3; // food eaten per agent per step
 
     params.species.forEach((sp, s) => {
       const o = HEADER_FLOATS + s * SPECIES_FLOATS;

@@ -10,9 +10,14 @@ struct Species {
 
 struct Params {
   width: u32, height: u32, numAgents: u32, frame: u32,
-  mouseX: f32, mouseY: f32, brushMode: u32, brushRadius: f32, // brushMode: 0 off, 1 food, 2 erase
+  mouseX: f32, mouseY: f32, brushMode: u32, brushRadius: f32, // brushMode: see BRUSH_*
   foodAttraction: f32, brightness: f32, lastMouseX: f32, lastMouseY: f32,
-  glow: f32, hue: f32, agentDots: f32, _pad: f32,
+  glow: f32, hue: f32, agentDots: f32, eatSpeed: f32,
   species: array<Species, NUM_SPECIES>,
 }
 @group(0) @binding(0) var<uniform> p: Params;
+
+const BRUSH_OFF = 0u;
+const BRUSH_FOOD = 1u;
+const BRUSH_WALL = 2u;
+const BRUSH_ERASE = 3u;

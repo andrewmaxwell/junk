@@ -48,7 +48,7 @@ export const defaults = {
     }),
   ],
   view: {brightness: 1, glow: 0.8, colorDrift: 0, agentDots: 0},
-  brush: {radius: 15, attraction: 1},
+  brush: {tool: 'food', radius: 15, attraction: 1, appetite: 0.1},
 };
 
 // Tunable parameters, grouped the same way as the GUI folders.
@@ -70,7 +70,7 @@ export const speciesRanges = {
   follow3: [-2, 2],
 };
 
-/** @type {Record<string, Record<string, [number, number, number?]>>} */
+/** Slider ranges, or [options] for a dropdown. @type {Record<string, Record<string, [number, number, number?] | [string[]]>>} */
 export const sharedRanges = {
   view: {
     brightness: [0.2, 5],
@@ -78,7 +78,12 @@ export const sharedRanges = {
     colorDrift: [0, 1],
     agentDots: [0, 0.5],
   },
-  brush: {radius: [2, 60], attraction: [0, 5]},
+  brush: {
+    tool: [['food', 'walls']],
+    radius: [2, 60],
+    attraction: [0, 5],
+    appetite: [0, 1],
+  },
 };
 
 const isLeaf = (v) => typeof v !== 'object' || typeof v[0] === 'number';

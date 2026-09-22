@@ -6,6 +6,7 @@ const title = (s) => s[0].toUpperCase() + s.slice(1);
 
 export const createGui = ({
   reset,
+  clearDrawing,
   onChange,
   applyPreset,
   randomize,
@@ -32,6 +33,7 @@ export const createGui = ({
       setTimeout(() => copyButton.name('copy link'), 2000);
     },
     reset,
+    'clear drawing': clearDrawing,
   };
   const presetMenu = gui
     .add(actions, 'preset', [...Object.keys(presets), CUSTOM])
@@ -39,6 +41,7 @@ export const createGui = ({
   gui.add(actions, 'randomize');
   const copyButton = gui.add(actions, 'copy link');
   gui.add(actions, 'reset');
+  gui.add(actions, 'clear drawing');
 
   /** Shows "custom" in the preset menu once the species no longer match a preset. */
   const markCustom = () => {

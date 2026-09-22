@@ -1,6 +1,6 @@
 /**
- * Tracks the pointer over the canvas, in CSS pixels. Left-drag paints food;
- * right-drag or shift-drag erases it. lastX/lastY is where the brush was at
+ * Tracks the pointer over the canvas, in CSS pixels. Left-drag paints (food
+ * or walls, per the brush tool); right-drag or shift-drag erases. lastX/lastY is where the brush was at
  * the last simulation step, so each step paints the whole segment since then.
  */
 export const trackPointer = (canvas) => {
@@ -8,7 +8,7 @@ export const trackPointer = (canvas) => {
   const update = (e) => {
     const wasOff = mouse.mode === 'off';
     if (e.buttons & 2 || (e.buttons & 1 && e.shiftKey)) mouse.mode = 'erase';
-    else if (e.buttons & 1) mouse.mode = 'food';
+    else if (e.buttons & 1) mouse.mode = 'paint';
     else mouse.mode = 'off';
     mouse.x = e.clientX;
     mouse.y = e.clientY;

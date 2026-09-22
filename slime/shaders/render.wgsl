@@ -1,5 +1,5 @@
 // Draws the scene in linear color, before glow and tone mapping (see post.wgsl).
-@group(0) @binding(1) var<storage, read> trail: array<trail4>; // one channel per species, then food
+@group(0) @binding(1) var<storage, read> trail: array<trail4>; // one channel per species, then food/wall
 @group(0) @binding(2) var<storage, read> agents: array<vec4f>; // x, y, angle, species
 
 @vertex
@@ -8,12 +8,12 @@ fn fullscreen(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   return vec4f(uv * 2.0 - 1.0, 0.0, 1.0);
 }
 
-// Species colors added together, plus food as a faint gray.
+// Species colors added together, plus food in faint gold and walls in gray.
 @fragment
 fn trailColor(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let c = vec2u(pos.xy);
   let v = vec4f(trail[c.y * p.width + c.x]);
-  var color = vec3f(v.w * 0.1);
+  var color = max(v.w, 0.0) * vec3f(0.3, 0.22, 0.05) + max(-v.w, 0.0) * vec3f(0.15);
   for (var s = 0u; s < NUM_SPECIES; s++) {
     color += p.species[s].color * v[s];
   }

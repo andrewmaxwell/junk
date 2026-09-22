@@ -2,7 +2,7 @@ WebGPU Slime Mold - 2026 - Lots of parameters to play with.
 
 Runs on the GPU with WebGPU compute shaders: 1M agents at full device resolution, spawned in a disc in the middle. Three species each lay their own trail channel and have their own color and behavior. `follow1`–`follow3` set how much a species follows (+) or avoids (-) each species' trail, including its own, so species can chase, flee, or ignore each other.
 
-Drag on the canvas to paint food, which attracts every species and stays until erased; right-drag or shift-drag erases it.
+Drag on the canvas to paint with the brush **tool**: **food** (gold) attracts every species and is slowly eaten (**appetite**); **walls** (gray) block agents, who also steer away from them. Right-drag or shift-drag erases. **reset** restarts the colony but keeps the drawing, with eaten food restored, so you can draw a maze and replay it; **clear drawing** wipes it. Resizing the window also clears it.
 
 Performance: the trail is stored as f16 where supported, deposits are packed per-species counts in one u32 per cell, the blur goes through workgroup shared memory, and agents are periodically sorted by screen tile so their trail reads are cache-friendly. About 2.6 ms per step for 1M agents on a 3024×1656 grid (Apple Silicon). The number of steps per frame adapts to the GPU and the display's refresh rate (`pacer.js`), so the frame rate stays smooth and fast machines evolve quicker.
 

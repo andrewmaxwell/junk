@@ -38,6 +38,7 @@ const apply = (overrides, groups) => {
 
 const gui = createGui({
   reset: sim.reset,
+  clearDrawing: sim.clearDrawing,
   onChange: syncUrl,
   applyPreset: (name) => apply({species: presets[name]}, ['species']),
   randomize: () => apply({species: randomSpecies()}, ['species']),
