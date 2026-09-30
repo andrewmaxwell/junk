@@ -94,6 +94,173 @@ class World:
     def collision_triangles(self, track):
         return sum(sum(ic for ic, _, _ in collision_meshes(d, False)) for _, d in self.chunks[track, 12])
 
+    def _chunk(self, ctype, ref):
+        """Look up a chunk by a packed (u8 track, u24 rid) reference."""
+        track, rid = ref >> 24, ref & 0xFFFFFF
+        return next((d for r, d in self.chunks[track, ctype] if r == rid), None)
+
+    def models(self):
+        """{(track, rid): Model} for every prefab model in the world.
+
+        A model's header word at 0x18 references a vertex-buffer descriptor
+        (chunk type 23: position pool, UV pool, colour pool references). Big
+        locations split their positions across several type-25 pools."""
+        out = {}
+        for (track, ctype), items in list(self.chunks.items()):
+            if ctype != 2:
+                continue
+            for rid, d in items:
+                desc = self._chunk(23, struct.unpack_from('>I', d, 0x18)[0])
+                if not desc:
+                    continue
+                pos_ref, uv_ref = struct.unpack_from('>II', desc, 0)
+                pool, uvs = self._chunk(25, pos_ref), self._chunk(27, uv_ref)
+                if pool and uvs:
+                    model = Model(d, pool, uvs)
+                    model.textures = [self.texture_id(ref) for ref in model.materials]
+                    out[track, rid] = model
+        return out
+
+    def texture_id(self, material_ref):
+        """Material (chunk type 0) -> id in the shared texture bank, or None."""
+        mat = self._chunk(0, material_ref)
+        return struct.unpack_from('>H', mat, 0)[0] if mat else None
+
+    def lightmaps(self):
+        """{lightmap id: texture chunk} (chunk type 10, CMPR, shared bank on track 255)."""
+        out = {}
+        for rid, d in self.chunks[255, 10]:
+            out.setdefault(rid, d)
+        return out
+
+    def color_pools(self):
+        """{(track, rid): bytes} of RGB565 vertex colours (chunk type 24), baked lighting for objects."""
+        return {(track, rid): d for (track, ctype), items in self.chunks.items() if ctype == 24 for rid, d in items}
+
+    def textures(self):
+        """{texture id: texture chunk}. The bank lives on track 255 and is
+        re-streamed with every section, so ids repeat; keep the first copy."""
+        out = {}
+        for rid, d in self.chunks[255, 9]:
+            out.setdefault(rid, d)
+        return out
+
+    def instances(self, track):
+        return [Instance(d) for _, d in self.chunks[track, 3]]
+
+
+IDENTITY = (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+
+
+def mat_mul(a, b):
+    """Row-vector convention (v' = v·M), so a·b applies a first."""
+    return tuple(sum(a[r * 4 + i] * b[i * 4 + c] for i in range(4)) for r in range(4) for c in range(4))
+
+
+def transform(p, m):
+    x, y, z = p
+    return (x * m[0] + y * m[4] + z * m[8] + m[12],
+            x * m[1] + y * m[5] + z * m[9] + m[13],
+            x * m[2] + y * m[6] + z * m[10] + m[14])
+
+
+class Instance:
+    """A placed copy of a prefab model (160-byte chunk)."""
+
+    def __init__(self, d):
+        self.matrix = struct.unpack_from('>16f', d, 0x08)
+        self.model = (d[0x78], int.from_bytes(d[0x79:0x7C], 'big'))
+        # baked lighting: this placement's colours start at a byte offset in a colour pool
+        ref, self.color_offset = struct.unpack_from('>II', d, 0x98)
+        self.color_pool = (ref >> 24, ref & 0xFFFFFF)
+
+
+class Mesh:
+    def __init__(self, material):
+        self.material = material  # index into Model.materials
+        self.verts, self.uvs, self.colors, self.tris = [], [], [], []  # colors: per-placement colour index
+
+
+class Model:
+    """Prefab model (chunk type 2). Header: u32 id, u32 part count, u32 part
+    table offset, ..., u32 display-list base at 0x1C, u32 material count at
+    0x20 followed by material references. Each 16-byte part entry is (parent
+    index, part info offset, extra, matrix offset). Part info: bbox (24 bytes),
+    u32, u32 mesh count, u32 offset of mesh-record pointers; a mesh record is
+    (u16 material index, u16, u32 display-list offset, u32 display-list size).
+
+    Display lists are GameCube GX primitives with 7-byte vertices:
+    u16 position index, u8 normal index, u16 colour index, u16 UV index.
+    The colour index is relative to each placement's block in a colour pool.
+    Positions come from a type-25 pool (s16, scaled by 1/4) and UVs from a
+    type-27 pool (s16 pairs, scaled by 1/4096)."""
+
+    def __init__(self, d, pool, uv_pool):
+        self.meshes = []
+        self.textures = []  # texture id per material, filled in by World
+        nparts, table = struct.unpack_from('>II', d, 4)
+        dl_base, nmat = struct.unpack_from('>II', d, 0x1C)
+        self.materials = list(struct.unpack_from(f'>{nmat}I', d, 0x24))
+        part_mats = []
+        for k in range(nparts):
+            parent, info, _, moff = struct.unpack_from('>iIII', d, table + 16 * k)
+            m = struct.unpack_from('>16f', d, moff) if moff != 0xFFFFFFFF else IDENTITY
+            if parent >= 0:
+                m = mat_mul(m, part_mats[parent])
+            part_mats.append(m)
+            if info == 0:  # a transform-only node
+                continue
+            nmesh, ptrs = struct.unpack_from('>II', d, info + 28)
+            for j in range(nmesh):
+                rec = struct.unpack_from('>I', d, ptrs + 4 * j)[0]
+                material, _, dl_off, dl_size = struct.unpack_from('>HHII', d, rec)
+                mesh = Mesh(material)
+                self._read_display_list(d, dl_base + dl_off, dl_base + dl_off + dl_size, pool, uv_pool, m, mesh)
+                if mesh.tris:
+                    self.meshes.append(mesh)
+
+    @property
+    def verts(self):
+        return [v for mesh in self.meshes for v in mesh.verts]
+
+    @property
+    def tris(self):
+        out, base = [], 0
+        for mesh in self.meshes:
+            out += [(a + base, b + base, c + base) for a, b, c in mesh.tris]
+            base += len(mesh.verts)
+        return out
+
+    @staticmethod
+    def _read_display_list(d, p, end, pool, uv_pool, m, mesh):
+        lookup = {}
+        while p + 3 <= end and (d[p] & 0xF8) in (0x80, 0x90, 0x98, 0xA0):
+            op = d[p] & 0xF8
+            n = int.from_bytes(d[p + 1:p + 3], 'big')
+            p += 3
+            idx = []
+            for _ in range(n):
+                pi, _normal, ci, ti = struct.unpack_from('>HBHH', d, p)
+                p += 7
+                if (pi, ci, ti) not in lookup:
+                    v = tuple(c / 4 for c in struct.unpack_from('>3h', pool, 6 * pi))
+                    lookup[pi, ci, ti] = len(mesh.verts)
+                    mesh.verts.append(transform(v, m) if m is not IDENTITY else v)
+                    mesh.uvs.append(tuple(c / 4096 for c in struct.unpack_from('>2h', uv_pool, 4 * ti)))
+                    mesh.colors.append(ci)
+                idx.append(lookup[pi, ci, ti])
+            if op == 0x90:    # triangles
+                tris = [idx[i:i + 3] for i in range(0, n - 2, 3)]
+            elif op == 0x98:  # triangle strip, alternating winding
+                tris = [(idx[i], idx[i + 1], idx[i + 2]) if i % 2 == 0 else (idx[i + 1], idx[i], idx[i + 2])
+                        for i in range(n - 2)]
+            elif op == 0xA0:  # fan
+                tris = [(idx[0], idx[i], idx[i + 1]) for i in range(1, n - 1)]
+            else:             # quads
+                tris = [t for i in range(0, n - 3, 4)
+                        for t in ((idx[i], idx[i + 1], idx[i + 2]), (idx[i], idx[i + 2], idx[i + 3]))]
+            mesh.tris += [tuple(t) for t in tris if len(set(t)) == 3]
+
 
 class Patch:
     """Bicubic terrain patch. The 16 stored points are power-basis coefficients
@@ -104,6 +271,11 @@ class Patch:
         self.coef = stored[::-1]
         self.bbox_min = struct.unpack_from('>3f', d, 0x180)
         self.bbox_max = struct.unpack_from('>3f', d, 0x18C)
+        # texture coordinates at the corners S(0,0), S(1,0), S(0,1), S(1,1)
+        self.uv_corners = struct.unpack_from('>8f', d, 0x20)
+        self.texture, self.lightmap = struct.unpack_from('>HH', d, 0x1A0)
+        # where this patch sits in its lightmap: (u, v, width, height)
+        self.lightmap_rect = struct.unpack_from('>4f', d, 0x10)
 
     def eval(self, u, v):
         us = (1, u, u * u, u * u * u)

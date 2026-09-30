@@ -81,8 +81,8 @@ def main():
         other = sorted({t for (_, t) in world.chunks} - {1, 2, 3, 8, 12})
         print('\nOther chunk types present:',
               ', '.join(ssx3.CHUNK_TYPES.get(t, f'type {t}') for t in other))
-        print('\nExportable now: terrain patches (--export). Collision meshes, prefab\n'
-              'models and instance placements are listed but not exported yet.')
+        print('\nExport: terrain patches to OBJ with --export; terrain plus every placed\n'
+              'object to a 3D viewer with export_viewer.py.')
 
 
 def bbox(patches):
