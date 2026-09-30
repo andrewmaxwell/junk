@@ -18,31 +18,26 @@
   label span.what { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
   .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
   button { background: #26324a; color: var(--text); border: 0; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
-  #loading { position: absolute; inset: 0; display: grid; place-items: center; font-size: 16px; }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; font-size: 16px; pointer-events: none; }
+  #hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none;
+    width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); display: none; }
+  #status { position: absolute; right: 12px; bottom: 12px; background: var(--panel); border-radius: 6px;
+    padding: 4px 10px; color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
-<div id="loading">Building the mountain…</div>
+<div id="loading">Loading the mountain…</div>
+<div id="status"></div>
+<div id="hint"></div>
 <div id="panel">
   <h1>SSX 3 — the mountain</h1>
-  <p>Drag to orbit, right-drag to pan, scroll to zoom. Click a name to fly to it. Skyboxes and flat backdrop panels start hidden.</p>
+  <p id="help"></p>
   <div style="display:flex; gap:6px; flex-wrap:wrap">
     <button id="all">All</button><button id="none">None</button>
-    <button id="lighting" title="Baked: the game's own lightmaps and vertex lighting. Viewer: plain sun and sky lights.">Lighting: baked</button><button id="textures">Textures: on</button><button id="objects">Objects: on</button><button id="panels" title="Big flat cards (backdrops, tree lines) drawn with see-through textures">Panels: off</button><button id="helpers" title="Flat translucent orange/purple/green volumes: editor markers the game doesn't draw">Helpers: off</button><button id="wire">Wireframe</button>
+    <button id="lighting" title="Baked: the game's own lightmaps and vertex lighting. Viewer: plain sun and sky lights.">Lighting: baked</button><button id="textures">Textures: on</button><button id="objects">Objects: on</button><button id="panels" title="Big flat cards (backdrops, tree lines) drawn with see-through textures">Panels: off</button><button id="helpers" title="Things the game doesn't draw as modelled: translucent editor volumes, plus placeholder objects like the black slabs by jumps and point-multiplier cubes">Helpers: off</button><button id="wire">Wireframe</button><button id="mode" title="Map: drag, zoom and rotate like Google Earth. Fly: first-person flying with the keyboard.">Camera: map</button>
   </div>
   <div id="list"></div>
 </div>
-<script id="meta" type="application/json">__META__</script>
-<script id="terrain" type="application/octet-stream">__TERRAIN__</script>
-<script id="patchUvs" type="application/octet-stream">__PATCH_UVS__</script>
-<script id="patchLm" type="application/octet-stream">__PATCH_LM__</script>
-<script id="modelVerts" type="application/octet-stream">__MODEL_VERTS__</script>
-<script id="modelUvs" type="application/octet-stream">__MODEL_UVS__</script>
-<script id="modelCols" type="application/octet-stream">__MODEL_COLS__</script>
-<script id="colorPools" type="application/octet-stream">__COLOR_POOLS__</script>
-<script id="modelTris" type="application/octet-stream">__MODEL_TRIS__</script>
-<script id="instances" type="application/octet-stream">__INSTANCES__</script>
-<script id="texData" type="application/octet-stream">__TEXTURES__</script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
@@ -51,30 +46,36 @@
 </script>
 <script type="module">
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { MapControls } from 'three/addons/controls/MapControls.js';
 
-const meta = JSON.parse(document.getElementById('meta').textContent);
-function blob(id) {
-  const text = document.getElementById(id).textContent.trim();
-  return Uint8Array.from(atob(text), c => c.charCodeAt(0)).buffer;
+// ---------- data loading ----------
+// Data files are <script>s calling ssxData(key, base64 gzip), because browsers
+// refuse fetch() on file:// pages but happily load local scripts.
+const waiting = new Map();
+window.ssxData = (key, b64) => waiting.get(key)?.(b64);
+
+function load(key, file) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    waiting.set(key, b64 => { waiting.delete(key); script.remove(); unpack(b64).then(resolve, reject); });
+    script.onerror = () => reject(new Error(`could not load ${file}`));
+    script.src = `data/${file}`;
+    document.head.appendChild(script);
+  });
 }
-const q = new Int16Array(blob('terrain'));
-const patchUvs = new Float32Array(blob('patchUvs'));
-const patchLm = new Float32Array(blob('patchLm'));
-const modelCols = new Uint16Array(blob('modelCols'));
-const colorPools = new Uint8Array(blob('colorPools'));
-const modelVerts = new Float32Array(blob('modelVerts'));
-const modelUvs = new Float32Array(blob('modelUvs'));
-const modelTris = new Uint16Array(blob('modelTris'));
-const inst = new Float32Array(blob('instances'));
-const texBytes = new Uint8Array(blob('texData'));
 
-// where each model mesh's data starts in the shared arrays
-const meshStart = meta.models.map(() => []);
-{ let v = 0, t = 0;
-  meta.models.forEach(([, meshes], m) => meshes.forEach(([, nv, nt]) => {
-    meshStart[m].push([v, t]); v += nv; t += nt;
-  })); }
+async function unpack(b64) {
+  const packed = await (await fetch(`data:application/octet-stream;base64,${b64}`)).blob();
+  const buf = await new Response(packed.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  const headerLen = new DataView(buf).getUint32(0, true);
+  const { meta, sections } = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, headerLen)));
+  const base = 4 + headerLen;
+  const section = (name, Type = Uint8Array) => {
+    const [off, len] = sections[name];
+    return new Type(buf, base + off, len / Type.BYTES_PER_ELEMENT);
+  };
+  return { meta, section };
+}
 
 // ---------- GameCube texture decoding ----------
 function rgb565(c) {
@@ -90,13 +91,13 @@ function rgb5a3(c) {
 }
 const u16 = (a, o) => a[o] << 8 | a[o + 1];
 
-function decodeTexture([kind, w, h, pixOff, pixLen, palOff, palCount, helper], wrap = THREE.RepeatWrapping) {
+function decodeTexture(bytes, [kind, w, h, pixOff, pixLen, palOff = 0, palCount = 0], wrap) {
   const out = new Uint8Array(w * h * 4);
   let p = pixOff;
   if (kind === 0x1E) {  // CMPR: 8x8 tiles of four 4x4 DXT1 blocks
     for (let ty = 0; ty < h; ty += 8) for (let tx = 0; tx < w; tx += 8) for (let sub = 0; sub < 4; sub++) {
-      const c0 = u16(texBytes, p), c1 = u16(texBytes, p + 2);
-      const bits = (texBytes[p + 4] << 24 | texBytes[p + 5] << 16 | texBytes[p + 6] << 8 | texBytes[p + 7]) >>> 0;
+      const c0 = u16(bytes, p), c1 = u16(bytes, p + 2);
+      const bits = (bytes[p + 4] << 24 | bytes[p + 5] << 16 | bytes[p + 6] << 8 | bytes[p + 7]) >>> 0;
       p += 8;
       const a = rgb565(c0), b = rgb565(c1);
       const pal = c0 > c1
@@ -110,10 +111,10 @@ function decodeTexture([kind, w, h, pixOff, pixLen, palOff, palCount, helper], w
     }
   } else {  // C8: 8x4 tiles of palette indices, RGB5A3 palette
     const pal = [];
-    for (let i = 0; i < 256; i++) pal.push(i < palCount ? rgb5a3(u16(texBytes, palOff + 2 * i)) : [255, 0, 255, 255]);
+    for (let i = 0; i < 256; i++) pal.push(i < palCount ? rgb5a3(u16(bytes, palOff + 2 * i)) : [255, 0, 255, 255]);
     for (let ty = 0; ty < h; ty += 4) for (let tx = 0; tx < w; tx += 8) for (let i = 0; i < 32; i++) {
       const x = tx + (i & 7), y = ty + (i >> 3);
-      if (x < w && y < h) out.set(pal[texBytes[p]], (y * w + x) * 4);
+      if (x < w && y < h) out.set(pal[bytes[p]], (y * w + x) * 4);
       p++;
     }
   }
@@ -123,145 +124,239 @@ function decodeTexture([kind, w, h, pixOff, pixLen, palOff, palCount, helper], w
     if (out[i] < 250) holes++;
     if (out[i] > 20 && out[i] < 235) soft++;
   }
-  const n = w * h;
-  const mode = holes === 0 ? 'opaque' : soft > n * 0.25 ? 'blend' : 'cutout';
+  const mode = holes === 0 ? 'opaque' : soft > w * h * 0.25 ? 'blend' : 'cutout';
   const tex = new THREE.DataTexture(out, w, h, THREE.RGBAFormat);
   tex.wrapS = tex.wrapT = wrap;
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.generateMipmaps = true;
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = anisotropy;
   tex.needsUpdate = true;
-  return { tex, mode, helper: !!helper };
+  return { tex, mode };
 }
-const textures = meta.textures.map(t => decodeTexture(t));
-const lightmaps = meta.lightmaps.map(t => {
-  const { tex } = decodeTexture(t, THREE.ClampToEdgeWrapping);
-  tex.channel = 1;  // lightmaps use the second UV set
-  return tex;
-});
-
-// Baked lighting is stored at half strength (128 = full brightness) and doubled when drawn.
-// The doubling happens on gamma-encoded colours, which is about 2^2.2 in three.js's linear space.
-const BAKED_GAIN = 2 ** 2.2;
-const srgbToLinear = c => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-const LINEAR = Array.from({ length: 256 }, (_, i) => srgbToLinear(i));
 
 // ---------- scene ----------
-const SCALE = 1 / 1000;  // game units are tiny; keep numbers friendly for the GPU
-const n = meta.steps + 1, perPatch = n * n;
-const center = meta.min.map((lo, a) => (lo + meta.max[a]) / 2);
-
-// grid triangle indices shared by every patch
-const gridIdx = [];
-for (let a = 0; a < meta.steps; a++) for (let b = 0; b < meta.steps; b++) {
-  const i = a * n + b, j = i + n;
-  gridIdx.push(i, j, j + 1, i, j + 1, i + 1);
-}
-
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(devicePixelRatio);
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 const anisotropy = renderer.capabilities.getMaxAnisotropy();
-textures.forEach(t => { t.tex.anisotropy = anisotropy; });
-lightmaps.forEach(t => { t.anisotropy = anisotropy; });
 
 const scene = new THREE.Scene();
 const sky = new THREE.Color(0x0d1320);
 scene.background = sky;
-const span = Math.max(...meta.max.map((hi, a) => hi - meta.min[a])) * SCALE;
-scene.fog = new THREE.Fog(sky, span * 1.2, span * 4);
-
-const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, span / 20000, span * 10);
-camera.position.set(span * 0.9, span * 0.6, span * 0.9);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-
 scene.add(new THREE.HemisphereLight(0xf2f6ff, 0x5a6070, 2.0));
 const sun = new THREE.DirectionalLight(0xfff4e0, 1.6);
 sun.position.set(1, 1.4, 0.6);
 scene.add(sun);
 
-// Geometry builders collect vertices per texture, then become one mesh each.
-class Builder {
-  constructor() { this.pos = []; this.uv = []; this.uv1 = []; this.col = []; this.idx = []; }
-  get count() { return this.pos.length / 3; }
-  mesh(material) {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    if (this.uv1.length) geo.setAttribute('uv1', new THREE.Float32BufferAttribute(this.uv1, 2));
-    if (this.col.length) geo.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
-    geo.setIndex(this.count > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1));
-    geo.computeVertexNormals();
-    geo.computeBoundingSphere();
-    return new THREE.Mesh(geo, material);
+// Baked lighting is stored at half strength (128 = full brightness) and doubled when drawn.
+// The doubling happens on gamma-encoded colours, which is about 2^2.2 in three.js's linear space.
+const BAKED_GAIN = 2 ** 2.2;
+const LINEAR = Array.from({ length: 256 }, (_, i) => (i /= 255) <= 0.04045 ? i / 12.92 : ((i + 0.055) / 1.055) ** 2.4);
+
+const SCALE = 1 / 1000;  // game units are tiny; keep numbers friendly for the GPU
+const DETAIL_STEPS = 6;  // terrain tessellation near the camera
+const MAX_DETAILED = 8;  // locations kept in memory at full detail
+
+const status = document.getElementById('status');
+const overview = await load('overview', 'overview.js');
+const ov = overview.meta;
+const center = ov.min.map((lo, a) => (lo + ov.max[a]) / 2);
+const span = Math.max(...ov.max.map((hi, a) => hi - ov.min[a])) * SCALE;
+scene.fog = new THREE.Fog(sky, span * 1.2, span * 4);
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, span / 20000, span * 10);
+camera.position.set(span * 0.9, span * 0.6, span * 0.9);
+camera.lookAt(0, 0, 0);
+
+// ---------- camera: map style (default) or fly ----------
+// Map style is the Google Earth convention: drag slides the ground, scroll / pinch zooms toward
+// the cursor, right-drag or Shift-drag rotates and tilts, double-click flies to a spot.
+const canvas = renderer.domElement;
+const controls = new MapControls(camera, canvas);
+controls.enableDamping = true;
+controls.zoomToCursor = true;
+controls.zoomSpeed = 1.5;  // the mountain is big; cover it in fewer swipes
+controls.maxPolarAngle = Math.PI * 0.49;  // stay above the horizon
+controls.minDistance = span / 5000;
+controls.maxDistance = span * 3;
+
+const keys = new Set();
+const fly = { on: false, speed: span * 0.03, base: span * 0.03, look: new THREE.Euler(0, 0, 0, 'YXZ') };
+const forward = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
+const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
+
+// What is under a screen point? Only terrain is tested, which is plenty to aim with and much cheaper.
+function groundAt(x, y) {
+  pointer.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const targets = [];
+  for (const loc of locations) {
+    if (!loc.root.visible) continue;
+    if (loc.detail?.visible) targets.push(...loc.detail.userData.kinds.terrain);
+    else if (loc.overview?.visible) targets.push(loc.overview);
   }
-}
-function builderFor(map, key) {
-  if (!map.has(key)) map.set(key, new Builder());
-  return map.get(key);
+  return raycaster.intersectObjects(targets, false)[0]?.point ?? null;
 }
 
-function addTerrain(parts, loc, patchOffset, vertOffset) {
-  let p = 0;
-  for (const [texIndex, lmIndex, count] of loc.runs) {
-    const b = builderFor(textures[texIndex]?.helper ? parts.helpers : parts.terrain, texIndex + ':' + lmIndex);
-    for (let k = 0; k < count; k++, p++) {
-      const base = b.count, uv = patchUvs.subarray((patchOffset + p) * 8, (patchOffset + p) * 8 + 8);
-      const [lu, lv, lw, lh] = patchLm.subarray((patchOffset + p) * 4, (patchOffset + p) * 4 + 4);
-      for (let a = 0; a < n; a++) for (let c = 0; c < n; c++) {
-        const v = vertOffset + p * perPatch + a * n + c;
-        for (let ax = 0; ax < 3; ax++) {
-          const t = (q[v * 3 + ax] + 32768) / 65535;
-          b.pos.push((meta.min[ax] + t * (meta.max[ax] - meta.min[ax]) - center[ax]) * SCALE);
-        }
-        // bilinear blend of the corner UVs: S(0,0), S(1,0), S(0,1), S(1,1)
-        const s = a / meta.steps, t = c / meta.steps;
-        const w0 = (1 - s) * (1 - t), w1 = s * (1 - t), w2 = (1 - s) * t, w3 = s * t;
-        b.uv.push(uv[0] * w0 + uv[2] * w1 + uv[4] * w2 + uv[6] * w3, uv[1] * w0 + uv[3] * w1 + uv[5] * w2 + uv[7] * w3);
-        // the patch's first parameter runs along the lightmap's v axis (checked by matching neighbours' edges)
-        b.uv1.push(lu + t * lw, lv + s * lh);
-      }
-      for (const i of gridIdx) b.idx.push(base + i);
-    }
+// When the middle of the view is empty sky, pivot at the distance of the location closest to
+// the line of sight instead, so zooming still covers ground at a sensible rate.
+function pivotAlongView() {
+  camera.getWorldDirection(forward);
+  let best = span, bestAngle = Infinity;
+  for (const loc of locations) {
+    if (!loc.root.visible) continue;
+    const along = move.copy(loc.sphere.center).sub(camera.position).dot(forward);
+    if (along <= 0) continue;
+    const off = move.copy(camera.position).addScaledVector(forward, along).distanceTo(loc.sphere.center) / along;
+    if (off < bestAngle) { bestAngle = off; best = along; }
+  }
+  return camera.position.clone().addScaledVector(forward, best);
+}
+
+// Keep the pivot on the ground in the middle of the view, so pan, zoom and rotate speeds always
+// match how far away the terrain really is. Re-aimed at the start of each gesture, at most every 300ms.
+let lastAim = 0;
+function aimPivot() {
+  const now = performance.now();
+  if (now - lastAim < 300) return;
+  lastAim = now;
+  controls.target.copy(groundAt(innerWidth / 2, innerHeight / 2) ?? pivotAlongView());
+}
+controls.addEventListener('start', aimPivot);
+window.viewer = { camera, controls, scene };  // handy from the browser console
+
+// Double-click: glide toward the point, ending a third of the way from it.
+let glide = null;
+canvas.addEventListener('dblclick', e => {
+  if (fly.on) return;
+  const hit = groundAt(e.clientX, e.clientY);
+  if (!hit) return;
+  glide = { t: 0, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), target: hit,
+            pos: hit.clone().add(camera.position.clone().sub(hit).multiplyScalar(0.35)) };
+});
+function glideStep(dt) {
+  if (!glide) return;
+  glide.t = Math.min(1, glide.t + dt / 0.7);
+  const e = 1 - (1 - glide.t) ** 3;  // ease out
+  camera.position.lerpVectors(glide.fromPos, glide.pos, e);
+  controls.target.lerpVectors(glide.fromTarget, glide.target, e);
+  if (glide.t === 1) glide = null;
+}
+
+// Keyboard works in both modes. In map mode W A S D slide across the terrain (camera and pivot
+// together) at a speed proportional to the distance to the pivot, so it suits any height.
+const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyC', 'Space', 'ShiftLeft', 'ShiftRight',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.target.closest?.('input')) return;
+  if (MOVE_KEYS.has(e.code)) {
+    keys.add(e.code);
+    e.preventDefault();  // stop Space scrolling the panel or toggling a focused button
+  }
+  const factor = { Minus: 1 / 1.25, BracketLeft: 1 / 1.25, Equal: 1.25, BracketRight: 1.25 }[e.code];
+  if (factor) {
+    fly.speed *= factor;
+    flash(`Speed ${(fly.speed / fly.base).toFixed(1)}×`);
+  }
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+function keyMove(dt) {
+  if (!keys.size) return;
+  const k = keys, boost = k.has('ShiftLeft') || k.has('ShiftRight') ? 5 : 1;
+  const ahead = (k.has('KeyW') || k.has('ArrowUp')) - (k.has('KeyS') || k.has('ArrowDown'));
+  const side = (k.has('KeyD') || k.has('ArrowRight')) - (k.has('KeyA') || k.has('ArrowLeft'));
+  const up = (k.has('Space') || k.has('KeyE')) - (k.has('KeyQ') || k.has('KeyC'));
+  camera.getWorldDirection(forward);
+  if (!fly.on) forward.y = 0;  // map mode: slide level with the ground
+  forward.normalize();
+  right.crossVectors(forward, camera.up).normalize();
+  move.set(0, 0, 0).addScaledVector(forward, ahead).addScaledVector(right, side).addScaledVector(camera.up, up);
+  if (!move.lengthSq()) return;
+  const speed = fly.on ? fly.speed : camera.position.distanceTo(controls.target) * 0.4 * fly.speed / fly.base;
+  move.normalize().multiplyScalar(speed * boost * dt);
+  camera.position.add(move);
+  if (!fly.on) controls.target.add(move);
+}
+
+// Fly mode: drag (or click to capture the mouse) to look; swipes glide.
+const flying = () => document.pointerLockElement === canvas;
+let drag = null;
+canvas.addEventListener('pointerdown', e => { if (fly.on && e.button === 0 && !flying()) drag = { moved: 0 }; });
+addEventListener('pointerup', () => {
+  // browsers may refuse (e.g. without a real user gesture); dragging still works then
+  if (drag && drag.moved < 4) canvas.requestPointerLock()?.catch?.(() => {});
+  drag = null;
+});
+document.addEventListener('pointerlockchange', () => {
+  document.getElementById('hint').style.display = flying() ? 'block' : 'none';
+});
+document.addEventListener('mousemove', e => {
+  if (drag) drag.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
+  if (!fly.on || !(flying() || drag)) return;
+  fly.look.y -= e.movementX * 0.002;
+  fly.look.x = Math.max(-1.55, Math.min(1.55, fly.look.x - e.movementY * 0.002));
+  camera.quaternion.setFromEuler(fly.look);
+});
+canvas.addEventListener('wheel', e => {
+  if (!fly.on) return;  // map mode: MapControls zooms toward the cursor
+  e.preventDefault();
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;  // lines / pages -> pixels
+  const step = fly.speed * 0.004 * (e.ctrlKey ? 8 : 1);  // pinch deltas are small
+  camera.getWorldDirection(forward);
+  right.crossVectors(forward, camera.up).normalize();
+  camera.position.addScaledVector(forward, -e.deltaY * unit * step);
+  if (!e.ctrlKey) camera.position.addScaledVector(right, e.deltaX * unit * step);
+}, { passive: false });
+
+let flashTimer;
+function flash(text) {
+  status.textContent = text;
+  status.dataset.flash = '1';
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { delete status.dataset.flash; }, 1200);
+}
+
+const HELP = {
+  map: '<b>Map:</b> drag to slide, scroll or pinch to zoom toward the cursor, right-drag or Shift-drag to rotate and tilt, double-click to fly there. W A S D and Space / Q also move; Shift is faster, − / = set speed.',
+  fly: '<b>Fly:</b> W A S D move, Space / Q up and down, Shift is faster, − / = set speed. Two-finger swipe or pinch to glide. Drag to look, or click the view to steer with the mouse (Esc lets go).',
+};
+function setMode(flyOn) {
+  fly.on = flyOn;
+  controls.enabled = !flyOn;
+  glide = null;
+  document.getElementById('mode').textContent = `Camera: ${flyOn ? 'fly' : 'map'}`;
+  document.getElementById('help').innerHTML = HELP[flyOn ? 'fly' : 'map'] +
+    ' Click a name to jump there. Full detail streams in as you get close.';
+  if (flyOn) {
+    fly.look.setFromQuaternion(camera.quaternion);
+  } else {
+    if (flying()) document.exitPointerLock();
+    // pivot on whatever ground is in front of the camera
+    controls.target.copy(groundAt(innerWidth / 2, innerHeight / 2) ?? pivotAlongView());
   }
 }
 
-function addObjects(parts, first, count) {
-  for (let i = first; i < first + count; i++) {
-    const m = inst[i * 15], M = inst.subarray(i * 15 + 1, i * 15 + 13);  // rows of (c0, c1, c2)
-    const pool = meta.colorPools[inst[i * 15 + 13]], colorBase = pool ? pool[0] + inst[i * 15 + 14] : -1;
-    const [panel, meshes] = meta.models[m];
-    meshes.forEach(([texIndex, nv, nt], k) => {
-      const kind = textures[texIndex]?.helper ? 'helpers' : panel ? 'panels' : 'objects';
-      const b = builderFor(parts[kind], texIndex + ':-1');
-      const [vs, ts] = meshStart[m][k], base = b.count;
-      for (let v = 0; v < nv; v++) {
-        const x = modelVerts[(vs + v) * 3], y = modelVerts[(vs + v) * 3 + 1], z = modelVerts[(vs + v) * 3 + 2];
-        const wx = x * M[0] + y * M[3] + z * M[6] + M[9];
-        const wy = x * M[1] + y * M[4] + z * M[7] + M[10];
-        const wz = x * M[2] + y * M[5] + z * M[8] + M[11];
-        // game is Z-up; the viewer is Y-up
-        b.pos.push((wx - center[0]) * SCALE, (wz - center[1]) * SCALE, (-wy - center[2]) * SCALE);
-        b.uv.push(modelUvs[(vs + v) * 2], modelUvs[(vs + v) * 2 + 1]);
-        if (colorBase < 0) { b.col.push(1, 1, 1); continue; }
-        const o = colorBase + modelCols[vs + v] * 2, c = colorPools[o] << 8 | colorPools[o + 1];  // RGB565
-        const r = c >> 11, g = (c >> 5) & 63, bl = c & 31;
-        b.col.push(LINEAR[r << 3 | r >> 2] * BAKED_GAIN, LINEAR[g << 2 | g >> 4] * BAKED_GAIN, LINEAR[bl << 3 | bl >> 2] * BAKED_GAIN);
-      }
-      for (let t = 0; t < nt * 3; t++) b.idx.push(modelTris[ts * 3 + t] + base);
-    });
-  }
-}
+// game Z-up -> viewer Y-up, centred and scaled
+const toScene = (x, y, z, out, o) => {
+  out[o] = (x - center[0]) * SCALE; out[o + 1] = (z - center[1]) * SCALE; out[o + 2] = (-y - center[2]) * SCALE;
+};
+
+// ---------- view state and materials ----------
+const view = { textures: true, lighting: 'baked', objects: true, panels: false, helpers: false, wire: false };
+const allMaterials = new Set();
+const track = m => { allMaterials.add(m); m.wireframe = view.wire; return m; };
+const pick = mesh => mesh.userData.mats[view.lighting][view.textures ? 'textured' : 'flat'];
+const applyMaterials = () => scene.traverse(o => { if (o.isMesh) o.material = pick(o); });
 
 // Four materials per (texture, lightmap, colour): textured or flat, baked or viewer-lit.
 const materialCache = new Map();
-function materials(texIndex, lmIndex, flatColor, vertexLit, solid) {
-  const key = [texIndex, lmIndex, flatColor.getHexString(), vertexLit, solid].join(':');
+function materials(t, lm, flatColor, vertexLit, solid) {
+  const key = [t?.id, lm?.uuid, flatColor.getHexString(), vertexLit, solid].join(':');
   if (!materialCache.has(key)) {
-    const t = textures[texIndex], lm = lightmaps[lmIndex];
     // Terrain is always solid: road textures keep a full snow image in their colour channel and
     // use alpha as a mask for some other effect, so treating it as transparency punches holes.
     const blend = !solid && t?.mode === 'blend', cutout = !solid && t?.mode === 'cutout';
@@ -270,121 +365,327 @@ function materials(texIndex, lmIndex, flatColor, vertexLit, solid) {
     const flatSurface = { color: flatColor, alphaMap: cutout ? t.tex : null, opacity: blend ? 0.4 : 1 };
     const baked = lm ? { lightMap: lm, lightMapIntensity: BAKED_GAIN * Math.PI }  // unlit materials divide by pi
       : vertexLit ? { vertexColors: true } : {};
-    const set = {
+    materialCache.set(key, {
       viewer: {
-        textured: new THREE.MeshStandardMaterial({ ...common, ...surface, roughness: 0.9 }),
-        flat: new THREE.MeshStandardMaterial({ ...common, ...flatSurface, roughness: 0.9 }),
+        textured: track(new THREE.MeshStandardMaterial({ ...common, ...surface, roughness: 0.9 })),
+        flat: track(new THREE.MeshStandardMaterial({ ...common, ...flatSurface, roughness: 0.9 })),
       },
       baked: {
-        textured: new THREE.MeshBasicMaterial({ ...common, ...surface, ...baked }),
-        flat: new THREE.MeshBasicMaterial({ ...common, ...flatSurface, ...baked }),
+        textured: track(new THREE.MeshBasicMaterial({ ...common, ...surface, ...baked })),
+        flat: track(new THREE.MeshBasicMaterial({ ...common, ...flatSurface, ...baked })),
       },
-    };
-    materialCache.set(key, set);
+    });
   }
   return materialCache.get(key);
 }
-const view = { textures: true, lighting: 'baked' };
-const pick = mesh => mesh.userData.mats[view.lighting][view.textures ? 'textured' : 'flat'];
 
+function makeMesh(pos, idx, attrs, mats) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  for (const [name, [array, size]] of Object.entries(attrs)) geo.setAttribute(name, new THREE.BufferAttribute(array, size));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  const mesh = new THREE.Mesh(geo);
+  mesh.userData.mats = mats;
+  mesh.material = pick(mesh);
+  return mesh;
+}
+const indexArray = (n, maxVertex) => maxVertex > 65535 ? new Uint32Array(n) : new Uint16Array(n);
+
+// ---------- overview: every location at low detail, coloured like the game ----------
 const peakHue = { A: 0.58, B: 0.33, C: 0.08, D: 0.85, E: 0.13 };
-const groups = [], allMeshes = [];
-let patchOffset = 0, vertOffset = 0, instOffset = 0;
-meta.locations.forEach((loc, k) => {
+const ovPos = overview.section('pos', Int16Array), ovCol = overview.section('col');
+const locations = [];
+{
+  const n = ov.steps + 1, per = n * n;
+  const grid = [];
+  for (let a = 0; a < ov.steps; a++) for (let b = 0; b < ov.steps; b++) {
+    const i = a * n + b, j = i + n;
+    grid.push(i, j, j + 1, i, j + 1, i + 1);
+  }
+  let vert = 0;
+  ov.locations.forEach((info, k) => {
+    const hue = peakHue[info.name[0]] ?? 0;
+    const loc = {
+      ...info, index: k, detail: null, loading: false, lastNear: 0,
+      tint: new THREE.Color().setHSL(hue, 0.45 + (k % 3) * 0.12, 0.62 + (k % 2) * 0.08),
+      objTint: new THREE.Color().setHSL(hue, 0.18, 0.5),
+      sphere: new THREE.Sphere(new THREE.Vector3(...info.center.map((c, a) => (c - center[a]) * SCALE)), info.radius * SCALE),
+      root: new THREE.Group(),
+    };
+    loc.root.visible = !info.name.endsWith('SKY');  // skyboxes would swallow the view
+    scene.add(loc.root);
+    if (info.patches) {
+      const count = info.patches * per;
+      const pos = new Float32Array(count * 3), col = new Float32Array(count * 3);
+      for (let v = 0; v < count; v++) for (let a = 0; a < 3; a++) {
+        const t = (ovPos[(vert + v) * 3 + a] + 32768) / 65535;
+        pos[v * 3 + a] = (ov.min[a] + t * (ov.max[a] - ov.min[a]) - center[a]) * SCALE;
+        col[v * 3 + a] = LINEAR[ovCol[(vert + v) * 3 + a]];
+      }
+      vert += count;
+      const idx = indexArray(info.patches * grid.length, count);
+      for (let p = 0; p < info.patches; p++) for (let i = 0; i < grid.length; i++) idx[p * grid.length + i] = grid[i] + p * per;
+      const mats = {
+        baked: { textured: track(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })),
+                 flat: track(new THREE.MeshStandardMaterial({ color: loc.tint, side: THREE.DoubleSide })) },
+        viewer: { textured: track(new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide })),
+                  flat: track(new THREE.MeshStandardMaterial({ color: loc.tint, side: THREE.DoubleSide })) },
+      };
+      loc.overview = makeMesh(pos, idx, { color: [col, 3] }, mats);
+      loc.root.add(loc.overview);
+    }
+    locations.push(loc);
+  });
+}
+document.getElementById('loading').remove();
+
+// ---------- full detail, loaded per location ----------
+let texturePack = null;
+const textureCache = new Map();
+function texture(id) {
+  if (id < 0) return null;
+  if (!textureCache.has(id)) {
+    const t = decodeTexture(texturePack.bytes, texturePack.meta.textures[id], THREE.RepeatWrapping);
+    textureCache.set(id, { ...t, id, helper: !!texturePack.meta.textures[id][7] });
+  }
+  return textureCache.get(id);
+}
+async function textures() {
+  if (!texturePack) {
+    const pack = await load('textures', 'textures.js');
+    texturePack = { meta: pack.meta, bytes: pack.section('bytes') };
+  }
+}
+
+function buildDetail(loc, pack) {
+  const { meta, section } = pack;
   const group = new THREE.Group();
-  const hue = peakHue[loc.name[0]] ?? 0;
-  const tint = new THREE.Color().setHSL(hue, 0.45 + (k % 3) * 0.12, 0.62 + (k % 2) * 0.08);
-  const objTint = new THREE.Color().setHSL(hue, 0.18, 0.5);
-  group.userData = { tint, name: loc.name, terrain: [], objects: [], panels: [], helpers: [] };
-  const parts = { terrain: new Map(), objects: new Map(), panels: new Map(), helpers: new Map() };
-  addTerrain(parts, loc, patchOffset, vertOffset);
-  addObjects(parts, instOffset, loc.instances);
-  patchOffset += loc.patches; vertOffset += loc.patches * perPatch; instOffset += loc.instances;
-  for (const [kind, builders] of Object.entries(parts)) {
-    for (const [key, b] of builders) {
-      const [texIndex, lmIndex] = key.split(':').map(Number);
-      const mats = materials(texIndex, lmIndex, kind === 'terrain' ? tint : objTint, b.col.length > 0, kind === 'terrain');
-      const mesh = b.mesh();
-      mesh.userData = { mats };
-      mesh.material = pick(mesh);
-      mesh.visible = kind === 'terrain' || kind === 'objects';
-      if (kind !== 'terrain' && textures[texIndex]?.mode === 'blend') mesh.renderOrder = 1;
-      group.userData[kind].push(mesh);
-      group.add(mesh);
-      allMeshes.push(mesh);
+  const kinds = { terrain: [], objects: [], panels: [], helpers: [] };
+  const lightmapBytes = section('lightmaps');
+  const lightmaps = meta.lightmaps.map(info => {
+    const { tex } = decodeTexture(lightmapBytes, info, THREE.ClampToEdgeWrapping);
+    tex.channel = 1;  // lightmaps use the second UV set
+    return tex;
+  });
+  const add = (kind, mesh) => { kinds[kind].push(mesh); group.add(mesh); mesh.visible = kind === 'terrain' || view[kind]; };
+
+  // terrain: tessellate the bicubic patches
+  const coefs = section('coefs', Float32Array), patchUv = section('patchUv', Float32Array), patchLm = section('patchLm', Float32Array);
+  const n = DETAIL_STEPS + 1, per = n * n;
+  const grid = [];
+  for (let a = 0; a < DETAIL_STEPS; a++) for (let b = 0; b < DETAIL_STEPS; b++) {
+    const i = a * n + b, j = i + n;
+    grid.push(i, j, j + 1, i, j + 1, i + 1);
+  }
+  const basis = [];  // u^i v^j for every grid point
+  for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
+    const s = a / DETAIL_STEPS, t = b / DETAIL_STEPS;
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) basis.push(s ** i * t ** j);
+  }
+  let p0 = 0;
+  for (const [texId, lmIndex, count] of meta.runs) {
+    const t = texture(texId);
+    const pos = new Float32Array(count * per * 3), uv = new Float32Array(count * per * 2), uv1 = new Float32Array(count * per * 2);
+    const idx = indexArray(count * grid.length, count * per);
+    for (let k = 0; k < count; k++) {
+      const p = p0 + k, c = coefs.subarray(p * 48, p * 48 + 48);
+      const cuv = patchUv.subarray(p * 8, p * 8 + 8), [lu, lv, lw, lh] = patchLm.subarray(p * 4, p * 4 + 4);
+      for (let g = 0; g < per; g++) {
+        let x = 0, y = 0, z = 0;
+        for (let m = 0; m < 16; m++) { const w = basis[g * 16 + m]; x += c[m * 3] * w; y += c[m * 3 + 1] * w; z += c[m * 3 + 2] * w; }
+        const v = k * per + g;
+        toScene(x, y, z, pos, v * 3);
+        // bilinear blend of the corner UVs: S(0,0), S(1,0), S(0,1), S(1,1)
+        const s = Math.floor(g / n) / DETAIL_STEPS, tt = (g % n) / DETAIL_STEPS;
+        const w0 = (1 - s) * (1 - tt), w1 = s * (1 - tt), w2 = (1 - s) * tt, w3 = s * tt;
+        uv[v * 2] = cuv[0] * w0 + cuv[2] * w1 + cuv[4] * w2 + cuv[6] * w3;
+        uv[v * 2 + 1] = cuv[1] * w0 + cuv[3] * w1 + cuv[5] * w2 + cuv[7] * w3;
+        // the patch's first parameter runs along the lightmap's v axis
+        uv1[v * 2] = lu + tt * lw; uv1[v * 2 + 1] = lv + s * lh;
+      }
+      for (let i = 0; i < grid.length; i++) idx[k * grid.length + i] = grid[i] + k * per;
+    }
+    p0 += count;
+    const mats = materials(t, lightmaps[lmIndex], loc.tint, false, true);
+    add(t?.helper ? 'helpers' : 'terrain', makeMesh(pos, idx, { uv: [uv, 2], uv1: [uv1, 2] }, mats));
+  }
+
+  // objects: bake every placement into one mesh per (kind, texture)
+  const verts = section('verts', Int16Array), uvs = section('uvs', Int16Array), cols = section('cols', Uint16Array);
+  const tris = section('tris', Uint16Array), inst = section('inst', Float32Array), pools = section('colorPools');
+  const meshStart = [];
+  { let v = 0, t = 0;
+    for (const [, meshes] of meta.models) meshStart.push(meshes.map(([, nv, nt]) => { const r = [v, t]; v += nv; t += nt; return r; })); }
+  // model category from the export: 0 object, 1 flat backdrop panel, 2 placeholder (drawn by the game some other way)
+  const kindOf = (category, texId) => category === 2 || texture(texId)?.helper ? 'helpers'
+    : category === 1 ? 'panels' : 'objects';
+  const buckets = new Map();  // kind:texId -> {nv, nt, ...}
+  for (let i = 0; i < meta.instances; i++) {  // pass 1: sizes
+    const [category, meshes] = meta.models[inst[i * 15]];
+    for (const [texId, nv, nt] of meshes) {
+      const key = kindOf(category, texId) + ':' + texId;
+      const b = buckets.get(key) ?? buckets.set(key, { nv: 0, nt: 0 }).get(key);
+      b.nv += nv; b.nt += nt;
     }
   }
-  group.visible = !loc.name.endsWith('SKY');  // skyboxes would swallow the view
-  scene.add(group);
-  groups.push(group);
-});
+  for (const b of buckets.values()) {
+    b.pos = new Float32Array(b.nv * 3); b.uv = new Float32Array(b.nv * 2); b.col = new Float32Array(b.nv * 3);
+    b.idx = indexArray(b.nt * 3, b.nv); b.v = 0; b.t = 0;
+  }
+  for (let i = 0; i < meta.instances; i++) {  // pass 2: fill
+    const m = inst[i * 15], M = inst.subarray(i * 15 + 1, i * 15 + 13);  // rows of (c0, c1, c2)
+    const pool = meta.pools[inst[i * 15 + 13]], colorBase = pool ? pool[0] + inst[i * 15 + 14] : -1;
+    const [category, meshes] = meta.models[m];
+    meshes.forEach(([texId, nv, nt, lx, ly, lz, sx, sy, sz], k) => {
+      const b = buckets.get(kindOf(category, texId) + ':' + texId), [vs, ts] = meshStart[m][k];
+      for (let v = 0; v < nv; v++) {
+        const q = (vs + v) * 3;
+        const x = lx + (verts[q] + 32768) * sx, y = ly + (verts[q + 1] + 32768) * sy, z = lz + (verts[q + 2] + 32768) * sz;
+        const o = b.v + v;
+        toScene(x * M[0] + y * M[3] + z * M[6] + M[9], x * M[1] + y * M[4] + z * M[7] + M[10],
+                x * M[2] + y * M[5] + z * M[8] + M[11], b.pos, o * 3);
+        b.uv[o * 2] = uvs[(vs + v) * 2] / 4096; b.uv[o * 2 + 1] = uvs[(vs + v) * 2 + 1] / 4096;
+        if (colorBase < 0) { b.col.fill(1, o * 3, o * 3 + 3); continue; }
+        const at = colorBase + cols[vs + v] * 2, c = pools[at] << 8 | pools[at + 1];  // RGB565
+        const r = c >> 11, g = (c >> 5) & 63, bl = c & 31;
+        b.col[o * 3] = LINEAR[r << 3 | r >> 2] * BAKED_GAIN;
+        b.col[o * 3 + 1] = LINEAR[g << 2 | g >> 4] * BAKED_GAIN;
+        b.col[o * 3 + 2] = LINEAR[bl << 3 | bl >> 2] * BAKED_GAIN;
+      }
+      for (let t = 0; t < nt * 3; t++) b.idx[b.t * 3 + t] = tris[ts * 3 + t] + b.v;
+      b.v += nv; b.t += nt;
+    });
+  }
+  for (const [key, b] of buckets) {
+    const [kind, texId] = key.split(':');
+    const t = texture(Number(texId));
+    const mesh = makeMesh(b.pos, b.idx, { uv: [b.uv, 2], color: [b.col, 3] }, materials(t, null, loc.objTint, true, false));
+    if (t?.mode === 'blend') mesh.renderOrder = 1;
+    add(kind, mesh);
+  }
+  group.userData.kinds = kinds;
+  return group;
+}
 
-// location list grouped by peak
+function disposeDetail(loc) {
+  loc.detail.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
+  for (const m of loc.detail.userData.kinds.terrain) m.material.lightMap?.dispose();
+  loc.root.remove(loc.detail);
+  loc.detail = null;
+}
+
+// ---------- level of detail ----------
+// A location gets full detail while the camera is within a couple of its radii.
+const isNear = loc => camera.position.distanceTo(loc.sphere.center) < loc.sphere.radius * 2 + span * 0.02;
+let busy = false;
+async function updateDetail() {
+  const now = performance.now();
+  for (const loc of locations) {
+    const near = loc.root.visible && isNear(loc);
+    if (near) loc.lastNear = now;
+    if (loc.detail) loc.detail.visible = near;
+    if (loc.overview) loc.overview.visible = !(near && loc.detail);
+  }
+  // free the least recently needed detail beyond the budget
+  const loaded = locations.filter(l => l.detail && !l.detail.visible).sort((a, b) => a.lastNear - b.lastNear);
+  while (locations.filter(l => l.detail).length > MAX_DETAILED && loaded.length) disposeDetail(loaded.shift());
+  if (busy) return;
+  const want = locations.filter(l => l.root.visible && !l.detail && isNear(l))
+    .sort((a, b) => camera.position.distanceTo(a.sphere.center) - camera.position.distanceTo(b.sphere.center))[0];
+  if (!want) {
+    if (!status.dataset.flash) status.textContent = `${locations.filter(l => l.detail?.visible).length} locations in full detail`;
+    return;
+  }
+  busy = true;
+  status.textContent = `Loading ${want.name}…`;
+  try {
+    await textures();
+    const pack = await load(want.name, want.file);
+    want.detail = buildDetail(want, pack);
+    want.root.add(want.detail);
+  } catch (e) {
+    console.error(e);
+    status.textContent = `Couldn't load ${want.name}`;
+  }
+  busy = false;
+  updateDetail();
+}
+setInterval(updateDetail, 250);
+
+// ---------- panel ----------
 const list = document.getElementById('list');
 let lastPeak = null;
-groups.forEach((group, k) => {
-  const loc = meta.locations[k];
+for (const loc of locations) {
   const peak = /^[A-E]/.test(loc.name) ? loc.name[0] : 'Other';
   if (peak !== lastPeak) {
     lastPeak = peak;
     list.insertAdjacentHTML('beforeend', `<div class="peak">${peak === 'Other' ? 'Other' : 'Peak ' + peak}</div>`);
   }
   const label = document.createElement('label');
-  label.innerHTML = `<input type="checkbox" ${group.visible ? 'checked' : ''}><span class="sw" style="background:#${group.userData.tint.getHexString()}"></span>` +
+  label.innerHTML = `<input type="checkbox" ${loc.root.visible ? 'checked' : ''}><span class="sw" style="background:#${loc.tint.getHexString()}"></span>` +
     `${loc.name} <span class="what">${loc.what.replace(/^peak \w /, '')}</span>`;
   const box = label.querySelector('input');
-  box.onchange = () => { group.visible = box.checked; };
-  label.onclick = e => { if (e.target !== box) { e.preventDefault(); focus(group); } };
-  group.userData.box = box;
+  box.onchange = () => { loc.root.visible = box.checked; };
+  label.onclick = e => { if (e.target !== box) { e.preventDefault(); focus(loc); } };
+  loc.box = box;
   list.appendChild(label);
-});
-
-function focus(group) {
-  const box = new THREE.Box3();
-  for (const m of [...group.userData.terrain, ...group.userData.objects]) box.expandByObject(m);
-  if (box.isEmpty()) return;
-  const sphere = box.getBoundingSphere(new THREE.Sphere());
-  const dir = camera.position.clone().sub(controls.target).normalize();
-  controls.target.copy(sphere.center);
-  camera.position.copy(sphere.center).addScaledVector(dir, sphere.radius * 2.2);
 }
-const meshesOf = key => groups.flatMap(g => g.userData[key]);
-const setAll = on => groups.forEach(g => {
-  const show = on && !g.userData.name.endsWith('SKY');
-  g.visible = show; g.userData.box.checked = show;
-});
-function toggle(id, label, initial, apply) {
-  let on = initial;
-  document.getElementById(id).onclick = e => {
-    on = !on;
-    e.target.textContent = `${label}: ${on ? 'on' : 'off'}`;
-    apply(on);
-  };
+function focus(loc) {
+  // come in from above and to the side, looking at the location
+  const c = loc.sphere.center, r = loc.sphere.radius;
+  camera.getWorldDirection(forward);
+  const back = new THREE.Vector3(-forward.x, 0, -forward.z).normalize();
+  if (!back.lengthSq()) back.set(1, 0, 0);
+  camera.position.copy(c).addScaledVector(back, r * 1.3).add(new THREE.Vector3(0, r * 0.7, 0));
+  camera.lookAt(c);
+  controls.target.copy(c);
+  fly.look.setFromQuaternion(camera.quaternion);
+  fly.speed = fly.base = Math.max(r * 0.25, span * 0.002);  // cross the location in a few seconds
+  updateDetail();
 }
+const setAll = on => locations.forEach(l => {
+  const show = on && !l.name.endsWith('SKY');
+  l.root.visible = show; l.box.checked = show;
+});
 document.getElementById('all').onclick = () => setAll(true);
 document.getElementById('none').onclick = () => setAll(false);
-const applyMaterials = () => allMeshes.forEach(m => { m.material = pick(m); });
-toggle('textures', 'Textures', true, on => { view.textures = on; applyMaterials(); });
+
+const setKind = (kind, on) => { view[kind] = on; for (const l of locations) for (const m of l.detail?.userData.kinds[kind] ?? []) m.visible = on; };
+function toggle(id, label, key, apply) {
+  document.getElementById(id).onclick = e => {
+    view[key] = !view[key];
+    e.target.textContent = `${label}: ${view[key] ? 'on' : 'off'}`;
+    apply(view[key]);
+  };
+}
+toggle('textures', 'Textures', 'textures', applyMaterials);
+toggle('objects', 'Objects', 'objects', on => setKind('objects', on));
+toggle('panels', 'Panels', 'panels', on => setKind('panels', on));
+toggle('helpers', 'Helpers', 'helpers', on => setKind('helpers', on));
 document.getElementById('lighting').onclick = e => {
   view.lighting = view.lighting === 'baked' ? 'viewer' : 'baked';
   e.target.textContent = `Lighting: ${view.lighting}`;
   applyMaterials();
 };
-toggle('objects', 'Objects', true, on => meshesOf('objects').forEach(m => { m.visible = on; }));
-toggle('panels', 'Panels', false, on => meshesOf('panels').forEach(m => { m.visible = on; }));
-toggle('helpers', 'Helpers', false, on => meshesOf('helpers').forEach(m => { m.visible = on; }));
-document.getElementById('wire').onclick = () => {
-  const on = !allMeshes[0]?.material.wireframe;
-  for (const set of materialCache.values()) for (const m of [set.viewer.textured, set.viewer.flat, set.baked.textured, set.baked.flat]) m.wireframe = on;
-};
+document.getElementById('mode').onclick = () => setMode(!fly.on);
+setMode(false);
+document.getElementById('wire').onclick = () => { view.wire = !view.wire; allMaterials.forEach(m => { m.wireframe = view.wire; }); };
 
-document.getElementById('loading').remove();
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  keyMove(dt);
+  glideStep(dt);
+  if (!fly.on) controls.update();
+  renderer.render(scene, camera);
+});
 </script>
 </body>
 </html>

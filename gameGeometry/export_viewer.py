@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
-"""Export SSX 3 terrain and placed objects into a self-contained HTML 3D viewer.
+"""Export SSX 3 terrain and placed objects into a streaming HTML 3D viewer.
 
-    python3 export_viewer.py                 # -> out/terrain.html
-    python3 export_viewer.py --steps 8       # smoother terrain (bigger file)
+    python3 export_viewer.py                 # -> out/viewer/index.html
     python3 export_viewer.py --no-objects    # terrain only
+
+The viewer opens straight from disk (file://). index.html starts with a
+low-detail overview of the whole mountain (data/overview.js) and loads each
+location's full terrain, objects, textures and baked lighting on demand
+(data/<location>.js, data/textures.js) as the camera gets close. Data files
+are gzipped binary packs wrapped in a script call, since browsers won't
+fetch() local files but will load local <script>s.
 """
 import argparse
 import base64
+import gzip
 import json
 import os
+import shutil
 import struct
 import sys
 from array import array
@@ -19,28 +27,12 @@ import gxtex
 import ssx3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+OVERVIEW_STEPS = 2  # patch tessellation for the far-away overview
 
 
-def tessellate(patches, steps):
-    """Grid points for every patch, (steps+1)^2 per patch, game Z-up -> Y-up."""
-    n = steps + 1
-    weights = []  # the 16 basis products u^i v^j for each grid point
-    for a in range(n):
-        for b in range(n):
-            us = [(a / steps) ** i for i in range(4)]
-            vs = [(b / steps) ** j for j in range(4)]
-            weights.append([us[i] * vs[j] for i in range(4) for j in range(4)])
-    out = []
-    for p in patches:
-        cx = [c[0] for c in p.coef]
-        cy = [c[1] for c in p.coef]
-        cz = [c[2] for c in p.coef]
-        for w in weights:
-            x = sum(a * b for a, b in zip(w, cx))
-            y = sum(a * b for a, b in zip(w, cy))
-            z = sum(a * b for a, b in zip(w, cz))
-            out.append((x, z, -y))
-    return out
+def to_viewer(p):
+    """Game coordinates are Z-up; the viewer is Y-up."""
+    return (p[0], p[2], -p[1])
 
 
 def is_panel(model):
@@ -62,12 +54,6 @@ def is_panel(model):
             normals.append([x / length for x in n])
     # every face parallel to the first (either side)
     return bool(normals) and all(abs(sum(p * q for p, q in zip(n, normals[0]))) > 0.99 for n in normals)
-
-
-def b64(arr):
-    if sys.byteorder != 'little':
-        arr.byteswap()
-    return base64.b64encode(arr.tobytes()).decode()
 
 
 def texture_payload(tex):
@@ -97,47 +83,143 @@ def is_helper_texture(tex):
     return alpha < 128 and saturation > 0.3
 
 
+def is_placeholder_texture(tex):
+    """A tiny image of one flat dark colour. Real textures always have detail; these mark
+    placeholder objects (point-multiplier cubes, black slabs by jumps) that the game draws
+    with effects at runtime or not at all."""
+    w, h = struct.unpack_from('>HH', tex, 4)
+    if w * h > 256:
+        return False
+    _, _, px = gxtex.decode(tex)
+    if max(max(px[i::4]) - min(px[i::4]) for i in range(4)) > 8:
+        return False
+    return sum(px[:3]) / 3 < 60 and px[3] > 250
+
+
+# model categories in the viewer
+OBJECT, PANEL, PLACEHOLDER = 0, 1, 2
+
+
+class Pack:
+    """Named binary sections plus JSON metadata, gzipped into one blob."""
+
+    def __init__(self, meta=None):
+        self.meta = meta if meta is not None else {}
+        self.sections = {}
+
+    def add(self, name, data):
+        if isinstance(data, array):
+            if sys.byteorder != 'little':
+                data = array(data.typecode, data)
+                data.byteswap()
+            data = data.tobytes()
+        self.sections[name] = bytes(data)
+
+    def write(self, path, key):
+        body, index = bytearray(), {}
+        for name, data in self.sections.items():
+            body += bytes(-len(body) % 8)  # keep typed-array views aligned
+            index[name] = [len(body), len(data)]
+            body += data
+        header = json.dumps({'meta': self.meta, 'sections': index}, separators=(',', ':')).encode()
+        header += b' ' * (-(len(header) + 4) % 8)
+        blob = gzip.compress(struct.pack('<I', len(header)) + header + body, 6)
+        with open(path, 'w') as f:
+            f.write(f'ssxData({json.dumps(key)},"{base64.b64encode(blob).decode()}");\n')
+        return os.path.getsize(path)
+
+
+def overview_grid(patch, steps):
+    """Low-detail grid points of a patch, as (s, t, game xyz)."""
+    out = []
+    for a in range(steps + 1):
+        for b in range(steps + 1):
+            s, t = a / steps, b / steps
+            out.append((s, t, patch.eval(s, t)))
+    return out
+
+
+def baked_color(tex_avg, lightmap, patch, s, t):
+    """Approximate the game's look at one point: texture colour x lightmap x 2."""
+    lu, lv, lw, lh = patch.lightmap_rect
+    w, h = struct.unpack_from('>HH', lightmap, 4)
+    # the patch's first parameter runs along the lightmap's v axis
+    x = min(w - 1, max(0, int((lu + t * lw) * w)))
+    y = min(h - 1, max(0, int((lv + s * lh) * h)))
+    light = gxtex.cmpr_pixel(lightmap, x, y)
+    return tuple(min(255, tex_avg[i] * light[i] * 2 // 255) for i in range(3))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('image', nargs='?', default=DEFAULT_ISO)
-    ap.add_argument('--steps', type=int, default=6, help='tessellation steps per patch edge (default 6)')
     ap.add_argument('--no-objects', action='store_true', help='leave out placed prefab models')
-    ap.add_argument('--out', default=os.path.join(HERE, 'out', 'terrain.html'))
+    ap.add_argument('--out', default=os.path.join(HERE, 'out', 'viewer'))
     args = ap.parse_args()
 
     disc = GCDisc(args.image)
     print('Decoding world...', file=sys.stderr)
     world = ssx3.World(disc.read_file('data/worlds/bam.big'))
     bank, lightmap_bank, color_pools = world.textures(), world.lightmaps(), world.color_pools()
-
-    texture_ids = {}   # texture bank id -> index in the exported texture list
-    lightmap_ids = {}  # lightmap id -> index in the exported lightmap list
-    pool_ids = {}      # (track, rid) -> index in the exported colour pool list
-
-    def index_in(table, bank_, key):
-        if key not in bank_:
-            return -1
-        return table.setdefault(key, len(table))
-
-    def tex_index(tid):
-        return index_in(texture_ids, bank, tid)
-
     models = {} if args.no_objects else world.models()
-    model_ids = {}  # (track, rid) -> index in the exported model list
-    # per model: [panel flag, [texture index, vertex count, triangle count] per mesh]
-    model_meta = []
-    model_verts, model_uvs, model_cols, model_tris = array('f'), array('f'), array('H'), array('H')
-    # per instance: model index, 12 matrix floats (3 columns x 4 rows), colour pool index, byte offset
-    inst = array('f')
-    patch_uvs, patch_lm = array('f'), array('f')
+    tex_avg = {tid: gxtex.average(d) for tid, d in bank.items()}
+    placeholders = {tid for tid, d in bank.items() if is_placeholder_texture(d)}
 
-    locations, points = [], []
+    data_dir = os.path.join(args.out, 'data')
+    shutil.rmtree(data_dir, ignore_errors=True)
+    os.makedirs(data_dir)
+
+    used_textures = set()
+    locations = []
+    overview_pos, overview_col = [], array('B')  # viewer-space points, baked RGB
+    total_bytes = 0
+
     for track in world.tracks():
         name = world.location_name(track)
         patches = sorted(world.patches(track), key=lambda p: (p.texture, p.lightmap))
         instances = [i for i in world.instances(track) if i.model in models]
         if not patches and not instances:
             continue
+        pack = Pack()
+
+        # terrain: bicubic coefficients, tessellated in the page
+        lightmap_ids, runs = {}, []  # runs: [texture id, local lightmap index, patch count]
+        coefs, uvs, lm_rects = array('f'), array('f'), array('f')
+        for p in patches:
+            lm = lightmap_ids.setdefault(p.lightmap, len(lightmap_ids)) if p.lightmap in lightmap_bank else -1
+            tid = p.texture if p.texture in bank else -1
+            used_textures.add(tid)
+            if runs and runs[-1][:2] == [tid, lm]:
+                runs[-1][2] += 1
+            else:
+                runs.append([tid, lm, 1])
+            coefs.extend(c for xyz in p.coef for c in xyz)
+            uvs.extend(p.uv_corners)
+            lm_rects.extend(p.lightmap_rect)
+            # overview: a few points per patch, coloured like the game would draw them
+            for s, t, xyz in overview_grid(p, OVERVIEW_STEPS):
+                overview_pos.append(to_viewer(xyz))
+                if p.lightmap in lightmap_bank and p.texture in tex_avg:
+                    overview_col.extend(baked_color(tex_avg[p.texture], lightmap_bank[p.lightmap], p, s, t))
+                else:
+                    overview_col.extend((200, 200, 200))
+        pack.add('coefs', coefs)
+        pack.add('patchUv', uvs)
+        pack.add('patchLm', lm_rects)
+
+        lm_bytes, lightmaps = bytearray(), []
+        for lid in lightmap_ids:  # insertion order == local index
+            kind, w, h, pixels, _ = texture_payload(lightmap_bank[lid])
+            lightmaps.append([kind, w, h, len(lm_bytes), len(pixels)])
+            lm_bytes += pixels
+        pack.add('lightmaps', lm_bytes)
+
+        # objects: each model once, then its placements
+        model_ids, model_meta = {}, []
+        verts, muvs, cols, tris = array('h'), array('h'), array('H'), array('H')
+        pool_ids, pool_bytes, pools = {}, bytearray(), []
+        inst = array('f')  # model index, 12 matrix floats (3 columns x 4 rows), pool index, byte offset
+        points = [to_viewer(ssx3.transform((0, 0, 0), i.matrix)) for i in instances]
         for i in instances:
             if i.model not in model_ids:
                 m = models[i.model]
@@ -145,69 +227,74 @@ def main():
                 meshes = []
                 for mesh in m.meshes:
                     tid = m.textures[mesh.material] if mesh.material < len(m.textures) else None
-                    meshes.append([tex_index(tid), len(mesh.verts), len(mesh.tris)])
-                    model_verts.extend(c for v in mesh.verts for c in v)
-                    model_uvs.extend(c for uv in mesh.uvs for c in uv)
-                    model_cols.extend(mesh.colors)
-                    model_tris.extend(k for t in mesh.tris for k in t)
-                model_meta.append([int(is_panel(m)), meshes])
+                    tid = tid if tid in bank else -1
+                    used_textures.add(tid)
+                    # positions quantized to 16 bits across each mesh's own bounds
+                    lo = [min(v[k] for v in mesh.verts) for k in range(3)]
+                    scale = [max((max(v[k] for v in mesh.verts) - lo[k]) / 65535, 1e-6) for k in range(3)]
+                    verts.extend(round((v[k] - lo[k]) / scale[k]) - 32768 for v in mesh.verts for k in range(3))
+                    muvs.extend(max(-32768, min(32767, round(c * 4096))) for uv in mesh.uvs for c in uv)
+                    cols.extend(mesh.colors)
+                    tris.extend(k for t in mesh.tris for k in t)
+                    meshes.append([tid, len(mesh.verts), len(mesh.tris), *lo, *scale])
+                if any(t in placeholders for t in m.textures):
+                    category = PLACEHOLDER
+                else:
+                    category = PANEL if is_panel(m) else OBJECT
+                model_meta.append([category, meshes])
+            if i.color_pool not in pool_ids and i.color_pool in color_pools:
+                pool_ids[i.color_pool] = len(pools)
+                pools.append([len(pool_bytes), len(color_pools[i.color_pool])])
+                pool_bytes += color_pools[i.color_pool]
             inst.append(model_ids[i.model])
             inst.extend(i.matrix[r * 4 + c] for r in range(4) for c in range(3))
-            inst.extend((index_in(pool_ids, color_pools, i.color_pool), i.color_offset))
-        runs = []  # [texture index, lightmap index, patch count] in patch order
+            inst.extend((pool_ids.get(i.color_pool, -1), i.color_offset))
+        for key, arr in (('verts', verts), ('uvs', muvs), ('cols', cols), ('tris', tris), ('inst', inst)):
+            pack.add(key, arr)
+        pack.add('colorPools', pool_bytes)
+        pack.meta = {'runs': runs, 'lightmaps': lightmaps, 'models': model_meta, 'pools': pools,
+                     'instances': len(instances), 'patches': len(patches)}
+
+        file = f'{name}.js'
+        size = pack.write(os.path.join(data_dir, file), name)
+        total_bytes += size
+
+        # bounding sphere (viewer space) from patch boxes and object positions
         for p in patches:
-            t, lm = tex_index(p.texture), index_in(lightmap_ids, lightmap_bank, p.lightmap)
-            if runs and runs[-1][:2] == [t, lm]:
-                runs[-1][2] += 1
-            else:
-                runs.append([t, lm, 1])
-            patch_uvs.extend(p.uv_corners)
-            patch_lm.extend(p.lightmap_rect)
-        print(f'  {name:<8} {len(patches):>5} patches {len(instances):>5} objects', file=sys.stderr)
-        locations.append({'name': name, 'what': describe(name), 'patches': len(patches),
-                          'instances': len(instances), 'runs': runs})
-        points += tessellate(patches, args.steps)
+            points += [to_viewer(p.bbox_min), to_viewer(p.bbox_max)]
+        lo = [min(q[k] for q in points) for k in range(3)]
+        hi = [max(q[k] for q in points) for k in range(3)]
+        centre = [(a + b) / 2 for a, b in zip(lo, hi)]
+        radius = max(((a - b) / 2) ** 2 for a, b in zip(lo, hi)) ** 0.5 * 3 ** 0.5
+        locations.append({'name': name, 'what': describe(name), 'file': file, 'patches': len(patches),
+                          'instances': len(instances), 'center': centre, 'radius': radius})
+        print(f'  {name:<8} {len(patches):>5} patches {len(instances):>5} objects  {size / 1e6:5.2f} MB',
+              file=sys.stderr)
 
-    lo = [min(p[a] for p in points) for a in range(3)]
-    hi = [max(p[a] for p in points) for a in range(3)]
-    # quantize terrain to int16 across the bounding box (~5 game units of precision)
-    q = array('h', (round((p[a] - lo[a]) / (hi[a] - lo[a]) * 65535) - 32768 for p in points for a in range(3)))
+    # shared textures, keyed by bank id
+    tex_bytes, textures = bytearray(), {}
+    for tid in sorted(t for t in used_textures if t >= 0):
+        kind, w, h, pixels, palette = texture_payload(bank[tid])
+        textures[tid] = [kind, w, h, len(tex_bytes), len(pixels), len(tex_bytes) + len(pixels),
+                         len(palette) // 2, int(is_helper_texture(bank[tid]))]
+        tex_bytes += pixels + palette
+        tex_bytes += bytes(-len(tex_bytes) % 4)
+    pack = Pack({'textures': textures})
+    pack.add('bytes', tex_bytes)
+    total_bytes += pack.write(os.path.join(data_dir, 'textures.js'), 'textures')
 
-    tex_bytes = bytearray()
+    # overview: every location's low-detail terrain, quantized across the whole mountain
+    lo = [min(p[k] for p in overview_pos) for k in range(3)]
+    hi = [max(p[k] for p in overview_pos) for k in range(3)]
+    q = array('h', (round((p[k] - lo[k]) / (hi[k] - lo[k]) * 65535) - 32768 for p in overview_pos for k in range(3)))
+    pack = Pack({'steps': OVERVIEW_STEPS, 'min': lo, 'max': hi, 'locations': locations})
+    pack.add('pos', q)
+    pack.add('col', overview_col)
+    total_bytes += pack.write(os.path.join(data_dir, 'overview.js'), 'overview')
 
-    def add_texture(tex, helper=False):
-        kind, w, h, pixels, palette = texture_payload(tex)
-        entry = [kind, w, h, len(tex_bytes), len(pixels), len(tex_bytes) + len(pixels), len(palette) // 2, int(helper)]
-        tex_bytes.extend(pixels + palette)
-        tex_bytes.extend(bytes(-len(tex_bytes) % 4))
-        return entry
-
-    # insertion order == index order
-    textures = [add_texture(bank[tid], is_helper_texture(bank[tid])) for tid in texture_ids]
-    lightmaps = [add_texture(lightmap_bank[lid]) for lid in lightmap_ids]
-    pool_bytes, pools = bytearray(), []
-    for key in pool_ids:
-        pools.append([len(pool_bytes), len(color_pools[key])])
-        pool_bytes += color_pools[key]
-
-    meta = {'steps': args.steps, 'min': lo, 'max': hi, 'locations': locations, 'models': model_meta,
-            'textures': textures, 'lightmaps': lightmaps, 'colorPools': pools}
-    with open(os.path.join(HERE, 'viewer_template.html')) as f:
-        html = f.read()
-    for key, value in (('__META__', json.dumps(meta, separators=(',', ':'))), ('__TERRAIN__', b64(q)),
-                       ('__PATCH_UVS__', b64(patch_uvs)), ('__PATCH_LM__', b64(patch_lm)),
-                       ('__MODEL_VERTS__', b64(model_verts)), ('__MODEL_UVS__', b64(model_uvs)),
-                       ('__MODEL_COLS__', b64(model_cols)), ('__MODEL_TRIS__', b64(model_tris)),
-                       ('__COLOR_POOLS__', base64.b64encode(pool_bytes).decode()),
-                       ('__INSTANCES__', b64(inst)), ('__TEXTURES__', base64.b64encode(tex_bytes).decode())):
-        html = html.replace(key, value)
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, 'w') as f:
-        f.write(html)
-    terrain_tris = sum(l['patches'] for l in locations) * args.steps ** 2 * 2
-    object_tris = sum(sum(m[2] for m in model_meta[int(inst[i])][1]) for i in range(0, len(inst), 15))
-    print(f'Wrote {args.out} ({len(html) / 1e6:.1f} MB): {terrain_tris:,} terrain + '
-          f'{object_tris:,} object triangles, {len(textures)} textures + {len(lightmaps)} lightmaps ({len(tex_bytes) / 1e6:.1f} MB)')
+    shutil.copy(os.path.join(HERE, 'viewer_template.html'), os.path.join(args.out, 'index.html'))
+    total_bytes += os.path.getsize(os.path.join(args.out, 'index.html'))
+    print(f'Wrote {args.out}/ ({total_bytes / 1e6:.1f} MB in {len(locations) + 3} files)')
 
 
 if __name__ == '__main__':

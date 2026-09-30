@@ -31,12 +31,22 @@ def ia8(c):
 PALETTE_FORMATS = {'rgb5a3': rgb5a3, 'rgb565': rgb565, 'ia8': ia8}
 
 
-def decode(d, palette_format='rgb5a3'):
-    """-> (width, height, rgba bytes)"""
+def level_offset(d, level):
+    """Byte offset and size of a mip level (level 0 is full size)."""
     kind = d[0]
     w, h = struct.unpack_from('>HH', d, 4)
-    out = bytearray(w * h * 4)
     p = 0x20
+    for _ in range(level):
+        p += max(w, 8) * max(h, 8) // 2 if kind == 0x1E else max(w, 8) * max(h, 4)
+        w, h = max(w // 2, 1), max(h // 2, 1)
+    return p, w, h
+
+
+def decode(d, palette_format='rgb5a3', level=0):
+    """-> (width, height, rgba bytes)"""
+    kind = d[0]
+    p, w, h = level_offset(d, level)
+    out = bytearray(w * h * 4)
     if kind == 0x1E:
         for ty in range(0, h, 8):
             for tx in range(0, w, 8):
@@ -72,6 +82,38 @@ def decode(d, palette_format='rgb5a3'):
     else:
         raise ValueError(f'unknown texture type {kind:#x}')
     return w, h, bytes(out)
+
+
+def average(d):
+    """Mean RGBA of a texture, from a small mip level."""
+    # pixels end where the palette starts (C8) or at the end of the chunk (CMPR)
+    end = int.from_bytes(d[1:4], 'big') if d[0] == 0x19 else len(d)
+    level = 0
+    while True:  # smallest stored mip level no bigger than 16x16
+        p, w, h = level_offset(d, level)
+        nxt, nw, nh = level_offset(d, level + 1)
+        if max(w, h) <= 16 or nw * nh == w * h or level_offset(d, level + 2)[0] > end:
+            break
+        level += 1
+    lw, lh, px = decode(d, level=level)
+    n = lw * lh
+    return tuple(sum(px[i::4]) // n for i in range(4))
+
+
+def cmpr_pixel(d, x, y):
+    """One RGBA pixel of a CMPR texture's full-size level, decoding only its block."""
+    w, _ = struct.unpack_from('>HH', d, 4)
+    tile = (y // 8) * (w // 8) + x // 8
+    sub = ((y % 8) // 4) * 2 + (x % 8) // 4
+    p = 0x20 + tile * 32 + sub * 8
+    c0, c1, bits = struct.unpack_from('>HHI', d, p)
+    a, b = rgb565(c0), rgb565(c1)
+    i = (bits >> (30 - 2 * ((y % 4) * 4 + x % 4))) & 3
+    if i < 2:
+        return (a, b)[i]
+    if c0 > c1:
+        return tuple((2 * p + q) // 3 for p, q in zip(a, b)) if i == 2 else tuple((p + 2 * q) // 3 for p, q in zip(a, b))
+    return tuple((p + q) // 2 for p, q in zip(a, b)) if i == 2 else (0, 0, 0, 0)
 
 
 def png(w, h, rgba):
