@@ -19,17 +19,38 @@ DEFAULT_ISO = os.path.expanduser('~/Downloads/SSX 3 (USA)/SSX 3 (USA).rvz')
 EVENTS = {'BA': 'Big Air', 'RA': 'Race', 'SS': 'Slopestyle', 'HP': 'Superpipe',
           'BC': 'Backcountry', 'SKY': 'skybox'}
 
+# The game has three peaks; location codes use sections A-E (letter), event type, number.
+PEAK_OF_SECTION = {'A': 1, 'B': 1, 'C': 2, 'D': 2, 'E': 3}
+
+# In-game course names. The names come from the run-poster list in data/be/rwrdngc.dat;
+# the pairing with codes was read off each course's menu picture (data/ui/courspic.big,
+# one image per code with its title in the corner). No text on the disc links them.
+COURSE_NAMES = {
+    'ABA1': 'Crows Nest', 'ABC1': 'Happiness', 'ARA1': 'Snow Jam', 'ASS1': 'R&B',
+    'BHP1': 'The Junction', 'BRA2': 'Metro City',
+    'CBA2': 'Launch Time', 'CHP2': 'Schizophrenia', 'CRA3': 'Ruthless Ridge',
+    'DBC2': 'Ruthless', 'DRA4': 'Intimidator', 'DSS2': 'The Style Mile',
+    'EBA3': 'Much 2 Much', 'EBC3': 'The Throne', 'EHP3': 'Perpendiculous', 'ERA5': 'Gravitude',
+    'ESS3': 'Kick Doubt',
+}
+
+
+def peak(name):
+    """The game's peak number (1-3) for a location code, or None."""
+    return PEAK_OF_SECTION.get(name[0]) if name != 'TRANSP' else None
+
 
 def describe(name):
+    """What kind of place a location code is, e.g. 'Race', 'hub', 'connector'."""
     if name == 'TRANSP':
         return 'transparent/shared'
     if len(name) == 1:
-        return f'peak {name} hub'
+        return 'hub'
     if '_' in name:
         return 'connector'
     for code, label in EVENTS.items():
         if name[1:].startswith(code):
-            return f'peak {name[0]} {label}'
+            return label
     return ''
 
 
@@ -72,7 +93,7 @@ def main():
             if counts[0]:
                 lo, hi = bbox(world.patches(track))
                 size = ' x '.join(f'{h - l:,.0f}' for l, h in zip(lo, hi))
-            print(f'{track:>3}  {name:<8} {describe(name):<22} {counts[0]:>7} {counts[1]:>9} '
+            print(f'{track:>3}  {name:<8} {COURSE_NAMES.get(name, describe(name)):<22} {counts[0]:>7} {counts[1]:>9} '
                   f'{counts[2]:>7} {counts[3]:>9} {counts[4]:>7}  {size}')
         print('-' * len(header))
         print(f'{"":>3}  {"TOTAL":<8} {"":<22} {totals[0]:>7} {totals[1]:>9} {totals[2]:>7} '

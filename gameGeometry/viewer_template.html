@@ -34,7 +34,7 @@
   <p id="help"></p>
   <div style="display:flex; gap:6px; flex-wrap:wrap">
     <button id="all">All</button><button id="none">None</button>
-    <button id="lighting" title="Baked: the game's own lightmaps and vertex lighting. Viewer: plain sun and sky lights.">Lighting: baked</button><button id="textures">Textures: on</button><button id="objects">Objects: on</button><button id="panels" title="Big flat cards (backdrops, tree lines) drawn with see-through textures">Panels: off</button><button id="helpers" title="Things the game doesn't draw as modelled: translucent editor volumes, plus placeholder objects like the black slabs by jumps and point-multiplier cubes">Helpers: off</button><button id="wire">Wireframe</button><button id="mode" title="Map: drag, zoom and rotate like Google Earth. Fly: first-person flying with the keyboard.">Camera: map</button>
+    <button id="lighting" title="Baked: the game's own lightmaps and vertex lighting. Viewer: plain sun and sky lights.">Lighting: baked</button><button id="textures">Textures: on</button><button id="objects">Objects: on</button><button id="panels" title="Big flat cards (backdrops, tree lines) drawn with see-through textures: 2D trees, signs, glass">Panels: on</button><button id="helpers" title="Things the game doesn't draw as modelled: translucent editor volumes, editor arrow boxes, and placeholders like the black slabs by jumps and point-multiplier cubes">Helpers: off</button><button id="blocks" title="Big plain boxes with snow or ice textures (e.g. on Snow Jam), probably invisible blockers">Blocks: off</button><button id="wire">Wireframe</button><button id="mode" title="Map: drag, zoom and rotate like Google Earth. Fly: first-person flying with the keyboard.">Camera: map</button>
   </div>
   <div id="list"></div>
 </div>
@@ -346,7 +346,7 @@ const toScene = (x, y, z, out, o) => {
 };
 
 // ---------- view state and materials ----------
-const view = { textures: true, lighting: 'baked', objects: true, panels: false, helpers: false, wire: false };
+const view = { textures: true, lighting: 'baked', objects: true, panels: true, helpers: false, blocks: false, wire: false };
 const allMaterials = new Set();
 const track = m => { allMaterials.add(m); m.wireframe = view.wire; return m; };
 const pick = mesh => mesh.userData.mats[view.lighting][view.textures ? 'textured' : 'flat'];
@@ -462,7 +462,7 @@ async function textures() {
 function buildDetail(loc, pack) {
   const { meta, section } = pack;
   const group = new THREE.Group();
-  const kinds = { terrain: [], objects: [], panels: [], helpers: [] };
+  const kinds = { terrain: [], objects: [], panels: [], helpers: [], blocks: [] };
   const lightmapBytes = section('lightmaps');
   const lightmaps = meta.lightmaps.map(info => {
     const { tex } = decodeTexture(lightmapBytes, info, THREE.ClampToEdgeWrapping);
@@ -518,9 +518,10 @@ function buildDetail(loc, pack) {
   const meshStart = [];
   { let v = 0, t = 0;
     for (const [, meshes] of meta.models) meshStart.push(meshes.map(([, nv, nt]) => { const r = [v, t]; v += nv; t += nt; return r; })); }
-  // model category from the export: 0 object, 1 flat backdrop panel, 2 placeholder (drawn by the game some other way)
+  // model category from the export: 0 object, 1 flat backdrop panel, 2 placeholder (drawn by the
+  // game some other way), 3 plain box (probably an invisible blocker)
   const kindOf = (category, texId) => category === 2 || texture(texId)?.helper ? 'helpers'
-    : category === 1 ? 'panels' : 'objects';
+    : category === 1 ? 'panels' : category === 3 ? 'blocks' : 'objects';
   const buckets = new Map();  // kind:texId -> {nv, nt, ...}
   for (let i = 0; i < meta.instances; i++) {  // pass 1: sizes
     const [category, meshes] = meta.models[inst[i * 15]];
@@ -618,14 +619,16 @@ setInterval(updateDetail, 250);
 const list = document.getElementById('list');
 let lastPeak = null;
 for (const loc of locations) {
-  const peak = /^[A-E]/.test(loc.name) ? loc.name[0] : 'Other';
-  if (peak !== lastPeak) {
-    lastPeak = peak;
-    list.insertAdjacentHTML('beforeend', `<div class="peak">${peak === 'Other' ? 'Other' : 'Peak ' + peak}</div>`);
+  // group by the game's three peaks, then by section letter (A-E) within them
+  const group = loc.peak ? `Peak ${loc.peak} · section ${loc.name[0]}` : 'Other';
+  if (group !== lastPeak) {
+    lastPeak = group;
+    list.insertAdjacentHTML('beforeend', `<div class="peak">${group}</div>`);
   }
   const label = document.createElement('label');
   label.innerHTML = `<input type="checkbox" ${loc.root.visible ? 'checked' : ''}><span class="sw" style="background:#${loc.tint.getHexString()}"></span>` +
-    `${loc.name} <span class="what">${loc.what.replace(/^peak \w /, '')}</span>`;
+    (loc.title ? `<b>${loc.title}</b> <span class="what">${loc.name} · ${loc.what}</span>`
+      : `${loc.name} <span class="what">${loc.what}</span>`);
   const box = label.querySelector('input');
   box.onchange = () => { loc.root.visible = box.checked; };
   label.onclick = e => { if (e.target !== box) { e.preventDefault(); focus(loc); } };
@@ -664,6 +667,7 @@ toggle('textures', 'Textures', 'textures', applyMaterials);
 toggle('objects', 'Objects', 'objects', on => setKind('objects', on));
 toggle('panels', 'Panels', 'panels', on => setKind('panels', on));
 toggle('helpers', 'Helpers', 'helpers', on => setKind('helpers', on));
+toggle('blocks', 'Blocks', 'blocks', on => setKind('blocks', on));
 document.getElementById('lighting').onclick = e => {
   view.lighting = view.lighting === 'baked' ? 'viewer' : 'baked';
   e.target.textContent = `Lighting: ${view.lighting}`;

@@ -21,7 +21,7 @@ import struct
 import sys
 from array import array
 
-from list_geometry import DEFAULT_ISO, describe
+from list_geometry import COURSE_NAMES, DEFAULT_ISO, describe, peak
 from rvz import GCDisc
 import gxtex
 import ssx3
@@ -96,8 +96,23 @@ def is_placeholder_texture(tex):
     return sum(px[:3]) / 3 < 60 and px[3] > 250
 
 
+# Editor textures no rule can spot: 345 is an arrow with corners numbered 1-4 (an orientation
+# test pattern) on boxes floating over the CHP2 superpipes.
+EDITOR_TEXTURES = {345}
+
 # model categories in the viewer
-OBJECT, PANEL, PLACEHOLDER = 0, 1, 2
+OBJECT, PANEL, PLACEHOLDER, BLOCK = 0, 1, 2, 3
+
+
+def is_plain_block(model):
+    """A bare closed box (12 triangles, 8 corners) at least 2000 units on a side, e.g. the
+    snow/ice slabs standing on ARA1's slopes. Probably invisible blockers, but the textures
+    are real ones, so these get their own toggle rather than joining the helpers."""
+    if len(model.meshes) != 1 or len(model.tris) != 12:
+        return False
+    if len({tuple(round(c) for c in v) for v in model.verts}) != 8:
+        return False
+    return max(max(v[k] for v in model.verts) - min(v[k] for v in model.verts) for k in range(3)) >= 2000
 
 
 class Pack:
@@ -239,6 +254,8 @@ def main():
                     meshes.append([tid, len(mesh.verts), len(mesh.tris), *lo, *scale])
                 if any(t in placeholders for t in m.textures):
                     category = PLACEHOLDER
+                elif is_plain_block(m):
+                    category = BLOCK
                 else:
                     category = PANEL if is_panel(m) else OBJECT
                 model_meta.append([category, meshes])
@@ -266,7 +283,8 @@ def main():
         hi = [max(q[k] for q in points) for k in range(3)]
         centre = [(a + b) / 2 for a, b in zip(lo, hi)]
         radius = max(((a - b) / 2) ** 2 for a, b in zip(lo, hi)) ** 0.5 * 3 ** 0.5
-        locations.append({'name': name, 'what': describe(name), 'file': file, 'patches': len(patches),
+        locations.append({'name': name, 'title': COURSE_NAMES.get(name), 'what': describe(name),
+                          'peak': peak(name), 'file': file, 'patches': len(patches),
                           'instances': len(instances), 'center': centre, 'radius': radius})
         print(f'  {name:<8} {len(patches):>5} patches {len(instances):>5} objects  {size / 1e6:5.2f} MB',
               file=sys.stderr)
@@ -276,7 +294,7 @@ def main():
     for tid in sorted(t for t in used_textures if t >= 0):
         kind, w, h, pixels, palette = texture_payload(bank[tid])
         textures[tid] = [kind, w, h, len(tex_bytes), len(pixels), len(tex_bytes) + len(pixels),
-                         len(palette) // 2, int(is_helper_texture(bank[tid]))]
+                         len(palette) // 2, int(tid in EDITOR_TEXTURES or is_helper_texture(bank[tid]))]
         tex_bytes += pixels + palette
         tex_bytes += bytes(-len(tex_bytes) % 4)
     pack = Pack({'textures': textures})
