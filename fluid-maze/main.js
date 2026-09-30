@@ -3,41 +3,115 @@ import {Fluid} from './fluid.js';
 import {makeMazeGrid} from './mazeGrid.js';
 
 const radius = 16;
+const spawnPerStep = 3;
+const spawnSpread = 2 * radius;
+const stepMs = 1000 / 60; // physics is a fixed timestep, independent of refresh rate
+
+const buildMaze = () =>
+  makeMazeGrid({
+    width: Math.floor(innerWidth / radius),
+    height: Math.floor(innerHeight / radius),
+    scale: 2,
+    wallThickness: 1,
+    margin: 3,
+    shiftDown: 16,
+  });
+
+let maze = buildMaze();
+
 const fluid = (window.fluid = new Fluid({
   radius,
   gravity: 0.02,
-  stiffness: 64,
-  blocks: makeMazeGrid({
-    mazeRows: 8,
-    mazeCols: 20,
-    scale: 2,
-    wallThickness: 1,
-    shiftDown: 16,
-  }),
+  restDensity: 0.2,
+  stiffness: 300,
+  stiffnessNear: 700,
+  speed: 0.001,
+  blocks: maze.blocks,
 }));
 
 const renderer = new Renderer(document.querySelector('canvas'));
 
+let paused = false;
+let lastTime = performance.now();
+let backlog = 0;
+let stepTime = 0;
+
+const step = () => {
+  for (let i = 0; i < spawnPerStep; i++) {
+    fluid.addParticle(
+      maze.entranceX * radius + spawnSpread * (Math.random() - 0.5),
+      spawnSpread * Math.random(),
+    );
+  }
+  fluid.tick();
+};
+
 const loop = () => {
-  fluid.addParticle(
-    innerWidth / 2 + 100 * (Math.random() - 0.5),
-    100 * Math.random()
-  );
+  requestAnimationFrame(loop);
+
+  const now = performance.now();
+  // cap the backlog so a backgrounded tab doesn't come back to a huge catch-up
+  backlog = Math.min(backlog + (now - lastTime), 4 * stepMs);
+  lastTime = now;
 
   const start = performance.now();
-  fluid.tick();
-  renderer.render(fluid, performance.now() - start);
-  requestAnimationFrame(loop);
+  let steps = 0;
+  while (!paused && backlog >= stepMs) {
+    backlog -= stepMs;
+    step();
+    steps++;
+  }
+  // frames where no step was due would otherwise report 0ms
+  if (steps) stepTime = (performance.now() - start) / steps;
+  renderer.render(fluid, stepTime);
 };
 
 loop();
 
-window.addEventListener('resize', () => {
-  fluid.resize();
-  renderer.resize();
+const newMaze = () => {
+  maze = buildMaze();
+  fluid.setBlocks(maze.blocks);
+};
+
+// debounced, dragging a window edge fires resize continuously and each one
+// rebuilds the maze and the spatial grid
+let resizeTimeout;
+addEventListener('resize', () => {
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    newMaze();
+    renderer.resize();
+  }, 200);
 });
 
-window.addEventListener('mousemove', (e) => {
-  if (!e.buttons) return;
-  fluid.pushParticles(e.offsetX, e.offsetY, e.movementX, e.movementY);
+// track movement ourselves, touch pointer events don't fill in movementX/Y
+let pointer = null;
+addEventListener('pointerdown', (e) => {
+  pointer = {x: e.clientX, y: e.clientY};
+});
+addEventListener('pointerup', () => {
+  pointer = null;
+});
+addEventListener(
+  'pointermove',
+  (e) => {
+    if (!pointer) return;
+    e.preventDefault();
+    fluid.pushParticles(
+      e.clientX,
+      e.clientY,
+      e.clientX - pointer.x,
+      e.clientY - pointer.y,
+    );
+    pointer = {x: e.clientX, y: e.clientY};
+  },
+  {passive: false},
+);
+
+addEventListener('keydown', (e) => {
+  if (e.key === ' ') paused = !paused;
+  else if (e.key === 'r') newMaze();
+  else if (e.key === 'c') fluid.reset();
+  else return;
+  e.preventDefault();
 });

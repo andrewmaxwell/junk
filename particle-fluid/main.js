@@ -1,6 +1,7 @@
 // Used some code from https://peeke.nl/simulating-blobs-of-fluid
 
 import Grid from './Grid.js';
+import {interact} from './interact.js';
 
 var canvas = document.querySelector('canvas');
 var T = canvas.getContext('2d');
@@ -22,7 +23,6 @@ var width,
   yc,
   xp,
   yp,
-  vic,
   grid,
   grav = {x: 0, y: 1};
 
@@ -32,64 +32,10 @@ var reset = () => {
   yc = new Float32Array(NUM); // y coords
   xp = new Float32Array(NUM); // x prev
   yp = new Float32Array(NUM); // y prev
-  vic = []; // vicinity cache
 
   for (var i = 0; i < NUM; i++) {
     xc[i] = xp[i] = width * Math.random();
     yc[i] = yp[i] = height * Math.random();
-  }
-};
-
-var ni = new Int16Array(NUM); // neighbor index
-var gr = new Float32Array(NUM); // neighbor gradient
-var nx = new Float32Array(NUM); // neighbor dx
-var ny = new Float32Array(NUM); // neighboy dy
-var nd = new Float32Array(NUM); // neighbor distance
-
-var interact = () => {
-  var {rad, restDensity, stiffness, stiffnessNear, speed} = params;
-  for (var i = 0; i < NUM; i++) {
-    var count = 0;
-    var density = 0;
-    var nearDensity = 0;
-    for (var k = 0; k < vic[i].length; k++) {
-      var n = vic[i][k];
-      var dx = xc[n] - xc[i];
-      var dy = yc[n] - yc[i];
-      var lsq = dx * dx + dy * dy;
-      if (!lsq || lsq >= rad * rad) continue;
-
-      var dist = Math.sqrt(lsq);
-      var g = 1 - dist / rad;
-
-      density += g * g;
-      nearDensity += g * g * g;
-      ni[count] = n;
-      gr[count] = g;
-      nx[count] = dx;
-      ny[count] = dy;
-      nd[count] = dist;
-      count++;
-
-      // if (n < i && dist < rad * 0.5) {
-      //   T.moveTo(xc[i], yc[i]);
-      //   T.lineTo(xc[n], yc[n]);
-      // }
-    }
-
-    var pressure =
-      (stiffness * stiffness * speed * (density - rad * restDensity)) /
-      (rad * rad);
-    var nearPressure =
-      (stiffnessNear * stiffnessNear * speed * nearDensity) / (rad * rad);
-
-    for (k = 0; k < count; k++) {
-      var amt = (pressure * gr[k] + nearPressure * gr[k] * gr[k]) / nd[k];
-      xc[i] -= nx[k] * amt;
-      yc[i] -= ny[k] * amt;
-      xc[ni[k]] += nx[k] * amt;
-      yc[ni[k]] += ny[k] * amt;
-    }
   }
 };
 
@@ -130,18 +76,28 @@ var loop = () => {
       yp[i] = height;
     }
 
-    vic[i] = grid.add(xc[i], yc[i], i);
+    grid.add(xc[i], yc[i], i);
   }
 
   T.stroke();
 
-  interact();
+  interact({
+    numParticles: NUM,
+    xCoord: xc,
+    yCoord: yc,
+    grid,
+    radius: params.rad,
+    restDensity: params.restDensity,
+    stiffness: params.stiffness,
+    stiffnessNear: params.stiffnessNear,
+    speed: params.speed,
+  });
 
   if (frame > rates.length)
     T.fillText(
       Math.round(rates.reduce((s, v) => s + v, 0) / rates.length),
       5,
-      10
+      10,
     );
 
   rates[frame % rates.length] = performance.now() - start;
@@ -149,7 +105,7 @@ var loop = () => {
 };
 
 var gui = new window.dat.GUI();
-gui.add(params, 'rad', 5, 100).onChange(window.onresize);
+gui.add(params, 'rad', 5, 100).onChange(() => handlers.resize());
 gui.add(params, 'restDensity', 0, 1);
 gui.add(params, 'stiffness', 0, 1000);
 gui.add(params, 'stiffnessNear', 0, 1000);

@@ -1,29 +1,47 @@
 import Grid from '../particle-fluid/Grid.js';
+import {interact} from '../particle-fluid/interact.js';
 
 const maxParticles = 2 ** 15;
+const eps = 0.01;
 
 export class Fluid {
-  constructor({radius, blocks, gravity, stiffness}) {
+  constructor({
+    radius,
+    blocks,
+    gravity,
+    restDensity,
+    stiffness,
+    stiffnessNear,
+    speed,
+    wallFriction = 0.98,
+  }) {
     this.radius = radius;
     this.blocks = blocks;
     this.gravity = gravity;
+    this.restDensity = restDensity;
     this.stiffness = stiffness;
+    this.stiffnessNear = stiffnessNear;
+    this.speed = speed;
+    this.wallFriction = wallFriction;
 
     this.xCoord = new Float32Array(maxParticles);
     this.yCoord = new Float32Array(maxParticles);
     this.xPrev = new Float32Array(maxParticles);
     this.yPrev = new Float32Array(maxParticles);
 
-    this.neighborIndex = new Int16Array(maxParticles);
-    this.neighborGradient = new Float32Array(maxParticles);
-
     this.reset();
   }
+
   resize() {
     this.width = innerWidth;
     this.height = innerHeight;
     this.grid = new Grid(this.radius, this.width, this.height);
     this.grid.addBlocks(this.blocks);
+  }
+
+  setBlocks(blocks) {
+    this.blocks = blocks;
+    this.resize();
   }
 
   reset() {
@@ -32,17 +50,29 @@ export class Fluid {
   }
 
   moveParticles() {
-    const {xCoord, yCoord, xPrev, yPrev, gravity, width, height, grid} = this;
+    const {xCoord, yCoord, xPrev, yPrev, gravity, width, height, grid, radius} =
+      this;
 
     for (let i = 0; i < this.numParticles; i++) {
-      const xVel = xCoord[i] - xPrev[i];
-      const yVel = yCoord[i] - yPrev[i] + gravity;
+      let xVel = xCoord[i] - xPrev[i];
+      let yVel = yCoord[i] - yPrev[i] + gravity;
+
+      // never move more than a cell in one step, or a particle could jump
+      // clean through a wall without ever landing in one of its cells
+      const speedSq = xVel * xVel + yVel * yVel;
+      if (speedSq > radius * radius) {
+        const scale = radius / Math.sqrt(speedSq);
+        xVel *= scale;
+        yVel *= scale;
+      }
+
       xPrev[i] = xCoord[i];
       yPrev[i] = yCoord[i];
       xCoord[i] += xVel;
       yCoord[i] += yVel;
 
-      // delete particles off screen
+      // delete particles off screen by swapping in the last one, then redo
+      // this index so the particle we just moved here gets its turn
       if (
         xCoord[i] < 0 ||
         xCoord[i] > width ||
@@ -62,52 +92,11 @@ export class Fluid {
     }
   }
 
-  interact() {
-    const {
-      radius,
-      numParticles,
-      xCoord,
-      yCoord,
-      neighborIndex,
-      neighborGradient,
-      stiffness,
-      grid,
-      xPrev,
-      yPrev,
-    } = this;
-
-    const invRad2 = 1 / radius ** 2;
-    for (let i = 0; i < numParticles; i++) {
-      let numNeighbors = 0;
-      let nearDensity = 0;
-      for (const n of grid.getCell(xCoord[i], yCoord[i]).items) {
-        if (n === i) continue;
-        const dx = xCoord[n] - xCoord[i];
-        const dy = yCoord[n] - yCoord[i];
-        const lsq = Math.max(1, dx * dx + dy * dy);
-        if (lsq >= radius * radius) continue;
-
-        const g = 1 - Math.sqrt(lsq) / radius;
-        nearDensity += g * g * g;
-        neighborIndex[numNeighbors] = n;
-        neighborGradient[numNeighbors] = g;
-        numNeighbors++;
-      }
-
-      const nearPressure = stiffness * nearDensity * invRad2;
-
-      for (let k = 0; k < numNeighbors; k++) {
-        const n = neighborIndex[k];
-        const ng = neighborGradient[k];
-        const amt = (nearPressure * ng * ng) / (1 - ng) / radius;
-        const ax = (xCoord[n] - xCoord[i]) * amt;
-        const ay = (yCoord[n] - yCoord[i]) * amt;
-        xCoord[i] -= ax;
-        yCoord[i] -= ay;
-        xCoord[n] += ax;
-        yCoord[n] += ay;
-      }
-    }
+  // Push particles out of the nearest face of any wall they ended up inside of.
+  // Only the velocity into the wall is cancelled, the velocity along it is kept
+  // (minus friction) so fluid can actually slide down and around corners.
+  collideWithWalls() {
+    const {xCoord, yCoord, xPrev, yPrev, grid, wallFriction} = this;
 
     for (let i = 0; i < this.numParticles; i++) {
       for (const b of grid.getCell(xCoord[i], yCoord[i]).blocks) {
@@ -115,16 +104,22 @@ export class Fluid {
         const right = b.x + b.w - xCoord[i];
         const top = yCoord[i] - b.y;
         const bottom = b.y + b.h - yCoord[i];
+        if (left < 0 || right < 0 || top < 0 || bottom < 0) continue;
+
+        const xVel = xCoord[i] - xPrev[i];
+        const yVel = yCoord[i] - yPrev[i];
         const min = Math.min(left, right, top, bottom);
 
-        if (min === left) {
-          xCoord[i] = xPrev[i] = b.x - Math.random();
-        } else if (min === right) {
-          xCoord[i] = xPrev[i] = b.x + b.w + Math.random();
-        } else if (min === top) {
-          yCoord[i] = yPrev[i] = b.y - Math.random();
-        } else if (min === bottom) {
-          yCoord[i] = yPrev[i] = b.y + b.h + Math.random();
+        // nudge just past the face, so a particle shoved off the edge of the
+        // screen by an outer wall goes out of bounds and gets deleted
+        if (min === left || min === right) {
+          xCoord[i] = min === left ? b.x - eps : b.x + b.w + eps;
+          xPrev[i] = xCoord[i];
+          yPrev[i] = yCoord[i] - yVel * wallFriction;
+        } else {
+          yCoord[i] = min === top ? b.y - eps : b.y + b.h + eps;
+          yPrev[i] = yCoord[i];
+          xPrev[i] = xCoord[i] - xVel * wallFriction;
         }
       }
     }
@@ -133,8 +128,8 @@ export class Fluid {
   tick() {
     this.grid.clear();
     this.moveParticles();
-    this.interact();
-    this.interact();
+    interact(this);
+    this.collideWithWalls();
   }
 
   addParticle(x, y) {
@@ -145,12 +140,12 @@ export class Fluid {
     yCoord[i] = yPrev[i] = y;
   }
 
-  pushParticles(x, y, dx, dy) {
+  pushParticles(x, y, dx, dy, reach = 100) {
     const {numParticles, xCoord, yCoord, xPrev, yPrev} = this;
     for (let i = 0; i < numParticles; i++) {
       const dist = Math.hypot(xCoord[i] - x, yCoord[i] - y);
-      const amt = 0.2 * (1 - dist * 0.01);
-      if (amt < 0) continue;
+      if (dist > reach) continue;
+      const amt = 0.2 * (1 - dist / reach);
       xPrev[i] -= amt * dx;
       yPrev[i] -= amt * dy;
     }

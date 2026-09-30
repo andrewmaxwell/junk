@@ -42,9 +42,12 @@ export default class {
   addBlocks(blocks) {
     const {grid, cols, rows, rad} = this;
     for (const wall of blocks) {
-      for (let y = wall.y; y < wall.y + wall.h; y++) {
-        for (let x = wall.x; x < wall.x + wall.w; x++) {
-          if (x < 0 || y < 0 || x >= cols || y >= rows) continue;
+      // clamp instead of skip, so a wall that hangs off the edge of the grid
+      // still collides in the cells it does cover
+      const y1 = Math.min(rows, Math.ceil(wall.y + wall.h));
+      const x1 = Math.min(cols, Math.ceil(wall.x + wall.w));
+      for (let y = Math.max(0, Math.floor(wall.y)); y < y1; y++) {
+        for (let x = Math.max(0, Math.floor(wall.x)); x < x1; x++) {
           grid[y * cols + x].blocks.push({
             x: wall.x * rad,
             y: wall.y * rad,

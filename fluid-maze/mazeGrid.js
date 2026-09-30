@@ -9,7 +9,7 @@ const dirs = [
 
 const makeMaze = ({mazeRows, mazeCols}) => {
   const maze = Array.from({length: mazeRows}, (_, y) =>
-    Array.from({length: mazeCols}, (_, x) => ({x, y}))
+    Array.from({length: mazeCols}, (_, x) => ({x, y})),
   );
   const q = [maze[Math.floor(mazeRows / 2)][Math.floor(mazeCols / 2)]];
 
@@ -19,7 +19,7 @@ const makeMaze = ({mazeRows, mazeCols}) => {
 
     curr.visited = true;
 
-    for (const [dx, dy] of shuffle(dirs)) {
+    for (const [dx, dy] of shuffle([...dirs])) {
       const nx = curr.x + dx;
       const ny = curr.y + dy;
       if (!maze[ny]?.[nx] || maze[ny][nx].visited) continue;
@@ -35,7 +35,7 @@ const makeMaze = ({mazeRows, mazeCols}) => {
         x1: Math.min(x, prev.x),
         y1: Math.min(y, prev.y),
         horizontal: y === prev.y,
-      }))
+      })),
   );
 };
 
@@ -87,13 +87,43 @@ const gridToRects = (grid) => {
   return rects;
 };
 
+/*
+Builds the biggest maze that fits in a width x height area (measured in fluid
+cells) and returns it as a list of blocks, plus where the entrance is so the
+faucet can be aimed at it.
+
+`margin` keeps empty cells to the left, right and below the maze, so the
+stream pouring out of the exit is visible on its way off the screen. The outer
+walls still run up to the top of the screen to hold the reservoir in.
+
+Every block is aligned to whole fluid cells on purpose: Fluid's wall collision
+assumes a block completely covers any cell it is registered in.
+*/
 export const makeMazeGrid = ({
-  mazeRows,
-  mazeCols,
+  width,
+  height,
   scale,
   wallThickness,
-  shiftDown,
+  margin, // empty cells left, right and below the maze
+  shiftDown, // minimum, the reservoir above the maze
 }) => {
+  const mazeCols = Math.max(
+    2,
+    Math.floor((width - 2 * margin - wallThickness) / (2 * scale)),
+  );
+  const mazeRows = Math.max(
+    2,
+    Math.floor((height - margin - shiftDown - wallThickness) / (2 * scale)),
+  );
+
+  const mazeWidth = mazeCols * 2 * scale + wallThickness;
+  const mazeHeight = mazeRows * 2 * scale + wallThickness;
+
+  // whatever slack is left over goes into the reservoir and the side margins,
+  // in whole cells so blocks stay cell-aligned
+  const shift = Math.max(shiftDown, height - margin - mazeHeight);
+  const shiftRight = margin + Math.floor((width - 2 * margin - mazeWidth) / 2);
+
   const grid = mazeToGrid({
     maze: makeMaze({mazeRows, mazeCols}),
     mazeRows,
@@ -103,9 +133,9 @@ export const makeMazeGrid = ({
   grid[0][1] = false; // entrance
   grid[grid.length - 2][grid[0].length - 1] = false; // exit
 
-  return gridToRects(grid).map((r) => {
-    r.x = r.x * scale;
-    r.y = r.y * scale + shiftDown;
+  const blocks = gridToRects(grid).map((r) => {
+    r.x = r.x * scale + shiftRight;
+    r.y = r.y * scale + shift;
     if (r.w === 1) {
       r.h = (r.h - 1) * scale + wallThickness;
       r.w *= wallThickness;
@@ -114,11 +144,23 @@ export const makeMazeGrid = ({
       r.h *= wallThickness;
     }
 
-    // left and right walls
-    if ((r.x === 0 || r.x === scale * (grid[0].length - 1)) && r.w === 1) {
-      r.y -= shiftDown;
-      r.h += shiftDown;
+    // left and right walls extend up to the top of the screen
+    if (
+      (r.x === shiftRight ||
+        r.x === shiftRight + scale * (grid[0].length - 1)) &&
+      r.w === 1
+    ) {
+      r.y -= shift;
+      r.h += shift;
     }
     return r;
   });
+
+  return {
+    blocks,
+    mazeRows,
+    mazeCols,
+    // the entrance is the gap between the left wall and the first top wall
+    entranceX: shiftRight + (wallThickness + 2 * scale) / 2,
+  };
 };

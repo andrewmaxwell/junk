@@ -22,16 +22,19 @@ export function polygonCentroid(vertices) {
   return {x: cx / (3 * a), y: cy / (3 * a)};
 }
 
-/** @type {(points: Point[]) => number} */
-export function polygonArea(points) {
+/** @type {(points: Point[]) => number} positive when clockwise on screen (y down) */
+export function polygonSignedArea(points) {
   let sum = 0;
   let prev = points[points.length - 1];
   for (const curr of points) {
     sum += prev.x * curr.y - curr.x * prev.y;
     prev = curr;
   }
-  return Math.abs(sum) * 0.5;
+  return sum * 0.5;
 }
+
+/** @type {(points: Point[]) => number} */
+export const polygonArea = (points) => Math.abs(polygonSignedArea(points));
 
 /** @type {(points: Point[]) => number} */
 export function polygonInertia(points) {
@@ -187,4 +190,29 @@ export const rotate = (points, angle) => {
     p.y = c.y + dx * sin + dy * cos;
   });
   return points;
+};
+
+/**
+ * Velocity to throw with when a drag ends. Trackpads stop moving just before the finger
+ * lifts, so use the fastest motion in the last `windowMs` rather than the latest motion.
+ * @type {(history: Array<{t: number, x: number, y: number}>, now: number, windowMs?: number) => Point}
+ */
+export const getThrowVelocity = (history, now, windowMs = 100) => {
+  const minSpan = 20; // ms, measure over at least this long to smooth out jitter
+  let best = {x: 0, y: 0};
+  let bestSpeed = 0;
+  let j = 0;
+  for (const b of history) {
+    while (j < history.length - 1 && b.t - history[j + 1].t >= minSpan) j++;
+    const a = history[j];
+    const span = b.t - a.t;
+    if (now - b.t > windowMs || span < minSpan) continue;
+    const vx = (b.x - a.x) / span;
+    const vy = (b.y - a.y) / span;
+    if (Math.hypot(vx, vy) > bestSpeed) {
+      bestSpeed = Math.hypot(vx, vy);
+      best = {x: vx, y: vy};
+    }
+  }
+  return best;
 };

@@ -1,6 +1,4 @@
-Survival of the Fittest - 2025 - Each agent has a neural network which decides
-how to move using info about its surroundings. The ones that find food survive
-and reproduce.
+Survival of the Fittest - 2025 - Each agent has a neural network which decides how to move using info about its surroundings. The ones that find food survive and reproduce.
 
 Agents start with random weights. A brain never changes during an agent's life;
 the only way the population improves is that better foragers eat more, reach

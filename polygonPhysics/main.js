@@ -1,5 +1,12 @@
 import {viewer} from '../primeSpiral/viewer.js';
-import {poly, randPoly, rect, rgbGradient, rotate} from './helpers.js';
+import {
+  getThrowVelocity,
+  poly,
+  randPoly,
+  rect,
+  rgbGradient,
+  rotate,
+} from './helpers.js';
 import {drawStats, Stat, timeFunc} from './Stats.js';
 import {World} from './World.js';
 /** @import {Shape} from './Shape.js' */
@@ -7,7 +14,7 @@ import {World} from './World.js';
 const params = {
   gravity: 0.001,
   restitution: 0.2,
-  friction: 0.5,
+  friction: 0.2, // matches the old solver's feel, which under-applied friction
 };
 
 /** @type {World} */
@@ -16,17 +23,31 @@ let world;
 /** @type {Shape | undefined} */
 let dragging;
 
+/** @type {Array<{t: number, x: number, y: number}>} recent mouse positions while dragging */
+let dragHistory = [];
+
 const getColor = rgbGradient([
   [255, 255, 255],
   [255, 0, 0],
   [0, 0, 0],
 ]);
 
-let lastRenderTime = 0;
-let frame = 0;
+// same gradient with a cool tint, for sleeping shapes
+const getSleepingColor = rgbGradient([
+  [200, 215, 255],
+  [210, 0, 70],
+  [0, 0, 40],
+]);
+
+const STEP_MS = 1000 / 120; // fixed timestep, so results don't depend on frame rate
+const MAX_STEPS_PER_FRAME = 4; // if the sim can't keep up, slow down instead of spiraling
+let lastRenderTime = performance.now();
+let accumulator = 0;
+let stepCount = 0;
 
 function reset() {
   world = new World();
+  dragging = undefined;
 
   // floor
   // world.add({points: rect(0, 400, 2000, 100), fixed: true});
@@ -58,14 +79,19 @@ const randShape = () => {
   return rect(x, y, 20 + Math.random() * 30, 20 + Math.random() * 200);
 };
 
-function step() {
-  if (frame % 4 === 0) world.add({points: randShape()});
+/** @param {{x: number, y: number}} mouse */
+function step(mouse) {
+  if (stepCount++ % 8 === 0) world.add({points: randShape()}); // 15 per second
 
-  const startTime = performance.now();
-  const dt = Math.min(30, startTime - lastRenderTime);
-  lastRenderTime = startTime;
+  if (dragging) {
+    // pick the velocity that lands the shape on the mouse after this step,
+    // so it collides along the way (the throw velocity is set on mouse up)
+    dragging.wake();
+    dragging.xVelocity = (mouse.x - dragging.centroidX) / STEP_MS;
+    dragging.yVelocity = (mouse.y - dragging.centroidY) / STEP_MS;
+  }
 
-  world.step(dt, params);
+  world.step(STEP_MS, params);
 }
 
 /** @param {CanvasRenderingContext2D} ctx */
@@ -75,7 +101,8 @@ function draw(ctx) {
   // shapes
   ctx.strokeStyle = 'white';
   for (const s of world.shapes) {
-    ctx.fillStyle = s.fixed ? 'black' : getColor(s.totalForce / 200);
+    const color = s.awake ? getColor : getSleepingColor;
+    ctx.fillStyle = s.fixed ? 'black' : color(s.totalForce / 7);
     ctx.beginPath();
     s.points.forEach((p) => ctx.lineTo(p.x, p.y));
     ctx.closePath();
@@ -85,10 +112,10 @@ function draw(ctx) {
 
   // contact points
   ctx.fillStyle = 'cyan';
-  for (const s of world.shapes) {
-    for (const {contact, force} of s.contacts) {
+  for (const {contacts} of world.manifolds.values()) {
+    for (const {x, y, jn} of contacts) {
       ctx.beginPath();
-      ctx.arc(contact.x, contact.y, Math.sqrt(force) / 4, 0, 2 * Math.PI);
+      ctx.arc(x, y, Math.sqrt(jn / STEP_MS) / 2.5, 0, 2 * Math.PI);
       ctx.fill();
     }
   }
@@ -101,41 +128,68 @@ const drawStat = new Stat('ms to render', 'cyan');
 const overlapStat = new Stat('BB overlaps', 'lime');
 const collisionStat = new Stat('collisions', 'yellow');
 const shapeStat = new Stat('shapes', 'magenta');
+const awakeStat = new Stat('awake', 'orange');
 
 viewer(
   (ctx, _, mouse) => {
+    const now = performance.now();
+    accumulator = Math.min(
+      accumulator + now - lastRenderTime,
+      MAX_STEPS_PER_FRAME * STEP_MS,
+    );
+    lastRenderTime = now;
+
     if (dragging) {
-      dragging.moveTo(mouse.x, mouse.y);
-      dragging.xVelocity = mouse.movementX;
-      dragging.yVelocity = mouse.movementY;
+      dragHistory.push({t: now, x: mouse.x, y: mouse.y});
+      while (now - dragHistory[0].t > 200) dragHistory.shift();
     }
 
-    simStat.push(timeFunc(step));
+    simStat.push(
+      timeFunc(() => {
+        for (; accumulator >= STEP_MS; accumulator -= STEP_MS) step(mouse);
+      }),
+    );
     drawStat.push(timeFunc(() => draw(ctx)));
     simStat.syncMax(drawStat);
 
     overlapStat.push(world.pairs.length);
-    collisionStat.push(world.numCollisions / world.collisionIterations);
+    collisionStat.push(world.manifolds.size);
     overlapStat.syncMax(collisionStat);
 
     shapeStat.push(world.shapes.length);
-
-    frame++;
+    awakeStat.push(world.shapes.filter((s) => s.awake).length);
+    shapeStat.syncMax(awakeStat);
   },
   {
     initialView: {zoom: 0.5},
     onMouseDown: ({x, y}) => {
       dragging = world.getClosestShape(x, y);
     },
-    onMouseUp: () => (dragging = undefined),
+    onMouseUp: () => {
+      if (dragging) {
+        const v = getThrowVelocity(dragHistory, performance.now());
+        dragging.xVelocity = v.x;
+        dragging.yVelocity = v.y;
+      }
+      dragging = undefined;
+      dragHistory = [];
+    },
     drawStatic: (ctx) =>
-      drawStats(ctx, simStat, drawStat, overlapStat, collisionStat, shapeStat),
+      drawStats(
+        ctx,
+        simStat,
+        drawStat,
+        overlapStat,
+        collisionStat,
+        shapeStat,
+        awakeStat,
+      ),
   },
 );
 
 // @ts-expect-error lil
 const gui = new window.lil.GUI();
-gui.add(params, 'gravity', -0.01, 0.01);
+gui.add(params, 'gravity', -0.01, 0.01).onChange(() => world.wakeAll());
 gui.add(params, 'restitution', 0, 1);
 gui.add(params, 'friction', 0, 2);
 gui.add({reset}, 'reset');
