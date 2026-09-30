@@ -1,6 +1,39 @@
-// Boids: each bird steers by separation, alignment and cohesion with the birds
-// near it. Neighbors are found through a uniform grid, so a step costs roughly
-// O(birds * neighbors) instead of O(birds^2).
+// Boids on the GPU: each bird steers by separation, alignment and cohesion with
+// the birds near it. Everything here runs as WebGPU compute shaders, written in
+// three.js's shading language. Neighbors are found through a uniform grid that
+// is rebuilt on the GPU every step.
+
+import {
+  Fn,
+  If,
+  Loop,
+  Return,
+  atomicAdd,
+  atomicLoad,
+  atomicStore,
+  clamp,
+  cos,
+  dot,
+  float,
+  hash,
+  instancedArray,
+  instanceIndex,
+  int,
+  ivec3,
+  length,
+  max,
+  min,
+  normalize,
+  select,
+  sin,
+  smoothstep,
+  sqrt,
+  uint,
+  uniform,
+  vec2,
+  vec3,
+  vec4,
+} from 'three/tsl';
 
 const moveSpeed = 0.5; // cruising speed
 const minSpeed = 0.3;
@@ -12,270 +45,387 @@ const viewRadius = 12; // how far a bird sees; also the grid cell size
 const separationRadius = 8;
 const alignment = 0.06;
 const cohesion = 0.04;
-const separation = 0.15;
+const edgeCohesion = 2; // extra pull inward for birds at the edge of a flock
+const separation = 0.25;
 const wander = 0.03;
 const levelling = 0.003; // pull toward level flight, so flocks spread sideways
 const bankPerTurn = 60; // roll, in radians, per unit of sideways heading change
 const maxBank = 1.2;
 const bankEase = 0.05; // how quickly a bird rolls toward its target bank
 
-// Birds roam a wide, shallow box of sky and get pushed back past its walls.
-const halfWidth = 250; // the box spans -halfWidth..halfWidth in x and z
+// Birds gather over a roost at the origin. Inside roostRadius they fly freely;
+// past it, birds heading away get turned back, at full strength from
+// roostRadius + roostEdge outward. floor and ceiling bound their height.
+const roostRadius = 500;
+const roostEdge = 300;
+const roostTurn = 0.01;
 const floor = -150;
-const ceiling = 200;
-const boundsStrength = 0.002;
+const ceiling = 300;
+const heightStrength = 0.002;
 
 // Invisible points that sweep through the sky and scatter the birds. Without
-// them the flocks settle into steady loops around the bounds.
+// them the flock settles into a steady loop around the roost.
 const numScares = 3;
 const scareRadius = 45;
 const scareStrength = 0.2;
 
-// Each bird re-steers only every few steps, in rotation, which is what makes
-// tens of thousands of birds affordable. Every bird still moves every step.
-const steerEvery = 3;
-const maxSteerDt = 6; // keeps steering stable when frames are slow
+// The grid is a fixed block of cells that repeats across the sky, so it covers
+// birds wherever they go. Two birds a whole block apart land in the same cell,
+// which is harmless: they are too far apart to count as neighbors. Each cell
+// holds up to cellCapacity birds; any beyond that go unnoticed by their
+// neighbors, and ignore them, for a step. That only happens in a crush.
+const gridX = 92; // cells along x and z
+const gridY = 48;
+const numCells = gridX * gridY * gridX;
+const cellCapacity = 12;
+const gridSize = vec3(gridX, gridY, gridX);
 
-// the grid reaches a little past the box, to cover birds that overshoot it
-const gridMargin = 60;
-const gridX = Math.ceil((2 * (halfWidth + gridMargin)) / viewRadius);
-const gridY = Math.ceil((ceiling - floor + 2 * gridMargin) / viewRadius);
-const numCells = gridX * gridX * gridY;
+// grid coordinates of a position, as a float vector wrapped into the block
+const cellCoords = (position) => {
+  const cell = position.div(viewRadius).floor();
+  return cell.sub(cell.div(gridSize).floor().mul(gridSize));
+};
 
-const cellCoord = (value, min, count) =>
-  Math.min(count - 1, Math.max(0, Math.floor((value - min) / viewRadius)));
-const cellX = (x) => cellCoord(x, -halfWidth - gridMargin, gridX); // and z
-const cellY = (y) => cellCoord(y, floor - gridMargin, gridY);
+// wraps a coordinate that has stepped one cell off either end of the block
+const wrap = (coord, size) =>
+  select(
+    coord.lessThan(int(0)),
+    coord.add(int(size)),
+    select(coord.greaterThanEqual(int(size)), coord.sub(int(size)), coord),
+  );
 
-// how far a coordinate is outside min..max: negative below, positive above
-const overshoot = (value, min, max) =>
-  value < min ? value - min : value > max ? value - max : 0;
+const cellIndex = (x, y, z) =>
+  uint(x.add(y.mul(int(gridX))).add(z.mul(int(gridX * gridY))));
+
+// A compute shader that runs body once for each index below count. Shaders run
+// in fixed-size groups, so a few spare runs land past the end and must do
+// nothing.
+const kernel = (count, body) =>
+  Fn(() => {
+    If(instanceIndex.greaterThanEqual(uint(count)), () => {
+      Return();
+    });
+    body();
+  })().compute(count);
 
 export const makeFlock = (numBirds) => {
-  const positions = new Float32Array(numBirds * 3);
-  const directions = new Float32Array(numBirds * 3);
-  const speeds = new Float32Array(numBirds).fill(moveSpeed);
-  const banks = new Float32Array(numBirds); // roll about the heading, in radians
+  const positionData = new Float32Array(numBirds * 4); // xyz, flap phase
+  const directionData = new Float32Array(numBirds * 4); // xyz, bank in radians
 
-  for (let i = 0; i < numBirds * 3; i += 3) {
-    const x = Math.random() - 0.5;
-    const y = Math.random() - 0.5;
-    const z = Math.random() - 0.5;
-    const length = Math.hypot(x, y, z) || 1;
+  // the birds start scattered all over the roost, each heading its own way
+  for (let i = 0; i < numBirds * 4; i += 4) {
+    const fromRoost = Math.sqrt(Math.random()) * (roostRadius + roostEdge);
+    const around = Math.random() * Math.PI * 2;
 
-    directions[i] = x / length;
-    directions[i + 1] = y / length;
-    directions[i + 2] = z / length;
-    positions[i] = (Math.random() * 2 - 1) * halfWidth;
-    positions[i + 1] = floor + Math.random() * (ceiling - floor);
-    positions[i + 2] = (Math.random() * 2 - 1) * halfWidth;
+    positionData[i] = Math.cos(around) * fromRoost;
+    positionData[i + 1] = floor + Math.random() * (ceiling - floor);
+    positionData[i + 2] = Math.sin(around) * fromRoost;
+    positionData[i + 3] = Math.random() * Math.PI * 2;
+
+    let dx, dy, dz, size;
+    do {
+      dx = Math.random() * 2 - 1;
+      dy = Math.random() * 2 - 1;
+      dz = Math.random() * 2 - 1;
+      size = Math.hypot(dx, dy, dz);
+    } while (size > 1 || size < 0.01);
+
+    directionData[i] = dx / size;
+    directionData[i + 1] = dy / size;
+    directionData[i + 2] = dz / size;
   }
 
-  // Birds sorted by cell: cell c holds slots cellStart[c] .. cellStart[c + 1].
-  // nearPositions and nearDirections are copies in slot order, so the neighbor
-  // search reads memory in sequence rather than hopping around.
-  const cellOfBird = new Uint32Array(numBirds);
-  const cellStart = new Uint32Array(numCells + 1);
-  const cellFill = new Uint32Array(numCells);
-  const birdInSlot = new Uint32Array(numBirds);
-  const nearPositions = new Float32Array(numBirds * 3);
-  const nearDirections = new Float32Array(numBirds * 3);
+  const positions = instancedArray(positionData, 'vec4');
+  const directions = instancedArray(directionData, 'vec4');
+  const speeds = instancedArray(
+    new Float32Array(numBirds).fill(moveSpeed),
+    'float',
+  );
+  // How many birds are in each cell, and for each of them its position and
+  // index. Keeping positions here means the neighbor search reads one block of
+  // memory per cell, not a scattered bird at a time.
+  const cellCounts = instancedArray(numCells, 'uint').toAtomic();
+  const cellBirds = instancedArray(numCells * cellCapacity, 'vec4');
 
-  const buildGrid = () => {
-    cellStart.fill(0);
-    for (let i = 0; i < numBirds; i++) {
-      const cell =
-        cellX(positions[i * 3]) +
-        gridX *
-          (cellX(positions[i * 3 + 2]) + gridX * cellY(positions[i * 3 + 1]));
-      cellOfBird[i] = cell;
-      cellStart[cell + 1]++;
-    }
-    for (let c = 0; c < numCells; c++) {
-      cellStart[c + 1] += cellStart[c];
-    }
-    cellFill.set(cellStart.subarray(0, numCells));
-    for (let i = 0; i < numBirds; i++) {
-      const slot = cellFill[cellOfBird[i]]++;
-      birdInSlot[slot] = i;
-      nearPositions[slot * 3] = positions[i * 3];
-      nearPositions[slot * 3 + 1] = positions[i * 3 + 1];
-      nearPositions[slot * 3 + 2] = positions[i * 3 + 2];
-      nearDirections[slot * 3] = directions[i * 3];
-      nearDirections[slot * 3 + 1] = directions[i * 3 + 1];
-      nearDirections[slot * 3 + 2] = directions[i * 3 + 2];
-    }
+  // whether each bird got a place in its cell this step
+  const inGrid = instancedArray(numBirds, 'uint');
+
+  const dt = uniform(1);
+  const time = uniform(0);
+  const noiseSeed = uniform(0, 'uint');
+
+  const clearGrid = kernel(numCells, () => {
+    atomicStore(cellCounts.element(instanceIndex), uint(0));
+  });
+
+  const fillGrid = kernel(numBirds, () => {
+    const position = positions.element(instanceIndex).xyz.toVar();
+    const coords = ivec3(cellCoords(position)).toVar();
+    const cell = cellIndex(coords.x, coords.y, coords.z).toVar();
+    const slot = atomicAdd(cellCounts.element(cell), uint(1)).toVar();
+
+    If(slot.lessThan(uint(cellCapacity)), () => {
+      cellBirds
+        .element(cell.mul(uint(cellCapacity)).add(slot))
+        .assign(vec4(position, float(instanceIndex)));
+      inGrid.element(instanceIndex).assign(uint(1));
+    }).Else(() => {
+      inGrid.element(instanceIndex).assign(uint(0));
+    });
+  });
+
+  // how many birds a cell holds, up to its capacity
+  const cellSize = (cell) => {
+    const count = atomicLoad(cellCounts.element(cell)).toVar();
+
+    If(count.greaterThan(uint(cellCapacity)), () => {
+      count.assign(uint(cellCapacity));
+    });
+    return count;
   };
 
-  const scares = new Float32Array(numScares * 3);
-  let time = 0;
+  // Turns one bird, given its position and index packed as a grid slot. A
+  // bird that doesn't see its neighbors still heads for the roost and flees
+  // scares.
+  const steerBird = (own, seesNeighbors) => {
+    const position = own.xyz.toVar();
+    const bird = uint(own.w).toVar();
+    const oldDirection = directions.element(bird).xyz.toVar();
+    const oldBank = directions.element(bird).w.toVar();
+    const oldSpeed = speeds.element(bird).toVar();
 
-  const moveScares = (dt) => {
-    time += dt;
-    for (let s = 0; s < numScares; s++) {
-      const pace = time * (1 + s * 0.3);
-      scares[s * 3] = halfWidth * Math.sin(pace * 0.0012 + s * 2);
-      scares[s * 3 + 1] =
-        (floor + ceiling) / 2 +
-        ((ceiling - floor) / 2) * Math.sin(pace * 0.002 + s * 3);
-      scares[s * 3 + 2] = halfWidth * Math.cos(pace * 0.0016 + s);
-    }
-  };
+    const neighbors = float(0).toVar();
+    const center = vec3(0).toVar();
+    const heading = vec3(0).toVar();
+    const away = vec3(0).toVar();
 
-  // turn bird i, which sits in the given grid slot, by dt worth of steering
-  const steer = (i, slot, dt) => {
-    const px = positions[i * 3];
-    const py = positions[i * 3 + 1];
-    const pz = positions[i * 3 + 2];
-    const cx = cellX(px);
-    const cy = cellY(py);
-    const cz = cellX(pz);
+    const coords = cellCoords(position).toVar();
+    const low = ivec3(coords.sub(1)).toVar();
+    const high = ivec3(coords.add(1)).toVar();
 
-    let neighbors = 0;
-    let centerX = 0, centerY = 0, centerZ = 0; // prettier-ignore
-    let headingX = 0, headingY = 0, headingZ = 0; // prettier-ignore
-    let awayX = 0, awayY = 0, awayZ = 0; // prettier-ignore
+    if (seesNeighbors) {
+      Loop(
+        {start: low.z, end: high.z, type: 'int', name: 'z', condition: '<='},
+        ({z}) => {
+          Loop(
+            {start: low.y, end: high.y, type: 'int', name: 'y', condition: '<='},
+            ({y}) => {
+              Loop(
+                {
+                  start: low.x,
+                  end: high.x,
+                  type: 'int',
+                  name: 'x',
+                  condition: '<=',
+                },
+                ({x}) => {
+                  const cell = cellIndex(
+                    wrap(x, gridX),
+                    wrap(y, gridY),
+                    wrap(z, gridX),
+                  ).toVar();
+                  const first = cell.mul(uint(cellCapacity)).toVar();
+                  const count = cellSize(cell);
 
-    for (let y = Math.max(0, cy - 1); y <= Math.min(gridY - 1, cy + 1); y++) {
-      for (let z = Math.max(0, cz - 1); z <= Math.min(gridX - 1, cz + 1); z++) {
-        // the three cells along x are next to each other in slot order
-        const row = gridX * (z + gridX * y);
-        const from = cellStart[row + Math.max(0, cx - 1)];
-        const to = cellStart[row + Math.min(gridX - 1, cx + 1) + 1];
+                  Loop(
+                    {
+                      start: uint(0),
+                      end: count,
+                      type: 'uint',
+                      name: 'slot',
+                      condition: '<',
+                    },
+                    ({slot}) => {
+                      const other = cellBirds.element(first.add(slot)).toVar();
+                      const offset = other.xyz.sub(position).toVar();
+                      const distanceSq = dot(offset, offset).toVar();
 
-        for (let k = from; k < to; k++) {
-          if (k === slot) continue;
+                      // the bird itself is in the grid too, at a distance of exactly zero
+                      If(
+                        distanceSq
+                          .lessThan(viewRadius * viewRadius)
+                          .and(distanceSq.greaterThan(0)),
+                        () => {
+                          neighbors.addAssign(1);
+                          center.addAssign(offset);
+                          heading.addAssign(
+                            directions.element(uint(other.w)).xyz,
+                          );
 
-          const ox = nearPositions[k * 3] - px;
-          const oy = nearPositions[k * 3 + 1] - py;
-          const oz = nearPositions[k * 3 + 2] - pz;
-          const distanceSq = ox * ox + oy * oy + oz * oz;
-          if (distanceSq >= viewRadius * viewRadius) continue;
-
-          neighbors++;
-          centerX += ox;
-          centerY += oy;
-          centerZ += oz;
-          headingX += nearDirections[k * 3];
-          headingY += nearDirections[k * 3 + 1];
-          headingZ += nearDirections[k * 3 + 2];
-
-          if (
-            distanceSq < separationRadius * separationRadius &&
-            distanceSq > 0
-          ) {
-            const distance = Math.sqrt(distanceSq);
-            const push = (1 - distance / separationRadius) / distance;
-            awayX -= ox * push;
-            awayY -= oy * push;
-            awayZ -= oz * push;
-          }
-        }
-      }
-    }
-
-    const oldDx = directions[i * 3];
-    const oldDy = directions[i * 3 + 1];
-    const oldDz = directions[i * 3 + 2];
-    let steerX = 0, steerY = 0, steerZ = 0; // prettier-ignore
-
-    if (neighbors) {
-      const cohere = cohesion / neighbors / viewRadius;
-      steerX +=
-        (headingX / neighbors - oldDx) * alignment +
-        centerX * cohere +
-        awayX * separation;
-      steerY +=
-        (headingY / neighbors - oldDy) * alignment +
-        centerY * cohere +
-        awayY * separation;
-      steerZ +=
-        (headingZ / neighbors - oldDz) * alignment +
-        centerZ * cohere +
-        awayZ * separation;
-    }
-
-    steerX -= overshoot(px, -halfWidth, halfWidth) * boundsStrength;
-    steerY -= overshoot(py, floor, ceiling) * boundsStrength;
-    steerZ -= overshoot(pz, -halfWidth, halfWidth) * boundsStrength;
-
-    for (let s = 0; s < numScares; s++) {
-      const ox = px - scares[s * 3];
-      const oy = py - scares[s * 3 + 1];
-      const oz = pz - scares[s * 3 + 2];
-      const distanceSq = ox * ox + oy * oy + oz * oz;
-
-      if (distanceSq < scareRadius * scareRadius && distanceSq > 0) {
-        const distance = Math.sqrt(distanceSq);
-        const flee = (scareStrength * (1 - distance / scareRadius)) / distance;
-        steerX += ox * flee;
-        steerY += oy * flee;
-        steerZ += oz * flee;
-      }
+                          If(
+                            distanceSq.lessThan(
+                              separationRadius * separationRadius,
+                            ),
+                            () => {
+                              const distance = sqrt(distanceSq);
+                              const push = float(1)
+                                .sub(distance.div(separationRadius))
+                                .div(distance);
+                              away.subAssign(offset.mul(push));
+                            },
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
+              );
+            },
+          );
+        },
+      );
     }
 
-    steerX += (Math.random() - 0.5) * wander;
-    steerY += (Math.random() - 0.5) * wander - oldDy * levelling;
-    steerZ += (Math.random() - 0.5) * wander;
+    const steering = vec3(0).toVar();
 
-    let dx = oldDx + steerX * dt;
-    let dy = oldDy + steerY * dt;
-    let dz = oldDz + steerZ * dt;
+    If(neighbors.greaterThan(0), () => {
+      steering.addAssign(
+        heading.div(neighbors).sub(oldDirection).mul(alignment),
+      );
+      // how far the neighbors' center is, in view radii: near 0 inside a
+      // flock and up to about 0.4 at its edge
+      const toCenter = center.div(neighbors).div(viewRadius).toVar();
+      const edgePull = length(toCenter).mul(edgeCohesion).add(1);
+      steering.addAssign(toCenter.mul(edgePull).mul(cohesion));
+      steering.addAssign(away.mul(separation));
+    });
 
-    const length = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-    dx /= length;
-    dy /= length;
-    dz /= length;
+    // Past the roost's edge, turn birds that are heading away back toward it.
+    // Turning sideways, not pulling inward, is what brings a bird flying
+    // straight out around in an arc.
+    const fromRoost = length(position.xz).toVar();
+    const outward = position.xz.div(max(fromRoost, 0.0001)).toVar();
+    const levelHeading = oldDirection.xz.div(max(length(oldDirection.xz), 0.0001)).toVar();
+    const leaving = dot(levelHeading, outward).mul(0.5).add(0.5);
+    const pastEdge = smoothstep(roostRadius, roostRadius + roostEdge, fromRoost);
+    const left = vec2(levelHeading.y.negate(), levelHeading.x).toVar();
+    const inward = select(dot(left, outward).lessThan(0), left, left.negate());
+    const turnBack = inward.mul(leaving).mul(pastEdge).mul(roostTurn).toVar();
+    steering.addAssign(vec3(turnBack.x, 0, turnBack.y));
 
-    // bank into turns: roll by how fast the heading swings sideways
-    const level = Math.sqrt(oldDx * oldDx + oldDz * oldDz) || 1;
-    const turn = ((dx - oldDx) * oldDz - (dz - oldDz) * oldDx) / level / dt;
-    const bank = Math.max(-maxBank, Math.min(maxBank, -turn * bankPerTurn));
-    banks[i] += (bank - banks[i]) * Math.min(1, bankEase * dt);
+    // push back by how far above the ceiling or below the floor the bird is
+    steering.y.subAssign(position.y.sub(clamp(position.y, floor, ceiling)).mul(heightStrength));
 
-    // speed up when pulled forward or diving, slow when pushed back or climbing
-    const forward = steerX * oldDx + steerY * oldDy + steerZ * oldDz;
-    speeds[i] = Math.max(
-      minSpeed,
-      Math.min(
-        maxSpeed,
-        speeds[i] +
-          (forward * thrust -
-            dy * gravity +
-            (moveSpeed - speeds[i]) * speedEase) *
-            dt,
-      ),
+    Loop(
+      {
+        start: int(0),
+        end: int(numScares),
+        type: 'int',
+        name: 's',
+        condition: '<',
+      },
+      ({s}) => {
+        // each scare wanders over the roost on its own looping path
+        const n = float(s);
+        const pace = time.mul(sin(n.mul(1.7)).mul(0.5).add(1)).toVar();
+        const scare = vec3(
+          sin(pace.mul(0.0012).add(n.mul(2))).mul(roostRadius + roostEdge),
+          sin(pace.mul(0.002).add(n.mul(3)))
+            .mul((ceiling - floor) / 2)
+            .add((floor + ceiling) / 2),
+          cos(pace.mul(0.0016).add(n)).mul(roostRadius + roostEdge),
+        );
+        const offset = position.sub(scare).toVar();
+        const distance = length(offset).toVar();
+
+        If(distance.lessThan(scareRadius).and(distance.greaterThan(0)), () => {
+          const flee = float(1)
+            .sub(distance.div(scareRadius))
+            .mul(scareStrength)
+            .div(distance);
+          steering.addAssign(offset.mul(flee));
+        });
+      },
     );
 
-    directions[i * 3] = dx;
-    directions[i * 3 + 1] = dy;
-    directions[i * 3 + 2] = dz;
+    const seed = bird.mul(uint(3)).add(noiseSeed).toVar();
+    const noise = vec3(
+      hash(seed),
+      hash(seed.add(uint(1))),
+      hash(seed.add(uint(2))),
+    );
+    steering.addAssign(noise.sub(0.5).mul(wander));
+    steering.y.subAssign(oldDirection.y.mul(levelling));
+
+    const direction = normalize(oldDirection.add(steering.mul(dt))).toVar();
+
+    // bank into turns: roll by how fast the heading swings sideways
+    const level = max(length(oldDirection.xz), 0.0001);
+    const turn = direction.x
+      .sub(oldDirection.x)
+      .mul(oldDirection.z)
+      .sub(direction.z.sub(oldDirection.z).mul(oldDirection.x))
+      .div(level)
+      .div(dt);
+    const targetBank = clamp(turn.mul(-bankPerTurn), -maxBank, maxBank);
+    const bank = oldBank.add(
+      targetBank.sub(oldBank).mul(min(dt.mul(bankEase), 1)),
+    );
+
+    // speed up when pulled forward or diving, slow when pushed back or climbing
+    const forward = dot(steering, oldDirection);
+    const acceleration = forward
+      .mul(thrust)
+      .sub(direction.y.mul(gravity))
+      .add(float(moveSpeed).sub(oldSpeed).mul(speedEase));
+    const speed = clamp(oldSpeed.add(acceleration.mul(dt)), minSpeed, maxSpeed);
+
+    directions.element(bird).assign(vec4(direction, bank));
+    speeds.element(bird).assign(speed);
   };
 
-  let stepCount = 0;
+  // Runs once per grid slot rather than once per bird, steering whichever bird
+  // is in the slot. Going through the grid in order keeps each bird's
+  // neighborhood in memory the previous few birds just touched, which is
+  // several times faster than visiting birds in their own scattered order.
+  const steer = kernel(numCells * cellCapacity, () => {
+    const cell = instanceIndex.div(uint(cellCapacity)).toVar();
+    const slot = instanceIndex.sub(cell.mul(uint(cellCapacity)));
 
-  // dt is the time to advance, in units of the 1/120s step the constants
-  // above are tuned for
-  const step = (dt = 1) => {
-    if (dt <= 0) return;
+    If(slot.greaterThanEqual(atomicLoad(cellCounts.element(cell))), () => {
+      Return();
+    });
 
-    buildGrid();
-    moveScares(dt);
-    stepCount++;
+    steerBird(cellBirds.element(instanceIndex).toVar(), true);
+  });
 
-    const steerDt = Math.min(maxSteerDt, dt * steerEvery);
+  // birds squeezed out of a full cell are steered here, without neighbors
+  const steerLeftOut = kernel(numBirds, () => {
+    If(inGrid.element(instanceIndex).equal(uint(0)), () => {
+      const position = positions.element(instanceIndex).xyz;
+      steerBird(vec4(position, float(instanceIndex)).toVar(), false);
+    });
+  });
 
-    for (let slot = 0; slot < numBirds; slot++) {
-      const i = birdInSlot[slot];
+  const move = kernel(numBirds, () => {
+    const position = positions.element(instanceIndex);
+    const travel = directions
+      .element(instanceIndex)
+      .xyz.mul(speeds.element(instanceIndex))
+      .mul(dt);
 
-      if ((i + stepCount) % steerEvery === 0) steer(i, slot, steerDt);
+    position.assign(vec4(position.xyz.add(travel), position.w));
+  });
 
-      const distance = speeds[i] * dt;
-      positions[i * 3] += directions[i * 3] * distance;
-      positions[i * 3 + 1] += directions[i * 3 + 1] * distance;
-      positions[i * 3 + 2] += directions[i * 3 + 2] * distance;
-    }
+  return {
+    numBirds,
+    positions,
+    directions,
+    // Advances the flock. compute runs one compute shader on the GPU; stepDt is
+    // the time to advance, in units of the 1/120s step the constants above are
+    // tuned for.
+    step(compute, stepDt) {
+      if (stepDt <= 0) return;
+
+      dt.value = stepDt;
+      time.value += stepDt;
+      noiseSeed.value = Math.floor(Math.random() * 2 ** 32);
+
+      compute(clearGrid);
+      compute(fillGrid);
+      compute(steer);
+      compute(steerLeftOut);
+      compute(move);
+    },
   };
-
-  return {numBirds, positions, directions, banks, step};
 };
