@@ -100,6 +100,26 @@ def is_placeholder_texture(tex):
 # test pattern) on boxes floating over the CHP2 superpipes.
 EDITOR_TEXTURES = {345}
 
+def additive_textures(world, bank):
+    """Glow textures the game must add on top: materials flagged for blending (bit 0x02 of the
+    flags at +12, and not a skybox/backdrop) whose texture has no alpha at all and is mostly black. Blending an opaque
+    texture only makes sense additively; in practice this is 555 (light streaks over DRA4)
+    and 226 (a soft glow blob). Brighter opaque textures on such materials look ordinary."""
+    out = set()
+    for (track, ctype), items in world.chunks.items():
+        if ctype != 0:
+            continue
+        for _, mat in items:
+            tid, flags = struct.unpack_from('>H', mat, 0)[0], struct.unpack_from('>H', mat, 12)[0]
+            # bits 0x08/0x10 mark skybox/backdrop materials (dark night skies), not glows
+            if tid in out or tid not in bank or not flags & 2 or flags & 0x18:
+                continue
+            _, _, px = gxtex.decode(bank[tid])
+            if min(px[3::4]) > 250 and sum(gxtex.average(bank[tid])[:3]) / 3 < 60:
+                out.add(tid)
+    return out
+
+
 # model categories in the viewer
 OBJECT, PANEL, PLACEHOLDER, BLOCK = 0, 1, 2, 3
 
@@ -179,6 +199,7 @@ def main():
     models = {} if args.no_objects else world.models()
     tex_avg = {tid: gxtex.average(d) for tid, d in bank.items()}
     placeholders = {tid for tid, d in bank.items() if is_placeholder_texture(d)}
+    additive = additive_textures(world, bank)
 
     data_dir = os.path.join(args.out, 'data')
     shutil.rmtree(data_dir, ignore_errors=True)
@@ -199,7 +220,7 @@ def main():
 
         # terrain: bicubic coefficients, tessellated in the page
         lightmap_ids, runs = {}, []  # runs: [texture id, local lightmap index, patch count]
-        coefs, uvs, lm_rects = array('f'), array('f'), array('f')
+        coefs, uvs, lm_rects, patch_rids = array('f'), array('f'), array('f'), array('I')
         for p in patches:
             lm = lightmap_ids.setdefault(p.lightmap, len(lightmap_ids)) if p.lightmap in lightmap_bank else -1
             tid = p.texture if p.texture in bank else -1
@@ -209,6 +230,7 @@ def main():
             else:
                 runs.append([tid, lm, 1])
             coefs.extend(c for xyz in p.coef for c in xyz)
+            patch_rids.append(p.rid)
             uvs.extend(p.uv_corners)
             lm_rects.extend(p.lightmap_rect)
             # overview: a few points per patch, coloured like the game would draw them
@@ -221,6 +243,7 @@ def main():
         pack.add('coefs', coefs)
         pack.add('patchUv', uvs)
         pack.add('patchLm', lm_rects)
+        pack.add('patchRid', patch_rids)  # which chunk each patch came from, for the inspector
 
         lm_bytes, lightmaps = bytearray(), []
         for lid in lightmap_ids:  # insertion order == local index
@@ -266,11 +289,14 @@ def main():
             inst.append(model_ids[i.model])
             inst.extend(i.matrix[r * 4 + c] for r in range(4) for c in range(3))
             inst.extend((pool_ids.get(i.color_pool, -1), i.color_offset))
-        for key, arr in (('verts', verts), ('uvs', muvs), ('cols', cols), ('tris', tris), ('inst', inst)):
+        inst_rids = array('I', (i.rid for i in instances))
+        for key, arr in (('verts', verts), ('uvs', muvs), ('cols', cols), ('tris', tris), ('inst', inst),
+                         ('instRid', inst_rids)):
             pack.add(key, arr)
         pack.add('colorPools', pool_bytes)
         pack.meta = {'runs': runs, 'lightmaps': lightmaps, 'models': model_meta, 'pools': pools,
-                     'instances': len(instances), 'patches': len(patches)}
+                     'instances': len(instances), 'patches': len(patches),
+                     'modelKeys': [list(key) for key in model_ids]}  # (track, rid) per model, for the inspector
 
         file = f'{name}.js'
         size = pack.write(os.path.join(data_dir, file), name)
@@ -294,7 +320,8 @@ def main():
     for tid in sorted(t for t in used_textures if t >= 0):
         kind, w, h, pixels, palette = texture_payload(bank[tid])
         textures[tid] = [kind, w, h, len(tex_bytes), len(pixels), len(tex_bytes) + len(pixels),
-                         len(palette) // 2, int(tid in EDITOR_TEXTURES or is_helper_texture(bank[tid]))]
+                         len(palette) // 2, int(tid in EDITOR_TEXTURES or is_helper_texture(bank[tid])),
+                         int(tid in additive)]
         tex_bytes += pixels + palette
         tex_bytes += bytes(-len(tex_bytes) % 4)
     pack = Pack({'textures': textures})
@@ -312,6 +339,7 @@ def main():
 
     shutil.copy(os.path.join(HERE, 'viewer_template.html'), os.path.join(args.out, 'index.html'))
     total_bytes += os.path.getsize(os.path.join(args.out, 'index.html'))
+    print(f'Additive glow textures: {sorted(additive)}', file=sys.stderr)
     print(f'Wrote {args.out}/ ({total_bytes / 1e6:.1f} MB in {len(locations) + 3} files)')
 
 

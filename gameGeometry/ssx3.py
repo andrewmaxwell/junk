@@ -89,7 +89,7 @@ class World:
         return sorted({t for t, _ in self.chunks})
 
     def patches(self, track):
-        return [Patch(d) for _, d in self.chunks[track, 1]]
+        return [Patch(d, rid) for rid, d in self.chunks[track, 1]]
 
     def collision_triangles(self, track):
         return sum(sum(ic for ic, _, _ in collision_meshes(d, False)) for _, d in self.chunks[track, 12])
@@ -146,7 +146,7 @@ class World:
         return out
 
     def instances(self, track):
-        return [Instance(d) for _, d in self.chunks[track, 3]]
+        return [Instance(d, rid) for rid, d in self.chunks[track, 3]]
 
 
 IDENTITY = (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
@@ -167,7 +167,8 @@ def transform(p, m):
 class Instance:
     """A placed copy of a prefab model (160-byte chunk)."""
 
-    def __init__(self, d):
+    def __init__(self, d, rid=None):
+        self.rid = rid
         self.matrix = struct.unpack_from('>16f', d, 0x08)
         self.model = (d[0x78], int.from_bytes(d[0x79:0x7C], 'big'))
         # baked lighting: this placement's colours start at a byte offset in a colour pool
@@ -266,7 +267,8 @@ class Patch:
     """Bicubic terrain patch. The 16 stored points are power-basis coefficients
     (stored highest order first), so S(u,v) = sum C[i][j] u^i v^j."""
 
-    def __init__(self, d):
+    def __init__(self, d, rid=None):
+        self.rid = rid
         stored = [struct.unpack_from('>3f', d, 0x40 + 16 * m) for m in range(16)]
         self.coef = stored[::-1]
         self.bbox_min = struct.unpack_from('>3f', d, 0x180)

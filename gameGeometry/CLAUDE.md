@@ -159,10 +159,33 @@ Game space is **Z-up**; the viewer converts to Y-up with `(x, z, -y)`. Units are
   `data/<NAME>.js` and the shared `data/textures.js` load when the camera is within about
   2 radii. Data files are `ssxData(key, base64(gzip(pack)))` scripts, because file:// pages
   can't fetch(). Pack = `u32 headerLen, JSON {meta, sections}, 8-aligned binary sections`.
-- Camera: MapControls by default. The pivot re-aims at the terrain under the screen
-  centre at the start of each gesture (or the location nearest the line of sight when
-  that's empty sky), so speeds scale with distance. Fly mode is behind the Camera button.
-  Scroll must not change speed (awful on a Mac trackpad); speed is on `-` / `=`.
+- Camera (map mode, default): nothing depends on a hidden pivot distance, because that made
+  speeds erratic (MapControls scaled pan/zoom by the distance to a pivot that re-aimed at
+  each gesture, often at far terrain or sky).
+  - Left-drag grabs the ground under the cursor and keeps that point pinned under it (a
+    horizontal plane through the grabbed point; steps capped near the horizon).
+  - Scroll / pinch move toward the point under the cursor by `exp(deltaY * 0.002)` of the
+    distance (pinch x5); a continuous gesture keeps the same anchor. View direction unchanged.
+  - OrbitControls only rotates (right-drag / Shift-drag), pivoting on the ground at screen centre.
+  - W A S D speed follows the camera's height above the terrain below (eased).
+  - Off-terrain fallback: a level plane at the height of the ground below the camera.
+  Fly mode is behind the Camera button. Scroll must never change speed (awful on a Mac
+  trackpad); speed is on `-` / `=`.
+  `window.viewer.debug()` shows key/speed state and has `state(name)`, `detailed()`, `pick(x, y)`.
+- Testing gotchas: tabs driven by the Chrome extension are usually hidden (background).
+  - requestAnimationFrame doesn't fire, so nothing renders and matrices only refresh on render;
+    `pickAt` calls `camera.updateMatrixWorld()` first. Take a screenshot to force a frame.
+  - Timers are throttled to ~1/s, so tests with many `setTimeout` waits time out (45s CDP
+    limit). Dispatch synthetic Pointer/Wheel/Keyboard events synchronously instead.
+
+## Finding a spot the user reports
+
+The viewer keeps the camera in the address (`index.html#view=cx,cy,cz,tx,ty,tz`, scene
+units) and Option-click / `I` shows what's under the cursor: location, terrain patch rid
+or placement rid + model (track, rid), texture id, game xyz. "Copy view + details" puts
+both on the clipboard. To investigate a pasted report: serve `out/viewer`, open the URL
+with the same `#view=`, and look up the rids in `World.chunks` (patch rids are
+`chunks[track, 1]`, placement rids `chunks[track, 3]`, models `chunks[track, 2]`).
 
 ## Open questions / ideas
 

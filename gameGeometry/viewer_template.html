@@ -21,6 +21,14 @@
   #loading { position: absolute; inset: 0; display: grid; place-items: center; font-size: 16px; pointer-events: none; }
   #hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none;
     width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); display: none; }
+  #where { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel);
+    border-radius: 6px; padding: 4px 12px; pointer-events: none; white-space: nowrap; }
+  #where:empty, #inspect[hidden] { display: none; }
+  #inspect { position: absolute; top: 12px; right: 12px; width: 280px; background: var(--panel); border-radius: 8px;
+    padding: 10px 12px; }
+  #inspect .k { color: var(--muted); }
+  #inspectClose { float: right; padding: 0 6px; }
+  #copyView { margin-top: 8px; }
   #status { position: absolute; right: 12px; bottom: 12px; background: var(--panel); border-radius: 6px;
     padding: 4px 10px; color: var(--muted); font-size: 12px; }
 </style>
@@ -28,6 +36,9 @@
 <body>
 <div id="loading">Loading the mountain…</div>
 <div id="status"></div>
+<div id="where"></div>
+<div id="inspect" hidden><button id="inspectClose" title="Close">×</button><div id="inspectBody"></div>
+  <button id="copyView">Copy view + details</button></div>
 <div id="hint"></div>
 <div id="panel">
   <h1>SSX 3 — the mountain</h1>
@@ -46,7 +57,7 @@
 </script>
 <script type="module">
 import * as THREE from 'three';
-import { MapControls } from 'three/addons/controls/MapControls.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ---------- data loading ----------
 // Data files are <script>s calling ssxData(key, base64 gzip), because browsers
@@ -174,13 +185,14 @@ camera.lookAt(0, 0, 0);
 // Map style is the Google Earth convention: drag slides the ground, scroll / pinch zooms toward
 // the cursor, right-drag or Shift-drag rotates and tilts, double-click flies to a spot.
 const canvas = renderer.domElement;
-const controls = new MapControls(camera, canvas);
+// Orbit controls only rotate (right-drag or Shift-drag); panning and zooming are done below by
+// grabbing the point under the cursor, so their speed always matches the ground you're touching.
+const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
-controls.zoomToCursor = true;
-controls.zoomSpeed = 1.5;  // the mountain is big; cover it in fewer swipes
+controls.enablePan = false;
+controls.enableZoom = false;
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.ROTATE };
 controls.maxPolarAngle = Math.PI * 0.49;  // stay above the horizon
-controls.minDistance = span / 5000;
-controls.maxDistance = span * 3;
 
 const keys = new Set();
 const fly = { on: false, speed: span * 0.03, base: span * 0.03, look: new THREE.Euler(0, 0, 0, 'YXZ') };
@@ -225,7 +237,10 @@ function aimPivot() {
   controls.target.copy(groundAt(innerWidth / 2, innerHeight / 2) ?? pivotAlongView());
 }
 controls.addEventListener('start', aimPivot);
-window.viewer = { camera, controls, scene };  // handy from the browser console
+window.viewer = { camera, controls, scene, debug: () => ({ keys: [...keys], mapSpeed, groundHeight, flySpeed: fly.speed, flyBase: fly.base, mouse,
+  state: name => { const l = locations.find(l => l.name === name); return l && { rootVisible: l.root.visible, detail: !!l.detail, detailVisible: l.detail?.visible ?? null, overviewVisible: l.overview?.visible ?? null, near: isNear(l), dist: camera.position.distanceTo(l.sphere.center), radius: l.sphere.radius }; },
+  detailed: () => locations.filter(l => l.detail).map(l => l.name + (l.detail.visible ? '' : '(hidden)')),
+  pick: (x, y, terrainOnly) => { const h = pickAt(x, y, terrainOnly); return h && { loc: h.object.userData.info.loc.name, kind: h.object.userData.info.kind, dist: h.distance }; } }) };  // handy from the browser console (see also #view= in the address)
 
 // Double-click: glide toward the point, ending a third of the way from it.
 let glide = null;
@@ -264,6 +279,22 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 
+// Map-mode key speed follows the camera's height above the terrain straight below (checked a few
+// times a second, eased so it never jumps). Tying it to the pivot distance made it jump whenever a
+// drag or scroll re-aimed the pivot at far-off terrain or empty sky.
+const down = new THREE.Vector3(0, -1, 0);
+let groundHeight = null, lastHeightCheck = 0, mapSpeed = null;
+function heightAboveGround() {
+  const now = performance.now();
+  if (now - lastHeightCheck > 200) {
+    lastHeightCheck = now;
+    raycaster.set(camera.position, down);
+    const hit = raycaster.intersectObjects(visibleMeshes(true), false)[0];
+    if (hit) groundHeight = hit.distance;
+  }
+  return groundHeight ?? camera.position.distanceTo(controls.target);
+}
+
 function keyMove(dt) {
   if (!keys.size) return;
   const k = keys, boost = k.has('ShiftLeft') || k.has('ShiftRight') ? 5 : 1;
@@ -276,7 +307,12 @@ function keyMove(dt) {
   right.crossVectors(forward, camera.up).normalize();
   move.set(0, 0, 0).addScaledVector(forward, ahead).addScaledVector(right, side).addScaledVector(camera.up, up);
   if (!move.lengthSq()) return;
-  const speed = fly.on ? fly.speed : camera.position.distanceTo(controls.target) * 0.4 * fly.speed / fly.base;
+  let speed = fly.speed;
+  if (!fly.on) {
+    const wanted = Math.max(heightAboveGround(), span * 0.0005) * 0.8;
+    mapSpeed = mapSpeed === null ? wanted : mapSpeed + (wanted - mapSpeed) * Math.min(1, dt * 2);
+    speed = mapSpeed * fly.speed / fly.base;
+  }
   move.normalize().multiplyScalar(speed * boost * dt);
   camera.position.add(move);
   if (!fly.on) controls.target.add(move);
@@ -302,7 +338,7 @@ document.addEventListener('mousemove', e => {
   camera.quaternion.setFromEuler(fly.look);
 });
 canvas.addEventListener('wheel', e => {
-  if (!fly.on) return;  // map mode: MapControls zooms toward the cursor
+  if (!fly.on) return;  // map mode zooms toward the cursor (below)
   e.preventDefault();
   const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;  // lines / pages -> pixels
   const step = fly.speed * 0.004 * (e.ctrlKey ? 8 : 1);  // pinch deltas are small
@@ -321,7 +357,7 @@ function flash(text) {
 }
 
 const HELP = {
-  map: '<b>Map:</b> drag to slide, scroll or pinch to zoom toward the cursor, right-drag or Shift-drag to rotate and tilt, double-click to fly there. W A S D and Space / Q also move; Shift is faster, − / = set speed.',
+  map: '<b>Map:</b> drag to move the ground (it stays under the cursor), scroll or pinch to zoom toward the cursor, right-drag or Shift-drag to rotate and tilt, double-click to fly there. W A S D and Space / Q also move; Shift is faster, − / = set speed.',
   fly: '<b>Fly:</b> W A S D move, Space / Q up and down, Shift is faster, − / = set speed. Two-finger swipe or pinch to glide. Drag to look, or click the view to steer with the mouse (Esc lets go).',
 };
 function setMode(flyOn) {
@@ -330,7 +366,7 @@ function setMode(flyOn) {
   glide = null;
   document.getElementById('mode').textContent = `Camera: ${flyOn ? 'fly' : 'map'}`;
   document.getElementById('help').innerHTML = HELP[flyOn ? 'fly' : 'map'] +
-    ' Click a name to jump there. Full detail streams in as you get close.';
+    ' Click a name to jump there. Option-click (or I) shows what something is; the address keeps your view.';
   if (flyOn) {
     fly.look.setFromQuaternion(camera.quaternion);
   } else {
@@ -361,6 +397,8 @@ function materials(t, lm, flatColor, vertexLit, solid) {
     // use alpha as a mask for some other effect, so treating it as transparency punches holes.
     const blend = !solid && t?.mode === 'blend', cutout = !solid && t?.mode === 'cutout';
     const common = { side: THREE.DoubleSide, transparent: blend, depthWrite: !blend, alphaTest: cutout ? 0.5 : 0 };
+    // glow textures (light on black) are added on top, so their black parts vanish
+    if (!solid && t?.additive) Object.assign(common, { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
     const surface = t ? { map: t.tex } : { color: 0xff00ff };
     const flatSurface = { color: flatColor, alphaMap: cutout ? t.tex : null, opacity: blend ? 0.4 : 1 };
     const baked = lm ? { lightMap: lm, lightMapIntensity: BAKED_GAIN * Math.PI }  // unlit materials divide by pi
@@ -434,6 +472,7 @@ const locations = [];
                   flat: track(new THREE.MeshStandardMaterial({ color: loc.tint, side: THREE.DoubleSide })) },
       };
       loc.overview = makeMesh(pos, idx, { color: [col, 3] }, mats);
+      loc.overview.userData.info = { kind: 'overview', loc };
       loc.root.add(loc.overview);
     }
     locations.push(loc);
@@ -448,7 +487,7 @@ function texture(id) {
   if (id < 0) return null;
   if (!textureCache.has(id)) {
     const t = decodeTexture(texturePack.bytes, texturePack.meta.textures[id], THREE.RepeatWrapping);
-    textureCache.set(id, { ...t, id, helper: !!texturePack.meta.textures[id][7] });
+    textureCache.set(id, { ...t, id, helper: !!texturePack.meta.textures[id][7], additive: !!texturePack.meta.textures[id][8] });
   }
   return textureCache.get(id);
 }
@@ -507,9 +546,11 @@ function buildDetail(loc, pack) {
       }
       for (let i = 0; i < grid.length; i++) idx[k * grid.length + i] = grid[i] + k * per;
     }
-    p0 += count;
     const mats = materials(t, lightmaps[lmIndex], loc.tint, false, true);
-    add(t?.helper ? 'helpers' : 'terrain', makeMesh(pos, idx, { uv: [uv, 2], uv1: [uv1, 2] }, mats));
+    const mesh = makeMesh(pos, idx, { uv: [uv, 2], uv1: [uv1, 2] }, mats);
+    mesh.userData.info = { kind: 'terrain', loc, texId, firstPatch: p0, trisPerPatch: grid.length / 3 };
+    p0 += count;
+    add(t?.helper ? 'helpers' : 'terrain', mesh);
   }
 
   // objects: bake every placement into one mesh per (kind, texture)
@@ -534,6 +575,7 @@ function buildDetail(loc, pack) {
   for (const b of buckets.values()) {
     b.pos = new Float32Array(b.nv * 3); b.uv = new Float32Array(b.nv * 2); b.col = new Float32Array(b.nv * 3);
     b.idx = indexArray(b.nt * 3, b.nv); b.v = 0; b.t = 0;
+    b.owners = [];  // [first triangle, placement index], for the inspector
   }
   for (let i = 0; i < meta.instances; i++) {  // pass 2: fill
     const m = inst[i * 15], M = inst.subarray(i * 15 + 1, i * 15 + 13);  // rows of (c0, c1, c2)
@@ -555,6 +597,7 @@ function buildDetail(loc, pack) {
         b.col[o * 3 + 1] = LINEAR[g << 2 | g >> 4] * BAKED_GAIN;
         b.col[o * 3 + 2] = LINEAR[bl << 3 | bl >> 2] * BAKED_GAIN;
       }
+      if (b.owners.at(-1)?.[1] !== i) b.owners.push([b.t, i]);
       for (let t = 0; t < nt * 3; t++) b.idx[b.t * 3 + t] = tris[ts * 3 + t] + b.v;
       b.v += nv; b.t += nt;
     });
@@ -563,10 +606,13 @@ function buildDetail(loc, pack) {
     const [kind, texId] = key.split(':');
     const t = texture(Number(texId));
     const mesh = makeMesh(b.pos, b.idx, { uv: [b.uv, 2], color: [b.col, 3] }, materials(t, null, loc.objTint, true, false));
-    if (t?.mode === 'blend') mesh.renderOrder = 1;
+    if (t?.mode === 'blend' || t?.additive) mesh.renderOrder = 1;
+    mesh.userData.info = { kind, loc, texId: Number(texId), owners: b.owners };
     add(kind, mesh);
   }
   group.userData.kinds = kinds;
+  group.userData.ids = { patchRid: section('patchRid', Uint32Array), instRid: section('instRid', Uint32Array),
+                         modelKeys: meta.modelKeys, inst };
   return group;
 }
 
@@ -682,6 +728,192 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+// ---------- where am I? ----------
+// Scene position back to the game's own coordinates (Z-up, unscaled).
+const toGame = p => [p.x / SCALE + center[0], -(p.z / SCALE + center[2]), p.y / SCALE + center[1]];
+const placeName = loc => (loc.title ? `${loc.title} · ` : '') + `${loc.name} · ${loc.what}` + (loc.peak ? ` · Peak ${loc.peak}` : '');
+
+// Meshes that are actually on screen: full detail where loaded and visible, else the overview.
+function visibleMeshes(terrainOnly) {
+  const out = [];
+  for (const loc of locations) {
+    if (!loc.root.visible) continue;
+    if (loc.detail?.visible) {
+      for (const [kind, meshes] of Object.entries(loc.detail.userData.kinds))
+        if (!terrainOnly || kind === 'terrain') out.push(...meshes.filter(m => m.visible));
+    } else if (loc.overview?.visible) out.push(loc.overview);
+  }
+  return out;
+}
+function pickAt(x, y, terrainOnly) {
+  // The camera's world matrix is only refreshed when a frame renders; background tabs don't render,
+  // and a jump (e.g. from a #view= link) leaves it with the new position but the old rotation.
+  camera.updateMatrixWorld();
+  pointer.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  return raycaster.intersectObjects(visibleMeshes(terrainOnly), false)[0] ?? null;
+}
+
+let mouse = { x: innerWidth / 2, y: innerHeight / 2 }, lastInspect = '';
+canvas.addEventListener('pointermove', e => { mouse = { x: e.clientX, y: e.clientY }; });
+
+// ---------- map mode: grab the ground to pan, zoom toward the cursor ----------
+const upAxis = new THREE.Vector3(0, 1, 0), planeHit = new THREE.Vector3();
+function rayAt(x, y) {
+  camera.updateMatrixWorld();
+  pointer.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  return raycaster.ray;
+}
+// Where the cursor points when it isn't over terrain: a level plane at the height of the ground
+// below the camera. null if the cursor is above the horizon.
+function groundFallback(x, y) {
+  const plane = new THREE.Plane(upAxis, -(camera.position.y - heightAboveGround()));
+  return rayAt(x, y).intersectPlane(plane, new THREE.Vector3());
+}
+const groundUnder = (x, y) => pickAt(x, y, true)?.point ?? groundFallback(x, y);
+
+// Drag: the point you pressed stays pinned under the cursor (the Google Earth / Cesium approach),
+// so there is no speed to get wrong. Plain left-drag only; Shift/right-drag still rotate.
+let grab = null;
+canvas.addEventListener('pointerdown', e => {
+  if (fly.on || e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  const anchor = groundUnder(e.clientX, e.clientY);
+  if (!anchor) return;
+  e.stopImmediatePropagation();  // keep the orbit controls from rotating
+  glide = null;
+  grab = { id: e.pointerId, anchor, plane: new THREE.Plane(upAxis, -anchor.y) };
+  try { canvas.setPointerCapture(e.pointerId); } catch {}  // keeps the drag going if the cursor leaves the canvas
+}, { capture: true });
+canvas.addEventListener('pointermove', e => {
+  if (!grab || e.pointerId !== grab.id) return;
+  const q = rayAt(e.clientX, e.clientY).intersectPlane(grab.plane, planeHit);
+  if (!q) return;
+  const shift = grab.anchor.clone().sub(q);
+  // near the horizon a tiny mouse move maps to a huge distance; cap each step
+  const cap = camera.position.distanceTo(grab.anchor) * 0.5;
+  if (shift.length() > cap) shift.setLength(cap);
+  camera.position.add(shift);
+  controls.target.add(shift);
+});
+const endGrab = e => {
+  if (!grab || e.pointerId !== grab.id) return;
+  try { canvas.releasePointerCapture(e.pointerId); } catch {}
+  grab = null;
+};
+canvas.addEventListener('pointerup', endGrab);
+canvas.addEventListener('pointercancel', endGrab);
+
+// Scroll / pinch: move toward the point under the cursor by a fixed fraction of the distance to it,
+// so every step is in proportion to how far away that point really is. A continuous trackpad
+// gesture keeps zooming toward the same point instead of re-aiming on every event.
+let zoomAnchor = null, lastZoom = { t: 0, x: 0, y: 0 };
+canvas.addEventListener('wheel', e => {
+  if (fly.on) return;
+  e.preventDefault();
+  const now = performance.now();
+  if (!zoomAnchor || now - lastZoom.t > 250 || Math.hypot(e.clientX - lastZoom.x, e.clientY - lastZoom.y) > 4)
+    zoomAnchor = groundUnder(e.clientX, e.clientY) ?? controls.target.clone();
+  lastZoom = { t: now, x: e.clientX, y: e.clientY };
+  glide = null;
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;  // lines / pages -> pixels
+  const factor = Math.exp(e.deltaY * unit * (e.ctrlKey ? 0.01 : 0.002));  // pinch deltas are small
+  const offset = camera.position.clone().sub(zoomAnchor).multiplyScalar(factor);
+  const dist = offset.length();
+  if ((factor < 1 && dist < span / 5000) || (factor > 1 && dist > span * 3)) return;
+  camera.position.copy(zoomAnchor).add(offset);
+  controls.target.sub(zoomAnchor).multiplyScalar(factor).add(zoomAnchor);  // keep the view direction
+}, { passive: false });
+
+// the readout at the top: the location under the mouse, or else in the middle of the view
+const where = document.getElementById('where');
+let lastWhere = '';
+setInterval(() => {
+  // also refresh when detail streams in or out, or a group is toggled, even if nothing moved
+  const shown = locations.map(l => (l.root.visible ? 1 : 0) + (l.detail?.visible ? 2 : 0)).join('');
+  const key = camera.position.toArray().map(v => v.toFixed(3)).join() + `:${mouse.x},${mouse.y}:${shown}`;
+  if (key === lastWhere) return;
+  lastWhere = key;
+  const hit = pickAt(mouse.x, mouse.y, true) ?? pickAt(innerWidth / 2, innerHeight / 2, true);
+  where.textContent = hit ? `Looking at ${placeName(hit.object.userData.info.loc)}` : '';
+}, 400);
+
+// Option-click (or I) inspects whatever is under the cursor.
+const marker = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xff3366, depthTest: false }));
+marker.renderOrder = 10;
+marker.visible = false;
+scene.add(marker);
+canvas.addEventListener('click', e => { if (e.altKey) inspect(e.clientX, e.clientY); });
+addEventListener('keydown', e => {
+  if (e.code === 'KeyI' && !e.metaKey && !e.ctrlKey && !e.target.closest?.('input')) inspect(mouse.x, mouse.y);
+  if (e.code === 'Escape') closeInspect();
+});
+
+function describeHit(hit) {
+  const info = hit.object.userData.info, loc = info.loc, rows = [['Where', placeName(loc)]];
+  const ids = loc.detail?.userData.ids;
+  if (info.kind === 'terrain' && ids) {
+    const patch = info.firstPatch + Math.floor(hit.faceIndex / info.trisPerPatch);
+    rows.push(['What', `terrain patch #${ids.patchRid[patch]}`], ['Texture', `${info.texId}`]);
+  } else if (info.kind !== 'overview' && ids) {
+    const owners = info.owners;
+    let lo = 0, hi = owners.length - 1;  // last owner starting at or before this triangle
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (owners[mid][0] <= hit.faceIndex) lo = mid; else hi = mid - 1; }
+    const placement = owners[lo][1], [track, rid] = ids.modelKeys[ids.inst[placement * 15]];
+    rows.push(['What', `${info.kind === 'objects' ? 'object' : info.kind.replace(/s$/, '')} · placement #${ids.instRid[placement]}`],
+              ['Model', `#${rid} (track ${track})`], ['Texture', `${info.texId}`]);
+  } else {
+    rows.push(['What', 'low-detail overview (fly closer for detail)']);
+  }
+  rows.push(['Game xyz', toGame(hit.point).map(v => Math.round(v)).join(', ')]);
+  return rows;
+}
+
+function inspect(x, y) {
+  const hit = pickAt(x, y, false);
+  if (!hit) return;
+  const rows = describeHit(hit);
+  document.getElementById('inspectBody').innerHTML =
+    rows.map(([k, v]) => `<div><span class="k">${k}:</span> ${v}</div>`).join('');
+  lastInspect = rows.map(([k, v]) => `${k}: ${v}`).join('\n');
+  document.getElementById('inspect').hidden = false;
+  marker.position.copy(hit.point);
+  marker.scale.setScalar(camera.position.distanceTo(hit.point) * 0.006);
+  marker.visible = true;
+}
+function closeInspect() {
+  document.getElementById('inspect').hidden = true;
+  marker.visible = false;
+}
+document.getElementById('inspectClose').onclick = closeInspect;
+
+// The view lives in the address (#view=camera xyz,target xyz), so a link reopens the same spot.
+function viewHash() {
+  return 'view=' + [...camera.position.toArray(), ...controls.target.toArray()].map(v => +v.toFixed(3)).join(',');
+}
+function applyHash() {
+  const m = location.hash.match(/view=([-\d.,e]+)/);
+  const v = m?.[1].split(',').map(Number);
+  if (!v || v.length !== 6 || v.some(Number.isNaN)) return false;
+  camera.position.set(v[0], v[1], v[2]);
+  controls.target.set(v[3], v[4], v[5]);
+  camera.lookAt(controls.target);
+  camera.updateMatrixWorld();
+  fly.look.setFromQuaternion(camera.quaternion);
+  return true;
+}
+applyHash();
+let lastHash = '';
+setInterval(() => {
+  const h = viewHash();
+  if (h !== lastHash) { lastHash = h; history.replaceState(null, '', '#' + h); }
+}, 500);
+document.getElementById('copyView').onclick = async () => {
+  const text = `${lastInspect}\nView: ${location.href.split('#')[0]}#${viewHash()}`;
+  try { await navigator.clipboard.writeText(text); flash('Copied'); }
+  catch { prompt('Copy this:', text); }
+};
+
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
