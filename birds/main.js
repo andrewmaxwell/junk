@@ -1,36 +1,20 @@
-import * as THREE from 'three';
 import {makeRenderer} from './makeRenderer.js';
+import {makeFlock} from './flock.js';
 
-const numBirds = 10000;
-const turnSpeed = 0.2;
-const moveSpeed = 0.5;
+const numBirds = 40000;
+const stepsPerSecond = 120; // the rate the flock constants are tuned for
+const maxStep = 3; // below 40fps the flock slows down rather than going unstable
 
-const moveBird = (bird, i, birds) => {
-  const targetDirection = new THREE.Vector3()
-    .subVectors(birds[(i + 1) % birds.length].position, bird.position)
-    .normalize();
+const flock = makeFlock(numBirds);
+const {render} = makeRenderer(flock);
 
-  bird.userData.direction = bird.userData.direction
-    .lerp(targetDirection, turnSpeed)
-    .normalize();
+let lastTime = performance.now();
 
-  bird.position.addScaledVector(bird.userData.direction, moveSpeed);
-
-  bird.lookAt(
-    bird.position.x + bird.userData.direction.x,
-    bird.position.y + bird.userData.direction.y,
-    bird.position.z + bird.userData.direction.z,
-  );
-};
-
-const {render, addBird} = makeRenderer();
-
-const birds = Array.from({length: numBirds}, (_, i) => addBird(i / numBirds));
-
-const loop = () => {
-  birds.forEach(moveBird);
+const loop = (time) => {
+  flock.step(Math.min(maxStep, ((time - lastTime) / 1000) * stepsPerSecond));
+  lastTime = time;
   render();
   requestAnimationFrame(loop);
 };
 
-loop();
+requestAnimationFrame(loop);
