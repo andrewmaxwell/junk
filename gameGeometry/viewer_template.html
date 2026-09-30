@@ -1,0 +1,154 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSX 3 Mountain</title>
+<style>
+  :root { --panel: rgba(16, 22, 34, 0.82); --text: #e6ecf5; --muted: #8a97ab; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1320; color: var(--text);
+    font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+  canvas { display: block; }
+  #panel { position: absolute; top: 12px; left: 12px; max-height: calc(100% - 24px); overflow-y: auto;
+    background: var(--panel); border-radius: 8px; padding: 10px 12px; width: 230px; }
+  #panel h1 { font-size: 14px; margin: 0 0 4px; }
+  #panel p { margin: 0 0 8px; color: var(--muted); }
+  .peak { margin-top: 8px; font-weight: 600; }
+  label { display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+  label span.what { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  button { background: #26324a; color: var(--text); border: 0; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; font-size: 16px; }
+</style>
+</head>
+<body>
+<div id="loading">Building terrain…</div>
+<div id="panel">
+  <h1>SSX 3 — the mountain</h1>
+  <p>Drag to orbit, right-drag to pan, scroll to zoom. Click a name to fly to it.</p>
+  <div style="display:flex; gap:6px; flex-wrap:wrap">
+    <button id="all">All</button><button id="none">None</button>
+    <button id="tint">Tint: on</button><button id="wire">Wireframe</button>
+  </div>
+  <div id="list"></div>
+</div>
+<script id="meta" type="application/json">__META__</script>
+<script id="data" type="application/octet-stream">__DATA__</script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const meta = JSON.parse(document.getElementById('meta').textContent);
+const bin = Uint8Array.from(atob(document.getElementById('data').textContent.trim()), c => c.charCodeAt(0));
+const q = new Int16Array(bin.buffer);
+
+const SCALE = 1 / 1000;  // game units are tiny; keep numbers friendly for the GPU
+const n = meta.steps + 1, perPatch = n * n;
+const center = meta.min.map((lo, a) => (lo + meta.max[a]) / 2);
+
+// grid triangle indices shared by every patch
+const gridIdx = [];
+for (let a = 0; a < meta.steps; a++) for (let b = 0; b < meta.steps; b++) {
+  const i = a * n + b, j = i + n;
+  gridIdx.push(i, j, j + 1, i, j + 1, i + 1);
+}
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1320);
+const span = Math.max(...meta.max.map((hi, a) => hi - meta.min[a])) * SCALE;
+scene.fog = new THREE.Fog(0x0d1320, span * 1.2, span * 4);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, span / 5000, span * 10);
+camera.position.set(span * 0.9, span * 0.6, span * 0.9);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x3a4050, 1.6));
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+sun.position.set(1, 1.4, 0.6);
+scene.add(sun);
+
+const peakHue = { A: 0.58, B: 0.33, C: 0.08, D: 0.85, E: 0.13 };
+const meshes = [];
+let offset = 0;
+meta.locations.forEach((loc, k) => {
+  const verts = loc.patches * perPatch;
+  const pos = new Float32Array(verts * 3);
+  for (let v = 0; v < verts; v++) for (let a = 0; a < 3; a++) {
+    const t = (q[(offset + v) * 3 + a] + 32768) / 65535;
+    pos[v * 3 + a] = (meta.min[a] + t * (meta.max[a] - meta.min[a]) - center[a]) * SCALE;
+  }
+  offset += verts;
+  const idx = new Uint32Array(loc.patches * gridIdx.length);
+  for (let p = 0; p < loc.patches; p++)
+    for (let i = 0; i < gridIdx.length; i++) idx[p * gridIdx.length + i] = gridIdx[i] + p * perPatch;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeVertexNormals();
+  const hue = peakHue[loc.name[0]] ?? 0;
+  const tint = new THREE.Color().setHSL(hue, 0.45 + (k % 3) * 0.12, 0.62 + (k % 2) * 0.08);
+  const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.85, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.userData = { tint, name: loc.name };
+  scene.add(mesh);
+  meshes.push(mesh);
+});
+
+// location list grouped by peak
+const list = document.getElementById('list');
+let lastPeak = null;
+meshes.forEach((mesh, k) => {
+  const loc = meta.locations[k];
+  if (loc.name[0] !== lastPeak) {
+    lastPeak = loc.name[0];
+    list.insertAdjacentHTML('beforeend', `<div class="peak">Peak ${lastPeak}</div>`);
+  }
+  const label = document.createElement('label');
+  label.innerHTML = `<input type="checkbox" checked><span class="sw" style="background:#${mesh.userData.tint.getHexString()}"></span>` +
+    `${loc.name} <span class="what">${loc.what.replace(/^peak \w /, '')}</span>`;
+  const box = label.querySelector('input');
+  box.onchange = () => { mesh.visible = box.checked; };
+  label.onclick = e => { if (e.target !== box) { e.preventDefault(); focus(mesh); } };
+  mesh.userData.box = box;
+  list.appendChild(label);
+});
+function focus(mesh) {
+  mesh.geometry.computeBoundingSphere();
+  const { center: c, radius: r } = mesh.geometry.boundingSphere;
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  controls.target.copy(c);
+  camera.position.copy(c).addScaledVector(dir, r * 2.2);
+}
+const setAll = on => meshes.forEach(m => { m.visible = on; m.userData.box.checked = on; });
+document.getElementById('all').onclick = () => setAll(true);
+document.getElementById('none').onclick = () => setAll(false);
+let tinted = true;
+document.getElementById('tint').onclick = e => {
+  tinted = !tinted;
+  e.target.textContent = `Tint: ${tinted ? 'on' : 'off'}`;
+  meshes.forEach(m => m.material.color.copy(tinted ? m.userData.tint : new THREE.Color(0xf2f5fa)));
+};
+document.getElementById('wire').onclick = () => meshes.forEach(m => { m.material.wireframe = !m.material.wireframe; });
+
+document.getElementById('loading').remove();
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>
