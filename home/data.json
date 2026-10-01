@@ -18,6 +18,12 @@
     "desc": "A game where you have to mow every patch in as few moves as you can."
   },
   {
+    "filePath": "murmuration",
+    "title": "Murmuration",
+    "year": 2026,
+    "desc": "250,000 birds flocking over a roost at dusk, running on WebGPU"
+  },
+  {
     "filePath": "optics",
     "title": "Optics Simulator",
     "year": 2026,

@@ -1,25 +1,36 @@
+import * as THREE from 'three';
 import {makeRenderer} from './makeRenderer.js';
-import {makeFlock} from './flock.js';
 
-const numBirds = 250000;
-const stepsPerSecond = 120; // the rate the flock constants are tuned for
-const maxStep = 3; // below 40fps the flock slows down rather than going unstable
+const numBirds = 10000;
+const turnSpeed = 0.2;
+const moveSpeed = 0.5;
 
-if (!navigator.gpu) {
-  document.body.textContent = 'This needs WebGPU, which this browser does not support.';
-  throw new Error('WebGPU is not available');
-}
+const moveBird = (bird, i, birds) => {
+  const targetDirection = new THREE.Vector3()
+    .subVectors(birds[(i + 1) % birds.length].position, bird.position)
+    .normalize();
 
-const flock = makeFlock(numBirds);
-const {compute, render} = await makeRenderer(flock);
+  bird.userData.direction = bird.userData.direction
+    .lerp(targetDirection, turnSpeed)
+    .normalize();
 
-let lastTime = performance.now();
+  bird.position.addScaledVector(bird.userData.direction, moveSpeed);
 
-const loop = (time) => {
-  flock.step(compute, Math.min(maxStep, ((time - lastTime) / 1000) * stepsPerSecond));
-  lastTime = time;
+  bird.lookAt(
+    bird.position.x + bird.userData.direction.x,
+    bird.position.y + bird.userData.direction.y,
+    bird.position.z + bird.userData.direction.z,
+  );
+};
+
+const {render, addBird} = makeRenderer();
+
+const birds = Array.from({length: numBirds}, (_, i) => addBird(i / numBirds));
+
+const loop = () => {
+  birds.forEach(moveBird);
   render();
   requestAnimationFrame(loop);
 };
 
-requestAnimationFrame(loop);
+loop();
