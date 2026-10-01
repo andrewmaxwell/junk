@@ -116,6 +116,53 @@ def cmpr_pixel(d, x, y):
     return tuple((p + q) // 2 for p, q in zip(a, b)) if i == 2 else (0, 0, 0, 0)
 
 
+# Re-encoding for the viewer: the same images in the layouts browsers and GPUs expect, so the
+# page never handles GameCube data.
+
+# CMPR keeps a block's first pixel in the top two bits of each row byte; BC1 keeps it in the bottom two
+_REVERSE_PAIRS = bytes((b & 3) << 6 | (b >> 2 & 3) << 4 | (b >> 4 & 3) << 2 | b >> 6 for b in range(256))
+
+
+def to_bc1(d):
+    """CMPR top level -> (w, h, BC1 blocks): standard DXT1, blocks row by row, little-endian colours."""
+    w, h = struct.unpack_from('>HH', d, 4)
+    tiles_across = (w + 7) // 8
+    blocks = []
+    for by in range((h + 3) // 4):
+        for bx in range((w + 3) // 4):
+            # an 8x8 tile holds four blocks: top left, top right, bottom left, bottom right
+            i = 0x20 + ((by // 2 * tiles_across + bx // 2) * 4 + by % 2 * 2 + bx % 2) * 8
+            blocks.append(d[i:i + 8])
+    out = bytearray(b''.join(blocks))
+    out[0::8], out[1::8] = out[1::8], out[0::8]
+    out[2::8], out[3::8] = out[3::8], out[2::8]
+    for k in range(4, 8):
+        out[k::8] = out[k::8].translate(_REVERSE_PAIRS)
+    return w, h, bytes(out)
+
+
+def to_indexed(d):
+    """C8 top level -> (w, h, row-major 8-bit indices, RGBA8 palette)."""
+    w, h = struct.unpack_from('>HH', d, 4)
+    nxt = int.from_bytes(d[1:4], 'big')
+    count = struct.unpack_from('>H', d, nxt + 4)[0]
+    tiles_across = (w + 7) // 8
+    rows = []
+    for y in range(h):  # tiles are 8x4
+        base = 0x20 + (y // 4 * tiles_across * 4 + y % 4) * 8
+        rows.append(b''.join(d[base + 32 * tx:base + 32 * tx + 8] for tx in range(tiles_across))[:w])
+    palette = b''.join(bytes(rgb5a3(c)) for c in struct.unpack_from(f'>{count}H', d, nxt + 0x20))
+    return w, h, b''.join(rows), palette
+
+
+_RGB565_TO_RGB8 = [bytes(rgb565(c)[:3]) for c in range(65536)]
+
+
+def rgb8_colors(d):
+    """Big-endian RGB565 colours -> RGB8 bytes."""
+    return b''.join(_RGB565_TO_RGB8[c] for c in struct.unpack(f'>{len(d) // 2}H', d))
+
+
 def png(w, h, rgba):
     rows = b''.join(b'\0' + rgba[y * w * 4:(y + 1) * w * 4] for y in range(h))
 

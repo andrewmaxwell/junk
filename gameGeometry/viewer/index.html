@@ -4,33 +4,55 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SSX 3 Mountain</title>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js">
 <style>
   :root { --panel: rgba(16, 22, 34, 0.82); --text: #e6ecf5; --muted: #8a97ab; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1320; color: var(--text);
-    font: 13px/1.4 -apple-system, system-ui, sans-serif; }
-  canvas { display: block; }
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #0d1320; color: var(--text);
+    font: 13px/1.4 -apple-system, system-ui, sans-serif; -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  canvas { display: block; touch-action: none; }
+  a { color: #9cc3ff; }
   #panel { position: absolute; top: 12px; left: 12px; max-height: calc(100% - 24px); overflow-y: auto;
-    background: var(--panel); border-radius: 8px; padding: 10px 12px; width: 230px; }
-  #panel h1 { font-size: 14px; margin: 0 0 4px; }
-  #panel p { margin: 0 0 8px; color: var(--muted); }
+    background: var(--panel); border-radius: 8px; padding: 10px 12px; width: 250px; box-sizing: border-box; }
+  #panelHead { display: flex; align-items: center; gap: 8px; }
+  #panelHead h1 { font-size: 14px; margin: 0; flex: 1; }
+  #panel.collapsed > :not(#panelHead) { display: none; }
+  #panel p { margin: 6px 0 8px; color: var(--muted); }
+  #panel p.credit { font-size: 11px; margin-top: 10px; }
+  .buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+  summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
   .peak { margin-top: 8px; font-weight: 600; }
   label { display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
   label span.what { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
   .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
-  button { background: #26324a; color: var(--text); border: 0; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
-  #loading { position: absolute; inset: 0; display: grid; place-items: center; font-size: 16px; pointer-events: none; }
+  button { background: #26324a; color: var(--text); border: 0; border-radius: 4px; padding: 3px 8px; cursor: pointer; font: inherit; }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; font-size: 16px; pointer-events: none;
+    padding: 0 16px; text-align: center; }
   #hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none;
     width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); display: none; }
   #where { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel);
-    border-radius: 6px; padding: 4px 12px; pointer-events: none; white-space: nowrap; }
+    border-radius: 6px; padding: 4px 12px; pointer-events: none; white-space: nowrap; max-width: calc(100% - 24px);
+    box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; }
   #where:empty, #inspect[hidden] { display: none; }
   #inspect { position: absolute; top: 12px; right: 12px; width: 280px; background: var(--panel); border-radius: 8px;
-    padding: 10px 12px; }
+    padding: 10px 12px; box-sizing: border-box; }
   #inspect .k { color: var(--muted); }
   #inspectClose { float: right; padding: 0 6px; }
   #copyView { margin-top: 8px; }
   #status { position: absolute; right: 12px; bottom: 12px; background: var(--panel); border-radius: 6px;
     padding: 4px 10px; color: var(--muted); font-size: 12px; }
+  #status:empty { display: none; }
+  @media (pointer: coarse) {
+    button { padding: 7px 11px; }
+    label { padding: 5px 0; }
+  }
+  /* phones: panel across the top, readouts along the bottom */
+  @media (max-width: 640px) {
+    #panel { top: 8px; left: 8px; right: 8px; width: auto; max-height: 60%; }
+    #where { top: auto; bottom: 44px; }
+    #inspect { top: auto; bottom: 44px; left: 8px; right: 8px; width: auto; }
+    #status { right: 8px; bottom: 8px; }
+  }
 </style>
 </head>
 <body>
@@ -41,17 +63,47 @@
   <button id="copyView">Copy view + details</button></div>
 <div id="hint"></div>
 <div id="panel">
-  <h1>SSX 3 — the mountain</h1>
+  <div id="panelHead"><h1>SSX 3 — the mountain</h1><button id="panelToggle">Hide</button></div>
   <p id="help"></p>
-  <div style="display:flex; gap:6px; flex-wrap:wrap">
-    <button id="all">All</button><button id="none">None</button>
-    <button id="lighting" title="Baked: the game's own lightmaps and vertex lighting. Viewer: plain sun and sky lights.">Lighting: baked</button><button id="textures">Textures: on</button><button id="objects">Objects: on</button><button id="panels" title="Big flat cards (backdrops, tree lines) drawn with see-through textures: 2D trees, signs, glass">Panels: on</button><button id="helpers" title="Things the game doesn't draw as modelled: translucent editor volumes, editor arrow boxes, and placeholders like the black slabs by jumps and point-multiplier cubes">Helpers: off</button><button id="blocks" title="Big plain boxes with snow or ice textures (e.g. on Snow Jam), probably invisible blockers">Blocks: off</button><button id="wire">Wireframe</button><button id="mode" title="Map: drag, zoom and rotate like Google Earth. Fly: first-person flying with the keyboard.">Camera: map</button>
+  <div class="buttons">
+    <button id="all">All</button><button id="none">None</button><button id="textures">Textures: on</button><button id="objects">Objects: on</button>
   </div>
+  <details><summary>More</summary><div class="buttons">
+    <button id="lighting" title="Baked: the game's own lightmaps and vertex lighting. Viewer: plain sun and sky lights.">Lighting: baked</button><button id="panels" title="Big flat cards (backdrops, tree lines) drawn with see-through textures: 2D trees, signs, glass">Panels: on</button><button id="helpers" title="Things the game doesn't draw as modelled: translucent editor volumes, editor arrow boxes, and placeholders like the black slabs by jumps and point-multiplier cubes">Helpers: off</button><button id="blocks" title="Big plain boxes with snow or ice textures (e.g. on Snow Jam), probably invisible blockers">Blocks: off</button><button id="wire">Wireframe</button><button id="mode" title="Map: drag, zoom and rotate like Google Earth. Fly: first-person flying with the keyboard.">Camera: map</button>
+  </div></details>
   <div id="list"></div>
+  <p class="credit">The world of SSX 3 (EA Canada, 2003), rebuilt from the GameCube disc. A fan project, not affiliated
+    with EA. <a href="https://github.com/andrewmaxwell/junk/tree/master/gameGeometry" target="_blank">How it works</a></p>
 </div>
+<script>
+// Start the worker and the overview download right away, while three.js is still on its way.
+window.ssx = (() => {
+  const loading = document.getElementById('loading');
+  if (location.protocol === 'file:') {
+    loading.textContent = 'This page needs a web server: run python3 -m http.server in its folder.';
+    return {};
+  }
+  const worker = new Worker('worker.js'), calls = new Map();
+  let next = 0;
+  worker.onmessage = ({ data }) => {
+    const call = calls.get(data.id);
+    if ('progress' in data) return call.onProgress?.(data.progress);
+    calls.delete(data.id);
+    if (data.error) call.reject(new Error(data.error)); else call.resolve(data.result);
+  };
+  const request = (kind, file, onProgress) => new Promise((resolve, reject) => {
+    const id = next++;
+    calls.set(id, { resolve, reject, onProgress });
+    worker.postMessage({ id, kind, url: `data/${file}` });
+  });
+  const overview = request('overview', 'overview.bin', p => { loading.textContent = `Loading the mountain… ${Math.round(p * 100)}%`; });
+  overview.catch(e => { loading.textContent = `Couldn't load the mountain (${e.message.split('\n')[0]})`; });
+  return { request, overview };
+})();
+</script>
 <script type="importmap">
 { "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
 } }
 </script>
@@ -59,97 +111,33 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// ---------- data loading ----------
-// Data files are <script>s calling ssxData(key, base64 gzip), because browsers
-// refuse fetch() on file:// pages but happily load local scripts.
-const waiting = new Map();
-window.ssxData = (key, b64) => waiting.get(key)?.(b64);
-
-function load(key, file) {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    waiting.set(key, b64 => { waiting.delete(key); script.remove(); unpack(b64).then(resolve, reject); });
-    script.onerror = () => reject(new Error(`could not load ${file}`));
-    script.src = `data/${file}`;
-    document.head.appendChild(script);
-  });
-}
-
-async function unpack(b64) {
-  const packed = await (await fetch(`data:application/octet-stream;base64,${b64}`)).blob();
-  const buf = await new Response(packed.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  const headerLen = new DataView(buf).getUint32(0, true);
-  const { meta, sections } = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, headerLen)));
-  const base = 4 + headerLen;
-  const section = (name, Type = Uint8Array) => {
-    const [off, len] = sections[name];
-    return new Type(buf, base + off, len / Type.BYTES_PER_ELEMENT);
-  };
-  return { meta, section };
-}
-
-// ---------- GameCube texture decoding ----------
-function rgb565(c) {
-  const r = c >> 11, g = (c >> 5) & 63, b = c & 31;
-  return [r << 3 | r >> 2, g << 2 | g >> 4, b << 3 | b >> 2, 255];
-}
-function rgb5a3(c) {
-  if (c & 0x8000) {
-    const r = (c >> 10) & 31, g = (c >> 5) & 31, b = c & 31;
-    return [r << 3 | r >> 2, g << 3 | g >> 2, b << 3 | b >> 2, 255];
-  }
-  return [((c >> 8) & 15) * 17, ((c >> 4) & 15) * 17, (c & 15) * 17, Math.round(((c >> 12) & 7) * 255 / 7)];
-}
-const u16 = (a, o) => a[o] << 8 | a[o + 1];
-
-function decodeTexture(bytes, [kind, w, h, pixOff, pixLen, palOff = 0, palCount = 0], wrap) {
-  const out = new Uint8Array(w * h * 4);
-  let p = pixOff;
-  if (kind === 0x1E) {  // CMPR: 8x8 tiles of four 4x4 DXT1 blocks
-    for (let ty = 0; ty < h; ty += 8) for (let tx = 0; tx < w; tx += 8) for (let sub = 0; sub < 4; sub++) {
-      const c0 = u16(bytes, p), c1 = u16(bytes, p + 2);
-      const bits = (bytes[p + 4] << 24 | bytes[p + 5] << 16 | bytes[p + 6] << 8 | bytes[p + 7]) >>> 0;
-      p += 8;
-      const a = rgb565(c0), b = rgb565(c1);
-      const pal = c0 > c1
-        ? [a, b, a.map((x, i) => (2 * x + b[i]) / 3 | 0), a.map((x, i) => (x + 2 * b[i]) / 3 | 0)]
-        : [a, b, a.map((x, i) => (x + b[i]) / 2 | 0), [0, 0, 0, 0]];
-      const bx = tx + (sub & 1) * 4, by = ty + (sub >> 1) * 4;
-      for (let i = 0; i < 16; i++) {
-        const x = bx + (i & 3), y = by + (i >> 2);
-        if (x < w && y < h) out.set(pal[(bits >>> (30 - 2 * i)) & 3], (y * w + x) * 4);
-      }
-    }
-  } else {  // C8: 8x4 tiles of palette indices, RGB5A3 palette
-    const pal = [];
-    for (let i = 0; i < 256; i++) pal.push(i < palCount ? rgb5a3(u16(bytes, palOff + 2 * i)) : [255, 0, 255, 255]);
-    for (let ty = 0; ty < h; ty += 4) for (let tx = 0; tx < w; tx += 8) for (let i = 0; i < 32; i++) {
-      const x = tx + (i & 7), y = ty + (i >> 3);
-      if (x < w && y < h) out.set(pal[bytes[p]], (y * w + x) * 4);
-      p++;
-    }
-  }
-  // how is alpha used? opaque, cut-out, or genuinely translucent
-  let holes = 0, soft = 0;
-  for (let i = 3; i < out.length; i += 4) {
-    if (out[i] < 250) holes++;
-    if (out[i] > 20 && out[i] < 235) soft++;
-  }
-  const mode = holes === 0 ? 'opaque' : soft > w * h * 0.25 ? 'blend' : 'cutout';
-  const tex = new THREE.DataTexture(out, w, h, THREE.RGBAFormat);
+// Files are fetched, unpacked and turned into plain arrays by worker.js (see window.ssx above);
+// this page only makes three.js objects out of them.
+function makeTexture({ w, h, rgba }, wrap, mipmaps) {
+  const tex = new THREE.DataTexture(rgba, w, h, THREE.RGBAFormat);
   tex.wrapS = tex.wrapT = wrap;
   tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  tex.generateMipmaps = true;
+  tex.minFilter = mipmaps ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+  tex.generateMipmaps = mipmaps;
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = anisotropy;
+  tex.anisotropy = mipmaps ? anisotropy : 1;
   tex.needsUpdate = true;
-  return { tex, mode };
+  return tex;
 }
+// flags from the export: 1 = helper (hidden with Helpers), 2 = additive glow
+const textureEntry = ({ id, flags, mode, ...image }) =>
+  ({ id, mode, helper: !!(flags & 1), additive: !!(flags & 2), tex: makeTexture(image, THREE.RepeatWrapping, true) });
 
 // ---------- scene ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(devicePixelRatio);
+const loadingText = document.getElementById('loading');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+} catch (e) {
+  loadingText.textContent = "This browser can't show 3D graphics (WebGL is unavailable).";
+  throw e;
+}
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));  // 3x phone screens cost a lot for little gain
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 const anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -162,20 +150,15 @@ const sun = new THREE.DirectionalLight(0xfff4e0, 1.6);
 sun.position.set(1, 1.4, 0.6);
 scene.add(sun);
 
-// Baked lighting is stored at half strength (128 = full brightness) and doubled when drawn.
-// The doubling happens on gamma-encoded colours, which is about 2^2.2 in three.js's linear space.
+// Baked lighting is stored at half strength and doubled on gamma-encoded colours: about 2^2.2 in
+// three.js's linear space (worker.js applies the same gain to object vertex colours).
 const BAKED_GAIN = 2 ** 2.2;
-const LINEAR = Array.from({ length: 256 }, (_, i) => (i /= 255) <= 0.04045 ? i / 12.92 : ((i + 0.055) / 1.055) ** 2.4);
-
-const SCALE = 1 / 1000;  // game units are tiny; keep numbers friendly for the GPU
-const DETAIL_STEPS = 6;  // terrain tessellation near the camera
-const MAX_DETAILED = 8;  // locations kept in memory at full detail
+const touchOnly = matchMedia('(hover: none)').matches;  // phones and tablets: no keyboard, no hover
+const MAX_DETAILED = touchOnly ? 4 : 8;  // locations kept in memory at full detail
 
 const status = document.getElementById('status');
-const overview = await load('overview', 'overview.js');
-const ov = overview.meta;
-const center = ov.min.map((lo, a) => (lo + ov.max[a]) / 2);
-const span = Math.max(...ov.max.map((hi, a) => hi - ov.min[a])) * SCALE;
+const overview = await ssx.overview;
+const { center, span, scale: SCALE } = overview;  // game -> scene: (p - center) * SCALE, Z-up -> Y-up
 scene.fog = new THREE.Fog(sky, span * 1.2, span * 4);
 const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, span / 20000, span * 10);
 camera.position.set(span * 0.9, span * 0.6, span * 0.9);
@@ -244,13 +227,13 @@ window.viewer = { camera, controls, scene, debug: () => ({ keys: [...keys], mapS
 
 // Double-click: glide toward the point, ending a third of the way from it.
 let glide = null;
-canvas.addEventListener('dblclick', e => {
-  if (fly.on) return;
-  const hit = groundAt(e.clientX, e.clientY);
+function glideTo(x, y) {
+  const hit = groundAt(x, y);
   if (!hit) return;
   glide = { t: 0, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), target: hit,
             pos: hit.clone().add(camera.position.clone().sub(hit).multiplyScalar(0.35)) };
-});
+}
+canvas.addEventListener('dblclick', e => { if (!fly.on && lastPointerType !== 'touch') glideTo(e.clientX, e.clientY); });
 function glideStep(dt) {
   if (!glide) return;
   glide.t = Math.min(1, glide.t + dt / 0.7);
@@ -357,6 +340,8 @@ function flash(text) {
 }
 
 const HELP = {
+  touch: 'Drag to move, pinch to zoom, twist to turn, slide two fingers up or down to tilt. Double-tap to fly to a spot, ' +
+    'long-press to see what something is. Tap a name to go there.',
   map: '<b>Map:</b> drag to move the ground (it stays under the cursor), scroll or pinch to zoom toward the cursor, right-drag or Shift-drag to rotate and tilt, double-click to fly there. W A S D and Space / Q also move; Shift is faster, − / = set speed.',
   fly: '<b>Fly:</b> W A S D move, Space / Q up and down, Shift is faster, − / = set speed. Two-finger swipe or pinch to glide. Drag to look, or click the view to steer with the mouse (Esc lets go).',
 };
@@ -365,7 +350,7 @@ function setMode(flyOn) {
   controls.enabled = !flyOn;
   glide = null;
   document.getElementById('mode').textContent = `Camera: ${flyOn ? 'fly' : 'map'}`;
-  document.getElementById('help').innerHTML = HELP[flyOn ? 'fly' : 'map'] +
+  document.getElementById('help').innerHTML = touchOnly ? HELP.touch : HELP[flyOn ? 'fly' : 'map'] +
     ' Click a name to jump there. Option-click (or I) shows what something is; the address keeps your view.';
   if (flyOn) {
     fly.look.setFromQuaternion(camera.quaternion);
@@ -376,22 +361,17 @@ function setMode(flyOn) {
   }
 }
 
-// game Z-up -> viewer Y-up, centred and scaled
-const toScene = (x, y, z, out, o) => {
-  out[o] = (x - center[0]) * SCALE; out[o + 1] = (z - center[1]) * SCALE; out[o + 2] = (-y - center[2]) * SCALE;
-};
-
 // ---------- view state and materials ----------
 const view = { textures: true, lighting: 'baked', objects: true, panels: true, helpers: false, blocks: false, wire: false };
-const allMaterials = new Set();
+const allMaterials = new Set();  // for the wireframe toggle
 const track = m => { allMaterials.add(m); m.wireframe = view.wire; return m; };
 const pick = mesh => mesh.userData.mats[view.lighting][view.textures ? 'textured' : 'flat'];
 const applyMaterials = () => scene.traverse(o => { if (o.isMesh) o.material = pick(o); });
 
 // Four materials per (texture, lightmap, colour): textured or flat, baked or viewer-lit.
-const materialCache = new Map();
-function materials(t, lm, flatColor, vertexLit, solid) {
-  const key = [t?.id, lm?.uuid, flatColor.getHexString(), vertexLit, solid].join(':');
+// Each location has its own cache, freed with it.
+function materials(materialCache, t, lm, flatColor, vertexLit, solid) {
+  const key = [t?.tex.uuid, lm?.uuid, flatColor.getHexString(), vertexLit, solid].join(':');
   if (!materialCache.has(key)) {
     // Terrain is always solid: road textures keep a full snow image in their colour channel and
     // use alpha as a mask for some other effect, so treating it as transparency punches holes.
@@ -422,205 +402,95 @@ function makeMesh(pos, idx, attrs, mats) {
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   for (const [name, [array, size]] of Object.entries(attrs)) geo.setAttribute(name, new THREE.BufferAttribute(array, size));
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  geo.computeVertexNormals();
   geo.computeBoundingSphere();
   const mesh = new THREE.Mesh(geo);
   mesh.userData.mats = mats;
   mesh.material = pick(mesh);
   return mesh;
 }
-const indexArray = (n, maxVertex) => maxVertex > 65535 ? new Uint32Array(n) : new Uint16Array(n);
 
 // ---------- overview: every location at low detail, coloured like the game ----------
 const peakHue = { A: 0.58, B: 0.33, C: 0.08, D: 0.85, E: 0.13 };
-const ovPos = overview.section('pos', Int16Array), ovCol = overview.section('col');
 const locations = [];
-{
-  const n = ov.steps + 1, per = n * n;
-  const grid = [];
-  for (let a = 0; a < ov.steps; a++) for (let b = 0; b < ov.steps; b++) {
-    const i = a * n + b, j = i + n;
-    grid.push(i, j, j + 1, i, j + 1, i + 1);
-  }
-  let vert = 0;
-  ov.locations.forEach((info, k) => {
-    const hue = peakHue[info.name[0]] ?? 0;
-    const loc = {
-      ...info, index: k, detail: null, loading: false, lastNear: 0,
-      tint: new THREE.Color().setHSL(hue, 0.45 + (k % 3) * 0.12, 0.62 + (k % 2) * 0.08),
-      objTint: new THREE.Color().setHSL(hue, 0.18, 0.5),
-      sphere: new THREE.Sphere(new THREE.Vector3(...info.center.map((c, a) => (c - center[a]) * SCALE)), info.radius * SCALE),
-      root: new THREE.Group(),
+overview.locations.forEach(({ info, pos, col, idx, normal }, k) => {
+  const hue = peakHue[info.name[0]] ?? 0;
+  const loc = {
+    ...info, index: k, detail: null, loading: false, lastNear: 0,
+    tint: new THREE.Color().setHSL(hue, 0.45 + (k % 3) * 0.12, 0.62 + (k % 2) * 0.08),
+    objTint: new THREE.Color().setHSL(hue, 0.18, 0.5),
+    sphere: new THREE.Sphere(new THREE.Vector3(...info.center.map((c, a) => (c - center[a]) * SCALE)), info.radius * SCALE),
+    root: new THREE.Group(),
+  };
+  loc.root.visible = !info.name.endsWith('SKY');  // skyboxes would swallow the view
+  scene.add(loc.root);
+  if (pos) {
+    const mats = {
+      baked: { textured: track(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })),
+               flat: track(new THREE.MeshStandardMaterial({ color: loc.tint, side: THREE.DoubleSide })) },
+      viewer: { textured: track(new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide })),
+                flat: track(new THREE.MeshStandardMaterial({ color: loc.tint, side: THREE.DoubleSide })) },
     };
-    loc.root.visible = !info.name.endsWith('SKY');  // skyboxes would swallow the view
-    scene.add(loc.root);
-    if (info.patches) {
-      const count = info.patches * per;
-      const pos = new Float32Array(count * 3), col = new Float32Array(count * 3);
-      for (let v = 0; v < count; v++) for (let a = 0; a < 3; a++) {
-        const t = (ovPos[(vert + v) * 3 + a] + 32768) / 65535;
-        pos[v * 3 + a] = (ov.min[a] + t * (ov.max[a] - ov.min[a]) - center[a]) * SCALE;
-        col[v * 3 + a] = LINEAR[ovCol[(vert + v) * 3 + a]];
-      }
-      vert += count;
-      const idx = indexArray(info.patches * grid.length, count);
-      for (let p = 0; p < info.patches; p++) for (let i = 0; i < grid.length; i++) idx[p * grid.length + i] = grid[i] + p * per;
-      const mats = {
-        baked: { textured: track(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })),
-                 flat: track(new THREE.MeshStandardMaterial({ color: loc.tint, side: THREE.DoubleSide })) },
-        viewer: { textured: track(new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide })),
-                  flat: track(new THREE.MeshStandardMaterial({ color: loc.tint, side: THREE.DoubleSide })) },
-      };
-      loc.overview = makeMesh(pos, idx, { color: [col, 3] }, mats);
-      loc.overview.userData.info = { kind: 'overview', loc };
-      loc.root.add(loc.overview);
-    }
-    locations.push(loc);
-  });
-}
-document.getElementById('loading').remove();
+    loc.overview = makeMesh(pos, idx, { color: [col, 3], normal: [normal, 3] }, mats);
+    loc.overview.userData.info = { kind: 'overview', loc };
+    loc.root.add(loc.overview);
+  }
+  locations.push(loc);
+});
+loadingText.remove();
 
 // ---------- full detail, loaded per location ----------
-let texturePack = null;
-const textureCache = new Map();
-function texture(id) {
-  if (id < 0) return null;
-  if (!textureCache.has(id)) {
-    const t = decodeTexture(texturePack.bytes, texturePack.meta.textures[id], THREE.RepeatWrapping);
-    textureCache.set(id, { ...t, id, helper: !!texturePack.meta.textures[id][7], additive: !!texturePack.meta.textures[id][8] });
-  }
-  return textureCache.get(id);
-}
-async function textures() {
-  if (!texturePack) {
-    const pack = await load('textures', 'textures.js');
-    texturePack = { meta: pack.meta, bytes: pack.section('bytes') };
-  }
-}
+// Textures most locations use come in textures.bin; each location's file brings the rest.
+const sharedTextures = new Map();
+let sharedLoad = null;
+const loadShared = () => sharedLoad ??= ssx.request('textures', 'textures.bin')
+  .then(list => { for (const t of list) sharedTextures.set(t.id, textureEntry(t)); })
+  .catch(e => { sharedLoad = null; throw e; });
 
-function buildDetail(loc, pack) {
-  const { meta, section } = pack;
-  const group = new THREE.Group();
-  const kinds = { terrain: [], objects: [], panels: [], helpers: [], blocks: [] };
-  const lightmapBytes = section('lightmaps');
-  const lightmaps = meta.lightmaps.map(info => {
-    const { tex } = decodeTexture(lightmapBytes, info, THREE.ClampToEdgeWrapping);
+function buildDetail(loc, { lightmaps, textures, meshes, ids }) {
+  loc.textures = new Map(textures.map(t => [t.id, textureEntry(t)]));
+  loc.materials = new Map();
+  const texture = id => loc.textures.get(id) ?? sharedTextures.get(id) ?? null;
+  // Each lightmap is a sheet of small per-patch regions with 1-texel gutters, and the game stores
+  // no mips for them. Mipmapping would average neighbouring patches together at a distance
+  // (hard-edged blotches of the wrong brightness), so sample only the full-size image.
+  loc.lightmaps = lightmaps.map(image => {
+    const tex = makeTexture(image, THREE.ClampToEdgeWrapping, false);
     tex.channel = 1;  // lightmaps use the second UV set
     return tex;
   });
-  const add = (kind, mesh) => { kinds[kind].push(mesh); group.add(mesh); mesh.visible = kind === 'terrain' || view[kind]; };
-
-  // terrain: tessellate the bicubic patches
-  const coefs = section('coefs', Float32Array), patchUv = section('patchUv', Float32Array), patchLm = section('patchLm', Float32Array);
-  const n = DETAIL_STEPS + 1, per = n * n;
-  const grid = [];
-  for (let a = 0; a < DETAIL_STEPS; a++) for (let b = 0; b < DETAIL_STEPS; b++) {
-    const i = a * n + b, j = i + n;
-    grid.push(i, j, j + 1, i, j + 1, i + 1);
-  }
-  const basis = [];  // u^i v^j for every grid point
-  for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
-    const s = a / DETAIL_STEPS, t = b / DETAIL_STEPS;
-    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) basis.push(s ** i * t ** j);
-  }
-  let p0 = 0;
-  for (const [texId, lmIndex, count] of meta.runs) {
-    const t = texture(texId);
-    const pos = new Float32Array(count * per * 3), uv = new Float32Array(count * per * 2), uv1 = new Float32Array(count * per * 2);
-    const idx = indexArray(count * grid.length, count * per);
-    for (let k = 0; k < count; k++) {
-      const p = p0 + k, c = coefs.subarray(p * 48, p * 48 + 48);
-      const cuv = patchUv.subarray(p * 8, p * 8 + 8), [lu, lv, lw, lh] = patchLm.subarray(p * 4, p * 4 + 4);
-      for (let g = 0; g < per; g++) {
-        let x = 0, y = 0, z = 0;
-        for (let m = 0; m < 16; m++) { const w = basis[g * 16 + m]; x += c[m * 3] * w; y += c[m * 3 + 1] * w; z += c[m * 3 + 2] * w; }
-        const v = k * per + g;
-        toScene(x, y, z, pos, v * 3);
-        // bilinear blend of the corner UVs: S(0,0), S(1,0), S(0,1), S(1,1)
-        const s = Math.floor(g / n) / DETAIL_STEPS, tt = (g % n) / DETAIL_STEPS;
-        const w0 = (1 - s) * (1 - tt), w1 = s * (1 - tt), w2 = (1 - s) * tt, w3 = s * tt;
-        uv[v * 2] = cuv[0] * w0 + cuv[2] * w1 + cuv[4] * w2 + cuv[6] * w3;
-        uv[v * 2 + 1] = cuv[1] * w0 + cuv[3] * w1 + cuv[5] * w2 + cuv[7] * w3;
-        // the patch's first parameter runs along the lightmap's v axis
-        uv1[v * 2] = lu + tt * lw; uv1[v * 2 + 1] = lv + s * lh;
-      }
-      for (let i = 0; i < grid.length; i++) idx[k * grid.length + i] = grid[i] + k * per;
-    }
-    const mats = materials(t, lightmaps[lmIndex], loc.tint, false, true);
-    const mesh = makeMesh(pos, idx, { uv: [uv, 2], uv1: [uv1, 2] }, mats);
-    mesh.userData.info = { kind: 'terrain', loc, texId, firstPatch: p0, trisPerPatch: grid.length / 3 };
-    p0 += count;
-    add(t?.helper ? 'helpers' : 'terrain', mesh);
-  }
-
-  // objects: bake every placement into one mesh per (kind, texture)
-  const verts = section('verts', Int16Array), uvs = section('uvs', Int16Array), cols = section('cols', Uint16Array);
-  const tris = section('tris', Uint16Array), inst = section('inst', Float32Array), pools = section('colorPools');
-  const meshStart = [];
-  { let v = 0, t = 0;
-    for (const [, meshes] of meta.models) meshStart.push(meshes.map(([, nv, nt]) => { const r = [v, t]; v += nv; t += nt; return r; })); }
-  // model category from the export: 0 object, 1 flat backdrop panel, 2 placeholder (drawn by the
-  // game some other way), 3 plain box (probably an invisible blocker)
-  const kindOf = (category, texId) => category === 2 || texture(texId)?.helper ? 'helpers'
-    : category === 1 ? 'panels' : category === 3 ? 'blocks' : 'objects';
-  const buckets = new Map();  // kind:texId -> {nv, nt, ...}
-  for (let i = 0; i < meta.instances; i++) {  // pass 1: sizes
-    const [category, meshes] = meta.models[inst[i * 15]];
-    for (const [texId, nv, nt] of meshes) {
-      const key = kindOf(category, texId) + ':' + texId;
-      const b = buckets.get(key) ?? buckets.set(key, { nv: 0, nt: 0 }).get(key);
-      b.nv += nv; b.nt += nt;
-    }
-  }
-  for (const b of buckets.values()) {
-    b.pos = new Float32Array(b.nv * 3); b.uv = new Float32Array(b.nv * 2); b.col = new Float32Array(b.nv * 3);
-    b.idx = indexArray(b.nt * 3, b.nv); b.v = 0; b.t = 0;
-    b.owners = [];  // [first triangle, placement index], for the inspector
-  }
-  for (let i = 0; i < meta.instances; i++) {  // pass 2: fill
-    const m = inst[i * 15], M = inst.subarray(i * 15 + 1, i * 15 + 13);  // rows of (c0, c1, c2)
-    const pool = meta.pools[inst[i * 15 + 13]], colorBase = pool ? pool[0] + inst[i * 15 + 14] : -1;
-    const [category, meshes] = meta.models[m];
-    meshes.forEach(([texId, nv, nt, lx, ly, lz, sx, sy, sz], k) => {
-      const b = buckets.get(kindOf(category, texId) + ':' + texId), [vs, ts] = meshStart[m][k];
-      for (let v = 0; v < nv; v++) {
-        const q = (vs + v) * 3;
-        const x = lx + (verts[q] + 32768) * sx, y = ly + (verts[q + 1] + 32768) * sy, z = lz + (verts[q + 2] + 32768) * sz;
-        const o = b.v + v;
-        toScene(x * M[0] + y * M[3] + z * M[6] + M[9], x * M[1] + y * M[4] + z * M[7] + M[10],
-                x * M[2] + y * M[5] + z * M[8] + M[11], b.pos, o * 3);
-        b.uv[o * 2] = uvs[(vs + v) * 2] / 4096; b.uv[o * 2 + 1] = uvs[(vs + v) * 2 + 1] / 4096;
-        if (colorBase < 0) { b.col.fill(1, o * 3, o * 3 + 3); continue; }
-        const at = colorBase + cols[vs + v] * 2, c = pools[at] << 8 | pools[at + 1];  // RGB565
-        const r = c >> 11, g = (c >> 5) & 63, bl = c & 31;
-        b.col[o * 3] = LINEAR[r << 3 | r >> 2] * BAKED_GAIN;
-        b.col[o * 3 + 1] = LINEAR[g << 2 | g >> 4] * BAKED_GAIN;
-        b.col[o * 3 + 2] = LINEAR[bl << 3 | bl >> 2] * BAKED_GAIN;
-      }
-      if (b.owners.at(-1)?.[1] !== i) b.owners.push([b.t, i]);
-      for (let t = 0; t < nt * 3; t++) b.idx[b.t * 3 + t] = tris[ts * 3 + t] + b.v;
-      b.v += nv; b.t += nt;
-    });
-  }
-  for (const [key, b] of buckets) {
-    const [kind, texId] = key.split(':');
-    const t = texture(Number(texId));
-    const mesh = makeMesh(b.pos, b.idx, { uv: [b.uv, 2], color: [b.col, 3] }, materials(t, null, loc.objTint, true, false));
-    if (t?.mode === 'blend' || t?.additive) mesh.renderOrder = 1;
-    mesh.userData.info = { kind, loc, texId: Number(texId), owners: b.owners };
-    add(kind, mesh);
+  const group = new THREE.Group();
+  const kinds = { terrain: [], objects: [], panels: [], helpers: [], blocks: [] };
+  for (const m of meshes) {
+    const t = texture(m.texId), terrain = !!m.uv1;
+    // Terrain is always solid: road textures keep a full snow image in their colour channel and
+    // use alpha as a mask for some other effect, so treating it as transparency punches holes.
+    const mats = terrain ? materials(loc.materials, t, loc.lightmaps[m.lightmap] ?? null, loc.tint, false, true)
+      : materials(loc.materials, t, null, loc.objTint, true, false);
+    const attrs = terrain ? { uv: [m.uv, 2], uv1: [m.uv1, 2], normal: [m.normal, 3] }
+      : { uv: [m.uv, 2], color: [m.col, 3], normal: [m.normal, 3] };
+    const mesh = makeMesh(m.pos, m.idx, attrs, mats);
+    if (!terrain && (t?.mode === 'blend' || t?.additive)) mesh.renderOrder = 1;
+    mesh.userData.info = terrain ? { kind: 'terrain', loc, texId: m.texId, firstPatch: m.firstPatch, trisPerPatch: m.trisPerPatch }
+      : { kind: m.kind, loc, texId: m.texId, owners: m.owners };
+    kinds[m.kind].push(mesh);
+    group.add(mesh);
+    mesh.visible = m.kind === 'terrain' || view[m.kind];
   }
   group.userData.kinds = kinds;
-  group.userData.ids = { patchRid: section('patchRid', Uint32Array), instRid: section('instRid', Uint32Array),
-                         modelKeys: meta.modelKeys, inst };
+  group.userData.ids = ids;
   return group;
 }
 
 function disposeDetail(loc) {
   loc.detail.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
-  for (const m of loc.detail.userData.kinds.terrain) m.material.lightMap?.dispose();
+  for (const t of loc.lightmaps) t.dispose();
+  for (const t of loc.textures.values()) t.tex.dispose();
+  for (const set of loc.materials.values()) for (const group of Object.values(set)) for (const m of Object.values(group)) {
+    m.dispose();
+    allMaterials.delete(m);
+  }
   loc.root.remove(loc.detail);
-  loc.detail = null;
+  loc.detail = loc.textures = loc.lightmaps = loc.materials = null;
 }
 
 // ---------- level of detail ----------
@@ -648,9 +518,8 @@ async function updateDetail() {
   busy = true;
   status.textContent = `Loading ${want.name}…`;
   try {
-    await textures();
-    const pack = await load(want.name, want.file);
-    want.detail = buildDetail(want, pack);
+    const [data] = await Promise.all([ssx.request('detail', want.file), loadShared()]);
+    want.detail = buildDetail(want, data);
     want.root.add(want.detail);
   } catch (e) {
     console.error(e);
@@ -662,6 +531,16 @@ async function updateDetail() {
 setInterval(updateDetail, 250);
 
 // ---------- panel ----------
+const panel = document.getElementById('panel'), panelToggle = document.getElementById('panelToggle');
+const narrow = matchMedia('(max-width: 640px)');
+function setPanel(open) {
+  panel.classList.toggle('collapsed', !open);
+  panelToggle.textContent = open ? 'Hide' : 'Places';
+}
+setPanel(!narrow.matches);
+panelToggle.onclick = () => setPanel(panel.classList.contains('collapsed'));
+if (touchOnly) document.getElementById('mode').hidden = true;  // fly mode needs a keyboard
+
 const list = document.getElementById('list');
 let lastPeak = null;
 for (const loc of locations) {
@@ -677,7 +556,12 @@ for (const loc of locations) {
       : `${loc.name} <span class="what">${loc.what}</span>`);
   const box = label.querySelector('input');
   box.onchange = () => { loc.root.visible = box.checked; };
-  label.onclick = e => { if (e.target !== box) { e.preventDefault(); focus(loc); } };
+  label.onclick = e => {
+    if (e.target === box) return;
+    e.preventDefault();
+    focus(loc);
+    if (narrow.matches) setPanel(false);
+  };
   loc.box = box;
   list.appendChild(label);
 }
@@ -754,8 +638,10 @@ function pickAt(x, y, terrainOnly) {
   return raycaster.intersectObjects(visibleMeshes(terrainOnly), false)[0] ?? null;
 }
 
-let mouse = { x: innerWidth / 2, y: innerHeight / 2 }, lastInspect = '';
-canvas.addEventListener('pointermove', e => { mouse = { x: e.clientX, y: e.clientY }; });
+let mouse = { x: innerWidth / 2, y: innerHeight / 2 }, lastInspect = '', lastPointerType = 'mouse';
+canvas.addEventListener('pointerdown', e => { lastPointerType = e.pointerType; }, { capture: true });
+// a finger isn't a hover position: on touch screens the readout follows the middle of the view
+canvas.addEventListener('pointermove', e => { if (e.pointerType !== 'touch') mouse = { x: e.clientX, y: e.clientY }; });
 
 // ---------- map mode: grab the ground to pan, zoom toward the cursor ----------
 const upAxis = new THREE.Vector3(0, 1, 0), planeHit = new THREE.Vector3();
@@ -776,13 +662,16 @@ const groundUnder = (x, y) => pickAt(x, y, true)?.point ?? groundFallback(x, y);
 // Drag: the point you pressed stays pinned under the cursor (the Google Earth / Cesium approach),
 // so there is no speed to get wrong. Plain left-drag only; Shift/right-drag still rotate.
 let grab = null;
+function startGrab(id, x, y) {
+  const anchor = groundUnder(x, y);
+  grab = anchor && { id, anchor, plane: new THREE.Plane(upAxis, -anchor.y) };
+  return !!grab;
+}
 canvas.addEventListener('pointerdown', e => {
-  if (fly.on || e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
-  const anchor = groundUnder(e.clientX, e.clientY);
-  if (!anchor) return;
+  if (fly.on || e.pointerType === 'touch' || e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!startGrab(e.pointerId, e.clientX, e.clientY)) return;
   e.stopImmediatePropagation();  // keep the orbit controls from rotating
   glide = null;
-  grab = { id: e.pointerId, anchor, plane: new THREE.Plane(upAxis, -anchor.y) };
   try { canvas.setPointerCapture(e.pointerId); } catch {}  // keeps the drag going if the cursor leaves the canvas
 }, { capture: true });
 canvas.addEventListener('pointermove', e => {
@@ -817,13 +706,109 @@ canvas.addEventListener('wheel', e => {
   lastZoom = { t: now, x: e.clientX, y: e.clientY };
   glide = null;
   const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;  // lines / pages -> pixels
-  const factor = Math.exp(e.deltaY * unit * (e.ctrlKey ? 0.01 : 0.002));  // pinch deltas are small
-  const offset = camera.position.clone().sub(zoomAnchor).multiplyScalar(factor);
+  zoomToward(zoomAnchor, Math.exp(e.deltaY * unit * (e.ctrlKey ? 0.01 : 0.002)));  // pinch deltas are small
+}, { passive: false });
+// Scale the camera's distance to the anchor by factor (< 1 moves closer), keeping the view direction.
+function zoomToward(anchor, factor) {
+  const offset = camera.position.clone().sub(anchor).multiplyScalar(factor);
   const dist = offset.length();
   if ((factor < 1 && dist < span / 5000) || (factor > 1 && dist > span * 3)) return;
-  camera.position.copy(zoomAnchor).add(offset);
-  controls.target.sub(zoomAnchor).multiplyScalar(factor).add(zoomAnchor);  // keep the view direction
-}, { passive: false });
+  camera.position.copy(anchor).add(offset);
+  controls.target.sub(anchor).multiplyScalar(factor).add(anchor);
+}
+
+// ---------- touch ----------
+// One finger drags the ground (the grab above). Two fingers: pinch zooms toward the point between
+// them, twisting turns the view around it, and sliding both up or down tilts. Double-tap flies to a
+// spot; long-press inspects. The orbit controls never see touches.
+const touches = new Map();  // pointer id -> {x, y}
+let pinch = null, press = null, lastTap = null;
+const cancelPress = () => { if (press) clearTimeout(press.timer); press = null; };
+canvas.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'touch') return;
+  e.stopImmediatePropagation();
+  if (fly.on) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  try { canvas.setPointerCapture(e.pointerId); } catch {}
+  glide = null;
+  if (touches.size === 1) {
+    startGrab(e.pointerId, e.clientX, e.clientY);
+    const x = e.clientX, y = e.clientY;
+    press = { x, y, t: performance.now(), timer: setTimeout(() => { press = null; grab = null; inspect(x, y); }, 550) };
+  } else {
+    grab = null;
+    cancelPress();
+    startPinch();
+  }
+}, { capture: true });
+canvas.addEventListener('pointermove', e => {
+  if (!touches.has(e.pointerId)) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) cancelPress();
+  if (pinch && touches.size >= 2) pinchMove();
+});
+const touchEnd = e => {
+  if (!touches.delete(e.pointerId)) return;
+  if (press && e.type === 'pointerup' && performance.now() - press.t < 300) {
+    const now = performance.now();
+    if (lastTap && now - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40) {
+      glideTo(e.clientX, e.clientY);
+      lastTap = null;
+    } else lastTap = { x: e.clientX, y: e.clientY, t: now };
+  }
+  cancelPress();
+  if (touches.size >= 2) startPinch();
+  else if (touches.size === 1) {  // back to one finger: carry on dragging with it
+    pinch = null;
+    const [[id, p]] = touches;
+    startGrab(id, p.x, p.y);
+  } else pinch = null;
+};
+canvas.addEventListener('pointerup', touchEnd);
+canvas.addEventListener('pointercancel', touchEnd);
+addEventListener('blur', () => { touches.clear(); pinch = null; grab = null; cancelPress(); });
+
+function pinchState() {
+  const [a, b] = touches.values();
+  return { a: { ...a }, b: { ...b }, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2,
+           dist: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)), angle: Math.atan2(b.y - a.y, b.x - a.x) };
+}
+function startPinch() {
+  const s = pinchState();
+  pinch = { ...s, anchor: groundUnder(s.x, s.y) ?? controls.target.clone(), dy: [0, 0] };
+}
+function pinchMove() {
+  const s = pinchState();
+  zoomToward(pinch.anchor, pinch.dist / s.dist);
+  let turn = s.angle - pinch.angle;
+  turn -= Math.round(turn / (2 * Math.PI)) * 2 * Math.PI;
+  rotateAround(pinch.anchor, upAxis, turn);  // the ground turns with the fingers
+  // Tilt only by as much as both fingers moved the same way, so a sloppy pinch doesn't tip the view.
+  // Each finger's moves arrive as separate events, so add them up until the other one catches up.
+  const dy = pinch.dy;
+  dy[0] += s.a.y - pinch.a.y; dy[1] += s.b.y - pinch.b.y;
+  if (dy[0] * dy[1] < 0) dy.fill(0);
+  else if (dy[0] * dy[1] > 0) {
+    const both = Math.sign(dy[0]) * Math.min(Math.abs(dy[0]), Math.abs(dy[1]));
+    tilt(pinch.anchor, -both / innerHeight * Math.PI);
+    dy[0] -= both; dy[1] -= both;
+  }
+  Object.assign(pinch, s);
+}
+const turnQ = new THREE.Quaternion(), tiltAxis = new THREE.Vector3();
+function rotateAround(anchor, axis, angle) {
+  turnQ.setFromAxisAngle(axis, angle);
+  camera.position.sub(anchor).applyQuaternion(turnQ).add(anchor);
+  controls.target.sub(anchor).applyQuaternion(turnQ).add(anchor);
+  camera.lookAt(controls.target);
+}
+// Positive angles tip the view toward the horizon; it stays between straight down and just above level.
+function tilt(anchor, angle) {
+  const offset = camera.position.clone().sub(controls.target), polar = offset.angleTo(upAxis);
+  angle = Math.min(Math.max(polar + angle, 0.02), controls.maxPolarAngle) - polar;
+  tiltAxis.crossVectors(upAxis, offset).normalize();  // rotating about this raises the polar angle
+  if (tiltAxis.lengthSq()) rotateAround(anchor, tiltAxis, angle);
+}
 
 // the readout at the top: the location under the mouse, or else in the middle of the view
 const where = document.getElementById('where');
@@ -857,9 +842,9 @@ function describeHit(hit) {
     rows.push(['What', `terrain patch #${ids.patchRid[patch]}`], ['Texture', `${info.texId}`]);
   } else if (info.kind !== 'overview' && ids) {
     const owners = info.owners;
-    let lo = 0, hi = owners.length - 1;  // last owner starting at or before this triangle
-    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (owners[mid][0] <= hit.faceIndex) lo = mid; else hi = mid - 1; }
-    const placement = owners[lo][1], [track, rid] = ids.modelKeys[ids.inst[placement * 15]];
+    let lo = 0, hi = owners.length / 2 - 1;  // last (first triangle, placement) pair at or before this triangle
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (owners[mid * 2] <= hit.faceIndex) lo = mid; else hi = mid - 1; }
+    const placement = owners[lo * 2 + 1], [track, rid] = ids.modelKeys[ids.instModel[placement]];
     rows.push(['What', `${info.kind === 'objects' ? 'object' : info.kind.replace(/s$/, '')} · placement #${ids.instRid[placement]}`],
               ['Model', `#${rid} (track ${track})`], ['Texture', `${info.texId}`]);
   } else {

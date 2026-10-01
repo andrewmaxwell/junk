@@ -2,7 +2,9 @@
 
 Extracts and views the level geometry of **SSX 3 (GameCube, USA, GXBE69)** from the
 user's own disc image. Pure Python 3.14 (stdlib only: `compression.zstd`, `gzip`,
-`zlib`) plus a three.js viewer page. Everything was reverse engineered in this repo;
+`zlib`) plus a three.js viewer page, published on GitHub Pages at
+https://andrewmaxwell.github.io/junk/gameGeometry/viewer/ (the Pages workflow deploys the
+whole repo; the homepage entry is in `home/data.json`, thumbnail `viewer/image.png`). Everything was reverse engineered in this repo;
 GlitcherOG's PS2 research (github.com/GlitcherOG/SSX-Library, `SSX3PS2/`) was a
 useful starting point, but the GameCube files differ in the details below.
 
@@ -13,17 +15,21 @@ Disc image: `~/Downloads/SSX 3 (USA)/SSX 3 (USA).rvz` (the default in every scri
 ```
 python3 list_geometry.py                  # table of locations and what geometry each has (~4s)
 python3 list_geometry.py --export BHP1    # one location's terrain patches -> BHP1.obj (ALL = everything)
-python3 export_viewer.py                  # -> out/viewer/ (index.html + data/*.js), ~15s
-open out/viewer/index.html                # works from file://
+python3 export_viewer.py                  # -> viewer/data/*.bin, ~15s
+cd viewer && python3 -m http.server 8765 --bind 127.0.0.1   # then open http://127.0.0.1:8765/
 ```
 
-`out/` is gitignored. Never commit generated viewers: they embed game data.
-To iterate on the page only: edit `viewer_template.html`, then
-`cp viewer_template.html out/viewer/index.html` (no re-export needed).
+`viewer/` is committed and published, data included. The user is fine with that as long
+as the data is our own re-encoding, **never bytes copied verbatim from the disc** (no raw
+chunks, no GameCube texture layouts); see "Data files" below. Re-export only when the data
+actually changes: every export adds ~24 MB of binaries to git history. Exports are
+deterministic (gzip mtime 0), so an unchanged world gives unchanged files.
+`out/` (gitignored) is only for OBJ experiments. The page needs HTTP (it fetches
+and uses a Worker); file:// shows a message saying so. Edit `viewer/index.html` and
+`viewer/worker.js` directly, no build step.
 
-Testing in Chrome: the Claude-in-Chrome extension can't open file:// URLs, so serve
-with `cd out/viewer && python3 -m http.server 8765 --bind 127.0.0.1`. The page exposes
-`window.viewer = { camera, controls, scene }` for poking at from the console.
+The page exposes `window.viewer = { camera, controls, scene }` for poking at from the
+console; `await import('three')` works there too (the import map applies).
 Automated clicks can't take pointer lock, and the extension's scroll action doesn't
 reach MapControls; dispatch `WheelEvent`/`KeyboardEvent` via JS instead. Clicks on the
 location list can land before the page finishes building; click labels via JS
@@ -38,8 +44,9 @@ location list can land before the page finishes building; click labels via JS
 | `ssx3.py` | World format: BIG archive, sections/chunks, patches, models, instances, textures, lighting |
 | `gxtex.py` | GameCube texture decoding (CMPR, C8+RGB5A3), mip levels, averages, PNG writer |
 | `list_geometry.py` | CLI inventory + terrain OBJ export (`describe()` names locations) |
-| `export_viewer.py` | Builds the streaming viewer data |
-| `viewer_template.html` | The viewer (three.js 0.170 from jsdelivr) |
+| `export_viewer.py` | Builds the streaming viewer data (`viewer/data/`) |
+| `viewer/index.html` | The viewer page: three.js 0.170 from jsdelivr, controls, UI |
+| `viewer/worker.js` | Web Worker: fetch, gunzip, decode textures, tessellate terrain, bake placements |
 
 ## Disc and world container
 
@@ -123,7 +130,9 @@ Game space is **Z-up**; the viewer converts to Y-up with `(x, z, -y)`. Units are
 ## Instances (type 3, 160 bytes)
 
 `0x08` 4x4 matrix (row-major, translation row 3), `0x48` bounding sphere, `0x58` bbox,
-`0x78` model ref, `0x98` colour pool ref, `0x9C` **byte** offset into that pool.
+`0x78` model ref, `0x7C` f32 **uniform scale** (applied in model space; the matrix has no
+scale; ~half of placements aren't 1.0, range ~0.5-3.6), `0x98` colour pool ref, `0x9C` **byte**
+offset into that pool. Bbox at 0x58 includes the scale (95% match within 5%).
 
 ## Textures and lighting
 
@@ -131,6 +140,10 @@ Game space is **Z-up**; the viewer converts to Y-up with `(x, z, -y)`. Units are
   `0x1E` = CMPR (DXT1 in 8x8 tiles of four 4x4 blocks, big-endian).
   `0x19` = C8 (8x4 tiles) followed by a `0x32` palette block (count at +4, RGB5A3 at +0x20).
   Not every texture stores a full mip chain.
+- Lightmaps are coarse: a median 14x14 texels per patch (~360 game units per texel), CMPR
+  4x4 blocks, packed into 256x256 sheets with 1-texel gutters and **no mips**. The viewer
+  samples them without mipmaps (mips blended neighbouring patches at a distance). Blocky,
+  rectangular tree shadows up close are inherent to the data.
 - Baked lighting is stored at half strength (128 = 1.0) and doubled; in linear space
   the viewer multiplies by `2^2.2`. Unlit `MeshBasicMaterial` divides lightMap by pi,
   so `lightMapIntensity = gain * PI`, base colour white.
@@ -155,10 +168,13 @@ Game space is **Z-up**; the viewer converts to Y-up with `(x, z, -y)`. Units are
 - The tall dark boxes on the Peak B superpipe are real **skyscrapers** (city backdrop).
 - Materials with a second texture layer (~100, flag 0x31; second layers 50/62/198/297 are
   sparkle/glitter) probably get a shine or env effect in the game. That's not reproduced.
-- Streaming: `data/overview.js` (low detail, baked colours) loads first; each location's
-  `data/<NAME>.js` and the shared `data/textures.js` load when the camera is within about
-  2 radii. Data files are `ssxData(key, base64(gzip(pack)))` scripts, because file:// pages
-  can't fetch(). Pack = `u32 headerLen, JSON {meta, sections}, 8-aligned binary sections`.
+- Streaming: `data/overview.bin` (low detail, baked colours) loads first, its download
+  started by a plain script before three.js arrives; each location's `data/<NAME>.bin`
+  plus the shared `data/textures.bin` load when the camera is within about 2 radii. All
+  decoding and mesh building happens in `worker.js`, which transfers ready typed arrays
+  (positions, normals, UVs, colours, indices, RGBA pixels); the page only makes three.js
+  objects, so streaming doesn't stutter. Up to 8 locations stay loaded (4 on touch devices);
+  freeing one disposes its geometry, lightmaps, own textures and materials.
 - Camera (map mode, default): nothing depends on a hidden pivot distance, because that made
   speeds erratic (MapControls scaled pan/zoom by the distance to a pivot that re-aimed at
   each gesture, often at far terrain or sky).
@@ -178,12 +194,42 @@ Game space is **Z-up**; the viewer converts to Y-up with `(x, z, -y)`. Units are
   - Timers are throttled to ~1/s, so tests with many `setTimeout` waits time out (45s CDP
     limit). Dispatch synthetic Pointer/Wheel/Keyboard events synchronously instead.
 
+## Data files (`viewer/data/*.bin`)
+
+Each is `gzip(u32 headerLen, JSON {meta, sections: {name: [offset, length, shuffle]}},
+8-aligned binary sections)`, little-endian. `shuffle` > 0 means the section is stored as
+byte planes (all first bytes of each number, then all second bytes, ...): gzip packs int16
+and float32 data 10-15% smaller that way. The worker undoes it.
+- Textures: CMPR becomes standard **BC1/DXT1** (blocks row by row, little-endian colours,
+  first pixel in the low bits: `gxtex.to_bc1`); C8 becomes row-major indices plus an
+  **RGBA8 palette** (`gxtex.to_indexed`). Lightmaps are BC1 too. Verified pixel-identical to
+  `gxtex.decode` for all 788 textures.
+- Object vertex colours: RGB8 pools (`gxtex.rgb8_colors`); each placement's start is a
+  colour index (the disc's byte offset / 2).
+- Textures used by >= `SHARED_BY` (5) locations live in `textures.bin` (~1 MB); the rest
+  are copied into each location's file that uses them (8 MB in all vs 7 unique, but the
+  first place you visit needs much less). Per-texture flags (helper, additive) are in the
+  overview so the worker can sort meshes before textures arrive.
+
+## Touch and phones
+
+`(hover: none)` means a touch device: touch help text, no fly mode, fewer loaded
+locations. Under 640px wide the panel starts collapsed ("Places") and readouts move to
+the bottom. Touch never reaches OrbitControls:
+- One finger: the same ground grab as the mouse.
+- Two fingers: pinch zooms toward the ground between them, twisting turns the view around
+  that point, and sliding both up or down tilts. Each finger's moves arrive as separate
+  events, so tilt adds up each finger's vertical movement and applies only what both share.
+- Double-tap glides to a spot (the dblclick handler ignores touch); long-press (550ms)
+  inspects.
+Testing: dispatch `PointerEvent`s with `pointerType: 'touch'` and distinct `pointerId`s.
+
 ## Finding a spot the user reports
 
 The viewer keeps the camera in the address (`index.html#view=cx,cy,cz,tx,ty,tz`, scene
-units) and Option-click / `I` shows what's under the cursor: location, terrain patch rid
+units) and Option-click / `I` / long-press shows what's under the cursor: location, terrain patch rid
 or placement rid + model (track, rid), texture id, game xyz. "Copy view + details" puts
-both on the clipboard. To investigate a pasted report: serve `out/viewer`, open the URL
+both on the clipboard. To investigate a pasted report: serve `viewer/`, open the URL
 with the same `#view=`, and look up the rids in `World.chunks` (patch rids are
 `chunks[track, 1]`, placement rids `chunks[track, 3]`, models `chunks[track, 2]`).
 
@@ -193,5 +239,5 @@ with the same `#view=`, and look up the rids in `World.chunks` (patch rids are
 - Plain 12-triangle boxes (some huge) that might be invisible blockers.
 - Splines (type 8) for a ride-the-course camera; collision meshes (type 12) are in model space.
 - 3D-print export (the original goal): add thickness to the terrain and a base, then write STL.
-- The user's preferences: commit straight to master in ~/junk, staging only this folder;
-  keep generated/extracted data out of git and off the web (no published artifacts).
+- The user's preferences: commit straight to master in ~/junk, staging only this folder
+  (plus `home/data.json` for the homepage entry).

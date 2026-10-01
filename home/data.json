@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "gameGeometry/viewer",
+    "title": "SSX 3 Mountain",
+    "year": 2026,
+    "desc": "Explore the whole mountain from SSX 3, rebuilt from the GameCube disc's own geometry, textures and lighting"
+  },
+  {
     "filePath": "drinks",
     "title": "Barista Bot",
     "year": 2026,

@@ -165,12 +165,14 @@ def transform(p, m):
 
 
 class Instance:
-    """A placed copy of a prefab model (160-byte chunk)."""
+    """A placed copy of a prefab model (160-byte chunk): world matrix at 0x08, bounding sphere 0x48,
+    bbox 0x58, model ref 0x78, uniform scale 0x7C, colour pool ref 0x98, colour byte offset 0x9C."""
 
     def __init__(self, d, rid=None):
         self.rid = rid
-        self.matrix = struct.unpack_from('>16f', d, 0x08)
+        self.matrix = struct.unpack_from('>16f', d, 0x08)  # rotation + translation, no scale
         self.model = (d[0x78], int.from_bytes(d[0x79:0x7C], 'big'))
+        self.scale = struct.unpack_from('>f', d, 0x7C)[0]  # uniform scale, applied in model space
         # baked lighting: this placement's colours start at a byte offset in a colour pool
         ref, self.color_offset = struct.unpack_from('>II', d, 0x98)
         self.color_pool = (ref >> 24, ref & 0xFFFFFF)

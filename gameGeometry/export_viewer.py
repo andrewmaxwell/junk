@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Export SSX 3 terrain and placed objects into a streaming HTML 3D viewer.
+"""Export SSX 3 terrain and placed objects for the streaming 3D viewer in viewer/.
 
-    python3 export_viewer.py                 # -> out/viewer/index.html
+    python3 export_viewer.py                 # -> viewer/data/*.bin
     python3 export_viewer.py --no-objects    # terrain only
 
-The viewer opens straight from disk (file://). index.html starts with a
-low-detail overview of the whole mountain (data/overview.js) and loads each
-location's full terrain, objects, textures and baked lighting on demand
-(data/<location>.js, data/textures.js) as the camera gets close. Data files
-are gzipped binary packs wrapped in a script call, since browsers won't
-fetch() local files but will load local <script>s.
+viewer/index.html starts with a low-detail overview of the whole mountain
+(data/overview.bin) and loads each location's full terrain, objects, textures
+and baked lighting (data/<location>.bin, plus the shared data/textures.bin) as
+the camera gets close. Files are gzipped packs of JSON metadata and binary
+sections in the viewer's own formats: nothing is copied from the disc as is
+(textures become standard BC1 or indexed RGBA, colours RGB8, geometry is
+re-quantized little-endian).
 """
 import argparse
-import base64
 import gzip
 import json
 import os
@@ -20,6 +20,7 @@ import shutil
 import struct
 import sys
 from array import array
+from collections import Counter
 
 from list_geometry import COURSE_NAMES, DEFAULT_ISO, describe, peak
 from rvz import GCDisc
@@ -28,6 +29,10 @@ import ssx3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERVIEW_STEPS = 2  # patch tessellation for the far-away overview
+# Textures used by at least this many locations go in the shared textures.bin; the rest travel in
+# each location's own file. That duplicates some (8 MB in all instead of 7), but the first place you
+# visit needs about 1 MB of shared textures instead of all 7.
+SHARED_BY = 5
 
 
 def to_viewer(p):
@@ -56,16 +61,25 @@ def is_panel(model):
     return bool(normals) and all(abs(sum(p * q for p, q in zip(n, normals[0]))) > 0.99 for n in normals)
 
 
-def texture_payload(tex):
-    """Top mip level only, still in GameCube form; the page decodes it.
-    -> (kind, width, height, pixel bytes, palette bytes)"""
-    kind = tex[0]
-    w, h = struct.unpack_from('>HH', tex, 4)
-    if kind == 0x1E:  # CMPR, 4 bits per pixel
-        return kind, w, h, tex[0x20:0x20 + w * h // 2], b''
-    nxt = int.from_bytes(tex[1:4], 'big')  # C8 + RGB5A3 palette
-    count = struct.unpack_from('>H', tex, nxt + 4)[0]
-    return kind, w, h, tex[0x20:0x20 + w * h], tex[nxt + 0x20:nxt + 0x20 + 2 * count]
+def encode_textures(bank, ids):
+    """Top mip levels re-encoded for the page: CMPR as BC1, C8 as indices plus an RGBA palette.
+    -> ({id: [format, w, h, pixel offset, pixel bytes, palette offset, palette colours]}, bytes)"""
+    index, data = {}, bytearray()
+    for tid in sorted(ids):
+        d = bank[tid]
+        if d[0] == 0x1E:
+            (w, h, pixels), palette = gxtex.to_bc1(d), b''
+        else:
+            w, h, pixels, palette = gxtex.to_indexed(d)
+        index[tid] = ['pal8' if palette else 'bc1', w, h, len(data), len(pixels), len(data) + len(pixels),
+                      len(palette) // 4]
+        data += pixels + palette
+        data += bytes(-len(data) % 4)
+    return index, data
+
+
+def model_textures(model):
+    return {model.textures[mesh.material] for mesh in model.meshes if mesh.material < len(model.textures)}
 
 
 def is_helper_texture(tex):
@@ -136,31 +150,37 @@ def is_plain_block(model):
 
 
 class Pack:
-    """Named binary sections plus JSON metadata, gzipped into one blob."""
+    """Named binary sections plus JSON metadata, gzipped into one file:
+    u32 header length, JSON {meta, sections: {name: [offset, length, shuffle]}}, 8-aligned sections."""
 
     def __init__(self, meta=None):
         self.meta = meta if meta is not None else {}
         self.sections = {}
 
-    def add(self, name, data):
+    def add(self, name, data, shuffle=False):
+        """shuffle: store the bytes of each number in separate planes (all first bytes, then all second
+        bytes, ...). Gzip packs smooth int16/float32 data 10-15% smaller that way."""
+        width = 0
         if isinstance(data, array):
             if sys.byteorder != 'little':
                 data = array(data.typecode, data)
                 data.byteswap()
+            width = data.itemsize if shuffle else 0
             data = data.tobytes()
-        self.sections[name] = bytes(data)
+        if width:
+            data = b''.join(data[i::width] for i in range(width))
+        self.sections[name] = (bytes(data), width)
 
-    def write(self, path, key):
+    def write(self, path):
         body, index = bytearray(), {}
-        for name, data in self.sections.items():
+        for name, (data, width) in self.sections.items():
             body += bytes(-len(body) % 8)  # keep typed-array views aligned
-            index[name] = [len(body), len(data)]
+            index[name] = [len(body), len(data), width]
             body += data
         header = json.dumps({'meta': self.meta, 'sections': index}, separators=(',', ':')).encode()
         header += b' ' * (-(len(header) + 4) % 8)
-        blob = gzip.compress(struct.pack('<I', len(header)) + header + body, 6)
-        with open(path, 'w') as f:
-            f.write(f'ssxData({json.dumps(key)},"{base64.b64encode(blob).decode()}");\n')
+        with open(path, 'wb') as f:
+            f.write(gzip.compress(struct.pack('<I', len(header)) + header + body, 9, mtime=0))
         return os.path.getsize(path)
 
 
@@ -189,7 +209,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('image', nargs='?', default=DEFAULT_ISO)
     ap.add_argument('--no-objects', action='store_true', help='leave out placed prefab models')
-    ap.add_argument('--out', default=os.path.join(HERE, 'out', 'viewer'))
+    ap.add_argument('--out', default=os.path.join(HERE, 'viewer'))
     args = ap.parse_args()
 
     disc = GCDisc(args.image)
@@ -205,17 +225,23 @@ def main():
     shutil.rmtree(data_dir, ignore_errors=True)
     os.makedirs(data_dir)
 
-    used_textures = set()
+    # which textures each location uses, to split them between shared and per-location files
+    plan = []
+    for track in world.tracks():
+        patches = sorted(world.patches(track), key=lambda p: (p.texture, p.lightmap))
+        instances = [i for i in world.instances(track) if i.model in models]
+        if patches or instances:
+            used = {p.texture for p in patches} | {t for i in instances for t in model_textures(models[i.model])}
+            plan.append((track, patches, instances, used & bank.keys()))
+    uses = Counter(t for *_, used in plan for t in used)
+    shared = {t for t, n in uses.items() if n >= SHARED_BY}
+
     locations = []
     overview_pos, overview_col = [], array('B')  # viewer-space points, baked RGB
     total_bytes = 0
 
-    for track in world.tracks():
+    for track, patches, instances, used in plan:
         name = world.location_name(track)
-        patches = sorted(world.patches(track), key=lambda p: (p.texture, p.lightmap))
-        instances = [i for i in world.instances(track) if i.model in models]
-        if not patches and not instances:
-            continue
         pack = Pack()
 
         # terrain: bicubic coefficients, tessellated in the page
@@ -224,7 +250,6 @@ def main():
         for p in patches:
             lm = lightmap_ids.setdefault(p.lightmap, len(lightmap_ids)) if p.lightmap in lightmap_bank else -1
             tid = p.texture if p.texture in bank else -1
-            used_textures.add(tid)
             if runs and runs[-1][:2] == [tid, lm]:
                 runs[-1][2] += 1
             else:
@@ -240,23 +265,25 @@ def main():
                     overview_col.extend(baked_color(tex_avg[p.texture], lightmap_bank[p.lightmap], p, s, t))
                 else:
                     overview_col.extend((200, 200, 200))
-        pack.add('coefs', coefs)
+        pack.add('coefs', coefs, shuffle=True)
         pack.add('patchUv', uvs)
         pack.add('patchLm', lm_rects)
         pack.add('patchRid', patch_rids)  # which chunk each patch came from, for the inspector
 
         lm_bytes, lightmaps = bytearray(), []
         for lid in lightmap_ids:  # insertion order == local index
-            kind, w, h, pixels, _ = texture_payload(lightmap_bank[lid])
-            lightmaps.append([kind, w, h, len(lm_bytes), len(pixels)])
+            w, h, pixels = gxtex.to_bc1(lightmap_bank[lid])
+            lightmaps.append(['bc1', w, h, len(lm_bytes), len(pixels)])
             lm_bytes += pixels
         pack.add('lightmaps', lm_bytes)
+        own_textures, tex_bytes = encode_textures(bank, used - shared)
+        pack.add('textures', tex_bytes)
 
         # objects: each model once, then its placements
         model_ids, model_meta = {}, []
         verts, muvs, cols, tris = array('h'), array('h'), array('H'), array('H')
         pool_ids, pool_bytes, pools = {}, bytearray(), []
-        inst = array('f')  # model index, 12 matrix floats (3 columns x 4 rows), pool index, byte offset
+        inst = array('f')  # model index, 12 matrix floats (3 columns x 4 rows), pool index, first colour
         points = [to_viewer(ssx3.transform((0, 0, 0), i.matrix)) for i in instances]
         for i in instances:
             if i.model not in model_ids:
@@ -266,7 +293,6 @@ def main():
                 for mesh in m.meshes:
                     tid = m.textures[mesh.material] if mesh.material < len(m.textures) else None
                     tid = tid if tid in bank else -1
-                    used_textures.add(tid)
                     # positions quantized to 16 bits across each mesh's own bounds
                     lo = [min(v[k] for v in mesh.verts) for k in range(3)]
                     scale = [max((max(v[k] for v in mesh.verts) - lo[k]) / 65535, 1e-6) for k in range(3)]
@@ -284,22 +310,25 @@ def main():
                 model_meta.append([category, meshes])
             if i.color_pool not in pool_ids and i.color_pool in color_pools:
                 pool_ids[i.color_pool] = len(pools)
-                pools.append([len(pool_bytes), len(color_pools[i.color_pool])])
-                pool_bytes += color_pools[i.color_pool]
+                rgb = gxtex.rgb8_colors(color_pools[i.color_pool])
+                pools.append([len(pool_bytes), len(rgb)])
+                pool_bytes += rgb
             inst.append(model_ids[i.model])
-            inst.extend(i.matrix[r * 4 + c] for r in range(4) for c in range(3))
-            inst.extend((pool_ids.get(i.color_pool, -1), i.color_offset))
+            # fold the placement's uniform scale into the matrix's basis rows (v' = (v * s) . M)
+            inst.extend(i.matrix[r * 4 + c] * (i.scale if r < 3 else 1) for r in range(4) for c in range(3))
+            inst.extend((pool_ids.get(i.color_pool, -1), i.color_offset // 2))  # 2 bytes per colour on disc
         inst_rids = array('I', (i.rid for i in instances))
-        for key, arr in (('verts', verts), ('uvs', muvs), ('cols', cols), ('tris', tris), ('inst', inst),
-                         ('instRid', inst_rids)):
+        for key, arr in (('verts', verts), ('uvs', muvs), ('inst', inst), ('instRid', inst_rids)):
             pack.add(key, arr)
+        pack.add('cols', cols, shuffle=True)
+        pack.add('tris', tris, shuffle=True)
         pack.add('colorPools', pool_bytes)
-        pack.meta = {'runs': runs, 'lightmaps': lightmaps, 'models': model_meta, 'pools': pools,
+        pack.meta = {'runs': runs, 'lightmaps': lightmaps, 'textures': own_textures, 'models': model_meta, 'pools': pools,
                      'instances': len(instances), 'patches': len(patches),
                      'modelKeys': [list(key) for key in model_ids]}  # (track, rid) per model, for the inspector
 
-        file = f'{name}.js'
-        size = pack.write(os.path.join(data_dir, file), name)
+        file = f'{name}.bin'
+        size = pack.write(os.path.join(data_dir, file))
         total_bytes += size
 
         # bounding sphere (viewer space) from patch boxes and object positions
@@ -315,32 +344,27 @@ def main():
         print(f'  {name:<8} {len(patches):>5} patches {len(instances):>5} objects  {size / 1e6:5.2f} MB',
               file=sys.stderr)
 
-    # shared textures, keyed by bank id
-    tex_bytes, textures = bytearray(), {}
-    for tid in sorted(t for t in used_textures if t >= 0):
-        kind, w, h, pixels, palette = texture_payload(bank[tid])
-        textures[tid] = [kind, w, h, len(tex_bytes), len(pixels), len(tex_bytes) + len(pixels),
-                         len(palette) // 2, int(tid in EDITOR_TEXTURES or is_helper_texture(bank[tid])),
-                         int(tid in additive)]
-        tex_bytes += pixels + palette
-        tex_bytes += bytes(-len(tex_bytes) % 4)
+    # textures most locations use, keyed by bank id
+    textures, tex_bytes = encode_textures(bank, shared)
     pack = Pack({'textures': textures})
-    pack.add('bytes', tex_bytes)
-    total_bytes += pack.write(os.path.join(data_dir, 'textures.js'), 'textures')
+    pack.add('textures', tex_bytes)
+    total_bytes += pack.write(os.path.join(data_dir, 'textures.bin'))
+    # how the page should treat each texture: 1 = helper (hidden with Helpers), 2 = additive glow
+    texture_flags = {tid: (tid in EDITOR_TEXTURES or is_helper_texture(bank[tid])) | (tid in additive) << 1
+                     for tid in uses}
 
     # overview: every location's low-detail terrain, quantized across the whole mountain
     lo = [min(p[k] for p in overview_pos) for k in range(3)]
     hi = [max(p[k] for p in overview_pos) for k in range(3)]
     q = array('h', (round((p[k] - lo[k]) / (hi[k] - lo[k]) * 65535) - 32768 for p in overview_pos for k in range(3)))
-    pack = Pack({'steps': OVERVIEW_STEPS, 'min': lo, 'max': hi, 'locations': locations})
-    pack.add('pos', q)
+    pack = Pack({'steps': OVERVIEW_STEPS, 'min': lo, 'max': hi, 'locations': locations,
+                 'textureFlags': {tid: f for tid, f in texture_flags.items() if f}})
+    pack.add('pos', q, shuffle=True)
     pack.add('col', overview_col)
-    total_bytes += pack.write(os.path.join(data_dir, 'overview.js'), 'overview')
+    total_bytes += pack.write(os.path.join(data_dir, 'overview.bin'))
 
-    shutil.copy(os.path.join(HERE, 'viewer_template.html'), os.path.join(args.out, 'index.html'))
-    total_bytes += os.path.getsize(os.path.join(args.out, 'index.html'))
     print(f'Additive glow textures: {sorted(additive)}', file=sys.stderr)
-    print(f'Wrote {args.out}/ ({total_bytes / 1e6:.1f} MB in {len(locations) + 3} files)')
+    print(f'Wrote {data_dir}/ ({total_bytes / 1e6:.1f} MB in {len(locations) + 2} files)')
 
 
 if __name__ == '__main__':
