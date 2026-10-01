@@ -21,23 +21,22 @@ export function getSystemInfo() {
     os = 'Linux';
   }
 
+  // Order matters: Edge and Chrome UAs also mention Chrome and Safari.
+  // iOS browsers use their own tokens (FxiOS, EdgiOS, CriOS) on top of Safari.
+  /** @type {[string, RegExp][]} */
+  const browsers = [
+    ['Firefox', /(?:Firefox|FxiOS)\/(\d+)/],
+    ['Edge', /(?:Edg|EdgiOS|EdgA)\/(\d+)/],
+    ['Chrome', /(?:Chrome|CriOS)\/(\d+)/],
+    ['Safari', /Version\/(\d+).*Safari/],
+  ];
   let browser = 'Unknown Browser';
-  if (ua.includes('Firefox')) {
-    browser = 'Firefox';
-    const match = ua.match(/Firefox\/(\d+)/);
-    if (match) browser += ` ${match[1]}`;
-  } else if (ua.includes('Edg/')) {
-    browser = 'Edge';
-    const match = ua.match(/Edg\/(\d+)/);
-    if (match) browser += ` ${match[1]}`;
-  } else if (ua.includes('Chrome')) {
-    browser = 'Chrome';
-    const match = ua.match(/Chrome\/(\d+)/);
-    if (match) browser += ` ${match[1]}`;
-  } else if (ua.includes('Safari')) {
-    browser = 'Safari';
-    const match = ua.match(/Version\/(\d+)/);
-    if (match) browser += ` ${match[1]}`;
+  for (const [name, pattern] of browsers) {
+    const match = ua.match(pattern);
+    if (match) {
+      browser = `${name} ${match[1]}`;
+      break;
+    }
   }
 
   let gpuName = 'Unknown GPU';
@@ -66,6 +65,9 @@ export function getSystemInfo() {
           gpuName = gpuName.replace('or similar', '').trim();
         }
       }
+      // Browsers cap live WebGL contexts, so don't hold this one until GC
+      // @ts-expect-error: Non-standard webgl context method safely guarded
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
     }
   } catch (e) {
     console.error('Telemetry failed to capture GPU', e);

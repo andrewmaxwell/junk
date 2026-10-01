@@ -1,84 +1,68 @@
 import {log, yieldToBrowser, updateScore} from './ui.js';
 import {logicalCores} from './telemetry.js';
+import {makeWorkerUrl, runParallel} from './workers.js';
 
-const UNROLL_CPU = 16;
-const cpuFmaLine =
-  'v1=(v1*a)+b; v2=(v2*a)+b; v3=(v3*a)+b; v4=(v4*a)+b;\n          ';
-const cpuMathCore = Array(UNROLL_CPU).fill(cpuFmaLine).join('');
+// Many independent chains so the FP units always have work ready. With only a
+// few chains, each one stalls waiting on its own previous result and we end up
+// measuring latency instead of throughput.
+const CHAINS = 16;
+const UNROLL = 4;
+const vars = Array.from({length: CHAINS}, (_, i) => `v${i}`);
+const fmaLine = vars.map((v) => `${v}=(${v}*a)+b;`).join(' ');
+const cpuMathCore = Array(UNROLL).fill(fmaLine).join('\n      ');
+// One multiply and one add per chain per line
+const FLOPS_PER_ITERATION = CHAINS * UNROLL * 2;
 
-const getWorkerScript = () => `
-  function calculateFlops(durationMs) {
-    const startV = (Date.now() % 10) * 0.00001; 
-    const a = -0.9999 - startV, b = 2.5 + startV;
-    let v1 = 1.1, v2 = 1.2, v3 = 1.3, v4 = 1.4;
-    
-    let N = 1000;
-    let elapsed = 0;
-    while(true) {
-      let t0 = performance.now();
-      for(let i = 0; i < N; i++) {
-        ${cpuMathCore}
-      }
-      let t1 = performance.now();
-      elapsed = t1 - t0;
-      if (elapsed > 20) break; 
-      N *= 2;
+const cpuWorkerUrl = makeWorkerUrl(`
+  const startV = (Date.now() % 10) * 0.00001;
+  const A = -0.9999 - startV, B = 2.5 + startV;
+  let N = 1000;
+
+  function spin(n) {
+    const a = A, b = B;
+    let ${vars.map((v, i) => `${v} = ${1 + i / 100}`).join(', ')};
+    for (let i = 0; i < n; i++) {
+      ${cpuMathCore}
     }
-
-    let totalTime = 0;
-    let totalOps = 0;
-    const baseOps = N * ${UNROLL_CPU * 8};
-    
-    const startTest = performance.now();
-    while(performance.now() - startTest < durationMs) {
-      let t0 = performance.now();
-      for(let i = 0; i < N; i++) {
-        ${cpuMathCore}
-      }
-      let t1 = performance.now();
-      totalTime += (t1 - t0);
-      totalOps += baseOps; 
-    }
-
-    return { timeInSeconds: totalTime / 1000, ops: totalOps, sanity: v1 + v2 + v3 + v4 };
+    return ${vars.join(' + ')};
   }
 
-  self.onmessage = function(e) {
-    self.postMessage(calculateFlops(e.data));
-  };
-`;
+  // Grow the batch until one takes >20ms so timer overhead is negligible
+  function setup() {
+    while (true) {
+      const t0 = performance.now();
+      spin(N);
+      if (performance.now() - t0 > 20) break;
+      N *= 2;
+    }
+  }
 
-const cpuWorkerBlob = new Blob([getWorkerScript()], {
-  type: 'application/javascript',
-});
-export const cpuWorkerUrl = URL.createObjectURL(cpuWorkerBlob);
-
-/** @param {number} durationMs */
-export function runInWorker(durationMs) {
-  return new Promise((resolve) => {
-    const worker = new Worker(cpuWorkerUrl);
-    worker.onmessage = function (e) {
-      worker.terminate();
-      resolve(e.data);
-    };
-    worker.postMessage(durationMs);
-  });
-}
+  function run(durationMs) {
+    let work = 0, sanity = 0;
+    const start = now();
+    while (now() - start < durationMs) {
+      sanity = spin(N);
+      work += N * ${FLOPS_PER_ITERATION};
+    }
+    return { work, start, end: now(), sanity };
+  }
+`);
 
 export async function runSingleCore() {
-  const el = /** @type {HTMLElement} */ (document.getElementById('res-single'));
+  const el = document.getElementById('res-single');
   if (el) el.innerText = 'Calculating...';
   await yieldToBrowser();
 
-  const result = await runInWorker(1500);
-  const gflops = result.ops / result.timeInSeconds / 1e9;
+  const result = await runParallel(cpuWorkerUrl, 1, null, 1500);
+  const gflops = result.perSecond / 1e9;
 
-  updateScore('res-single', gflops, 10);
+  updateScore('res-single', gflops, 30);
   log(`✓ Single-Core complete. (Sanity check: ${result.sanity})`);
+  return gflops;
 }
 
 export async function runMultiCore() {
-  const el = /** @type {HTMLElement} */ (document.getElementById('res-multi'));
+  const el = document.getElementById('res-multi');
   if (el) el.innerText = 'Calculating...';
   await yieldToBrowser();
 
@@ -87,17 +71,10 @@ export async function runMultiCore() {
   // without heavily overwhelming the OS scheduler on older dual-core machines.
   const threadsToSpawn = logicalCores || 8;
 
-  const promises = Array(threadsToSpawn).fill(2500).map(runInWorker);
-  const results = await Promise.all(promises);
+  const result = await runParallel(cpuWorkerUrl, threadsToSpawn, null, 2500);
+  const gflops = result.perSecond / 1e9;
 
-  let combinedOpsPerSec = 0;
-  let combinedSanity = 0;
-
-  for (const res of results) {
-    combinedOpsPerSec += res.ops / res.timeInSeconds;
-    combinedSanity += res.sanity;
-  }
-
-  updateScore('res-multi', combinedOpsPerSec / 1e9, 60);
-  log(`✓ Multi-Core complete. (Combined sanity: ${combinedSanity})`);
+  updateScore('res-multi', gflops, 175);
+  log(`✓ Multi-Core complete. (Combined sanity: ${result.sanity})`);
+  return gflops;
 }

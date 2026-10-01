@@ -18,6 +18,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let isRunning = false;
 
+  // Browsers heavily throttle background tabs, so flag any test that ran
+  // while this one was hidden
+  let wasHidden = false;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) wasHidden = true;
+  });
+
   async function runAllBenchmarks() {
     if (isRunning) return;
     isRunning = true;
@@ -61,28 +68,62 @@ document.addEventListener('DOMContentLoaded', () => {
 
     clearLog();
 
-    await runSingleCore();
-    await yieldToBrowser();
-    await runMultiCore();
-    await yieldToBrowser();
-    await runGPU();
-    await yieldToBrowser();
-    await runDOM();
-    await yieldToBrowser();
-    await runMemory();
+    try {
+      await runBenchmarks(shareBtn, sEl);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerText = 'Run Again';
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+      }
+      if (statusText) statusText.innerText = 'Ready.';
+      isRunning = false;
+    }
+  }
+
+  /**
+   * Runs one benchmark, turning a failure into a score of 0 so the rest
+   * still run.
+   * @param {string} id
+   * @param {string} name
+   * @param {() => Promise<number>} run
+   */
+  async function attempt(id, name, run) {
+    wasHidden = document.hidden;
+    try {
+      const result = await run();
+      if (wasHidden) {
+        log(
+          `<span style="color: #dcdcaa">⚠ ${name} ran while the tab was hidden; its result is probably too low.</span>`,
+        );
+      }
+      return result;
+    } catch (e) {
+      console.error(e);
+      const el = document.getElementById(id);
+      if (el) el.innerText = 'Failed';
+      const message = String(e instanceof Error ? e.message : e)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;');
+      log(`<span style="color: #f44747">✗ ${name} failed: ${message}</span>`);
+      return 0;
+    } finally {
+      await yieldToBrowser();
+    }
+  }
+
+  /**
+   * @param {HTMLElement | null} shareBtn
+   * @param {HTMLElement | null} sEl
+   */
+  async function runBenchmarks(shareBtn, sEl) {
+    const single = await attempt('res-single', 'Single-Core', runSingleCore);
+    const multi = await attempt('res-multi', 'Multi-Core', runMultiCore);
+    const gpu = await attempt('res-gpu', 'GPU', runGPU);
+    const dom = await attempt('res-dom', 'DOM', runDOM);
+    const mem = await attempt('res-mem', 'Memory', runMemory);
     log('<br><b>All benchmarks finished.</b>');
-
-    const singleEl = document.getElementById('res-single');
-    const multiEl = document.getElementById('res-multi');
-    const gpuEl = document.getElementById('res-gpu');
-    const domEl = document.getElementById('res-dom');
-    const memEl = document.getElementById('res-mem');
-
-    const single = singleEl ? parseFloat(singleEl.innerText) || 0 : 0;
-    const multi = multiEl ? parseFloat(multiEl.innerText) || 0 : 0;
-    const gpu = gpuEl ? parseFloat(gpuEl.innerText) || 0 : 0;
-    const dom = domEl ? parseFloat(domEl.innerText) || 0 : 0;
-    const mem = memEl ? parseFloat(memEl.innerText) || 0 : 0;
 
     // Calculate the Geometric Mean. This is the mathematically perfect industry standard (used by SPEC/Geekbench)
     // for normalizing vastly different numerical ranges so no single test can arbitrarily dominate the final score.
@@ -95,16 +136,18 @@ document.addEventListener('DOMContentLoaded', () => {
       1 / 5,
     );
 
-    // Scale the raw geometric mean (usually ~80-90 for high-end) by 30 to cosmetically map to a 4-digit UI score
-    const computeIndex = Math.round(gMean * 30);
+    // Cosmetic scale to a 4-digit UI score. 17.4 keeps scores in line with
+    // earlier versions of this page, which measured less of the CPU and RAM
+    // and used ×30 (calibrated on an Apple M4: ~2,880 before and after).
+    const computeIndex = Math.round(gMean * 17.4);
 
     if (sEl) sEl.innerText = computeIndex.toLocaleString();
 
     let cpuMatch = 'Entry-level CPU';
-    if (multi > 10) cpuMatch = 'Mid-range Desktop/Laptop CPU';
-    if (multi > 30)
+    if (multi > 30) cpuMatch = 'Mid-range Desktop/Laptop CPU';
+    if (multi > 80)
       cpuMatch = 'High-end CPU (e.g. Apple M-Series, Core i7/Ryzen 7)';
-    if (multi > 80) cpuMatch = 'Enthusiast CPU (e.g. Core i9, Threadripper)';
+    if (multi > 220) cpuMatch = 'Enthusiast CPU (e.g. Core i9, Threadripper)';
 
     let gpuMatch = 'Integrated Graphics';
     if (gpu > 300) gpuMatch = 'Entry-level Dedicated / Advanced APU';
@@ -115,8 +158,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let ramMatch = 'Standard DDR3 / Single-Channel';
     if (mem > 20) ramMatch = 'Dual-Channel DDR4 / LPDDR4';
     if (mem > 45) ramMatch = 'High-performance DDR5 / LPDDR5';
-    if (mem > 90) ramMatch = 'Unified Memory (e.g. Apple M-Series Max/Pro)';
-    if (mem > 200) ramMatch = 'Ultra-Unified workstation memory';
+    if (mem > 150) ramMatch = 'Unified Memory (e.g. Apple M-Series Max/Pro)';
+    if (mem > 300) ramMatch = 'Ultra-Unified workstation memory';
 
     log(`<span style="color: #4ec9b0">↳ CPU Class: ${cpuMatch}</span>`);
     if (gpu > 0)
@@ -150,15 +193,6 @@ Unified Compute Score: ${computeIndex.toLocaleString()}`;
         });
       };
     }
-
-    if (btn) {
-      btn.disabled = false;
-      btn.innerText = 'Run Again';
-      btn.style.opacity = '1';
-      btn.style.cursor = 'pointer';
-    }
-    if (statusText) statusText.innerText = 'Ready.';
-    isRunning = false;
   }
 
   const runBtn = document.getElementById('btn-run');

@@ -94,9 +94,9 @@
     <div class="note" id="log" style="line-height: 1.3;">Logs:<br></div>
 
     <div class="note" style="margin-top: 15px; border-top: 1px dashed #444; padding-top: 15px; color: #666;">
-      <strong>Disclaimer:</strong> This is a synthetic browser-based benchmark that measures peak Fused Multiply-Add (FMA) floating-point throughput entirely within CPU registers. 
+      <strong>Disclaimer:</strong> This is a synthetic browser-based benchmark that measures peak multiply-add floating-point throughput entirely within registers. JavaScript requires a multiply and an add to be rounded separately, so the CPU tests can't use fused multiply-add (FMA) instructions; native code that does will be faster.
       <br><br>
-      Unlike traditional native benchmarks (e.g., Cinebench, Geekbench), the CPU/GPU tests <strong>do not</strong> test complex branching or sustained thermal throttling, mapping directly to your browser's JIT Compiler engine efficiency. The System RAM test directly exhausts physical memory bandwidth.
+      Unlike traditional native benchmarks (e.g., Cinebench, Geekbench), the CPU/GPU tests <strong>do not</strong> test complex branching or sustained thermal throttling, mapping directly to your browser's JIT Compiler engine efficiency. The System RAM test copies large buffers on every thread at once to approach your memory bandwidth.
 
       <details style="margin-top: 15px; padding: 10px 15px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px;">
         <summary style="color: #4ec9b0; display: flex; align-items: center; gap: 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; outline: none; font-weight: bold;">
