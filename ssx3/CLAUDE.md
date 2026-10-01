@@ -1,10 +1,12 @@
-# gameGeometry
+# ssx3
 
 Extracts and views the level geometry of **SSX 3 (GameCube, USA, GXBE69)** from the
 user's own disc image. Pure Python 3.14 (stdlib only: `compression.zstd`, `gzip`,
-`zlib`) plus a three.js viewer page, published on GitHub Pages at
-https://andrewmaxwell.github.io/junk/gameGeometry/viewer/ (the Pages workflow deploys the
-whole repo; the homepage entry is in `home/data.json`, thumbnail `viewer/image.png`). Everything was reverse engineered in this repo;
+`zlib`) in `scripts/`, plus a three.js viewer page at the top of this folder, published
+on GitHub Pages at https://andrewmaxwell.github.io/junk/ssx3/ (the Pages workflow deploys
+the whole repo). It isn't on the junk homepage yet; when it is, add an entry to
+`home/data.json` with `filePath: "ssx3"` (thumbnail `image.png` is ready). Everything was
+reverse engineered in this repo;
 GlitcherOG's PS2 research (github.com/GlitcherOG/SSX-Library, `SSX3PS2/`) was a
 useful starting point, but the GameCube files differ in the details below.
 
@@ -13,20 +15,21 @@ Disc image: `~/Downloads/SSX 3 (USA)/SSX 3 (USA).rvz` (the default in every scri
 ## Commands
 
 ```
+cd scripts
 python3 list_geometry.py                  # table of locations and what geometry each has (~4s)
 python3 list_geometry.py --export BHP1    # one location's terrain patches -> BHP1.obj (ALL = everything)
-python3 export_viewer.py                  # -> viewer/data/*.bin, ~15s
-cd viewer && python3 -m http.server 8765 --bind 127.0.0.1   # then open http://127.0.0.1:8765/
+python3 export_viewer.py                  # -> ../data/*.bin, ~15s
+cd .. && python3 -m http.server 8765 --bind 127.0.0.1   # then open http://127.0.0.1:8765/
 ```
 
-`viewer/` is committed and published, data included. The user is fine with that as long
+Everything here is committed and published, `data/` included. The user is fine with that as long
 as the data is our own re-encoding, **never bytes copied verbatim from the disc** (no raw
 chunks, no GameCube texture layouts); see "Data files" below. Re-export only when the data
 actually changes: every export adds ~24 MB of binaries to git history. Exports are
 deterministic (gzip mtime 0), so an unchanged world gives unchanged files.
-`out/` (gitignored) is only for OBJ experiments. The page needs HTTP (it fetches
-and uses a Worker); file:// shows a message saying so. Edit `viewer/index.html` and
-`viewer/worker.js` directly, no build step.
+OBJ exports (`*.obj`, `out/`) are gitignored. The page needs HTTP (it fetches
+and uses a Worker); file:// shows a message saying so. Edit `index.html` and
+`worker.js` directly, no build step.
 
 The page exposes `window.viewer = { camera, controls, scene }` for poking at from the
 console; `await import('three')` works there too (the import map applies).
@@ -39,14 +42,14 @@ location list can land before the page finishes building; click labels via JS
 
 | File | What |
 |---|---|
-| `rvz.py` | RVZ (Dolphin) reader: zstd groups, RVZ packing (junk -> zeros), GameCube FST |
-| `refpack.py` | EA RefPack (0x10FB) decompressor |
-| `ssx3.py` | World format: BIG archive, sections/chunks, patches, models, instances, textures, lighting |
-| `gxtex.py` | GameCube texture decoding (CMPR, C8+RGB5A3), mip levels, averages, PNG writer |
-| `list_geometry.py` | CLI inventory + terrain OBJ export (`describe()` names locations) |
-| `export_viewer.py` | Builds the streaming viewer data (`viewer/data/`) |
-| `viewer/index.html` | The viewer page: three.js 0.170 from jsdelivr, controls, UI |
-| `viewer/worker.js` | Web Worker: fetch, gunzip, decode textures, tessellate terrain, bake placements |
+| `scripts/rvz.py` | RVZ (Dolphin) reader: zstd groups, RVZ packing (junk -> zeros), GameCube FST |
+| `scripts/refpack.py` | EA RefPack (0x10FB) decompressor |
+| `scripts/ssx3.py` | World format: BIG archive, sections/chunks, patches, models, instances, textures, lighting |
+| `scripts/gxtex.py` | GameCube texture decoding (CMPR, C8+RGB5A3), mip levels, averages, PNG writer |
+| `scripts/list_geometry.py` | CLI inventory + terrain OBJ export (`describe()` names locations) |
+| `scripts/export_viewer.py` | Builds the streaming viewer data (`data/`) |
+| `index.html` | The viewer page: three.js 0.170 from jsdelivr, controls, UI |
+| `worker.js` | Web Worker: fetch, gunzip, decode textures, tessellate terrain, bake placements |
 
 ## Disc and world container
 
@@ -194,7 +197,7 @@ offset into that pool. Bbox at 0x58 includes the scale (95% match within 5%).
   - Timers are throttled to ~1/s, so tests with many `setTimeout` waits time out (45s CDP
     limit). Dispatch synthetic Pointer/Wheel/Keyboard events synchronously instead.
 
-## Data files (`viewer/data/*.bin`)
+## Data files (`data/*.bin`)
 
 Each is `gzip(u32 headerLen, JSON {meta, sections: {name: [offset, length, shuffle]}},
 8-aligned binary sections)`, little-endian. `shuffle` > 0 means the section is stored as
@@ -229,7 +232,7 @@ Testing: dispatch `PointerEvent`s with `pointerType: 'touch'` and distinct `poin
 The viewer keeps the camera in the address (`index.html#view=cx,cy,cz,tx,ty,tz`, scene
 units) and Option-click / `I` / long-press shows what's under the cursor: location, terrain patch rid
 or placement rid + model (track, rid), texture id, game xyz. "Copy view + details" puts
-both on the clipboard. To investigate a pasted report: serve `viewer/`, open the URL
+both on the clipboard. To investigate a pasted report: serve this folder, open the URL
 with the same `#view=`, and look up the rids in `World.chunks` (patch rids are
 `chunks[track, 1]`, placement rids `chunks[track, 3]`, models `chunks[track, 2]`).
 
@@ -240,4 +243,4 @@ with the same `#view=`, and look up the rids in `World.chunks` (patch rids are
 - Splines (type 8) for a ride-the-course camera; collision meshes (type 12) are in model space.
 - 3D-print export (the original goal): add thickness to the terrain and a base, then write STL.
 - The user's preferences: commit straight to master in ~/junk, staging only this folder
-  (plus `home/data.json` for the homepage entry).
+  (`ssx3/`).

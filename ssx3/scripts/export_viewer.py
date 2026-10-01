@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Export SSX 3 terrain and placed objects for the streaming 3D viewer in viewer/.
+"""Export SSX 3 terrain and placed objects for the streaming 3D viewer in ssx3/.
 
-    python3 export_viewer.py                 # -> viewer/data/*.bin
+    python3 export_viewer.py                 # -> ../data/*.bin
     python3 export_viewer.py --no-objects    # terrain only
 
-viewer/index.html starts with a low-detail overview of the whole mountain
+index.html starts with a low-detail overview of the whole mountain
 (data/overview.bin) and loads each location's full terrain, objects, textures
 and baked lighting (data/<location>.bin, plus the shared data/textures.bin) as
 the camera gets close. Files are gzipped packs of JSON metadata and binary
@@ -209,7 +209,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('image', nargs='?', default=DEFAULT_ISO)
     ap.add_argument('--no-objects', action='store_true', help='leave out placed prefab models')
-    ap.add_argument('--out', default=os.path.join(HERE, 'viewer'))
+    ap.add_argument('--out', default=os.path.dirname(HERE), help='viewer folder (data/ is written inside)')
     args = ap.parse_args()
 
     disc = GCDisc(args.image)
