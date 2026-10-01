@@ -1,6 +1,6 @@
 // Loads and builds the viewer's data off the main thread: fetch, gunzip, decode textures, tessellate
 // terrain and bake object placements into ready-to-draw arrays. The page only creates GPU objects.
-// Requests: {id, kind: 'overview' | 'textures' | 'detail', url}. Replies: {id, progress} while
+// Requests: {id, kind: 'overview' | 'textures' | 'detail' | 'sky', url}. Replies: {id, progress} while
 // downloading, then {id, result} or {id, error}. Typed arrays in results are transferred, not copied.
 
 const SCALE = 1 / 1000;  // game units are tiny; keep numbers friendly for the GPU
@@ -15,7 +15,9 @@ let center = null, textureFlags = {};  // from the overview, needed by everythin
 onmessage = async ({ data: { id, kind, url } }) => {
   try {
     const pack = await load(url, progress => postMessage({ id, progress }));
-    const result = kind === 'overview' ? buildOverview(pack) : kind === 'textures' ? decodeTextures(pack) : buildDetail(pack);
+    const result = kind === 'overview' ? buildOverview(pack) : kind === 'textures' ? decodeTextures(pack)
+      // skies are domes the page draws around the camera, so they keep their own origin and units
+      : kind === 'sky' ? buildDetail(pack, [0, 0, 0], 1) : buildDetail(pack, center, SCALE);
     const buffers = new Set();
     (function collect(v) {
       if (ArrayBuffer.isView(v)) buffers.add(v.buffer);
@@ -109,10 +111,10 @@ function decodeTextures({ meta, section }) {
 }
 
 // ---------- geometry helpers ----------
-// game Z-up -> viewer Y-up, centred and scaled
-function toScene(x, y, z, out, o) {
-  out[o] = (x - center[0]) * SCALE; out[o + 1] = (z - center[1]) * SCALE; out[o + 2] = (-y - center[2]) * SCALE;
-}
+// game Z-up -> viewer Y-up, moved to an origin (in viewer axes) and scaled
+const sceneTransform = (origin, scale) => (x, y, z, out, o) => {
+  out[o] = (x - origin[0]) * scale; out[o + 1] = (z - origin[1]) * scale; out[o + 2] = (-y - origin[2]) * scale;
+};
 const indexArray = (n, maxVertex) => maxVertex > 65535 ? new Uint32Array(n) : new Uint16Array(n);
 
 // area-weighted vertex normals, like three.js's computeVertexNormals
@@ -130,6 +132,49 @@ function normals(pos, idx) {
     n[v] /= l; n[v + 1] /= l; n[v + 2] /= l;
   }
   return n;
+}
+
+// Bounding-volume hierarchy, so the page can raycast without testing every triangle. Each node
+// splits its triangles at the middle of their centres' longest axis, down to 8 per leaf.
+// bounds: 6 floats per node (min xyz, max xyz). nodes: 2 uints per node, [first, count] into
+// order for a leaf, [right child, 0] for an inner node (its left child is the next node).
+function buildBVH(pos, idx) {
+  const n = idx.length / 3, order = new Uint32Array(n), cen = new Float32Array(n * 3);
+  for (let t = 0; t < n; t++) {
+    order[t] = t;
+    for (let a = 0; a < 3; a++) cen[t * 3 + a] = (pos[idx[t * 3] * 3 + a] + pos[idx[t * 3 + 1] * 3 + a] + pos[idx[t * 3 + 2] * 3 + a]) / 3;
+  }
+  const bounds = [], nodes = [];
+  (function build(first, count) {
+    const node = nodes.length / 2, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    const clo = [...lo], chi = [...hi];
+    for (let i = first; i < first + count; i++) {
+      const t = order[i];
+      for (let k = 0; k < 3; k++) for (let a = 0; a < 3; a++) {
+        const v = pos[idx[t * 3 + k] * 3 + a];
+        if (v < lo[a]) lo[a] = v;
+        if (v > hi[a]) hi[a] = v;
+      }
+      for (let a = 0; a < 3; a++) { const c = cen[t * 3 + a]; if (c < clo[a]) clo[a] = c; if (c > chi[a]) chi[a] = c; }
+    }
+    bounds.push(...lo, ...hi);
+    nodes.push(first, count);
+    const axis = [0, 1, 2].reduce((m, a) => chi[a] - clo[a] > chi[m] - clo[m] ? a : m, 0);
+    if (count <= 8 || chi[axis] === clo[axis]) return node;
+    // partition around the middle; if everything lands on one side, split the count in half
+    const mid = (clo[axis] + chi[axis]) / 2;
+    let i = first, j = first + count - 1;
+    while (i <= j) {
+      if (cen[order[i] * 3 + axis] < mid) i++;
+      else { const t = order[i]; order[i] = order[j]; order[j--] = t; }
+    }
+    const left = i - first > 0 && i - first < count ? i - first : count >> 1;
+    build(first, left);
+    nodes[node * 2] = build(first + left, count - left);
+    nodes[node * 2 + 1] = 0;
+    return node;
+  })(0, n);
+  return { bounds: new Float32Array(bounds), nodes: new Uint32Array(nodes), order };
 }
 
 // triangles for a patch grid of (steps+1)^2 points
@@ -161,16 +206,17 @@ function buildOverview({ meta, section }) {
     vert += count;
     const idx = indexArray(info.patches * grid.length, count);
     for (let p = 0; p < info.patches; p++) for (let i = 0; i < grid.length; i++) idx[p * grid.length + i] = grid[i] + p * per;
-    return { info, pos, col, idx, normal: normals(pos, idx) };
+    return { info, pos, col, idx, normal: normals(pos, idx), bvh: buildBVH(pos, idx) };
   });
   return { locations, center, scale: SCALE, span: Math.max(...meta.max.map((hi, a) => hi - meta.min[a])) * SCALE };
 }
 
 // ---------- full detail for one location ----------
-function buildDetail(pack) {
+function buildDetail(pack, origin, scale) {
   const { meta, section } = pack;
+  const toScene = sceneTransform(origin, scale);
   const lightmapBytes = section('lightmaps');
-  const lightmaps = meta.lightmaps.map(info => decodeTexture(lightmapBytes, info));
+  const { atlases, place } = packLightmaps(meta.lightmaps.map(info => decodeTexture(lightmapBytes, info)));
   const textures = decodeTextures(pack);
   const meshes = [];  // {kind, texId, lightmap, pos, idx, normal, uv, uv1?, col?, ...inspector info}
 
@@ -182,31 +228,46 @@ function buildDetail(pack) {
     const s = a / DETAIL_STEPS, t = b / DETAIL_STEPS;
     for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) basis.push(s ** i * t ** j);
   }
+  // Patches come sorted by texture, then lightmap. With the lightmaps in atlases, consecutive runs
+  // sharing a texture and an atlas draw as one mesh.
+  const groups = [];
   let p0 = 0;
   for (const [texId, lmIndex, count] of meta.runs) {
+    const atlas = place[lmIndex]?.atlas ?? -1, last = groups.at(-1);
+    if (last && last.texId === texId && last.atlas === atlas) { last.runs.push([lmIndex, count]); last.count += count; }
+    else groups.push({ texId, atlas, first: p0, count, runs: [[lmIndex, count]] });
+    p0 += count;
+  }
+  for (const { texId, atlas, first, count, runs } of groups) {
     const pos = new Float32Array(count * per * 3), uv = new Float32Array(count * per * 2), uv1 = new Float32Array(count * per * 2);
     const idx = indexArray(count * grid.length, count * per);
-    for (let k = 0; k < count; k++) {
-      const p = p0 + k, c = coefs.subarray(p * 48, p * 48 + 48);
-      const cuv = patchUv.subarray(p * 8, p * 8 + 8), [lu, lv, lw, lh] = patchLm.subarray(p * 4, p * 4 + 4);
-      for (let g = 0; g < per; g++) {
-        let x = 0, y = 0, z = 0;
-        for (let m = 0; m < 16; m++) { const w = basis[g * 16 + m]; x += c[m * 3] * w; y += c[m * 3 + 1] * w; z += c[m * 3 + 2] * w; }
-        const v = k * per + g;
-        toScene(x, y, z, pos, v * 3);
-        // bilinear blend of the corner UVs: S(0,0), S(1,0), S(0,1), S(1,1)
-        const s = Math.floor(g / n) / DETAIL_STEPS, tt = (g % n) / DETAIL_STEPS;
-        const w0 = (1 - s) * (1 - tt), w1 = s * (1 - tt), w2 = (1 - s) * tt, w3 = s * tt;
-        uv[v * 2] = cuv[0] * w0 + cuv[2] * w1 + cuv[4] * w2 + cuv[6] * w3;
-        uv[v * 2 + 1] = cuv[1] * w0 + cuv[3] * w1 + cuv[5] * w2 + cuv[7] * w3;
-        // the patch's first parameter runs along the lightmap's v axis
-        uv1[v * 2] = lu + tt * lw; uv1[v * 2 + 1] = lv + s * lh;
+    let k = 0;
+    for (const [lmIndex, runCount] of runs) {
+      const sheet = place[lmIndex];
+      for (const end = k + runCount; k < end; k++) {
+        const p = first + k, c = coefs.subarray(p * 48, p * 48 + 48);
+        const cuv = patchUv.subarray(p * 8, p * 8 + 8), [lu, lv, lw, lh] = patchLm.subarray(p * 4, p * 4 + 4);
+        for (let g = 0; g < per; g++) {
+          let x = 0, y = 0, z = 0;
+          for (let m = 0; m < 16; m++) { const w = basis[g * 16 + m]; x += c[m * 3] * w; y += c[m * 3 + 1] * w; z += c[m * 3 + 2] * w; }
+          const v = k * per + g;
+          toScene(x, y, z, pos, v * 3);
+          // bilinear blend of the corner UVs: S(0,0), S(1,0), S(0,1), S(1,1)
+          const s = Math.floor(g / n) / DETAIL_STEPS, tt = (g % n) / DETAIL_STEPS;
+          const w0 = (1 - s) * (1 - tt), w1 = s * (1 - tt), w2 = (1 - s) * tt, w3 = s * tt;
+          uv[v * 2] = cuv[0] * w0 + cuv[2] * w1 + cuv[4] * w2 + cuv[6] * w3;
+          uv[v * 2 + 1] = cuv[1] * w0 + cuv[3] * w1 + cuv[5] * w2 + cuv[7] * w3;
+          // the patch's first parameter runs along the lightmap's v axis; then into the atlas
+          if (sheet) {
+            uv1[v * 2] = sheet.u + (lu + tt * lw) * sheet.su;
+            uv1[v * 2 + 1] = sheet.v + (lv + s * lh) * sheet.sv;
+          }
+        }
+        for (let i = 0; i < grid.length; i++) idx[k * grid.length + i] = grid[i] + k * per;
       }
-      for (let i = 0; i < grid.length; i++) idx[k * grid.length + i] = grid[i] + k * per;
     }
-    meshes.push({ kind: textureFlags[texId] & 1 ? 'helpers' : 'terrain', texId, lightmap: lmIndex, pos, idx, uv, uv1,
-                  normal: normals(pos, idx), firstPatch: p0, trisPerPatch: grid.length / 3 });
-    p0 += count;
+    meshes.push({ kind: textureFlags[texId] & 1 ? 'helpers' : 'terrain', texId, lightmap: atlas, pos, idx, uv, uv1,
+                  normal: normals(pos, idx), bvh: buildBVH(pos, idx), firstPatch: first, trisPerPatch: grid.length / 3 });
   }
 
   // objects: bake every placement into one mesh per (kind, texture)
@@ -258,9 +319,37 @@ function buildDetail(pack) {
   for (const [key, b] of buckets) {
     const [kind, texId] = key.split(':');
     meshes.push({ kind, texId: +texId, lightmap: -1, pos: b.pos, idx: b.idx, uv: b.uv, col: b.col,
-                  normal: normals(b.pos, b.idx), owners: Uint32Array.from(b.owners) });
+                  normal: normals(b.pos, b.idx), bvh: buildBVH(b.pos, b.idx), owners: Uint32Array.from(b.owners) });
   }
   const instModel = Uint32Array.from({ length: meta.instances }, (_, i) => inst[i * 15]);
-  return { lightmaps, textures, meshes,
+  return { lightmaps: atlases, textures, meshes,
            ids: { patchRid: section('patchRid', Uint32Array), instRid: section('instRid', Uint32Array), modelKeys: meta.modelKeys, instModel } };
+}
+
+// Lightmap sheets packed into atlases of at most 2048 px (a size every WebGL 2 device supports),
+// so terrain that shares a texture can draw as one mesh whatever sheet each patch uses. Each sheet
+// gets a 1-texel border copied from its own edge, so filtering never picks up a neighbour.
+// -> {atlases: [{w, h, rgba}], place: per sheet {atlas, u, v, su, sv}: atlas uv = (u + lu * su, v + lv * sv)}
+function packLightmaps(sheets) {
+  if (!sheets.length) return { atlases: [], place: [] };
+  const cell = Math.max(...sheets.map(s => Math.max(s.w, s.h))) + 2;
+  const perRow = Math.max(1, Math.floor(2048 / cell)), perAtlas = perRow * perRow;
+  const atlases = [], place = [];
+  for (let start = 0; start < sheets.length; start += perAtlas) {
+    const group = sheets.slice(start, start + perAtlas);
+    const cols = Math.min(perRow, Math.ceil(Math.sqrt(group.length))), rows = Math.ceil(group.length / cols);
+    const W = cols * cell, H = rows * cell, rgba = new Uint8Array(W * H * 4);
+    group.forEach(({ w, h, rgba: src }, i) => {
+      const ox = (i % cols) * cell + 1, oy = Math.floor(i / cols) * cell + 1;
+      for (let y = -1; y <= h; y++) {
+        const sy = Math.min(h - 1, Math.max(0, y)), row = ((oy + y) * W + ox) * 4;
+        rgba.set(src.subarray(sy * w * 4, (sy + 1) * w * 4), row);
+        rgba.set(src.subarray(sy * w * 4, sy * w * 4 + 4), row - 4);
+        rgba.set(src.subarray((sy + 1) * w * 4 - 4, (sy + 1) * w * 4), row + w * 4);
+      }
+      place.push({ atlas: atlases.length, u: ox / W, v: oy / H, su: w / W, sv: h / H });
+    });
+    atlases.push({ w: W, h: H, rgba, mode: 'opaque' });
+  }
+  return { atlases, place };
 }

@@ -176,8 +176,25 @@ offset into that pool. Bbox at 0x58 includes the scale (95% match within 5%).
   plus the shared `data/textures.bin` load when the camera is within about 2 radii. All
   decoding and mesh building happens in `worker.js`, which transfers ready typed arrays
   (positions, normals, UVs, colours, indices, RGBA pixels); the page only makes three.js
-  objects, so streaming doesn't stutter. Up to 8 locations stay loaded (4 on touch devices);
-  freeing one disposes its geometry, lightmaps, own textures and materials.
+  objects, so streaming doesn't stutter. Only the nearest 8 locations in range get detail
+  (5 on touch devices); the rest show the overview. Detail out of that set stays cached until
+  the total passes the limit, then the least recently wanted is freed (geometry, lightmaps,
+  own textures, materials).
+- **Draw calls**: the worker packs each location's lightmap sheets into atlases (<= 2048 px,
+  7x7 sheets of 256 + a copied 1-texel border each, so CRA3's 62 sheets need two) and merges
+  consecutive terrain runs with the same texture and atlas into one mesh. Patches are sorted
+  by texture, so a merged mesh is still a contiguous patch range (the inspector relies on
+  `firstPatch + faceIndex / trisPerPatch`). CRA3 terrain went from 476 meshes to 61.
+- **Raycasts**: every mesh gets a bounding-volume hierarchy built in the worker (`buildBVH`:
+  median-of-extent splits, 8 triangles per leaf) and `mesh.raycast = bvhRaycast`, which
+  returns only the nearest hit, with the original `faceIndex`. ~0.5 ms per ray against
+  everything loaded vs ~100 ms with three.js's per-triangle raycast; verified same hits.
+  It assumes meshes sit at the scene origin, unrotated (true for everything in `scene`).
+- **Sky**: each section's `?SKY` is a 300-unit dome around the origin (18 meshes, 9
+  textures). It's drawn in a separate pass (`skyScene` + `skyCamera` at the origin, rotated
+  like the main camera, then `clearDepth`), in game units rather than scene units, and the
+  section shown is that of the nearest location's surface. Skies aren't in the places
+  list; the Sky button (under More) hides them.
 - Camera (map mode, default): nothing depends on a hidden pivot distance, because that made
   speeds erratic (MapControls scaled pan/zoom by the distance to a pivot that re-aimed at
   each gesture, often at far terrain or sky).

@@ -69,7 +69,7 @@
     <button id="all">All</button><button id="none">None</button><button id="textures">Textures: on</button><button id="objects">Objects: on</button>
   </div>
   <details><summary>More</summary><div class="buttons">
-    <button id="lighting" title="Baked: the game's own lightmaps and vertex lighting. Viewer: plain sun and sky lights.">Lighting: baked</button><button id="panels" title="Big flat cards (backdrops, tree lines) drawn with see-through textures: 2D trees, signs, glass">Panels: on</button><button id="helpers" title="Things the game doesn't draw as modelled: translucent editor volumes, editor arrow boxes, and placeholders like the black slabs by jumps and point-multiplier cubes">Helpers: off</button><button id="blocks" title="Big plain boxes with snow or ice textures (e.g. on Snow Jam), probably invisible blockers">Blocks: off</button><button id="wire">Wireframe</button><button id="mode" title="Map: drag, zoom and rotate like Google Earth. Fly: first-person flying with the keyboard.">Camera: map</button>
+    <button id="lighting" title="Baked: the game's own lightmaps and vertex lighting. Viewer: plain sun and sky lights.">Lighting: baked</button><button id="panels" title="Big flat cards (backdrops, tree lines) drawn with see-through textures: 2D trees, signs, glass">Panels: on</button><button id="helpers" title="Things the game doesn't draw as modelled: translucent editor volumes, editor arrow boxes, and placeholders like the black slabs by jumps and point-multiplier cubes">Helpers: off</button><button id="blocks" title="Big plain boxes with snow or ice textures (e.g. on Snow Jam), probably invisible blockers">Blocks: off</button><button id="sky" title="The game's sky for the part of the mountain you're looking at">Sky: on</button><button id="wire">Wireframe</button><button id="mode" title="Map: drag, zoom and rotate like Google Earth. Fly: first-person flying with the keyboard.">Camera: map</button>
   </div></details>
   <div id="list"></div>
   <p class="credit">The world of SSX 3 (EA Canada, 2003), rebuilt from the GameCube disc. A fan project, not affiliated
@@ -143,8 +143,9 @@ document.body.appendChild(renderer.domElement);
 const anisotropy = renderer.capabilities.getMaxAnisotropy();
 
 const scene = new THREE.Scene();
-const sky = new THREE.Color(0x0d1320);
-scene.background = sky;
+const sky = new THREE.Color(0x0d1320);  // behind everything until (or unless) the game's sky is drawn
+renderer.setClearColor(sky);
+renderer.autoClear = false;
 scene.add(new THREE.HemisphereLight(0xf2f6ff, 0x5a6070, 2.0));
 const sun = new THREE.DirectionalLight(0xfff4e0, 1.6);
 sun.position.set(1, 1.4, 0.6);
@@ -154,7 +155,7 @@ scene.add(sun);
 // three.js's linear space (worker.js applies the same gain to object vertex colours).
 const BAKED_GAIN = 2 ** 2.2;
 const touchOnly = matchMedia('(hover: none)').matches;  // phones and tablets: no keyboard, no hover
-const MAX_DETAILED = touchOnly ? 4 : 8;  // locations kept in memory at full detail
+const MAX_DETAILED = touchOnly ? 5 : 8;  // locations kept in memory at full detail
 
 const status = document.getElementById('status');
 const overview = await ssx.overview;
@@ -362,7 +363,7 @@ function setMode(flyOn) {
 }
 
 // ---------- view state and materials ----------
-const view = { textures: true, lighting: 'baked', objects: true, panels: true, helpers: false, blocks: false, wire: false };
+const view = { sky: true, textures: true, lighting: 'baked', objects: true, panels: true, helpers: false, blocks: false, wire: false };
 const allMaterials = new Set();  // for the wireframe toggle
 const track = m => { allMaterials.add(m); m.wireframe = view.wire; return m; };
 const pick = mesh => mesh.userData.mats[view.lighting][view.textures ? 'textured' : 'flat'];
@@ -397,7 +398,49 @@ function materials(materialCache, t, lm, flatColor, vertexLit, solid) {
   return materialCache.get(key);
 }
 
-function makeMesh(pos, idx, attrs, mats) {
+// Raycasts through the worker's bounding-volume hierarchy (see buildBVH in worker.js): only the
+// triangles in boxes the ray passes through get tested. Meshes sit at the scene origin, unrotated,
+// so the ray needs no transforming. Reports the nearest hit, which is all the page ever uses.
+function bvhRaycast(raycaster, intersects) {
+  const { bounds, nodes, order } = this.userData.bvh;
+  const pos = this.geometry.attributes.position.array, idx = this.geometry.index.array;
+  const { origin: o, direction: d } = raycaster.ray;
+  const ox = o.x, oy = o.y, oz = o.z, dx = d.x, dy = d.y, dz = d.z, ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
+  let best = raycaster.far, bestTri = -1;
+  const stack = [0];
+  while (stack.length) {
+    const n = stack.pop(), b = n * 6;
+    // slab test against the node's box
+    let t1 = (bounds[b] - ox) * ix, t2 = (bounds[b + 3] - ox) * ix;
+    let near = Math.min(t1, t2), far = Math.max(t1, t2);
+    t1 = (bounds[b + 1] - oy) * iy; t2 = (bounds[b + 4] - oy) * iy;
+    near = Math.max(near, Math.min(t1, t2)); far = Math.min(far, Math.max(t1, t2));
+    t1 = (bounds[b + 2] - oz) * iz; t2 = (bounds[b + 5] - oz) * iz;
+    near = Math.max(near, Math.min(t1, t2)); far = Math.min(far, Math.max(t1, t2));
+    if (near > far || far < raycaster.near || near > best) continue;
+    const first = nodes[n * 2], count = nodes[n * 2 + 1];
+    if (!count) { stack.push(first, n + 1); continue; }  // inner node: right child, then left
+    for (let i = first; i < first + count; i++) {  // Moller-Trumbore, both sides
+      const t = order[i], a = idx[t * 3] * 3, bb = idx[t * 3 + 1] * 3, c = idx[t * 3 + 2] * 3;
+      const e1x = pos[bb] - pos[a], e1y = pos[bb + 1] - pos[a + 1], e1z = pos[bb + 2] - pos[a + 2];
+      const e2x = pos[c] - pos[a], e2y = pos[c + 1] - pos[a + 1], e2z = pos[c + 2] - pos[a + 2];
+      const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+      const det = e1x * px + e1y * py + e1z * pz;
+      if (Math.abs(det) < 1e-12) continue;
+      const inv = 1 / det, sx = ox - pos[a], sy = oy - pos[a + 1], sz = oz - pos[a + 2];
+      const u = (sx * px + sy * py + sz * pz) * inv;
+      if (u < 0 || u > 1) continue;
+      const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+      const v = (dx * qx + dy * qy + dz * qz) * inv;
+      if (v < 0 || u + v > 1) continue;
+      const dist = (e2x * qx + e2y * qy + e2z * qz) * inv;
+      if (dist >= raycaster.near && dist < best) { best = dist; bestTri = t; }
+    }
+  }
+  if (bestTri >= 0) intersects.push({ distance: best, point: raycaster.ray.at(best, new THREE.Vector3()), object: this, faceIndex: bestTri });
+}
+
+function makeMesh(pos, idx, attrs, mats, bvh) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   for (const [name, [array, size]] of Object.entries(attrs)) geo.setAttribute(name, new THREE.BufferAttribute(array, size));
@@ -406,13 +449,14 @@ function makeMesh(pos, idx, attrs, mats) {
   const mesh = new THREE.Mesh(geo);
   mesh.userData.mats = mats;
   mesh.material = pick(mesh);
+  if (bvh) { mesh.userData.bvh = bvh; mesh.raycast = bvhRaycast; }
   return mesh;
 }
 
 // ---------- overview: every location at low detail, coloured like the game ----------
 const peakHue = { A: 0.58, B: 0.33, C: 0.08, D: 0.85, E: 0.13 };
 const locations = [];
-overview.locations.forEach(({ info, pos, col, idx, normal }, k) => {
+overview.locations.forEach(({ info, pos, col, idx, normal, bvh }, k) => {
   const hue = peakHue[info.name[0]] ?? 0;
   const loc = {
     ...info, index: k, detail: null, loading: false, lastNear: 0,
@@ -430,7 +474,7 @@ overview.locations.forEach(({ info, pos, col, idx, normal }, k) => {
       viewer: { textured: track(new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide })),
                 flat: track(new THREE.MeshStandardMaterial({ color: loc.tint, side: THREE.DoubleSide })) },
     };
-    loc.overview = makeMesh(pos, idx, { color: [col, 3], normal: [normal, 3] }, mats);
+    loc.overview = makeMesh(pos, idx, { color: [col, 3], normal: [normal, 3] }, mats, bvh);
     loc.overview.userData.info = { kind: 'overview', loc };
     loc.root.add(loc.overview);
   }
@@ -450,9 +494,10 @@ function buildDetail(loc, { lightmaps, textures, meshes, ids }) {
   loc.textures = new Map(textures.map(t => [t.id, textureEntry(t)]));
   loc.materials = new Map();
   const texture = id => loc.textures.get(id) ?? sharedTextures.get(id) ?? null;
-  // Each lightmap is a sheet of small per-patch regions with 1-texel gutters, and the game stores
-  // no mips for them. Mipmapping would average neighbouring patches together at a distance
-  // (hard-edged blotches of the wrong brightness), so sample only the full-size image.
+  // Lightmap atlases (the worker packs each location's sheets together). Each sheet is small
+  // per-patch regions with 1-texel gutters, and the game stores no mips for them. Mipmapping would
+  // average neighbouring patches together at a distance (hard-edged blotches of the wrong
+  // brightness), so sample only the full-size image.
   loc.lightmaps = lightmaps.map(image => {
     const tex = makeTexture(image, THREE.ClampToEdgeWrapping, false);
     tex.channel = 1;  // lightmaps use the second UV set
@@ -468,7 +513,7 @@ function buildDetail(loc, { lightmaps, textures, meshes, ids }) {
       : materials(loc.materials, t, null, loc.objTint, true, false);
     const attrs = terrain ? { uv: [m.uv, 2], uv1: [m.uv1, 2], normal: [m.normal, 3] }
       : { uv: [m.uv, 2], color: [m.col, 3], normal: [m.normal, 3] };
-    const mesh = makeMesh(m.pos, m.idx, attrs, mats);
+    const mesh = makeMesh(m.pos, m.idx, attrs, mats, m.bvh);
     if (!terrain && (t?.mode === 'blend' || t?.additive)) mesh.renderOrder = 1;
     mesh.userData.info = terrain ? { kind: 'terrain', loc, texId: m.texId, firstPatch: m.firstPatch, trisPerPatch: m.trisPerPatch }
       : { kind: m.kind, loc, texId: m.texId, owners: m.owners };
@@ -494,23 +539,26 @@ function disposeDetail(loc) {
 }
 
 // ---------- level of detail ----------
-// A location gets full detail while the camera is within a couple of its radii.
+// The nearest MAX_DETAILED locations within a couple of their radii get full detail; the rest show
+// the overview. Detail that falls out of that set stays cached, least recently wanted freed first,
+// so no more than MAX_DETAILED are ever in memory.
 const isNear = loc => camera.position.distanceTo(loc.sphere.center) < loc.sphere.radius * 2 + span * 0.02;
+const byDistance = (a, b) => camera.position.distanceTo(a.sphere.center) - camera.position.distanceTo(b.sphere.center);
 let busy = false;
 async function updateDetail() {
   const now = performance.now();
+  const wanted = new Set(locations.filter(l => l.root.visible && isNear(l)).sort(byDistance).slice(0, MAX_DETAILED));
   for (const loc of locations) {
-    const near = loc.root.visible && isNear(loc);
-    if (near) loc.lastNear = now;
-    if (loc.detail) loc.detail.visible = near;
-    if (loc.overview) loc.overview.visible = !(near && loc.detail);
+    const show = wanted.has(loc);
+    if (show) loc.lastNear = now;
+    if (loc.detail) loc.detail.visible = show;
+    if (loc.overview) loc.overview.visible = !(show && loc.detail);
   }
-  // free the least recently needed detail beyond the budget
-  const loaded = locations.filter(l => l.detail && !l.detail.visible).sort((a, b) => a.lastNear - b.lastNear);
+  const loaded = locations.filter(l => l.detail && !wanted.has(l)).sort((a, b) => a.lastNear - b.lastNear);
   while (locations.filter(l => l.detail).length > MAX_DETAILED && loaded.length) disposeDetail(loaded.shift());
+  updateSky();
   if (busy) return;
-  const want = locations.filter(l => l.root.visible && !l.detail && isNear(l))
-    .sort((a, b) => camera.position.distanceTo(a.sphere.center) - camera.position.distanceTo(b.sphere.center))[0];
+  const want = [...wanted].find(l => !l.detail);
   if (!want) {
     if (!status.dataset.flash) status.textContent = `${locations.filter(l => l.detail?.visible).length} locations in full detail`;
     return;
@@ -544,6 +592,7 @@ if (touchOnly) document.getElementById('mode').hidden = true;  // fly mode needs
 const list = document.getElementById('list');
 let lastPeak = null;
 for (const loc of locations) {
+  if (loc.name.endsWith('SKY')) continue;  // drawn around the camera instead (see sky below)
   // group by the game's three peaks, then by section letter (A-E) within them
   const group = loc.peak ? `Peak ${loc.peak} · section ${loc.name[0]}` : 'Other';
   if (group !== lastPeak) {
@@ -579,8 +628,8 @@ function focus(loc) {
   updateDetail();
 }
 const setAll = on => locations.forEach(l => {
-  const show = on && !l.name.endsWith('SKY');
-  l.root.visible = show; l.box.checked = show;
+  if (!l.box) return;
+  l.root.visible = l.box.checked = on;
 });
 document.getElementById('all').onclick = () => setAll(true);
 document.getElementById('none').onclick = () => setAll(false);
@@ -594,6 +643,7 @@ function toggle(id, label, key, apply) {
   };
 }
 toggle('textures', 'Textures', 'textures', applyMaterials);
+toggle('sky', 'Sky', 'sky', () => {});
 toggle('objects', 'Objects', 'objects', on => setKind('objects', on));
 toggle('panels', 'Panels', 'panels', on => setKind('panels', on));
 toggle('helpers', 'Helpers', 'helpers', on => setKind('helpers', on));
@@ -607,9 +657,48 @@ document.getElementById('mode').onclick = () => setMode(!fly.on);
 setMode(false);
 document.getElementById('wire').onclick = () => { view.wire = !view.wire; allMaterials.forEach(m => { m.wireframe = view.wire; }); };
 
+// ---------- sky ----------
+// Each section (A-E) has a skybox: a dome 300 game units across that the game draws around the
+// camera. It gets its own scene and camera, at the dome's origin and turned like the main camera,
+// drawn before the mountain. The sky shown is the one for the section of the nearest location.
+const skyScene = new THREE.Scene();
+const skyCamera = new THREE.PerspectiveCamera(camera.fov, camera.aspect, 1, 10000);
+const skies = new Map();  // section letter -> Group, or null while loading
+let skyLetter = null;
+function updateSky() {
+  const nearest = locations.filter(l => l.root.visible && l.peak)
+    .reduce((m, l) => !m || camera.position.distanceTo(l.sphere.center) - l.sphere.radius
+      < camera.position.distanceTo(m.sphere.center) - m.sphere.radius ? l : m, null);
+  const letter = nearest?.name[0];
+  if (!letter || letter === skyLetter) return;
+  skyLetter = letter;
+  for (const [key, group] of skies) if (group) group.visible = key === letter;
+  if (skies.has(letter) || !locations.some(l => l.name === letter + 'SKY')) return;
+  skies.set(letter, null);
+  ssx.request('sky', `${letter}SKY.bin`).then(({ textures, meshes }) => {
+    const group = new THREE.Group();
+    const own = new Map(textures.map(t => [t.id, textureEntry(t)]));
+    for (const m of meshes) {
+      const t = own.get(m.texId) ?? sharedTextures.get(m.texId);
+      const material = new THREE.MeshBasicMaterial({ map: t?.tex ?? null, vertexColors: true, side: THREE.DoubleSide, fog: false,
+        depthWrite: false, transparent: t?.mode === 'blend', alphaTest: t?.mode === 'cutout' ? 0.5 : 0 });
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(m.uv, 2));
+      geo.setAttribute('color', new THREE.BufferAttribute(m.col, 3));
+      geo.setIndex(new THREE.BufferAttribute(m.idx, 1));
+      group.add(new THREE.Mesh(geo, material));
+    }
+    group.visible = skyLetter === letter;
+    skies.set(letter, group);
+    skyScene.add(group);
+  }).catch(e => { console.error(e); skies.delete(letter); });
+}
+
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
+  camera.aspect = skyCamera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  skyCamera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
 // ---------- where am I? ----------
@@ -905,6 +994,12 @@ renderer.setAnimationLoop(() => {
   keyMove(dt);
   glideStep(dt);
   if (!fly.on) controls.update();
+  renderer.clear();
+  if (view.sky) {
+    skyCamera.quaternion.copy(camera.quaternion);
+    renderer.render(skyScene, skyCamera);
+    renderer.clearDepth();
+  }
   renderer.render(scene, camera);
 });
 </script>
