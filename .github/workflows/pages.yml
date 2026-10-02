@@ -18,9 +18,34 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # Large folders kept out of the site: never checked out or published.
       - uses: actions/checkout@v5
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/skull/
+            !/dalle-elves/
+            !/dalle-elements/
+
+      # Each Vite app's dist/ is cached under a hash of its source, so a push
+      # that doesn't touch an app restores its last build instead of rebuilding.
+      - name: Restore languageModel build
+        id: lm
+        uses: actions/cache@v4
+        with:
+          path: languageModel/dist
+          key: languageModel-dist-${{ hashFiles('languageModel/**') }}
+
+      - name: Restore straw-art-visualizer build
+        id: sav
+        uses: actions/cache@v4
+        with:
+          path: straw-art-visualizer/dist
+          key: straw-art-visualizer-dist-${{ hashFiles('straw-art-visualizer/**') }}
 
       - uses: actions/setup-node@v6
+        if: steps.lm.outputs.cache-hit != 'true' || steps.sav.outputs.cache-hit != 'true'
         with:
           node-version: lts/*
           cache: npm
@@ -28,21 +53,15 @@ jobs:
             languageModel/package-lock.json
             straw-art-visualizer/package-lock.json
 
-      - name: Install
+      - name: Build languageModel
+        if: steps.lm.outputs.cache-hit != 'true'
         working-directory: languageModel
-        run: npm ci
-
-      - name: Build
-        working-directory: languageModel
-        run: npm run build
-
-      - name: Install straw-art-visualizer
-        working-directory: straw-art-visualizer
-        run: npm ci
+        run: npm ci && npm run build
 
       - name: Build straw-art-visualizer
+        if: steps.sav.outputs.cache-hit != 'true'
         working-directory: straw-art-visualizer
-        run: npm run build
+        run: npm ci && npm run build
 
       - name: Assemble site (repo + built app)
         run: |

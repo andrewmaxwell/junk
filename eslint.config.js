@@ -19,10 +19,7 @@ export default [
     },
 
     rules: {
-      'prettier/prettier': [
-        'warn',
-        {singleQuote: true, bracketSpacing: false, endOfLine: 'auto'},
-      ],
+      'prettier/prettier': 'warn',
       'dot-notation': 'warn',
       'quote-props': ['warn', 'as-needed'],
       'arrow-body-style': ['warn', 'as-needed'],
