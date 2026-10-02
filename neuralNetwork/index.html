@@ -1,5 +1,24 @@
-<body>
-  <canvas id="stats" style="position: fixed; top: 0; left: 0"></canvas>
-  <canvas id="nn" style="position: fixed; top: 0; left: 0; z-index: 10"></canvas>
+<!doctype html>
+<meta charset="utf-8" />
+<title>Neural Network</title>
+<body style="margin: 0; background: white; font: 13px sans-serif">
+  <style>
+    .stepper {
+      position: fixed;
+      z-index: 1;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      white-space: nowrap;
+    }
+    .stepper button {
+      width: 24px;
+    }
+  </style>
+  <div class="stepper" style="top: 8px; left: 8px">
+    Hidden layers <button id="removeLayer">−</button> <span id="numLayers"></span> <button id="addLayer">+</button>
+  </div>
+  <div id="layerControls"></div>
+  <canvas id="nn" style="position: fixed; top: 0; left: 0; touch-action: none"></canvas>
   <script type="module" src="main.js"></script>
 </body>

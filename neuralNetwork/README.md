@@ -1,1 +1,1 @@
-Neural Network - 2023 - A visualization of a network learning to predict prime numbers.
+Neural Network - 2023 - A visualization of a network learning to separate two spirals of colored dots. Each neuron shows a heatmap of how it responds across the plane, so you can watch simple straight-line splits combine into a spiral. Change the number of hidden layers and neurons per layer to see which shapes can learn it.
