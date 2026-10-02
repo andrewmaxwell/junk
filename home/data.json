@@ -6,6 +6,12 @@
     "desc": "A web app that helps you figure out what to drink at my house."
   },
   {
+    "filePath": "lambdagator",
+    "title": "Lambdagator",
+    "year": 2026,
+    "desc": "Watch lambda calculus run, drawn as hungry alligators eating each other."
+  },
+  {
     "filePath": "langViz",
     "title": "Language Model Visualizer",
     "year": 2026,

@@ -1,0 +1,629 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lambdagator</title>
+<style>
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #fbfaf7;
+    color: #222;
+    font: 15px system-ui, sans-serif;
+  }
+  header.top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 14px;
+    padding: 12px 16px 4px;
+  }
+  h1 {
+    margin: 0;
+    font-size: 26px;
+  }
+  .hook {
+    color: #777;
+  }
+  header nav {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+  }
+  #editButton[aria-expanded='true'] {
+    background: #eef3fe;
+    border-color: #2a6df4;
+  }
+  #editor {
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e6e2d8;
+  }
+  #editor .tip {
+    margin: 0 16px 6px;
+  }
+  .bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 8px 16px;
+  }
+  /* the path through the lessons, and the current one */
+  #lessons {
+    padding: 4px 16px 0;
+    text-align: center;
+  }
+  #path {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 18px;
+  }
+  .chapter {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .chapter .name {
+    margin-right: 4px;
+    font-size: 13px;
+    color: #888;
+  }
+  button.dot {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 12px;
+    color: #666;
+  }
+  button.dot.done {
+    background: #e6f4e6;
+    border-color: #8fc98f;
+    color: #2e7d32;
+  }
+  button.dot.current {
+    background: #2a6df4;
+    border-color: #2a6df4;
+    color: white;
+  }
+  #lessonTitle {
+    margin: 12px 0 2px;
+    font-size: 22px;
+  }
+  /* the names the expression defines, so they're visible without the editor */
+  #lessonDefs {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2px 18px;
+    max-width: 1000px;
+    margin: 6px auto 0;
+    font: 14px ui-monospace, Menlo, Consolas, monospace;
+    color: #777;
+  }
+  #lessonDefs b {
+    color: #5d4a1f;
+  }
+  #lessonDefs:empty {
+    display: none;
+  }
+  #lessonGoal {
+    max-width: 760px;
+    margin: 0 auto;
+    font-size: 17px;
+    line-height: 1.45;
+    color: #444;
+  }
+  textarea {
+    flex: 1;
+    min-width: 200px;
+    font: 20px ui-monospace, Menlo, Consolas, monospace;
+    padding: 6px 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    resize: none;
+  }
+  details {
+    padding: 0 16px;
+    color: #666;
+  }
+  summary {
+    cursor: pointer;
+  }
+  /* the list of built-in names */
+  #names {
+    max-width: 1000px;
+    margin: 8px 0 12px;
+    font-size: 14px;
+    color: #333;
+  }
+  .name {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    padding: 4px 0;
+    border-bottom: 1px solid #eee;
+  }
+  .name .chipText {
+    flex: 0 0 110px;
+    box-sizing: border-box;
+    text-align: center;
+  }
+  .name code {
+    flex: 0 0 260px;
+    color: #666;
+  }
+  .name span:not(.chipText) {
+    flex: 1;
+  }
+  button.why {
+    font-size: 13px;
+    padding: 2px 8px;
+    color: #2a6df4;
+    border-color: #c9d8fb;
+  }
+  #caption button.why {
+    font-size: 15px;
+    vertical-align: 1px;
+  }
+  dialog {
+    max-width: 600px;
+    border: 0;
+    border-radius: 14px;
+    padding: 24px 28px;
+    font-size: 17px;
+    line-height: 1.5;
+    box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
+  }
+  dialog#about {
+    max-width: 960px;
+  }
+  dialog#about h2 {
+    margin: 0;
+  }
+  dialog::backdrop {
+    background: rgb(0 0 0 / 0.3);
+  }
+  #whyBody h2 {
+    margin: 0 0 12px;
+    font-size: 20px;
+  }
+  .whyButtons,
+  .dialogButtons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 16px;
+  }
+  #tryIt {
+    background: #2a6df4;
+    border-color: #2a6df4;
+    color: white;
+  }
+  #tryIt code {
+    font-size: 15px;
+  }
+  button,
+  select {
+    font: inherit;
+    padding: 6px 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background: white;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  #go {
+    background: #2a6df4;
+    border-color: #2a6df4;
+    color: white;
+  }
+  #error {
+    color: #c62828;
+    padding: 0 16px;
+    min-height: 1.2em;
+  }
+  #stage {
+    flex: 1;
+    /* with the intro open, the page scrolls rather than squeezing the alligators */
+    min-height: 400px;
+    position: relative;
+    overflow: hidden;
+  }
+  .world {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
+  }
+  /* --h is the hue, --c is 0 for free variables and 1 otherwise, --em is 1 when highlighted, and
+     --k is how cracked open an egg is. stage.js tweens them along with everything else. */
+  .world div {
+    position: absolute;
+    left: 0;
+    top: 0;
+    will-change: transform;
+    pointer-events: none;
+  }
+  .world [data-target] {
+    pointer-events: auto;
+    cursor: pointer;
+  }
+  .chip,
+  .chipText {
+    font: bold 21px ui-monospace, Menlo, Consolas, monospace;
+    text-align: center;
+    color: #5d4a1f;
+    background: hsl(40 60% 86%);
+    border-radius: 999px;
+  }
+  .chip {
+    line-height: 40px;
+    box-shadow: 0 0 0 4px hsl(40 85% 55% / calc(var(--em) * 0.4));
+    z-index: 60;
+  }
+  .chip .text {
+    position: relative;
+    text-shadow:
+      0 0 3px hsl(40 60% 86%),
+      0 0 6px hsl(40 60% 86%);
+  }
+  /* a faint drawing of the alligators a name stands for */
+  .chip .mini {
+    /* gray, since the alligators get their real colors when the name opens up */
+    filter: grayscale(1);
+    position: absolute;
+    left: 50%;
+    top: 5px;
+    transform: translateX(-50%);
+    opacity: 0.55;
+  }
+  .chip .mini div {
+    will-change: auto;
+  }
+  .chip .mini * {
+    animation: none;
+  }
+  .chipText {
+    font-size: 15px;
+    padding: 1px 8px;
+  }
+  /* alligators: the element is the whole animal, facing right. Its jaws open with --em. */
+  .gator {
+    --skin: hsl(var(--h) calc(var(--c) * 55%) calc(42% + (1 - var(--c)) * 30%));
+    --belly: hsl(var(--h) calc(var(--c) * 60%) calc(62% + (1 - var(--c)) * 20%));
+  }
+  .gator .g-body {
+    position: absolute;
+    left: 0;
+    right: 30px;
+    top: 9px;
+    height: 18px;
+    background:
+      radial-gradient(circle at 50% 0, rgb(255 255 255 / 0.25) 2px, transparent 3px) 0 2px / 11px 8px,
+      var(--skin);
+    border-radius: 18px 6px 6px 18px / 12px 6px 6px 12px;
+    box-shadow: inset 0 -4px 0 var(--belly);
+  }
+  /* feet */
+  .gator .g-body::before,
+  .gator .g-body::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    width: 9px;
+    height: 9px;
+    border-radius: 3px 3px 5px 5px;
+    background: var(--skin);
+    left: 12px;
+  }
+  .gator .g-body::after {
+    left: auto;
+    right: 6px;
+  }
+  .gator .g-jaw {
+    position: absolute;
+    left: auto;
+    right: 0;
+    width: 38px;
+    background:
+      repeating-linear-gradient(90deg, white 0 4px, transparent 4px 8px) 4px 100% / calc(100% - 10px) 3px no-repeat,
+      var(--skin);
+  }
+  .gator .g-upper {
+    top: 7px;
+    height: 11px;
+    border-radius: 4px 12px 2px 6px;
+    transform-origin: 3px 100%;
+    transform: rotate(calc(var(--em) * -32deg));
+  }
+  .gator .g-lower {
+    top: 18px;
+    height: 8px;
+    width: 34px;
+    right: 3px;
+    border-radius: 2px 2px 10px 6px;
+    background:
+      repeating-linear-gradient(90deg, white 0 4px, transparent 4px 8px) 4px 0 / calc(100% - 10px) 3px no-repeat,
+      var(--belly);
+    transform-origin: 3px 0;
+    transform: rotate(calc(var(--em) * 14deg));
+  }
+  .gator .g-eye {
+    position: absolute;
+    left: auto;
+    right: 24px;
+    top: 0;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 62% 55%, #222 2.6px, white 3.2px);
+    border: 2px solid var(--skin);
+  }
+  .gator.old .g-eye {
+    /* old alligators are sleepy */
+    background: linear-gradient(white 45%, #555 45% 60%, var(--skin) 60%);
+  }
+  /* an egg's shell is two halves that crack apart as --k goes to 1 */
+  .egg .shell {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font: bold 16px ui-monospace, Menlo, Consolas, monospace;
+    color: #555;
+    border-radius: 50% 50% 50% 50% / 60% 60% 42% 42%;
+    box-shadow: 0 0 0 calc(var(--em) * 5px) hsl(var(--h) 85% 60% / calc(0.35 * (1 - var(--k))));
+    animation: jiggle 0.45s ease-in-out infinite alternate;
+  }
+  .egg .half {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: 50% 50% 50% 50% / 60% 60% 42% 42%;
+    background: radial-gradient(
+      circle at 38% 30%,
+      hsl(var(--h) calc(var(--c) * 80%) calc(88% + (1 - var(--c)) * 6%)),
+      hsl(var(--h) calc(var(--c) * 65%) calc(56% + (1 - var(--c)) * 28%)) 70%
+    );
+    border: 2px solid hsl(var(--h) calc(var(--c) * 50%) calc(40% + (1 - var(--c)) * 30%));
+  }
+  .egg .top {
+    clip-path: polygon(0 0, 100% 0, 100% 56%, 86% 48%, 72% 60%, 58% 48%, 44% 60%, 30% 48%, 16% 60%, 0 50%);
+    transform: translate(calc(var(--k) * -8px), calc(var(--k) * -20px)) rotate(calc(var(--k) * -35deg));
+  }
+  .egg .bottom {
+    clip-path: polygon(0 46%, 16% 56%, 30% 44%, 44% 56%, 58% 44%, 72% 56%, 86% 44%, 100% 52%, 100% 100%, 0 100%);
+    transform: translate(calc(var(--k) * 6px), calc(var(--k) * 12px)) rotate(calc(var(--k) * 20deg));
+  }
+  /* an egg about to hatch swells and shrinks, rocking a little */
+  @keyframes jiggle {
+    from {
+      transform: scale(calc(1 - var(--em) * 0.04)) rotate(calc(var(--em) * -6deg));
+    }
+    to {
+      transform: scale(calc(1 + var(--em) * 0.16)) rotate(calc(var(--em) * 6deg));
+    }
+  }
+  .swatch {
+    display: inline-block;
+    width: 0.8em;
+    height: 0.8em;
+    border-radius: 50%;
+    margin-right: 0.25em;
+    vertical-align: -0.05em;
+    background: hsl(var(--h) 55% 45%);
+  }
+  .highlight {
+    border: 2px dashed hsl(var(--h) 70% 45%);
+    background: hsl(var(--h) 80% 60% / 0.12);
+    border-radius: 10px;
+  }
+  #caption {
+    text-align: center;
+    font-size: 20px;
+    line-height: 1.4;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 0 16px;
+    min-height: 2.8em;
+  }
+  #caption code,
+  #current {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  #current {
+    font-size: 15px;
+    color: #888;
+    overflow-wrap: anywhere;
+    max-height: 3.6em;
+    overflow-y: auto;
+  }
+  /* in the notation, the part that's about to change */
+  .changing {
+    text-decoration: underline 2px #2a6df4;
+    text-underline-offset: 4px;
+  }
+  .rules {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .rule {
+    flex: 1 1 200px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px;
+    background: white;
+    border: 1px solid #e6e2d8;
+    border-radius: 10px;
+  }
+  .rule p {
+    margin: 8px 0 0;
+    font-size: 14px;
+    text-align: center;
+  }
+  .pic {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #999;
+  }
+  .pic > div {
+    position: relative;
+  }
+  /* a side note above a caption */
+  .note {
+    font-size: 15px;
+    color: #777;
+  }
+  .tip {
+    margin: 6px 16px 0;
+    font-size: 13px;
+    color: #777;
+  }
+  .controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px 4px;
+  }
+  #next {
+    font-size: 22px;
+    font-weight: 600;
+    padding: 12px 48px;
+    border: 0;
+    border-radius: 12px;
+    background: #2a6df4;
+    color: white;
+    box-shadow: 0 3px 10px rgb(42 109 244 / 0.35);
+  }
+  #next:not(:disabled):hover {
+    background: #1d5be0;
+  }
+  #back {
+    font-size: 16px;
+    padding: 10px 16px;
+    color: #555;
+  }
+  .footer {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 16px 12px;
+    font-size: 13px;
+    color: #999;
+  }
+  .footer button {
+    font-size: 13px;
+    padding: 3px 10px;
+    color: #555;
+  }
+</style>
+<header class="top">
+  <h1>Lambdagator</h1>
+  <span class="hook">Lambda calculus, drawn as hungry alligators</span>
+  <nav>
+    <button id="aboutButton">What is this?</button>
+    <button id="editButton" aria-expanded="false">✎ Write your own</button>
+  </nav>
+</header>
+<section id="editor" hidden>
+  <div class="bar">
+    <textarea id="input" rows="1" spellcheck="false" autocomplete="off"></textarea>
+    <button id="go">Go</button>
+  </div>
+  <div id="error"></div>
+  <p class="tip">
+    Type <code>\</code> for <code>λ</code>. Variables are single letters, and <code>λab.x</code> is short for
+    <code>λa.λb.x</code>. Numbers like <code>3</code> work, and you can define your own names on separate lines,
+    like <code>TWICE = λfx.f(fx)</code>.
+  </p>
+  <details>
+    <summary>Built-in names, and why each is built the way it is</summary>
+    <div id="names"></div>
+  </details>
+</section>
+<section id="lessons">
+  <div id="path"></div>
+  <h2 id="lessonTitle"></h2>
+  <p id="lessonGoal"></p>
+  <p id="lessonDefs"></p>
+</section>
+<div id="stage"></div>
+<div id="caption" aria-live="polite"></div>
+<div class="controls">
+  <button id="back" title="Back a step (←)">◂ Back</button>
+  <button id="next" title="Next (space or →)">Next ▸</button>
+</div>
+<div class="footer">
+  <span>In symbols: <span id="current"></span></span>
+  <span id="count"></span>
+  <button id="watch" title="Quickly play the rest (or all of it again, if it’s finished)">⏩ Fast forward</button>
+</div>
+<dialog id="about">
+  <h2>What is this?</h2>
+  <p>
+    <b>Lambda calculus</b> is a programming language with only one thing in it: functions. No numbers, no true or
+    false, no loops. Alonzo Church invented it in 1936 to answer a question at the foundations of math: is there a
+    mechanical procedure that can decide, for any statement, whether it can be proved? (There isn’t. Alan Turing
+    showed the same thing with his machines that year.) It turns out that anything a computer can compute, lambda
+    calculus can compute too. It’s the core of functional programming languages like Haskell, and proof
+    assistants like Lean are built on typed versions of it. The lessons build true and false, numbers,
+    arithmetic, and recursion out of nothing but functions.
+  </p>
+  <p>Bret Victor’s <a href="http://worrydream.com/AlligatorEggs/" target="_blank">Alligator Eggs</a> turns it into a game:</p>
+  <div class="rules">
+    <div class="rule">
+      <div class="pic" id="rule-eat"></div>
+      <p>A <b>hungry alligator</b> eats whatever is just to its right.</p>
+    </div>
+    <div class="rule">
+      <div class="pic" id="rule-eggs"></div>
+      <p>Each <b>egg</b> belongs to the alligator of its color above it.</p>
+    </div>
+    <div class="rule">
+      <div class="pic" id="rule-hatch"></div>
+      <p>After eating, the alligator dies, and each of its eggs <b>hatches</b> into a copy of what it ate.</p>
+    </div>
+    <div class="rule">
+      <div class="pic" id="rule-old"></div>
+      <p><b>Old alligators</b> hold a group together. When only one thing is left in it, the old alligator leaves.</p>
+    </div>
+  </div>
+  <p>
+    In the usual notation, written under the picture, an alligator is a function, written <code>λx.</code>
+    followed by its family. An egg is a variable like <code>x</code>, and its color says which <code>λ</code> it
+    belongs to. What’s to an alligator’s right is what the function is applied to, and eating is applying it:
+    replacing the variable with the argument everywhere it appears (called <i>β-reduction</i>). Old alligators are
+    parentheses, and names like <code>TRUE</code> or <code>2</code> are shorthand that opens up when it’s needed.
+  </p>
+  <p class="tip">
+    Press <b>Next</b> (or space) to go one step at a time, or <b>⏩ Fast forward</b> to play the rest quickly. Between
+    steps, you can click any hungry alligator with something to its right to choose who eats next.
+  </p>
+  <div class="dialogButtons">
+    <button id="closeAbout">Close</button>
+  </div>
+</dialog>
+<dialog id="why">
+  <div id="whyBody"></div>
+  <div class="whyButtons">
+    <button id="tryIt"></button>
+    <button id="closeWhy">Close</button>
+  </div>
+</dialog>
+<script type="module" src="main.js"></script>
