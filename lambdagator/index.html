@@ -58,6 +58,7 @@
     text-align: center;
   }
   #path {
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
@@ -172,7 +173,7 @@
     vertical-align: 1px;
   }
   dialog {
-    max-width: 600px;
+    max-width: min(600px, calc(100vw - 32px));
     border: 0;
     border-radius: 14px;
     padding: 24px 28px;
@@ -181,7 +182,7 @@
     box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
   }
   dialog#about {
-    max-width: 960px;
+    max-width: min(960px, calc(100vw - 32px));
   }
   dialog#about h2 {
     margin: 0;
@@ -531,6 +532,56 @@
     font-size: 13px;
     padding: 3px 10px;
     color: #555;
+  }
+  /* phones: everything needs to fit above the Next button */
+  @media (max-width: 600px) {
+    header.top {
+      padding: 8px 12px 2px;
+      align-items: center;
+    }
+    h1 {
+      font-size: 20px;
+    }
+    .hook {
+      display: none;
+    }
+    header nav button {
+      padding: 4px 8px;
+      font-size: 13px;
+    }
+    /* one row of lessons that scrolls sideways */
+    #path {
+      flex-wrap: nowrap;
+      justify-content: flex-start;
+      overflow-x: auto;
+      gap: 12px;
+      padding-bottom: 4px;
+    }
+    .chapter .name {
+      white-space: nowrap;
+      font-size: 11px;
+    }
+    #lessonTitle {
+      margin-top: 6px;
+      font-size: 18px;
+    }
+    #lessonGoal {
+      font-size: 14px;
+    }
+    #stage {
+      min-height: 220px;
+    }
+    #caption {
+      font-size: 16px;
+    }
+    #next {
+      padding: 10px 32px;
+      font-size: 19px;
+    }
+    dialog {
+      padding: 18px;
+      font-size: 15px;
+    }
   }
 </style>
 <header class="top">

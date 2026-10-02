@@ -105,6 +105,11 @@ const showLesson = () => {
   for (const [src, dot] of dots) {
     dot.classList.toggle('done', done.has(src));
     dot.classList.toggle('current', src === source);
+    // on narrow screens the path scrolls sideways, so keep the current lesson in view
+    if (src === source) {
+      dot.parentElement.parentElement.scrollLeft =
+        dot.offsetLeft - dot.parentElement.parentElement.clientWidth / 2;
+    }
   }
   const l = lesson();
   $('lessonTitle').textContent = l
