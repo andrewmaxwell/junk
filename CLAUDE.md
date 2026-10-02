@@ -7,6 +7,7 @@ A collection of standalone browser experiments. Each top-level directory is its 
 - A project is a directory with `index.html`, `main.js`, `README.md`, and `image.png`. The homepage only lists projects that have the README, index.html, and image.png.
 - The first line of the README must read `Title - Year - Short description`. `generateHome.js` parses it by splitting on ` - `.
 - `home/data.json` is generated from the READMEs by `generateHome.js`. Never edit it by hand. After changing any README, regenerate it with `npm run gen` (`npm run dev` does this too, but also starts the dev server).
+- `npm run gen` also shrinks any homepage `image.png` over 200KB (see `optimizeImages.js`, which uses the `sharp` dev dependency), so screenshots can be saved at any size. Commit the shrunken images along with the project.
 - Some projects have their own `CLAUDE.md`. Read it before working in that project.
 
 ## Running
