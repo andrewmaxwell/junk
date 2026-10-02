@@ -44,7 +44,6 @@ var frame = 0;
 var loop = () => {
   requestAnimationFrame(loop);
   var start = performance.now();
-  grid.clear();
 
   T.clearRect(0, 0, width, height);
   T.beginPath();
@@ -75,11 +74,10 @@ var loop = () => {
       yc[i] = height - 1;
       yp[i] = height;
     }
-
-    grid.add(xc[i], yc[i], i);
   }
 
   T.stroke();
+  grid.sort(NUM, xc, yc, xp, yp);
 
   interact({
     numParticles: NUM,

@@ -93,7 +93,7 @@
     "filePath": "fluid-maze",
     "title": "Particle Fluid Maze",
     "year": 2024,
-    "desc": "Watch the particles slowly flow through the maze. Drag to push them around, space to pause, R for a new maze, C to clear."
+    "desc": "Watch the particles slowly flow through the maze. Drag to push them around, space to pause, C to clear."
   },
   {
     "filePath": "temperatureFluid",

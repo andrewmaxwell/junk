@@ -89,12 +89,13 @@ const gridToRects = (grid) => {
 
 /*
 Builds the biggest maze that fits in a width x height area (measured in fluid
-cells) and returns it as a list of blocks, plus where the entrance is so the
-faucet can be aimed at it.
+cells) and returns it as a list of blocks, plus where the faucet goes, up in
+the corner of the reservoir.
 
 `margin` keeps empty cells to the left, right and below the maze, so the
 stream pouring out of the exit is visible on its way off the screen. The outer
-walls still run up to the top of the screen to hold the reservoir in.
+walls run up to the top of the screen and a lid closes them off, so the
+reservoir is a sealed tank.
 
 Every block is aligned to whole fluid cells on purpose: Fluid's wall collision
 assumes a block completely covers any cell it is registered in.
@@ -156,11 +157,20 @@ export const makeMazeGrid = ({
     return r;
   });
 
+  // lid over the reservoir, spanning the outer walls
+  blocks.push({
+    x: shiftRight,
+    y: 0,
+    w: mazeWidth,
+    h: wallThickness,
+  });
+
   return {
     blocks,
     mazeRows,
     mazeCols,
-    // the entrance is the gap between the left wall and the first top wall
-    entranceX: shiftRight + (wallThickness + 2 * scale) / 2,
+    // just inside the upper right corner of the reservoir
+    spawnX: shiftRight + mazeWidth - wallThickness - 2,
+    spawnY: wallThickness + 2,
   };
 };

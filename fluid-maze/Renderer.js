@@ -5,6 +5,10 @@ export class Renderer {
     this.frames = 0;
     this.fps = 0;
     this.lastFpsTime = performance.now();
+    this.palette = Array.from(
+      {length: 8},
+      (_, i) => `hsl(${(i * 360) / 8}, 90%, 65%)`,
+    );
     this.resize();
   }
 
@@ -18,19 +22,40 @@ export class Renderer {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  render({numParticles, xCoord, yCoord, xPrev, yPrev, blocks, radius}, time) {
-    const {ctx} = this;
+  render(
+    {
+      numParticles,
+      xCoord,
+      yCoord,
+      xPrev,
+      yPrev,
+      color,
+      blocks,
+      radius,
+      substeps,
+    },
+    time,
+  ) {
+    const {ctx, palette} = this;
     ctx.clearRect(0, 0, innerWidth, innerHeight);
     ctx.lineWidth = 2;
     ctx.lineCap = 'round';
-    ctx.strokeStyle = 'white';
 
-    ctx.beginPath();
-    for (let i = 0; i < numParticles; i++) {
-      ctx.moveTo(xCoord[i], yCoord[i]);
-      ctx.lineTo(xPrev[i], yPrev[i]);
+    // one path per color, stroking every particle on its own is much slower
+    for (let c = 0; c < palette.length; c++) {
+      ctx.strokeStyle = palette[c];
+      ctx.beginPath();
+      for (let i = 0; i < numParticles; i++) {
+        if (color[i] !== c) continue;
+        ctx.moveTo(xCoord[i], yCoord[i]);
+        // a streak as long as a whole step's movement, not just a substep's
+        ctx.lineTo(
+          xCoord[i] - substeps * (xCoord[i] - xPrev[i]),
+          yCoord[i] - substeps * (yCoord[i] - yPrev[i]),
+        );
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
 
     ctx.fillStyle = '#FFF8';
 

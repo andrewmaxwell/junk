@@ -3,8 +3,15 @@ import {Fluid} from './fluid.js';
 import {makeMazeGrid} from './mazeGrid.js';
 
 const radius = 16;
-const spawnPerStep = 3;
+const spawnPerStep = 8;
 const spawnSpread = 2 * radius;
+// the reservoir is sealed, so stop pouring once it backs up to the faucet.
+// Higher pushes the fluid through the maze faster, but too high and the
+// pressure starts squeezing particles through the walls
+const spawnMaxCrowd = 48;
+// the faucet switches dye every so many particles, the bands of color show
+// how the fluid folds its way through the maze
+const dyeBand = 5000;
 const stepMs = 1000 / 60; // physics is a fixed timestep, independent of refresh rate
 
 const buildMaze = () =>
@@ -35,12 +42,18 @@ let paused = false;
 let lastTime = performance.now();
 let backlog = 0;
 let stepTime = 0;
+let poured = 0;
 
 const step = () => {
-  for (let i = 0; i < spawnPerStep; i++) {
+  const x = maze.spawnX * radius;
+  const y = maze.spawnY * radius;
+  const crowd = fluid.grid.countNear(x, y);
+  for (let i = 0; crowd < spawnMaxCrowd && i < spawnPerStep; i++) {
+    const color = Math.floor(poured++ / dyeBand) % renderer.palette.length;
     fluid.addParticle(
-      maze.entranceX * radius + spawnSpread * (Math.random() - 0.5),
-      spawnSpread * Math.random(),
+      x + spawnSpread * (Math.random() - 0.5),
+      y + spawnSpread * (Math.random() - 0.5),
+      color,
     );
   }
   fluid.tick();
@@ -109,8 +122,9 @@ addEventListener(
 );
 
 addEventListener('keydown', (e) => {
+  // leave browser shortcuts like cmd+c alone
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === ' ') paused = !paused;
-  else if (e.key === 'r') newMaze();
   else if (e.key === 'c') fluid.reset();
   else return;
   e.preventDefault();
