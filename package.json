@@ -4,6 +4,7 @@
   "description": "my side projects",
   "type": "module",
   "dependencies": {
+    "@duckdb/node-api": "^1.5.6-r.1",
     "@types/node": "^24.9.1",
     "edfjs": "^0.6.0",
     "express": "^5.1.0",
