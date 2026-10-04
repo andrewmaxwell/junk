@@ -1,8 +1,12 @@
 Kaleido - 2026 - Automated roast controller for a Kaleido M1 LITE that follows a per-bean procedure and learns from every batch.
 
-> **Status:** the roaster connection, simulator, session logic, and roast logging are built and tested in simulation. There's no UI yet, and it hasn't run on the real roaster.
->
-> To watch a whole simulated session in the terminal: `node kaleido/server/main.js --sim --autopilot --speed 50`
+> **Status:** built and tested against a simulated roaster. It hasn't run on the real one yet; run the self-test first (see below).
+
+## Running it
+
+- `node kaleido/server/main.js` connects to the roaster (quit Artisan first) and serves the app at http://localhost:3100/. Click **Start** to turn on sound, then **Start preheating**.
+- `node kaleido/server/main.js --sim --speed 20` does the same with a simulated roaster, so you can try the whole flow anywhere. Its roasts go to `logs-sim/`.
+- If the server stops mid-session, the roaster keeps its current settings. Restart within 30 minutes and the session picks up where it left off.
 
 ## What it does
 

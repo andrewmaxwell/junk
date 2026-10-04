@@ -1,15 +1,19 @@
-// Entry point. Until the browser UI exists (build step 5), there are three
-// modes:
+// Entry point.
 //
-// Monitor: connects, prints every reading, reports disconnects and stuck
-// controls. Against the real roaster this never sets a control: it only does
-// the handshake (PI, TU C, SC AR), polls (RD A0), and sends CL AR on exit.
-//   node kaleido/server/main.js                 real roaster, read-only
-//   node kaleido/server/main.js --sim           simulated roaster, preheating
+// App (the normal way to roast): serves the UI at http://localhost:3100/.
+//   node kaleido/server/main.js                 real roaster
+//   node kaleido/server/main.js --sim [--speed 10]   simulated roaster; the
+//       UI gets buttons to pour beans in and discharge them. Roasts go to
+//       kaleido/logs-sim/ (gitignored), never to logs/.
+//   --port 3100 to change the port.
 //
-// Autopilot: a whole simulated session (two batches, then shutdown) with a
-// simulated person doing the charging, FC marking, and discharging. The roasts
-// are written to kaleido/logs-sim/ (gitignored), never to logs/.
+// Monitor: connects and prints every reading. Against the real roaster this
+// never sets a control: it only does the handshake (PI, TU C, SC AR), polls
+// (RD A0), and sends CL AR on exit.
+//   node kaleido/server/main.js --monitor [--sim]
+//
+// Autopilot: a whole simulated session (two batches, then shutdown) in the
+// terminal, with a simulated person charging, marking FC, and discharging.
 //   node kaleido/server/main.js --sim --autopilot [--speed 20]
 //
 // Self-test: the empty-drum hardware checks in selftest.js. Asks before it
@@ -27,11 +31,15 @@ import {autopilot} from './autopilot.js';
 import {Recorder} from './recorder.js';
 import {runSelfTest} from './selftest.js';
 import readline from 'readline';
+import {startApp} from './app.js';
 
 const args = process.argv.slice(2);
 const SIM = args.includes('--sim');
 const AUTOPILOT = SIM && args.includes('--autopilot');
 const SELFTEST = args.includes('--selftest');
+const MONITOR = args.includes('--monitor');
+const portArg = args.indexOf('--port');
+const PORT = portArg >= 0 ? Number(args[portArg + 1]) : 3100;
 const speedArg = args.indexOf('--speed');
 const speed = SIM && speedArg >= 0 ? Number(args[speedArg + 1]) : 1;
 
@@ -63,11 +71,15 @@ const reading = (r) =>
   `  air ${f(r.FC)}%  drum ${f(r.RC)}%  auto ${f(r.AH)}  heat ${f(r.HS)}` +
   `  cool ${f(r.CS)}`;
 
+let app = null;
 if (AUTOPILOT) runAutopilot();
 else if (SELFTEST) runSelfTestCLI();
-else {
+else if (MONITOR) {
   machine.on('sample', (r) => log(reading(r)));
   if (SIM) machine.set({TS: 185, HS: 1, AH: 1, FC: 30, RC: 90});
+} else {
+  const dir = new URL(SIM ? '../logs-sim/' : '../logs/', import.meta.url);
+  app = startApp({machine, clock, sim, port: PORT, logsDir: dir.pathname});
 }
 machine.run();
 
@@ -173,8 +185,20 @@ async function runSelfTestCLI() {
 }
 
 let quitting = false;
+let warned = false;
 process.on('SIGINT', async () => {
   if (quitting) process.exit(1);
+  // Quitting the app mid-session leaves the roaster on its current settings.
+  // That's survivable (restart within 30 min and the session resumes), but it
+  // shouldn't happen by accident.
+  const phase = app?.getSession()?.phase;
+  if (phase && phase !== 'OFF' && !warned) {
+    warned = true;
+    log(`A session is running (${phase}). If you quit, the roaster keeps its`);
+    log('current settings; restart within 30 min to resume. To end the day,');
+    log('use "Done for today" in the UI instead. Ctrl-C again to quit anyway.');
+    return;
+  }
   quitting = true;
   log('stopping');
   // The self-test may have the burner lit. Monitor mode never touches the

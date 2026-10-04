@@ -111,7 +111,7 @@ export class Recorder {
       steps: b.steps.map(at),
       overrides: b.overrides.map(at),
       alerts: b.alerts.map(at),
-      pops: b.pops ?? [],
+      pops: (b.pops ?? []).map(at),
       notes: b.notes ?? [],
     };
   }

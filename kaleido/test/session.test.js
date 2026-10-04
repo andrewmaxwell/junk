@@ -221,3 +221,23 @@ test('a cable pull mid-roast raises the alarm, then the roast carries on', async
   assert.equal(session.batch.steps.length, 6);
   await finish(ctx);
 });
+
+test('the drop alarm keeps going until the beans are out', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session, log} = ctx;
+  session.start();
+  session.selectBatch(ESPRESSO);
+  await clock.until(() => session.phase === 'READY', HOUR, 5000);
+  sim.chargeBeans(155);
+  await clock.until(() => log.some((x) => x.e === 'drop'), HOUR, 1500);
+  const dropAt = clock.now();
+  // Nobody opens the door for 5 minutes.
+  await clock.advance(5 * 60_000);
+  assert.ok(session.batch?.drop, 'the record is still open');
+  const calls = log.filter((x) => x.e === 'say' && x.t > dropAt + 60_000);
+  assert.ok(calls.filter((x) => /drop now/i.test(x.a)).length > 30);
+  assert.ok(!calls.some((x) => /ready for charge/i.test(x.a)));
+  sim.discharge();
+  await clock.until(() => log.some((x) => x.e === 'batchComplete'), HOUR, 1500);
+  await finish(ctx);
+});

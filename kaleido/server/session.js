@@ -28,7 +28,7 @@ const KEEP_RECENT_MS = 10 * 60_000; // samples kept for stability/RoR checks
 const READY_REPEAT_MS = 60_000; // repeat "ready for charge" this often
 const DROP_REPEAT_MS = 5_000; // repeat "drop now" until the beans are out
 const BEANS_OUT_FALL = 10; // °C below the drop temp = the drum is empty
-const RECORD_AFTER_DROP_MS = 60_000;
+const RECORD_AFTER_DROP_MS = 60_000; // after the drop, once the beans are out
 const DROP_WARNING_S = 30;
 const STALL = {windowMs: 60_000, belowCPerMin: 1, repeatMs: 120_000};
 const LONG_ROAST_MS = 16 * 60_000;
@@ -207,6 +207,14 @@ export class Session extends EventEmitter {
     this.emit('persist');
   }
 
+  // Pops the browser's microphone heard ({intensity}); stamped on arrival.
+  // Hints only: they're logged and shown, never acted on.
+  addPop(intensity) {
+    const b = this.batch;
+    if (this.phase !== 'ROASTING' || !b) return;
+    (b.pops ??= []).push({...this.mark(), intensity});
+  }
+
   // Done for the day. Mid-roast, this takes effect at the drop.
   done() {
     if (this.phase === 'SHUTDOWN' || this.phase === 'OFF') return;
@@ -268,6 +276,7 @@ export class Session extends EventEmitter {
 
   checkPreheat() {
     if (!this.machine.settled()) return;
+    if (this.batch?.drop && !this.batch.beansOut) return; // beans still in
     if (!preheatStable(this.recent, this.preheat.sv, this.preheat.stable))
       return;
     this.setPhase('READY');
@@ -430,7 +439,9 @@ export class Session extends EventEmitter {
         this.say('Drop now!', {urgent: true});
       }
     }
-    if (s.t - b.drop.t >= RECORD_AFTER_DROP_MS) {
+    // The record (and with it the drop alarm) stays open until the beans are
+    // actually out, however long that takes.
+    if (b.beansOut && s.t - b.drop.t >= RECORD_AFTER_DROP_MS) {
       this.batch = null;
       this.tracker = null;
       this.log = [];

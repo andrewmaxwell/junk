@@ -10,9 +10,11 @@ Files marked * aren't built yet.
 
 ```
 server/
-  main.js        node kaleido/server/main.js [--sim [--autopilot] [--speed 10]]
-                 monitor (read-only on real hardware), or a whole simulated session;
-                 --selftest [--no-heat] [--no-cable] runs selftest.js
+  main.js        node kaleido/server/main.js [--sim [--speed 10]]: the app at http://localhost:3100/
+                 --monitor (read-only on real hardware), --sim --autopilot (terminal demo),
+                 --selftest [--no-heat] [--no-cable]
+  app.js         HTTP + WebSocket server for the UI; saves the session to logs/.session.json
+                 and resumes it after a restart (if < 30 min old)
   clock.js       real clock (with a speed-up for the sim) and a virtual clock for tests
   protocol.js    encode {[TAG VAL]}, parse {sid,VAR:val,...}
   port.js        the USB serial transport (finds the port, maps tty→cu)
@@ -30,7 +32,10 @@ server/
                  patches weight out / tasting notes in later
   selftest.js    empty-drum hardware checks (main.js --selftest); reports go to selftests/
 test/            node --test kaleido/test/*.test.js
-index.html, main.js *   browser UI (chart, buttons, speech, weights, bean picker, mic pop hints)
+index.html, main.js   browser UI: readouts, charts, side panel of actions, alarm banner
+ui/charts.js          three stacked uPlot charts (temps, RoR, burner/air) sharing time + cursor
+ui/sound.js           speech + chimes (needs the Start click to unlock audio)
+ui/pops.js            mic pop detector (AudioWorklet); hints only
 preheat.json          preheat settings + stability rule, shared by every bean
 procedures/<bean>.json
 beans.json            canonical bean slugs → name, supplier, old filename aliases
@@ -92,8 +97,17 @@ A procedure's `variants` (e.g. `espresso`, `pourover`) are a shallow override of
 2. ✅ `session.js` and `procedure.js`, tested end to end in the sim at high speed.
 3. ✅ `alog.js` + `recorder.js`. Output passes Artisan's own type validation; still to do: open one in Artisan by hand.
 4. ✅ `selftest.js` (passes in the sim). Still to do: run it on the real roaster, and fold what the report's `observations` show back into the protocol facts below.
-5. The browser UI, then pop detection.
+5. ✅ The browser UI and pop detection (tested in Chrome against the sim; the mic detector is untested against real cracks).
 6. `analyze.js`.
+
+## UI
+
+- **Served by the app server, not the repo's dev server.** It needs the WebSocket. Don't add an `image.png`: the homepage would list the page, and on GitHub Pages it can't work without the server.
+- **Charts:** three plots, not a dual-axis chart. Colors follow the dataviz palette's fixed order: BT slot 1 (blue), ET 2 (orange), burner 3 (aqua), air 4 (yellow), with dark-mode steps. The reference roast's BT (from the procedure's `reference.roast`, served by `/api/roast/:n` from `logs/`, even in the sim) is a muted dashed line. While roasting, x is seconds since charge; otherwise it's the last 20 minutes. Only the *next* step and the drop get horizontal guides, because all of them collide.
+- **Side panel:** rebuilt only when its inputs change (see `renderSide`'s key), so typing isn't interrupted. Numbers that change every reading update in place by id (`preheatInfo`, `devInfo`, `dropEta`).
+- **No charge button** (the user's choice): charging is auto-detected. In `--sim`, "Pour beans in" and "Open the door" stand in for the person.
+- **The drop alarm** (a full-width banner, speech, and a chime every 5 s) lasts until the beans are out, and the batch record stays open until then too.
+- **Crack listening** high-passes the mic at 1.5 kHz and reports transients 12× or more above an adaptive floor. Three pops within 8 s shows a hint banner. Pops are logged in the sidecar, but they never act.
 
 ## Self-test
 
