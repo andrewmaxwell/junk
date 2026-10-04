@@ -1,4 +1,5 @@
-// Entry point. Until the browser UI exists (build step 5), there are two modes:
+// Entry point. Until the browser UI exists (build step 5), there are three
+// modes:
 //
 // Monitor: connects, prints every reading, reports disconnects and stuck
 // controls. Against the real roaster this never sets a control: it only does
@@ -10,6 +11,10 @@
 // simulated person doing the charging, FC marking, and discharging. The roasts
 // are written to kaleido/logs-sim/ (gitignored), never to logs/.
 //   node kaleido/server/main.js --sim --autopilot [--speed 20]
+//
+// Self-test: the empty-drum hardware checks in selftest.js. Asks before it
+// fires the burner. The report goes to kaleido/selftests/ (logs-sim/ for --sim).
+//   node kaleido/server/main.js --selftest [--no-heat] [--no-cable] [--sim]
 
 import fs from 'fs';
 import {createClock} from './clock.js';
@@ -20,10 +25,13 @@ import {Session} from './session.js';
 import {loadProcedure} from './procedure.js';
 import {autopilot} from './autopilot.js';
 import {Recorder} from './recorder.js';
+import {runSelfTest} from './selftest.js';
+import readline from 'readline';
 
 const args = process.argv.slice(2);
 const SIM = args.includes('--sim');
 const AUTOPILOT = SIM && args.includes('--autopilot');
+const SELFTEST = args.includes('--selftest');
 const speedArg = args.indexOf('--speed');
 const speed = SIM && speedArg >= 0 ? Number(args[speedArg + 1]) : 1;
 
@@ -56,6 +64,7 @@ const reading = (r) =>
   `  cool ${f(r.CS)}`;
 
 if (AUTOPILOT) runAutopilot();
+else if (SELFTEST) runSelfTestCLI();
 else {
   machine.on('sample', (r) => log(reading(r)));
   if (SIM) machine.set({TS: 185, HS: 1, AH: 1, FC: 30, RC: 90});
@@ -118,11 +127,73 @@ function runAutopilot() {
   });
 }
 
+async function runSelfTestCLI() {
+  // Only an Enter pressed after the prompt counts: nobody should be able to
+  // say "the drum is empty" in advance. In the sim there's nobody to ask.
+  const rl = SIM ? null : readline.createInterface({input: process.stdin});
+  const ask = (q) =>
+    new Promise((resolve) => {
+      log(`>>> ${q}`);
+      if (SIM) resolve();
+      else rl.once('line', resolve);
+    });
+  const report = await runSelfTest({
+    machine,
+    clock,
+    log,
+    ask,
+    opts: {
+      heat: !args.includes('--no-heat'),
+      cable: !args.includes('--no-cable'),
+      ...(SIM && {
+        pullCable: () => {
+          sim.unplugged = true;
+          sim.close();
+        },
+        plugCable: () => (sim.unplugged = false),
+      }),
+    },
+  });
+  const dir = new URL(SIM ? '../logs-sim/' : '../selftests/', import.meta.url)
+    .pathname;
+  fs.mkdirSync(dir, {recursive: true});
+  const stamp = report.startedAt.slice(0, 16).replace(/[:T]/g, '-');
+  const file = `${dir}selftest_${stamp}.json`;
+  fs.writeFileSync(file, JSON.stringify(report, null, 2) + '\n');
+  const failed = report.checks.filter((c) => !c.ok);
+  log(
+    failed.length
+      ? `${failed.length} FAILED: ${failed.map((c) => c.name).join('; ')}`
+      : `all ${report.checks.length} checks passed`,
+  );
+  log(`report: ${file}`);
+  rl?.close();
+  await machine.stop();
+  process.exit(failed.length ? 1 : 0);
+}
+
 let quitting = false;
 process.on('SIGINT', async () => {
   if (quitting) process.exit(1);
   quitting = true;
   log('stopping');
+  // The self-test may have the burner lit. Monitor mode never touches the
+  // controls, so it doesn't start now.
+  if (SELFTEST && machine.connected) {
+    machine.set({HS: 0, AH: 0, HP: 0, FC: 100, RC: 90});
+    await Promise.race([
+      new Promise((r) => {
+        const poll = setInterval(() => {
+          if (!machine.settled()) return;
+          clearInterval(poll);
+          r();
+        }, 100);
+      }),
+      clock.sleep(10_000),
+    ]);
+    log('heater off; air and drum left running to cool the machine.');
+    log('turn them off on the roaster once it has cooled.');
+  }
   await machine.stop();
   process.exit(0);
 });

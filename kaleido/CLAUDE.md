@@ -11,7 +11,8 @@ Files marked * aren't built yet.
 ```
 server/
   main.js        node kaleido/server/main.js [--sim [--autopilot] [--speed 10]]
-                 monitor (read-only on real hardware), or a whole simulated session
+                 monitor (read-only on real hardware), or a whole simulated session;
+                 --selftest [--no-heat] [--no-cable] runs selftest.js
   clock.js       real clock (with a speed-up for the sim) and a virtual clock for tests
   protocol.js    encode {[TAG VAL]}, parse {sid,VAR:val,...}
   port.js        the USB serial transport (finds the port, maps tty→cu)
@@ -27,14 +28,15 @@ server/
                  node kaleido/server/alog.js --make-template <alog>
   recorder.js    numbers roasts, writes .alog + .json sidecar during and after each roast,
                  patches weight out / tasting notes in later
-  selftest.js *  empty-drum hardware checks
+  selftest.js    empty-drum hardware checks (main.js --selftest); reports go to selftests/
 test/            node --test kaleido/test/*.test.js
 index.html, main.js *   browser UI (chart, buttons, speech, weights, bean picker, mic pop hints)
 preheat.json          preheat settings + stability rule, shared by every bean
 procedures/<bean>.json
 beans.json            canonical bean slugs → name, supplier, old filename aliases
 logs/                 .alog + .json sidecar per roast
-logs-sim/             what --sim --autopilot writes (gitignored)
+logs-sim/             what --sim runs write (gitignored)
+selftests/            self-test reports from the real roaster
 analyze.js *          prints a compact summary of one or more roasts for Claude
 ```
 
@@ -89,9 +91,23 @@ A procedure's `variants` (e.g. `espresso`, `pourover`) are a shallow override of
 1. ✅ `protocol.js`, `port.js`, `machine.js` (the reconciler), and `sim.js` (fit to `logs/`).
 2. ✅ `session.js` and `procedure.js`, tested end to end in the sim at high speed.
 3. ✅ `alog.js` + `recorder.js`. Output passes Artisan's own type validation; still to do: open one in Artisan by hand.
-4. `selftest.js` on real hardware, with an empty drum.
+4. ✅ `selftest.js` (passes in the sim). Still to do: run it on the real roaster, and fold what the report's `observations` show back into the protocol facts below.
 5. The browser UI, then pop detection.
 6. `analyze.js`.
+
+## Self-test
+
+`node kaleido/server/main.js --selftest` (drum empty, Artisan closed) takes about 30–40 minutes. It covers:
+- the connection and readings
+- every control echoing back, with the heater off
+- the manual burner heating BT to 195 °C, which proves the SV ceiling lifts
+- what a setpoint below BT does in manual mode (an observation, not pass/fail)
+- the PID taking over in auto mode
+- the cooling fan
+- a cable pull, which it asks you to do
+- a cool-down to 60 °C, then everything off
+
+The burner checks only start once you press Enter to confirm the drum is empty. Ctrl-C turns the heater off and leaves the air and drum running to cool. `--no-heat` skips the burner checks and the cool-down. The report records per-check results, `sends` (commands written per control; more than one per change means the machine dropped some), and `observations`.
 
 ## Kaleido protocol facts
 
@@ -99,7 +115,7 @@ These were verified on hardware in the old `roast/` project and in Artisan's `~/
 
 - **Serial format.** The serial link runs at 57600 8N1. To the machine: `{[TAG VALUE]}\n`, or `{[TAG]}\n` to query. From the machine: `{sid,VAR:val,...}\n`. Init is `PI` until a `sid` arrives, then `TU C`, then `SC AR`. Poll with `RD A0`. `SC AR` and `CL AR` (sent on exit) are what Artisan calls the start and end "safety guard"; what they actually do isn't documented anywhere.
 - **Numbers are sent as integers**, including `TS`, matching Artisan.
-- **Writes are spaced about 100 ms apart.** The M1 drops commands that arrive back to back.
+- **Writes are spaced about 100 ms apart.** The M1 drops commands that arrive back to back. A command that's already queued gets updated in place and keeps its position; moving it to the back once starved the RD poll.
 - **Variables.** `BT` bean temp, `ET` env temp, `AT` ambient, `TS` setpoint (SV), `HP` burner %, `FC` air %, `RC` drum %, `AH` auto-heat (1 = PID to `TS`, 0 = manual `HP`), `HS` master heater switch, `CS` cooling fan, `EV` event marker shown on the machine (1 = CHARGE, 3 = DRY, 4 = FCs, 5 = FCe, 6 = SCs, 7 = SCe, 8 = DROP).
 - **`HS 1` is required to heat.** `AH 1` alone leaves the burner off.
 - **`TS` caps the burner in manual mode too.** See the charge order above.

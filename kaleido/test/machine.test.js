@@ -127,3 +127,23 @@ test('reports a control that never takes', async () => {
   assert.deepEqual(stuck[0], {control: 'FC', want: 55, got: 0});
   await machine.stop();
 });
+
+test('polling keeps its place in a busy write queue', async () => {
+  // Writes drain one per 100 ms; flood the queue faster than that, the way
+  // resends pile up after a reconnect, and readings must still arrive.
+  const clock = createClock(200);
+  const sim = new SimKaleido({clock});
+  const machine = new Machine({openTransport: () => sim.open(), clock});
+  machine.run();
+  await until(clock, () => machine.connected, 10_000);
+  let samples = 0;
+  machine.on('sample', () => samples++);
+  const flood = setInterval(() => {
+    for (const tag of ['EV']) machine.enqueue(tag, 1);
+    machine.enqueue('FC', Math.round(Math.random() * 100));
+  }, 0);
+  await clock.sleep(15_000);
+  clearInterval(flood);
+  assert.ok(samples >= 5, `only ${samples} readings in 15 s`);
+  await machine.stop();
+});

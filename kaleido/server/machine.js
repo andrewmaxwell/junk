@@ -42,6 +42,7 @@ export class Machine extends EventEmitter {
     this.lastSent = {};
     this.mismatchSince = {};
     this.queue = new Map(); // tag -> value; one pending write per tag
+    this.sent = {}; // commands written per tag (resends included)
     this.stopped = false;
   }
 
@@ -111,7 +112,9 @@ export class Machine extends EventEmitter {
   }
 
   enqueue(tag, value) {
-    this.queue.delete(tag); // re-insert at the back with the latest value
+    // A tag that's already waiting gets the new value but keeps its place.
+    // (Moving it to the back starved the RD poll whenever commands arrived
+    // faster than the write gap drains them: no readings, ever.)
     this.queue.set(tag, value);
     this.drain();
   }
@@ -124,6 +127,7 @@ export class Machine extends EventEmitter {
       this.queue.delete(tag);
       try {
         this.transport.write(encode(tag, value));
+        this.sent[tag] = (this.sent[tag] ?? 0) + 1;
       } catch (err) {
         this.emit('error', err);
       }

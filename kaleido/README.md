@@ -71,7 +71,7 @@ In Claude Code, ask "analyze roast #38" or "analyze my last Colombian Supremo ro
 ## Trust path (before real beans)
 
 1. **Simulator.** A thermal model fit to the existing logs, so BT responds to the burner and air like the real machine. Whole sessions run at 10× speed.
-2. **Hardware self-test** with an empty drum. It checks four things:
+2. **Hardware self-test** with an empty drum: `node kaleido/server/main.js --selftest` (Artisan closed). It takes about 30–40 minutes and asks before it fires the burner; `--no-heat` runs a quick version. It checks four things:
    - each control is set, and the machine echoes the new value back
    - manual burner raises BT past the preheat SV, which proves the SV ceiling was lifted
    - the cooling fan and shutdown work

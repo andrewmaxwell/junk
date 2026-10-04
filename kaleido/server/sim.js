@@ -25,6 +25,7 @@ export class SimKaleido extends EventEmitter {
     this.random = random;
     this.isOpen = false;
     this.muted = false; // true = stops answering, like a hung USB adapter
+    this.faults = {burner: false}; // burner: true = it never lights
     this.accepted = []; // commands the machine acted on, for tests
     this.m = {TS: 0, HP: 0, FC: 0, RC: 0, AH: 0, HS: 0, CS: 0};
     this.seen = new Set(); // vars that have been set (HS/CS show up after)
@@ -36,6 +37,7 @@ export class SimKaleido extends EventEmitter {
   }
 
   async open() {
+    if (this.unplugged) throw new Error('Roaster not found (sim: unplugged)');
     if (this.isOpen) throw new Error('sim: already open');
     this.isOpen = true;
     return this;
@@ -51,7 +53,9 @@ export class SimKaleido extends EventEmitter {
   advance() {
     const now = this.clock.now();
     for (; this.t + DT * 1000 <= now; this.t += DT * 1000) {
-      this.duty = physics.burnerDuty(this.m, this.s, this.pid, DT);
+      this.duty = this.faults.burner
+        ? 0
+        : physics.burnerDuty(this.m, this.s, this.pid, DT);
       // CS is the cooling tray's fan; it doesn't touch the drum.
       const u = {duty: this.duty, FC: this.m.FC, AT: this.ambient};
       physics.step(this.s, u, params, DT);
