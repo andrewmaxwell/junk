@@ -1,0 +1,156 @@
+// Procedures (procedures/<bean>.json) and the pure logic that follows one
+// through a roast. Nothing here talks to the machine; session.js does that.
+
+import fs from 'fs';
+import path from 'path';
+
+// A procedure with its variant applied. Variants are a shallow override of
+// top-level fields; a variant's `steps` replaces the whole list.
+export function resolve(proc, variantName) {
+  const {variants = {}, history = [], ...base} = proc;
+  const names = Object.keys(variants);
+  if (variantName == null && names.length) variantName = names[0];
+  if (variantName != null && !variants[variantName])
+    throw new Error(`${proc.bean} has no "${variantName}" variant`);
+  const p = {...base, ...(variants[variantName] ?? {})};
+  p.variant = variantName ?? null;
+  p.version = history.length; // which procedure revision this roast used
+  validate(p);
+  return p;
+}
+
+const pct = (v) => v == null || (Number.isFinite(v) && v >= 0 && v <= 100);
+
+export function validate(p) {
+  const fail = (msg) => {
+    throw new Error(`procedure ${p.bean}/${p.variant}: ${msg}`);
+  };
+  if (!p.charge || !pct(p.charge.burner) || !pct(p.charge.air))
+    fail('charge needs a burner % (and optionally air %)');
+  if (!(p.charge.sv > 0)) fail('charge needs an sv');
+  if (!(p.drop?.bt > 0)) fail('needs drop.bt');
+  if (p.charge.sv <= p.drop.bt + 5)
+    fail('charge.sv must sit well above drop.bt, or it caps the burner');
+  let last = -Infinity;
+  for (const s of p.steps ?? []) {
+    if (!(s.bt > last)) fail('steps must be in increasing bt order');
+    if (!pct(s.burner) || !pct(s.air)) fail(`bad step at ${s.bt}`);
+    if (s.burner == null && s.air == null) fail(`empty step at ${s.bt}`);
+    if (s.bt >= p.drop.bt) fail(`step at ${s.bt} is past the drop`);
+    last = s.bt;
+  }
+}
+
+const here = path.dirname(new URL(import.meta.url).pathname);
+export const PROCEDURES_DIR = path.join(here, '../procedures');
+
+export function loadProcedure(bean, variant, dir = PROCEDURES_DIR) {
+  const file = path.join(dir, `${bean}.json`);
+  return resolve(JSON.parse(fs.readFileSync(file, 'utf8')), variant);
+}
+
+// Rate of rise in °C/min: least-squares slope of `key` over the samples in
+// the last windowMs.
+export function rateOfRise(samples, windowMs = 30_000, key = 'BT') {
+  if (samples.length < 2) return null;
+  const tEnd = samples.at(-1).t;
+  let n = 0;
+  let st = 0;
+  let sv = 0;
+  let stt = 0;
+  let stv = 0;
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const s = samples[i];
+    if (tEnd - s.t > windowMs) break;
+    if (s[key] == null) continue;
+    const t = (s.t - tEnd) / 60_000;
+    n++;
+    st += t;
+    sv += s[key];
+    stt += t * t;
+    stv += t * s[key];
+  }
+  const d = n * stt - st * st;
+  return n < 2 || d === 0 ? null : (n * stv - st * sv) / d;
+}
+
+// Preheat is done when, over the last `forSeconds`, BT stayed within
+// btWithinC of the setpoint the whole time and ET has stopped climbing. From
+// cold, the drum keeps soaking up heat for ~15 min after BT looks settled, and
+// ET climbs the whole time. Falling ET is fine: between batches the drum is
+// still hotter than it needs to be, and real second batches were charged with
+// ET falling 0.5-1.5 °C/min, after a 5-8 minute preheat.
+export function preheatStable(samples, sv, cfg) {
+  const windowMs = cfg.forSeconds * 1000;
+  if (!samples.length) return false;
+  const tEnd = samples.at(-1).t;
+  const recent = samples.filter((s) => tEnd - s.t <= windowMs);
+  if (recent[0].t > tEnd - windowMs + 5000) return false; // not enough history
+  if (recent.some((s) => s.BT == null || Math.abs(s.BT - sv) > cfg.btWithinC))
+    return false;
+  const etRise = rateOfRise(recent, windowMs, 'ET');
+  return etRise != null && etRise <= cfg.maxEtRiseCPerMin;
+}
+
+// Follows a procedure through one roast, sample by sample. feed() returns the
+// things that just happened, in order:
+//   {type: 'tp', t, BT}           turning point confirmed (steps now armed)
+//   {type: 'step', index, step}   BT reached a step's temperature
+//   {type: 'drop'}                BT reached the drop temperature
+// Steps arm only after the turning point, so the stale ~185 reading right at
+// charge can't fire them. The drop does NOT wait for the turning point: the
+// roast must always end. Every trigger needs `confirm` consecutive samples
+// at/above its temperature, so one thermocouple spike can't fire it.
+export class RoastTracker {
+  constructor(proc, {confirm = 3, tpRise = 2} = {}, state = null) {
+    this.proc = proc;
+    this.confirm = confirm;
+    this.tpRise = tpRise;
+    Object.assign(
+      this,
+      state ?? {
+        min: null, // {t, BT} coolest point so far
+        tp: null, // {t, BT} once confirmed
+        nextStep: 0,
+        stepCount: 0, // consecutive samples at/above the next step
+        dropCount: 0,
+        dropped: false,
+      },
+    );
+  }
+
+  toJSON() {
+    const {min, tp, nextStep, stepCount, dropCount, dropped} = this;
+    return {min, tp, nextStep, stepCount, dropCount, dropped};
+  }
+
+  feed({t, BT}) {
+    const out = [];
+    if (this.dropped || BT == null) return out;
+    if (!this.tp) {
+      if (!this.min || BT < this.min.BT) this.min = {t, BT};
+      else if (BT >= this.min.BT + this.tpRise) {
+        this.tp = this.min;
+        out.push({type: 'tp', ...this.tp});
+      }
+    }
+    const steps = this.proc.steps ?? [];
+    if (this.tp && this.nextStep < steps.length) {
+      const step = steps[this.nextStep];
+      this.stepCount = BT >= step.bt ? this.stepCount + 1 : 0;
+      if (this.stepCount >= this.confirm) {
+        out.push({type: 'step', index: this.nextStep, step});
+        this.nextStep++;
+        this.stepCount = 0;
+        // If BT is already past later steps too, they fire on the following
+        // samples (each still needs its own confirmations).
+      }
+    }
+    this.dropCount = BT >= this.proc.drop.bt ? this.dropCount + 1 : 0;
+    if (this.dropCount >= this.confirm) {
+      this.dropped = true;
+      out.push({type: 'drop'});
+    }
+    return out;
+  }
+}
