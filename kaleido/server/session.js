@@ -542,7 +542,9 @@ export class Session extends EventEmitter {
 
   restore(saved) {
     Object.assign(this, {
-      phase: saved.phase,
+      // The heater was off while we were gone, so "ready" has to be proven
+      // again: charging a drum that cooled off would ruin the batch.
+      phase: saved.phase === 'READY' ? 'PREHEAT' : saved.phase,
       planned: saved.planned,
       overrides: saved.overrides,
       cooling: saved.cooling,

@@ -56,7 +56,7 @@ analyze.js *          prints a compact summary of one or more roasts for Claude
 - **At drop**, the app sends `HP 0` while still in manual mode, then switches to the preheat settings with the cooling fan on. It repeats "Drop now!" every 5 s until the beans are out: you press the button, or BT falls 10 °C below the drop temperature (about 12 s on the real machine). The batch record closes a minute after the drop, and `batchComplete` fires.
 - **Alerts never change the heat.** A stall alert fires when RoR has been under 1 °C/min for a minute after the turning point. A long-roast alert fires at 16 minutes. A stuck-control alert fires after 8 s.
 - **Shutdown** turns the heater off and runs air at 100% with the drum at 90% until BT is under 60 °C. Then everything goes off, and `off` fires only after the machine confirms it.
-- **Saving state.** `toJSON()` and `start(saved)` let a restarted server resume mid-roast without firing any step twice. `main.js` doesn't save to disk yet; that comes with the UI in step 5.
+- **Saving state.** `toJSON()` and `start(saved)` let a restarted server resume mid-roast without firing any step twice. `app.js` saves it to `logs/.session.json`. A session saved in READY resumes as PREHEAT, because the heater was off while the app was down and a cooled drum must not be called ready.
 
 ## Simulator
 

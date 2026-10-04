@@ -206,6 +206,34 @@ test('a restart mid-roast picks up where it left off', async () => {
   await finish(b);
 });
 
+test('a restart while ready proves the preheat again before calling for beans', async () => {
+  const clock = createVirtualClock();
+  const sim = new SimKaleido({clock, dropRate: 0, random: seeded(5)});
+  const a = setup({clock, sim});
+  a.session.start();
+  a.session.selectBatch(ESPRESSO);
+  await clock.until(() => a.session.phase === 'READY', HOUR, 1500);
+  const saved = JSON.parse(JSON.stringify(a.session.toJSON()));
+  // The app quits (heater off) and comes back 25 minutes later, with the
+  // drum far below the preheat temperature.
+  a.session.removeAllListeners();
+  a.session.detach();
+  a.machine.set({HS: 0, AH: 0, HP: 0, FC: 100});
+  await clock.advance(5000);
+  await finish(a);
+  await clock.advance(25 * 60_000);
+
+  const b = setup({clock, sim});
+  b.session.start(saved);
+  await clock.advance(2 * 60_000);
+  assert.equal(b.session.phase, 'PREHEAT');
+  assert.ok(!said(b.log).some((x) => /ready for charge/i.test(x)));
+  await clock.until(() => b.session.phase === 'READY', HOUR, 1500);
+  const BT = Number(sim.readings().BT);
+  assert.ok(BT > 183, `ready again at BT ${BT}`);
+  await finish(b);
+});
+
 test('a cable pull mid-roast raises the alarm, then the roast carries on', async () => {
   const ctx = setup();
   const {clock, sim, session, log} = ctx;
