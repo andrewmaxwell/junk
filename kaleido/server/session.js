@@ -207,6 +207,21 @@ export class Session extends EventEmitter {
     this.emit('persist');
   }
 
+  // STOP: heater off now, whatever is happening. Mid-roast that's a drop
+  // (the beans have to come out) and then the end of the session; the air
+  // and drum keep running to cool, as in any shutdown.
+  emergencyStop() {
+    if (this.phase === 'ROASTING') {
+      this.doneRequested = true;
+      this.drop('emergency stop');
+    } else if (this.phase !== 'SHUTDOWN' && this.phase !== 'OFF')
+      this.shutdown();
+    this.alert(
+      'urgent',
+      'Stopped: heater off. Air and drum keep running to cool.',
+    );
+  }
+
   // Ends the cool-down early: everything off now, at whatever temperature.
   offNow() {
     if (this.phase !== 'SHUTDOWN') throw new Error('not shutting down');

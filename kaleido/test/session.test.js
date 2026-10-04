@@ -260,3 +260,22 @@ test('the cool-down can be cut short', async () => {
   );
   await finish(ctx);
 });
+
+test('STOP mid-roast cuts the heat, calls for the drop, and shuts down', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session, log} = ctx;
+  session.start();
+  session.selectBatch(ESPRESSO);
+  await clock.until(() => session.phase === 'READY', HOUR, 5000);
+  sim.chargeBeans(155);
+  await clock.until(() => session.batch?.steps.length === 2, HOUR, 1500);
+  session.emergencyStop();
+  await clock.advance(5000);
+  assert.equal(session.phase, 'SHUTDOWN');
+  assert.equal(session.batch.drop.reason, 'emergency stop');
+  assert.equal(sim.m.HS, 0);
+  assert.equal(sim.m.HP, 0);
+  assert.ok(sim.m.FC > 0 && sim.m.RC > 0, 'air and drum keep running');
+  assert.ok(log.some((x) => x.e === 'say' && /drop now/i.test(x.a)));
+  await finish(ctx);
+});

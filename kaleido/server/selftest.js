@@ -7,7 +7,8 @@
 //   1. connects and reads sane temperatures
 //   2. every control takes and is echoed back (heater off)
 //   3. manual burner heats, past the preheat SV (proves the SV ceiling lifts)
-//   4. a setpoint below BT caps the burner in manual mode (observed)
+//   4. silence mid-heat: does the roaster stop heating by itself? (observed)
+//      then: a setpoint below BT caps the burner in manual mode (observed)
 //   5. auto mode: the PID runs and HP reads back its duty (observed)
 //   6. the cooling fan works
 //   7. a cable pull is survived and the settings are re-applied
@@ -193,6 +194,7 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
             ? [true, `reached ${latest.BT} in ${mins} min`]
             : [false, `stuck at ${latest.BT} after ${mins} min`];
         });
+      if (burnerOK) await watchdog();
       if (burnerOK) {
         // 4: with TS below BT, does the burner stop even in manual mode?
         const capBT = latest.BT;
@@ -301,6 +303,47 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
     }
   }
   return finish(report);
+
+  // The roaster has no panel, so if the computer crashes mid-roast, does the
+  // burner keep going? Go quiet for 45 s mid-heat (no goodbye, like a crash)
+  // and look at what it did on its own before re-applying anything.
+  async function watchdog() {
+    const SILENT = 45_000;
+    const saved = {...machine.desired};
+    const before = {...latest};
+    machine.desired = {}; // nothing to re-apply until we've looked
+    machine.goSilent(SILENT);
+    const back = await waitFor(
+      () => machine.connected && latest.t > before.t + SILENT,
+      SILENT + MIN,
+      250,
+      (t) =>
+        t < SILENT
+          ? `silent, like a crash, to see if the roaster stops heating by itself · ${mmss(SILENT - t)} left`
+          : `reconnecting… ${mmss(t - SILENT)}`,
+    );
+    const after = {...latest};
+    machine.set(saved);
+    await waitFor(() => machine.settled(), 15_000);
+    if (!back) {
+      log("observed: watchdog: couldn't reconnect to look");
+      return;
+    }
+    const change = round1(after.BT - before.BT);
+    const verdict =
+      after.HS === 0 || after.HP === 0 || change < -2
+        ? 'the roaster cut the heat on its own'
+        : 'the roaster KEPT HEATING with no computer';
+    report.observations.watchdog = {
+      silentSeconds: SILENT / 1000,
+      before: {BT: before.BT, HP: before.HP, HS: before.HS, AH: before.AH},
+      after: {BT: after.BT, HP: after.HP, HS: after.HS ?? null, AH: after.AH},
+      verdict,
+    };
+    log(
+      `observed: watchdog: BT ${before.BT} → ${after.BT} in ${SILENT / 1000} s of silence, then HS ${after.HS ?? '-'} HP ${after.HP}: ${verdict}`,
+    );
+  }
 
   function finish(r) {
     r.sends = {...machine.sent};

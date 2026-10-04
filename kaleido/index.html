@@ -162,11 +162,23 @@
     margin-right: 5px;
   }
   #phase {
-    margin-left: auto;
     text-align: right;
   }
   #phase .value {
     font-size: 22px;
+  }
+  #stop {
+    align-self: center;
+    margin-left: auto;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 10px 22px;
+    background: var(--critical);
+    color: #fff;
+    border-color: transparent;
+  }
+  #stop.confirm {
+    animation: pulse 0.6s infinite;
   }
   #conn {
     font-size: 13px;
@@ -373,6 +385,9 @@
     >
     <span class="value" id="air">–</span>
   </div>
+  <button id="stop" title="Heater off now. Air and drum keep running.">
+    STOP
+  </button>
   <div class="readout" id="phase">
     <span class="label" id="conn">connecting…</span>
     <span class="value" id="phaseText">–</span>

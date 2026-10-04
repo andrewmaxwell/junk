@@ -113,9 +113,23 @@ test('the heater is off before the cable pull', async () => {
   let heaterAtPull = null;
   const pull = ctx.sim.close.bind(ctx.sim);
   ctx.sim.close = () => {
-    heaterAtPull ??= ctx.sim.m.HS;
+    // (The watchdog check also closes the port, mid-heat, on purpose. The
+    // cable pull is the close that happens while unplugged.)
+    if (ctx.sim.unplugged) heaterAtPull ??= ctx.sim.m.HS;
     pull();
   };
   await result(ctx);
   assert.equal(heaterAtPull, 0);
+});
+
+test('the watchdog check reports what the roaster did while the computer was silent', async () => {
+  const ctx = setup();
+  const report = await result(ctx);
+  const w = report.observations.watchdog;
+  // The simulator has no watchdog: it keeps heating, like a roaster would
+  // that needs the computer to turn it off.
+  assert.equal(w.silentSeconds, 45);
+  assert.ok(w.after.BT > w.before.BT);
+  assert.match(w.verdict, /KEPT HEATING/);
+  assert.equal(report.passed, true);
 });

@@ -31,6 +31,7 @@ import {autopilot} from './autopilot.js';
 import {Recorder} from './recorder.js';
 import {runSelfTest} from './selftest.js';
 import readline from 'readline';
+import {spawn} from 'child_process';
 import {startApp} from './app.js';
 
 const args = process.argv.slice(2);
@@ -219,40 +220,65 @@ async function runSelfTestCLI() {
   process.exit(failed.length ? 1 : 0);
 }
 
+// The M1 LITE has no panel: if this process goes away with the burner on,
+// nothing turns it off. So quitting or crashing turns the heater off first
+// (air and drum keep running while it's hot). Monitor mode never touches the
+// controls, so it doesn't start now. Not covered: kill -9, power loss, the
+// laptop sleeping (see caffeinate below); for those, kaleido/server/stop.js.
+async function heaterOffAndExit(code) {
+  const active =
+    SELFTEST ||
+    (app && !['IDLE', 'OFF'].includes(app.getSession()?.phase ?? 'IDLE'));
+  if (!MONITOR && !AUTOPILOT && machine.connected) {
+    const hot = active && machine.state.BT >= 60;
+    machine.set({HS: 0, AH: 0, HP: 0, ...(hot && {FC: 100, RC: 90})});
+    const end = Date.now() + 5000;
+    while (!machine.settled() && Date.now() < end)
+      await new Promise((r) => setTimeout(r, 100));
+    log(
+      machine.settled()
+        ? 'heater off.'
+        : 'tried to turn the heater off, but it was not confirmed!',
+    );
+    if (hot)
+      log(
+        'air and drum are still running to cool; when BT is under 60: node kaleido/server/stop.js --all',
+      );
+  }
+  await machine.stop();
+  process.exit(code);
+}
+
 let quitting = false;
 let warned = false;
 process.on('SIGINT', async () => {
   if (quitting) process.exit(1);
-  // Quitting the app mid-session leaves the roaster on its current settings.
-  // That's survivable (restart within 30 min and the session resumes), but it
-  // shouldn't happen by accident.
   const phase = app?.getSession()?.phase;
   if (phase && phase !== 'OFF' && !warned) {
     warned = true;
-    log(`A session is running (${phase}). If you quit, the roaster keeps its`);
-    log('current settings; restart within 30 min to resume. To end the day,');
-    log('use "Done for today" in the UI instead. Ctrl-C again to quit anyway.');
+    log(`A session is running (${phase}). Quitting turns the heater off; the`);
+    log('session is saved, and restarting within 30 min resumes it (heat and');
+    log(
+      'all). To end the day, use "Done for today" instead. Ctrl-C again to quit.',
+    );
     return;
   }
   quitting = true;
   log('stopping');
-  // The self-test may have the burner lit. Monitor mode never touches the
-  // controls, so it doesn't start now.
-  if (SELFTEST && machine.connected) {
-    machine.set({HS: 0, AH: 0, HP: 0, FC: 100, RC: 90});
-    await Promise.race([
-      new Promise((r) => {
-        const poll = setInterval(() => {
-          if (!machine.settled()) return;
-          clearInterval(poll);
-          r();
-        }, 100);
-      }),
-      clock.sleep(10_000),
-    ]);
-    log('heater off; air and drum left running to cool the machine.');
-    log('turn them off on the roaster once it has cooled.');
-  }
-  await machine.stop();
-  process.exit(0);
+  await heaterOffAndExit(0);
 });
+for (const event of ['uncaughtException', 'unhandledRejection'])
+  process.on(event, async (err) => {
+    console.error(err);
+    if (quitting) process.exit(1);
+    quitting = true;
+    await heaterOffAndExit(1);
+  });
+
+// Keep the Mac awake while the app runs: a sleeping laptop can't turn the
+// burner off. (Closing the lid can still sleep it.)
+if (app && !SIM && process.platform === 'darwin')
+  spawn('caffeinate', ['-is', '-w', String(process.pid)], {
+    stdio: 'ignore',
+    detached: true,
+  }).unref();

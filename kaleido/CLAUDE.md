@@ -131,6 +131,16 @@ The burner checks only start once you press Enter to confirm the drum is empty. 
 - Cooling from 195 to 60 °C with air at 100% took 18 minutes. The self-test's cool-down can be skipped with Enter, and the app's shutdown has a "Turn everything off now" button.
 - Long waits show a live status line (`status()` in `selftest.js`, drawn by `main.js`). Its time-left estimates come from `timeTo()` in `procedure.js`: linear while heating, exponential toward 25 °C while cooling. They run a bit optimistic.
 
+## Safety: the roaster has no panel
+
+The M1 LITE can only be controlled over USB, so if our process dies with the burner on, nothing turns it off. Every path out turns the heater off first:
+- the UI's STOP button (`session.emergencyStop()`: drop, then shutdown)
+- Ctrl-C, after a confirmation when a session is running
+- uncaught exceptions (`heaterOffAndExit` in `main.js`)
+- `server/stop.js` for when the app is gone
+
+`main.js` runs `caffeinate -is` while the app is up. Not covered: kill -9, the laptop losing power, and the lid closing. The self-test's watchdog check measures what the roaster does on its own when the computer goes silent mid-heat (`observations.watchdog`). Until that has run on the real machine, assume it keeps heating.
+
 ## Kaleido protocol facts
 
 These were verified on hardware in the old `roast/` project and in Artisan's `~/artisan/src/artisanlib/kaleido.py` and `~/artisan/src/includes/Machines/Kaleido/Serial.aset`:

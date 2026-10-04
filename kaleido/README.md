@@ -6,7 +6,11 @@ Kaleido - 2026 - Automated roast controller for a Kaleido M1 LITE that follows a
 
 - `node kaleido/server/main.js` connects to the roaster (quit Artisan first) and serves the app at http://localhost:3100/. Click **Start** to turn on sound, then **Start preheating**.
 - `node kaleido/server/main.js --sim --speed 20` does the same with a simulated roaster, so you can try the whole flow anywhere. Its roasts go to `logs-sim/`.
-- If the server stops mid-session, the roaster keeps its current settings. Restart within 30 minutes and the session picks up where it left off.
+- **Stopping.** The roaster has no panel, so the computer is the only way to turn the burner off:
+  - **STOP** (top right, click twice) turns the heater off now. Mid-roast it also calls for the drop. The air and drum keep running to cool.
+  - Quitting the server (Ctrl-C twice) or a crash also turns the heater off first. The session is saved, so restarting within 30 minutes resumes it, heat included.
+  - If the app is gone or hung, run `node kaleido/server/stop.js` for heater off with the fans left running, or `--all` once the roaster is cool. The very last resort is unplugging the roaster.
+  - While the app runs, it keeps the Mac awake with `caffeinate`, but closing the lid can still put it to sleep. Leave the lid open.
 
 ## What it does
 
@@ -80,4 +84,4 @@ In Claude Code, ask "analyze roast #38" or "analyze my last Colombian Supremo ro
    - manual burner raises BT past the preheat SV, which proves the SV ceiling was lifted
    - the cooling fan and shutdown work
    - the program reconnects after the cable is pulled
-3. **First real batch.** Use a bean you've roasted many times, keep a hand near the panel, and compare the result against its past Artisan logs.
+3. **First real batch.** Use a bean you've roasted many times, keep the STOP button in reach, and compare the result against its past Artisan logs.

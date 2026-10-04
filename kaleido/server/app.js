@@ -141,6 +141,11 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
     release: ({control}) => need().release(control),
     done: () => need().done(),
     offNow: () => need().offNow(),
+    // Works with or without a session.
+    emergencyStop: () =>
+      session && session.phase !== 'OFF'
+        ? session.emergencyStop()
+        : machine.set({HS: 0, AH: 0, HP: 0}),
     pop: ({intensity}) => session?.addPop(intensity),
     setWeightOut: ({number, grams}) => {
       recorder.setWeightOut(number, Number(grams));

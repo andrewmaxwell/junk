@@ -171,6 +171,8 @@ export class Machine extends EventEmitter {
   // desired state, so an unplugged cable mid-roast isn't fatal.
   async run() {
     while (!this.stopped) {
+      while (this.clock.now() < (this.silentUntil ?? 0))
+        await this.clock.sleep(250);
       try {
         this.transport = await this.openTransport();
         const closed = new Promise((r) => this.transport.once('close', r));
@@ -195,6 +197,14 @@ export class Machine extends EventEmitter {
       this.teardown();
       if (!this.stopped) await this.clock.sleep(this.retryMs);
     }
+  }
+
+  // Drops the connection without the usual goodbye (no CL AR) and stays away
+  // for ms, the way a crash would. The self-test uses it to see what the
+  // roaster does on its own when the computer goes quiet.
+  goSilent(ms) {
+    this.silentUntil = this.clock.now() + ms;
+    this.transport?.close();
   }
 
   teardown() {

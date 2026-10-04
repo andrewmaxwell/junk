@@ -472,6 +472,23 @@ $('side').addEventListener('change', (e) => {
 });
 $('beansOut').onclick = () => act('beansOut');
 
+// STOP takes two clicks within 3 s, so a stray click can't end a roast.
+$('stop').onclick = () => {
+  const btn = $('stop');
+  if (btn.classList.contains('confirm')) {
+    btn.classList.remove('confirm');
+    btn.textContent = 'STOP';
+    act('emergencyStop');
+    return;
+  }
+  btn.classList.add('confirm');
+  btn.textContent = 'Click again: heater off';
+  setTimeout(() => {
+    btn.classList.remove('confirm');
+    btn.textContent = 'STOP';
+  }, 3000);
+};
+
 // ---- live numbers inside the side panel (updated every reading)
 
 function renderLive(s) {
