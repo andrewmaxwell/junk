@@ -480,7 +480,12 @@ function simSection() {
   );
 }
 
+// Phases with a batch on the way: when crack listening is worth having on
+// (turn it on before the charge, not mid-roast).
+const ACTIVE = ['PREHEAT', 'READY', 'ROASTING'];
+
 function micSection() {
+  if (!ACTIVE.includes(state.phase)) return '';
   return section(
     'Crack listening',
     mic
@@ -491,19 +496,17 @@ function micSection() {
   );
 }
 
+// Ending the day is decided between batches. Mid-roast the button is left
+// out (one less thing next to the roast controls); press it after the drop.
+// (A STOP mid-roast still means shutting down after the drop.)
 function doneSection() {
   const {phase, doneRequested} = state;
-  if (!['PREHEAT', 'READY', 'ROASTING'].includes(phase)) return '';
-  if (doneRequested)
-    return section(
-      '',
-      `<p class="note">Shutting down after this batch. To keep going instead, choose the next beans.</p>`,
-    );
-  const label =
-    phase === 'ROASTING' ? 'Shut down after this batch' : 'Done for today';
+  if (doneRequested && phase === 'ROASTING')
+    return section('', `<p class="note">Shutting down after this batch.</p>`);
+  if (phase !== 'PREHEAT' && phase !== 'READY') return '';
   return section(
     '',
-    `<button data-act="done" class="${confirmClass('done')}">${confirming.has('done') ? `Click again: ${label.toLowerCase()}` : label}</button>`,
+    `<button data-act="done" class="${confirmClass('done')}">${confirming.has('done') ? 'Click again: done for today' : 'Done for today'}</button>`,
   );
 }
 
@@ -814,6 +817,8 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
 // ---- render everything
 
 function renderAll() {
+  // The session is over: stop listening (its section is gone).
+  if (mic && !ACTIVE.includes(state.phase)) HANDLERS.micOff();
   renderBar();
   renderSide();
   renderReadouts(samples.at(-1));
