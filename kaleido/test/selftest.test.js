@@ -133,3 +133,28 @@ test('the watchdog check reports what the roaster did while the computer was sil
   assert.match(w.verdict, /KEPT HEATING/);
   assert.equal(report.passed, true);
 });
+
+test('skipping the cool-down leaves the air and drum cooling, heater off', async () => {
+  const clock = createVirtualClock();
+  const sim = new SimKaleido({clock});
+  const machine = new Machine({clock, openTransport: () => sim.open()});
+  machine.run();
+  const ctx = {clock, machine};
+  ctx.run = runSelfTest({
+    machine,
+    clock,
+    log: () => {},
+    ask: async () => {},
+    opts: {cable: false, offerSkip: () => ({skipped: () => true})},
+  });
+  const report = await result(ctx);
+  assert.equal(
+    report.checks.at(-1).name,
+    'heater off, air and drum left cooling',
+  );
+  assert.equal(report.passed, true);
+  assert.deepEqual(
+    {HS: sim.m.HS, HP: sim.m.HP, FC: sim.m.FC, RC: sim.m.RC},
+    {HS: 0, HP: 0, FC: 100, RC: 90},
+  );
+});

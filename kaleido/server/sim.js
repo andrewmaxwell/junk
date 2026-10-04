@@ -39,6 +39,9 @@ export class SimKaleido extends EventEmitter {
   async open() {
     if (this.unplugged) throw new Error('Roaster not found (sim: unplugged)');
     if (this.isOpen) throw new Error('sim: already open');
+    // Like the real one: HS and CS go unreported again on every new
+    // connection until they're set (seen after a reconnect, 2026-10-04).
+    this.seen = new Set();
     this.isOpen = true;
     return this;
   }

@@ -30,6 +30,8 @@ server/
                  node kaleido/server/alog.js --make-template <alog>
   recorder.js    numbers roasts, writes .alog + .json sidecar during and after each roast,
                  patches weight out / tasting notes in later
+  stop.js        emergency stop (heater off) for when the app is gone: emergencyStop()
+  guardian.js    separate process: heater off if the app dies or hangs
   selftest.js    empty-drum hardware checks (main.js --selftest); reports go to selftests/
 test/            node --test kaleido/test/*.test.js
 index.html, main.js   browser UI: readouts, charts, side panel of actions, alarm banner
@@ -139,7 +141,14 @@ The M1 LITE can only be controlled over USB, so if our process dies with the bur
 - uncaught exceptions (`heaterOffAndExit` in `main.js`)
 - `server/stop.js` for when the app is gone
 
-`main.js` runs `caffeinate -is` while the app is up. Not covered: kill -9, the laptop losing power, and the lid closing. The self-test's watchdog check measures what the roaster does on its own when the computer goes silent mid-heat (`observations.watchdog`). Until that has run on the real machine, assume it keeps heating.
+**The roaster keeps heating with no computer.** The self-test's watchdog check (2026-10-04) went silent for 45 s at 60% manual burner: BT went 195 → 205 °C and HP still read 60 afterward. So there's one more layer, `guardian.js`. It's a detached process that `main.js` starts in app mode (not `--sim`). It watches the app's pid and `logs/.heartbeat`, which the app touches every 2 s.
+- If the app dies (crash or kill -9), the guardian grabs the freed port and runs `emergencyStop()` from `stop.js`, then says so with macOS `say`.
+- If the app hangs (heartbeat older than 15 s), the guardian kills it first, then does the same.
+- On a clean exit, the app deletes the heartbeat, but only after the heater is confirmed off. If that confirmation fails, the guardian tries again.
+- Its log is `logs/.guardian.log`.
+- Verified on the real roaster with kill -9: the heater was off within about 2 s.
+
+`main.js` also runs `caffeinate -is` while the app is up. Still not covered: the laptop losing power, or the lid closing. Leave the lid open.
 
 ## Kaleido protocol facts
 
@@ -154,7 +163,7 @@ These were verified on hardware in the old `roast/` project and in Artisan's `~/
 - **Variables.** `BT` bean temp, `ET` env temp, `AT` ambient, `TS` setpoint (SV), `HP` burner %, `FC` air %, `RC` drum %, `AH` auto-heat (1 = PID to `TS`, 0 = manual `HP`), `HS` master heater switch, `CS` cooling fan, `EV` event marker shown on the machine (1 = CHARGE, 3 = DRY, 4 = FCs, 5 = FCe, 6 = SCs, 7 = SCe, 8 = DROP).
 - **`HS 1` is required to heat.** `AH 1` alone leaves the burner off.
 - **`TS` caps the burner in manual mode too.** See the charge order above. Confirmed by the self-test: with SV 15 °C below BT and HP 60 in manual mode, BT fell 15 °C in 90 s. **HP still reads 60 while capped**, so HP alone can't tell you the burner is off.
-- **`HS` and `CS` don't appear in `RD A0` replies** until they've been set once.
+- **`HS` and `CS` don't appear in `RD A0` replies** until they've been set, and they go missing again on **every new connection** (a reconnect after the self-test's silence read `HS` as missing). The reconciler treats a missing value as a mismatch and resends it, and `sim.js` does the same per connection.
 - **macOS port.** Open `/dev/cu.usbserial-*`, not `tty.*`, because `tty.*` blocks on carrier-detect.
 - **One program per port.** If Artisan is connected, opening the port fails with a lock error. Show that clearly; don't spin silently.
 - **Preheat heat-soak.** From cold, BT reaches 183 °C in about 3.5 minutes and holds flat, but ET keeps climbing (about 158 → 180 °C) for another 12–15 minutes, while the PID's duty drifts down from about 37% to about 25%. That's the drum soaking. So stable BT alone isn't "ready": `preheat.json` also requires ET to have stopped rising.

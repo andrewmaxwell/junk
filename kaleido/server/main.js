@@ -32,6 +32,7 @@ import {Recorder} from './recorder.js';
 import {runSelfTest} from './selftest.js';
 import readline from 'readline';
 import {spawn} from 'child_process';
+import {HEARTBEAT_MS} from './guardian.js';
 import {startApp} from './app.js';
 
 const args = process.argv.slice(2);
@@ -229,14 +230,16 @@ async function heaterOffAndExit(code) {
   const active =
     SELFTEST ||
     (app && !['IDLE', 'OFF'].includes(app.getSession()?.phase ?? 'IDLE'));
+  let confirmed = false;
   if (!MONITOR && !AUTOPILOT && machine.connected) {
     const hot = active && machine.state.BT >= 60;
     machine.set({HS: 0, AH: 0, HP: 0, ...(hot && {FC: 100, RC: 90})});
     const end = Date.now() + 5000;
     while (!machine.settled() && Date.now() < end)
       await new Promise((r) => setTimeout(r, 100));
+    confirmed = machine.settled();
     log(
-      machine.settled()
+      confirmed
         ? 'heater off.'
         : 'tried to turn the heater off, but it was not confirmed!',
     );
@@ -245,6 +248,9 @@ async function heaterOffAndExit(code) {
         'air and drum are still running to cool; when BT is under 60: node kaleido/server/stop.js --all',
       );
   }
+  // The heartbeat goes only once the heater is confirmed off (or nothing
+  // could have it on). Otherwise the guardian sees us gone and tries again.
+  if (confirmed || !active) removeHeartbeat();
   await machine.stop();
   process.exit(code);
 }
@@ -267,6 +273,12 @@ process.on('SIGINT', async () => {
   log('stopping');
   await heaterOffAndExit(0);
 });
+process.on('SIGTERM', async () => {
+  if (quitting) return;
+  quitting = true;
+  log('terminated');
+  await heaterOffAndExit(0);
+});
 for (const event of ['uncaughtException', 'unhandledRejection'])
   process.on(event, async (err) => {
     console.error(err);
@@ -274,6 +286,33 @@ for (const event of ['uncaughtException', 'unhandledRejection'])
     quitting = true;
     await heaterOffAndExit(1);
   });
+
+// The guardian (guardian.js) turns the heater off if this process dies or
+// hangs: it watches our pid and a heartbeat file we touch every 2 s.
+let heartbeatFile = null;
+function removeHeartbeat() {
+  if (!heartbeatFile) return;
+  try {
+    fs.unlinkSync(heartbeatFile);
+  } catch {
+    // already gone
+  }
+}
+if (app && !SIM) {
+  const logs = new URL('../logs/', import.meta.url).pathname;
+  heartbeatFile = `${logs}.heartbeat`;
+  fs.writeFileSync(heartbeatFile, '');
+  setInterval(() => {
+    const t = new Date();
+    fs.utimesSync(heartbeatFile, t, t);
+  }, HEARTBEAT_MS);
+  const out = fs.openSync(`${logs}.guardian.log`, 'a');
+  const guardian = new URL('./guardian.js', import.meta.url).pathname;
+  spawn(process.execPath, [guardian, String(process.pid), heartbeatFile], {
+    stdio: ['ignore', out, out],
+    detached: true,
+  }).unref();
+}
 
 // Keep the Mac awake while the app runs: a sleeping laptop can't turn the
 // burner off. (Closing the lid can still sleep it.)

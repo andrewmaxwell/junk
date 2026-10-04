@@ -21,7 +21,9 @@
 // opts.status(text) shows a live progress line during every long wait (null
 // clears it), so it's always clear the test is working, not stuck.
 // opts.offerSkip(text) offers the person a way out of the cool-down; it
-// returns {skipped()} (pressing Enter makes it true).
+// returns {skipped()} (pressing Enter makes it true). Skipping ends the test
+// with the air and drum still running: turning them off on a hot drum just
+// lets the heat soak back up (164 → 173 °C in the second real self-test).
 
 import {rateOfRise, timeTo} from './procedure.js';
 
@@ -112,6 +114,7 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
       .join(', ');
 
   let heated = false;
+  let skippedCooling = false;
   let connectedOnce = false;
   try {
     // 1
@@ -281,25 +284,33 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
         if (!ok) return [false, detail];
         if (!heated && !(latest?.BT >= 60)) return [true, 'nothing to cool'];
         const skip = offerSkip(
-          'Cooling to 60 °C with the air at 100%. Press Enter to turn everything off now instead.',
+          "Cooling to 60 °C with the air at 100%. Press Enter to finish now; the air and drum keep running until you run 'node kaleido/server/stop.js --all'.",
         );
         const cooled = await waitFor(
           () => latest.BT < 60 || skip.skipped(),
           45 * MIN,
           1000,
           (t) =>
-            `cooling to 60: ${bt(60)} · ${mmss(t)} elapsed · Enter turns everything off now`,
+            `cooling to 60: ${bt(60)} · ${mmss(t)} elapsed · Enter finishes now (air and drum keep cooling)`,
         );
-        if (skip.skipped())
-          return [true, `skipped at ${latest.BT} (turned off by hand)`];
+        if (skip.skipped()) {
+          skippedCooling = true;
+          return [true, `skipped at ${latest.BT}; air and drum left running`];
+        }
         return cooled
           ? [true, `cooled to ${latest.BT}`]
           : [false, `still ${latest.BT} after 45 min`];
       });
-      // Whatever happened above, end with everything off.
-      await check('all off', () =>
-        settle({...SAFE, FC: 0, RC: 0, CS: 0}, 30_000),
-      );
+      // Whatever happened above, end with everything off (except the air
+      // and drum, if the person cut the cool-down short on a hot machine).
+      if (skippedCooling)
+        await check('heater off, air and drum left cooling', () =>
+          settle({...SAFE, CS: 0}, 30_000),
+        );
+      else
+        await check('all off', () =>
+          settle({...SAFE, FC: 0, RC: 0, CS: 0}, 30_000),
+        );
     }
   }
   return finish(report);

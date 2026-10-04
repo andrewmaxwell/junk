@@ -6,4 +6,4 @@ output.txt
 __pycache__/
 health/data/
 kaleido/logs-sim/
-kaleido/logs/.session.json
+kaleido/logs/.*
