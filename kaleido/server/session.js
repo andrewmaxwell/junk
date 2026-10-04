@@ -207,6 +207,15 @@ export class Session extends EventEmitter {
     this.emit('persist');
   }
 
+  // Ends the cool-down early: everything off now, at whatever temperature.
+  offNow() {
+    if (this.phase !== 'SHUTDOWN') throw new Error('not shutting down');
+    if (this.batch?.drop && !this.batch.beansOut) this.beansOut();
+    this.batch = null;
+    this.cooling = false;
+    this.setPhase('OFF');
+  }
+
   // Pops the browser's microphone heard ({intensity}); stamped on arrival.
   // Hints only: they're logged and shown, never acted on.
   addPop(intensity) {

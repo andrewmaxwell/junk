@@ -140,6 +140,7 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
     override: ({control, value}) => need().override(control, Number(value)),
     release: ({control}) => need().release(control),
     done: () => need().done(),
+    offNow: () => need().offNow(),
     pop: ({intensity}) => session?.addPop(intensity),
     setWeightOut: ({number, grams}) => {
       recorder.setWeightOut(number, Number(grams));

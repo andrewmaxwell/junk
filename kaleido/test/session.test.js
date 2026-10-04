@@ -241,3 +241,22 @@ test('the drop alarm keeps going until the beans are out', async () => {
   await clock.until(() => log.some((x) => x.e === 'batchComplete'), HOUR, 1500);
   await finish(ctx);
 });
+
+test('the cool-down can be cut short', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session} = ctx;
+  session.start();
+  await clock.until(() => session.phase === 'READY', HOUR, 5000);
+  session.done();
+  await clock.advance(60_000);
+  assert.equal(session.phase, 'SHUTDOWN');
+  let off = false;
+  session.on('off', () => (off = true));
+  session.offNow();
+  await clock.until(() => off, 60_000, 1500);
+  assert.deepEqual(
+    {HS: sim.m.HS, FC: sim.m.FC, RC: sim.m.RC, CS: sim.m.CS},
+    {HS: 0, FC: 0, RC: 0, CS: 0},
+  );
+  await finish(ctx);
+});

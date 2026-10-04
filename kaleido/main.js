@@ -22,6 +22,7 @@ const references = {}; // roast number → curve (or a pending promise)
 let ws = null;
 let mic = null; // {stop, pops: [ms], level}
 let confirmDone = false;
+let confirmOff = false;
 
 // ---- server connection
 
@@ -128,6 +129,7 @@ function renderSide() {
     procedures.length,
     !!mic,
     confirmDone,
+    confirmOff,
   ]);
   if (key === sideKey) return;
   sideKey = key;
@@ -174,7 +176,9 @@ function statusSection() {
   if (phase === 'SHUTDOWN')
     return section(
       'Shutting down',
-      `<p class="note">Heater off; air and drum run until BT is under 60 °C, then everything turns off.</p>`,
+      `<p class="note">Heater off; air and drum run until BT is under 60 °C, then everything turns off.</p>
+       <p id="shutdownInfo"></p>
+       <button data-act="offNow">${confirmOff ? 'Click again: everything off now' : 'Turn everything off now'}</button>`,
     );
   return '';
 }
@@ -403,6 +407,19 @@ const HANDLERS = {
     if (!(grams > 0)) return toast('Enter the weight in grams.');
     act('setWeightOut', {number: Number(el.dataset.number), grams});
   },
+  offNow: () => {
+    if (!confirmOff) {
+      confirmOff = true;
+      setTimeout(() => {
+        confirmOff = false;
+        renderSide();
+      }, 4000);
+    } else {
+      confirmOff = false;
+      act('offNow');
+    }
+    renderSide();
+  },
   done: () => {
     if (!confirmDone) {
       confirmDone = true;
@@ -462,6 +479,11 @@ function renderLive(s) {
   const b = state.batch;
   const pre = $('preheatInfo');
   if (pre) pre.textContent = preheatProgress();
+  const shut = $('shutdownInfo');
+  if (shut) {
+    const eta = coolingEta(60);
+    shut.textContent = `BT ${f(s.BT, 1)}°${eta ? `, about ${mmss(eta)} to go` : ''}`;
+  }
   const dev = $('devInfo');
   if (dev && b?.fc) {
     const since = s.t - b.fc.t;
@@ -493,6 +515,21 @@ function preheatProgress() {
         ? ` · ET still rising ${f(etRise, 1)}°/min (drum soaking up heat)`
         : ' · ET steady';
   return `BT ${f(last.BT, 1)}°, steady for ${mmss(Math.min(held, 180_000))} of 3:00${et}`;
+}
+
+// Roughly how long (ms) until BT cools to target: exponential decay toward
+// the room, at the rate of the last minute. Null if it can't tell yet.
+function coolingEta(target, ambient = 25) {
+  const last = samples.at(-1);
+  if (!last) return null;
+  const rate = slope(
+    samples.filter((x) => last.t - x.t <= 60_000),
+    'BT',
+  );
+  if (rate == null || rate > -0.2 || last.BT <= target) return null;
+  const k = -rate / (last.BT - ambient);
+  const ms = (Math.log((last.BT - ambient) / (target - ambient)) / k) * 60_000;
+  return ms < 3600_000 ? ms : null;
 }
 
 function slope(xs, key) {

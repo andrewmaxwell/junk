@@ -155,3 +155,17 @@ export class RoastTracker {
     return out;
   }
 }
+
+// Roughly how long (ms) until `key` reaches target at the current rate, or
+// null if it isn't heading there. Heating is close enough to linear over the
+// remaining stretch; cooling slows as it nears the room, so that's modeled as
+// exponential decay toward `ambient`.
+export function timeTo(samples, target, {key = 'BT', ambient = 25} = {}) {
+  const now = samples.at(-1)?.[key];
+  const rate = rateOfRise(samples, 60_000, key); // °/min
+  if (now == null || rate == null) return null;
+  if (target > now) return rate > 0.2 ? ((target - now) / rate) * 60_000 : null;
+  if (rate > -0.2 || target <= ambient) return null;
+  const k = -rate / (now - ambient); // per minute
+  return (Math.log((now - ambient) / (target - ambient)) / k) * 60_000;
+}

@@ -123,6 +123,14 @@ A procedure's `variants` (e.g. `espresso`, `pourover`) are a shallow override of
 
 The burner checks only start once you press Enter to confirm the drum is empty. Ctrl-C turns the heater off and leaves the air and drum running to cool. `--no-heat` skips the burner checks and the cool-down. The report records per-check results, `sends` (commands written per control; more than one per change means the machine dropped some), and `observations`.
 
+## Measured on this roaster (self-test, 2026-10-04)
+
+- An empty drum at 60% manual burner went from 41 to 195 °C in 8 minutes; the sim takes about 9.
+- The PID held 185 at 20–35% duty.
+- After a cable pull, it was reconnected and back in sync in 25 s.
+- Cooling from 195 to 60 °C with air at 100% took 18 minutes. The self-test's cool-down can be skipped with Enter, and the app's shutdown has a "Turn everything off now" button.
+- Long waits show a live status line (`status()` in `selftest.js`, drawn by `main.js`). Its time-left estimates come from `timeTo()` in `procedure.js`: linear while heating, exponential toward 25 °C while cooling. They run a bit optimistic.
+
 ## Kaleido protocol facts
 
 These were verified on hardware in the old `roast/` project and in Artisan's `~/artisan/src/artisanlib/kaleido.py` and `~/artisan/src/includes/Machines/Kaleido/Serial.aset`:
@@ -130,12 +138,12 @@ These were verified on hardware in the old `roast/` project and in Artisan's `~/
 - **Serial format.** The serial link runs at 57600 8N1. To the machine: `{[TAG VALUE]}\n`, or `{[TAG]}\n` to query. From the machine: `{sid,VAR:val,...}\n`. Init is `PI` until a `sid` arrives, then `TU C`, then `SC AR`. Poll with `RD A0`. `SC AR` and `CL AR` (sent on exit) are what Artisan calls the start and end "safety guard"; what they actually do isn't documented anywhere.
 - **Numbers are sent as integers**, including `TS`, matching Artisan.
 - **TS maxes out at 240.** Asked for 250, the M1 LITE silently sets and echoes 240 (self-test, 2026-10-04). `machine.js` clamps to `MAX_TS`, and procedures reject `charge.sv` over 240.
-- **Dropped commands are rare, at least with 100 ms spacing.** In the first self-test, all 15 control changes were echoed on the first send. The heavy dropping the old `roast/` project saw may have come from sending back to back. The reconciler stays anyway.
-- **At idle the machine reads `TS 0, AH 1, FC 0, RC 0`.** That's what it showed on connect both before the first self-test and right after it, even though the test had left air at 100% and drum at 90%. Unconfirmed: either the person turned them off at the panel, or the `CL AR`/`SC AR` safety guard resets the controls on disconnect or connect. Either way, the reconciler re-applies the desired state after any reconnect.
+- **Dropped commands are rare, at least with 100 ms spacing.** In both real self-tests (2026-10-04), every control change was echoed on the first send. The heavy dropping the old `roast/` project saw may have come from sending back to back. The reconciler stays anyway.
+- **A power cycle resets the controls** to `TS 0, AH 1, FC 0, RC 0`, with HS and CS unset. (Unplugging the roaster did that after the first self-test; the `SC AR`/`CL AR` handshake doesn't.)
 - **Writes are spaced about 100 ms apart.** The M1 drops commands that arrive back to back. A command that's already queued gets updated in place and keeps its position; moving it to the back once starved the RD poll.
 - **Variables.** `BT` bean temp, `ET` env temp, `AT` ambient, `TS` setpoint (SV), `HP` burner %, `FC` air %, `RC` drum %, `AH` auto-heat (1 = PID to `TS`, 0 = manual `HP`), `HS` master heater switch, `CS` cooling fan, `EV` event marker shown on the machine (1 = CHARGE, 3 = DRY, 4 = FCs, 5 = FCe, 6 = SCs, 7 = SCe, 8 = DROP).
 - **`HS 1` is required to heat.** `AH 1` alone leaves the burner off.
-- **`TS` caps the burner in manual mode too.** See the charge order above.
+- **`TS` caps the burner in manual mode too.** See the charge order above. Confirmed by the self-test: with SV 15 °C below BT and HP 60 in manual mode, BT fell 15 °C in 90 s. **HP still reads 60 while capped**, so HP alone can't tell you the burner is off.
 - **`HS` and `CS` don't appear in `RD A0` replies** until they've been set once.
 - **macOS port.** Open `/dev/cu.usbserial-*`, not `tty.*`, because `tty.*` blocks on carrier-detect.
 - **One program per port.** If Artisan is connected, opening the port fails with a lock error. Show that clearly; don't spin silently.

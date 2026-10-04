@@ -16,26 +16,60 @@
 // ask(text) shows a prompt and resolves when the person is ready (they press
 // Enter). Hooks let the simulator stand in for the person: pullCable() and
 // plugCable() are called instead of asking when given.
+//
+// opts.status(text) shows a live progress line during every long wait (null
+// clears it), so it's always clear the test is working, not stuck.
+// opts.offerSkip(text) offers the person a way out of the cool-down; it
+// returns {skipped()} (pressing Enter makes it true).
+
+import {rateOfRise, timeTo} from './procedure.js';
 
 const SAFE = {HS: 0, AH: 0, HP: 0};
 const MIN = 60_000;
 
 export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
   const {heat = true, cable = true, pullCable, plugCable} = opts;
+  const status = opts.status ?? (() => {});
+  const offerSkip = opts.offerSkip ?? (() => ({skipped: () => false}));
   const report = {startedAt: new Date(clock.now()).toISOString(), checks: []};
   report.observations = {};
   let latest = null;
-  machine.on('sample', (r) => (latest = r));
+  const recent = []; // the last 2 minutes of readings, for rates and ETAs
+  machine.on('sample', (r) => {
+    latest = r;
+    recent.push(r);
+    while (r.t - recent[0].t > 2 * MIN) recent.shift();
+  });
 
   // Waits (in clock time) until cond() is true or ms pass. Returns whether
-  // it came true.
-  const waitFor = async (cond, ms, step = 250) => {
-    const end = clock.now() + ms;
-    while (!cond()) {
-      if (clock.now() >= end) return false;
-      await clock.sleep(step);
+  // it came true. show(elapsedMs) is the live status line meanwhile.
+  const waitFor = async (cond, ms, step = 250, show = null) => {
+    const t0 = clock.now();
+    try {
+      while (!cond()) {
+        if (clock.now() - t0 >= ms) return false;
+        if (show) status(show(clock.now() - t0));
+        await clock.sleep(step);
+      }
+      return true;
+    } finally {
+      if (show) status(null);
     }
-    return true;
+  };
+  const mmss = (ms) => {
+    const sec = Math.max(0, Math.round(ms / 1000));
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  };
+  // "BT 143.2 (+12.5°/min), about 4:10 left"
+  const bt = (target) => {
+    const rate = rateOfRise(recent, 60_000);
+    let eta = target == null ? null : timeTo(recent, target);
+    if (eta > 60 * MIN) eta = null; // the rate hasn't settled yet
+    return (
+      `BT ${latest?.BT ?? '-'}` +
+      (rate == null ? '' : ` (${rate > 0 ? '+' : ''}${rate.toFixed(1)}°/min)`) +
+      (eta == null ? '' : `, about ${mmss(eta)} left`)
+    );
   };
 
   async function check(name, fn) {
@@ -83,7 +117,13 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
     const connected = await check(
       'connects and reads temperatures',
       async () => {
-        if (!(await waitFor(() => machine.connected && latest, 20_000)))
+        const up = await waitFor(
+          () => machine.connected && latest,
+          20_000,
+          250,
+          (t) => `waiting for the roaster… ${mmss(t)}`,
+        );
+        if (!up)
           return [false, 'no connection (is the cable in? is Artisan closed?)'];
         const {BT, ET, AT} = latest;
         const sane = (x) => typeof x === 'number' && x > -10 && x < 300;
@@ -124,7 +164,13 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
         const [ok, detail] = await settle({TS: 240, HS: 1, AH: 0, HP: 60});
         if (!ok) return [false, detail];
         report.observations.hpReadsInManual = machine.state.HP;
-        const rising = await waitFor(() => latest.BT >= startBT + 5, 4 * MIN);
+        const rising = await waitFor(
+          () => latest.BT >= startBT + 5,
+          4 * MIN,
+          1000,
+          (t) =>
+            `burner at 60%, waiting for BT to rise: ${bt()} · ${mmss(t)} of 4:00`,
+        );
         if (!rising)
           return [
             false,
@@ -136,7 +182,12 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
       if (burnerOK)
         await check(`heats past the preheat SV (to ${target})`, async () => {
           const t0 = clock.now();
-          const ok = await waitFor(() => latest.BT >= target, 20 * MIN, 1000);
+          const ok = await waitFor(
+            () => latest.BT >= target,
+            20 * MIN,
+            1000,
+            (t) => `heating to ${target}: ${bt(target)} · ${mmss(t)} elapsed`,
+          );
           const mins = ((clock.now() - t0) / MIN).toFixed(1);
           return ok
             ? [true, `reached ${latest.BT} in ${mins} min`]
@@ -147,7 +198,13 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
         const capBT = latest.BT;
         machine.set({TS: Math.round(capBT - 15)});
         await waitFor(() => machine.settled(), 15_000);
-        await clock.sleep(90_000);
+        await waitFor(
+          () => false,
+          90_000,
+          1000,
+          (t) =>
+            `setpoint below BT, watching what the burner does: ${bt()} · ${mmss(90_000 - t)} left`,
+        );
         report.observations.setpointCap = {
           note: 'manual mode, HP 60, TS 15 below BT, after 90 s',
           btChange: round1(latest.BT - capBT),
@@ -162,7 +219,13 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
           if (!ok) return [false, detail];
           const duties = [];
           for (let i = 0; i < 8; i++) {
-            await clock.sleep(15_000);
+            await waitFor(
+              () => false,
+              15_000,
+              1000,
+              (t) =>
+                `auto mode: ${bt()}, burner ${latest.HP}% · ${mmss(2 * MIN - i * 15_000 - t)} left`,
+            );
             duties.push(latest.HP);
           }
           report.observations.pidDuty = duties;
@@ -187,12 +250,22 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
         try {
           if (pullCable) pullCable();
           else await ask('Unplug the USB cable now, then press Enter.');
-          if (!(await waitFor(() => downs > 0, MIN)))
-            return [false, 'never noticed the cable was out'];
+          const noticed = await waitFor(
+            () => downs > 0,
+            MIN,
+            250,
+            (t) => `waiting to notice the cable is out… ${mmss(t)}`,
+          );
+          if (!noticed) return [false, 'never noticed the cable was out'];
           if (plugCable) plugCable();
           else await ask('Plug it back in, then press Enter.');
-          if (!(await waitFor(() => machine.connected, MIN)))
-            return [false, "didn't reconnect within a minute"];
+          const back = await waitFor(
+            () => machine.connected,
+            MIN,
+            250,
+            (t) => `reconnecting… ${mmss(t)}`,
+          );
+          if (!back) return [false, "didn't reconnect within a minute"];
           return settle({}, 20_000);
         } finally {
           machine.off('disconnected', onDown);
@@ -205,19 +278,18 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
         const [ok, detail] = await settle({...SAFE, FC: 100, RC: 90});
         if (!ok) return [false, detail];
         if (!heated && !(latest?.BT >= 60)) return [true, 'nothing to cool'];
-        log('cooling to 60 °C with the air at 100%…');
-        let lastLog = clock.now();
+        const skip = offerSkip(
+          'Cooling to 60 °C with the air at 100%. Press Enter to turn everything off now instead.',
+        );
         const cooled = await waitFor(
-          () => {
-            if (clock.now() - lastLog >= MIN) {
-              lastLog = clock.now();
-              log(`  BT ${latest.BT}`);
-            }
-            return latest.BT < 60;
-          },
+          () => latest.BT < 60 || skip.skipped(),
           45 * MIN,
           1000,
+          (t) =>
+            `cooling to 60: ${bt(60)} · ${mmss(t)} elapsed · Enter turns everything off now`,
         );
+        if (skip.skipped())
+          return [true, `skipped at ${latest.BT} (turned off by hand)`];
         return cooled
           ? [true, `cooled to ${latest.BT}`]
           : [false, `still ${latest.BT} after 45 min`];

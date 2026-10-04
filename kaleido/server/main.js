@@ -55,8 +55,35 @@ const mmss = (ms) => {
   const s = Math.round(ms / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
-const log = (msg) =>
-  console.log(`${mmss(clock.now() - t0).padStart(6)}  ${msg}`);
+const stamp = () => mmss(clock.now() - t0).padStart(6);
+
+// One live status line at the bottom, redrawn in place (on a terminal), with
+// normal log lines printed above it. Piped output gets the status every 30 s.
+const TTY = process.stdout.isTTY;
+let statusText = null;
+let statusPrinted = 0;
+const drawStatus = () => {
+  if (!statusText) return;
+  const cols = process.stdout.columns || 100;
+  process.stdout.write(
+    `\r\x1b[K${`${stamp()}  ${statusText}`.slice(0, cols - 1)}`,
+  );
+};
+const log = (msg) => {
+  if (TTY && statusText) process.stdout.write('\r\x1b[K');
+  console.log(`${stamp()}  ${msg}`);
+  if (TTY) drawStatus();
+};
+const status = (text) => {
+  if (TTY) {
+    if (!text && statusText) process.stdout.write('\r\x1b[K');
+    statusText = text;
+    drawStatus();
+  } else if (text && Date.now() - statusPrinted >= 30_000) {
+    statusPrinted = Date.now();
+    console.log(`${stamp()}  ${text}`);
+  }
+};
 
 machine.on('connected', () => log('connected'));
 machine.on('disconnected', () => log('DISCONNECTED'));
@@ -157,6 +184,14 @@ async function runSelfTestCLI() {
     opts: {
       heat: !args.includes('--no-heat'),
       cable: !args.includes('--no-cable'),
+      status,
+      // The cool-down can take 20 minutes; let the person end it early.
+      offerSkip: (text) => {
+        let skipped = false;
+        log(`>>> ${text}`);
+        rl?.once('line', () => (skipped = true));
+        return {skipped: () => skipped};
+      },
       ...(SIM && {
         pullCable: () => {
           sim.unplugged = true;
