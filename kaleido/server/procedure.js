@@ -28,6 +28,7 @@ export function validate(p) {
   if (!p.charge || !pct(p.charge.burner) || !pct(p.charge.air))
     fail('charge needs a burner % (and optionally air %)');
   if (!(p.charge.sv > 0)) fail('charge needs an sv');
+  if (p.charge.sv > 240) fail('charge.sv over 240 (the machine caps it there)');
   if (!(p.drop?.bt > 0)) fail('needs drop.bt');
   if (p.charge.sv <= p.drop.bt + 5)
     fail('charge.sv must sit well above drop.bt, or it caps the burner');

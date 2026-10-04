@@ -147,3 +147,12 @@ test('polling keeps its place in a busy write queue', async () => {
   assert.ok(samples >= 5, `only ${samples} readings in 15 s`);
   await machine.stop();
 });
+
+test('a setpoint above the machine maximum is clamped, so it still settles', async () => {
+  const {clock, sim, machine} = await setup();
+  machine.set({TS: 250, HS: 0, AH: 0});
+  await until(clock, () => machine.settled(), 10_000);
+  assert.equal(machine.desired.TS, 240);
+  assert.equal(sim.m.TS, 240);
+  await machine.stop();
+});

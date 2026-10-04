@@ -88,3 +88,34 @@ test('no machine: fails the first check, sends nothing', async () => {
   assert.equal(report.checks.length, 1);
   assert.match(report.checks[0].detail, /no connection/);
 });
+
+test('a control that never takes fails only the checks that use it', async () => {
+  const ctx = setup({faults: {ignore: ['CS']}});
+  const report = await result(ctx);
+  const failed = report.checks.filter((c) => !c.ok).map((c) => c.name);
+  // Every failure involves the cooling fan; nothing else is dragged down.
+  assert.deepEqual(failed, [
+    'control: cooling fan on',
+    'control: cooling fan off',
+    'cooling fan',
+    'all off',
+  ]);
+  assert.match(report.checks.at(-1).detail, /^not echoed: CS wants 0/);
+  // And everything else still ends up off.
+  assert.deepEqual(
+    {HS: ctx.sim.m.HS, HP: ctx.sim.m.HP, FC: ctx.sim.m.FC, RC: ctx.sim.m.RC},
+    {HS: 0, HP: 0, FC: 0, RC: 0},
+  );
+});
+
+test('the heater is off before the cable pull', async () => {
+  const ctx = setup();
+  let heaterAtPull = null;
+  const pull = ctx.sim.close.bind(ctx.sim);
+  ctx.sim.close = () => {
+    heaterAtPull ??= ctx.sim.m.HS;
+    pull();
+  };
+  await result(ctx);
+  assert.equal(heaterAtPull, 0);
+});

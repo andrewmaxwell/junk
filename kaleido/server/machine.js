@@ -16,6 +16,12 @@ import {encode, parse} from './protocol.js';
 
 export const CONTROLS = ['TS', 'HS', 'AH', 'FC', 'RC', 'CS', 'HP'];
 
+// The M1 LITE silently clamps the setpoint: asked for TS 250 it sets and
+// echoes 240 (self-test, 2026-10-04). Clamp here, or the reconciler would
+// chase a value the machine will never report, and AH 0 (which waits for TS)
+// would never be sent.
+export const MAX_TS = 240;
+
 export class Machine extends EventEmitter {
   constructor({
     openTransport,
@@ -48,8 +54,9 @@ export class Machine extends EventEmitter {
 
   // Merge into the desired state and push the changes out right away.
   set(values) {
-    for (const [k, v] of Object.entries(values)) {
+    for (let [k, v] of Object.entries(values)) {
       if (!CONTROLS.includes(k)) throw new Error(`unknown control ${k}`);
+      if (k === 'TS') v = Math.min(v, MAX_TS);
       if (this.desired[k] !== v) {
         this.desired[k] = v;
         delete this.lastSent[k];
@@ -71,9 +78,10 @@ export class Machine extends EventEmitter {
     return k === 'TS' ? Math.abs(got - want) < 0.6 : got === want;
   }
 
-  // True once every desired control (that we're responsible for) matches.
-  settled() {
-    return CONTROLS.every(
+  // True once every desired control (that we're responsible for) matches,
+  // or just the given ones.
+  settled(keys = CONTROLS) {
+    return keys.every(
       (k) => this.desired[k] == null || !this.owns(k) || this.matches(k),
     );
   }

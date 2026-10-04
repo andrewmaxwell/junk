@@ -53,19 +53,25 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
     return ok;
   }
 
-  // Sets controls and waits for the machine to echo them all. Reports how
-  // many sends it took (the M1 drops commands; more than 1 means resends).
+  // Sets controls and waits for the machine to echo them (just these: one
+  // bad control mustn't fail every later check). Reports how many sends it
+  // took (more than 1 means the machine dropped some).
   async function settle(values, ms = 15_000) {
     const before = {...machine.sent};
+    const keys = Object.keys(values);
     machine.set(values);
-    const ok = await waitFor(() => machine.settled(), ms);
+    const ok = await waitFor(() => machine.settled(keys), ms);
     const sends = Object.keys(values)
       .map((k) => `${k}×${(machine.sent[k] ?? 0) - (before[k] ?? 0)}`)
       .join(' ');
-    return [ok, ok ? `echoed (sends: ${sends})` : `not echoed: ${mismatch()}`];
+    return [
+      ok,
+      ok ? `echoed (sends: ${sends})` : `not echoed: ${mismatch(keys)}`,
+    ];
   }
-  const mismatch = () =>
+  const mismatch = (keys) =>
     Object.entries(machine.desired)
+      .filter(([k]) => !keys || keys.includes(k))
       .filter(([k]) => machine.owns(k) && !machine.matches(k))
       .map(([k, v]) => `${k} wants ${v}, reads ${machine.state[k] ?? '-'}`)
       .join(', ');
@@ -115,7 +121,7 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
       const startBT = latest.BT;
       const target = Math.max(startBT + 20, 195);
       const burnerOK = await check('manual burner heats', async () => {
-        const [ok, detail] = await settle({TS: 250, HS: 1, AH: 0, HP: 60});
+        const [ok, detail] = await settle({TS: 240, HS: 1, AH: 0, HP: 60});
         if (!ok) return [false, detail];
         report.observations.hpReadsInManual = machine.state.HP;
         const rising = await waitFor(() => latest.BT >= startBT + 5, 4 * MIN);
@@ -126,6 +132,7 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
           ];
         return [true, `BT ${startBT} → ${latest.BT}`];
       });
+      if (!burnerOK) machine.set(SAFE); // never leave a failed burner lit
       if (burnerOK)
         await check(`heats past the preheat SV (to ${target})`, async () => {
           const t0 = clock.now();
@@ -164,6 +171,10 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
       }
     }
 
+    // Heater off before anything else (the PID check leaves it on).
+    if (heat)
+      await check('heater off after the heat checks', () => settle(SAFE));
+
     // 6
     await check('cooling fan', () => settle({CS: 1}));
 
@@ -189,28 +200,33 @@ export async function runSelfTest({machine, clock, log, ask, opts = {}}) {
       });
   } finally {
     // 8 (always, even after a failure, as long as there's a machine to talk to)
-    if (connectedOnce)
-      await check('shutdown: heater off, cool down, all off', async () => {
+    if (connectedOnce) {
+      await check('shutdown: heater off, cool down', async () => {
         const [ok, detail] = await settle({...SAFE, FC: 100, RC: 90});
         if (!ok) return [false, detail];
-        if (heated || latest?.BT >= 60) {
-          log('cooling to 60 °C with the air at 100%…');
-          let lastLog = clock.now();
-          const cooled = await waitFor(
-            () => {
-              if (clock.now() - lastLog >= MIN) {
-                lastLog = clock.now();
-                log(`  BT ${latest.BT}`);
-              }
-              return latest.BT < 60;
-            },
-            45 * MIN,
-            1000,
-          );
-          if (!cooled) return [false, `still ${latest.BT} after 45 min`];
-        }
-        return settle({FC: 0, RC: 0, CS: 0});
+        if (!heated && !(latest?.BT >= 60)) return [true, 'nothing to cool'];
+        log('cooling to 60 °C with the air at 100%…');
+        let lastLog = clock.now();
+        const cooled = await waitFor(
+          () => {
+            if (clock.now() - lastLog >= MIN) {
+              lastLog = clock.now();
+              log(`  BT ${latest.BT}`);
+            }
+            return latest.BT < 60;
+          },
+          45 * MIN,
+          1000,
+        );
+        return cooled
+          ? [true, `cooled to ${latest.BT}`]
+          : [false, `still ${latest.BT} after 45 min`];
       });
+      // Whatever happened above, end with everything off.
+      await check('all off', () =>
+        settle({...SAFE, FC: 0, RC: 0, CS: 0}, 30_000),
+      );
+    }
   }
   return finish(report);
 

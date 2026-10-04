@@ -25,7 +25,7 @@ export class SimKaleido extends EventEmitter {
     this.random = random;
     this.isOpen = false;
     this.muted = false; // true = stops answering, like a hung USB adapter
-    this.faults = {burner: false}; // burner: true = it never lights
+    this.faults = {burner: false, ignore: []}; // burner: never lights; ignore: tags it never takes
     this.accepted = []; // commands the machine acted on, for tests
     this.m = {TS: 0, HP: 0, FC: 0, RC: 0, AH: 0, HS: 0, CS: 0};
     this.seen = new Set(); // vars that have been set (HS/CS show up after)
@@ -93,8 +93,10 @@ export class SimKaleido extends EventEmitter {
     if (tag === 'EV') return this.accept(tag, val);
     if (!(tag in this.m)) return;
     if (this.random() < this.dropRate) return; // silently dropped
+    if (this.faults.ignore?.includes(tag)) return; // a control that never takes
     this.advance();
     this.m[tag] = Math.round(parseFloat(val));
+    if (tag === 'TS') this.m.TS = Math.min(this.m.TS, 240); // like the real one
     this.seen.add(tag);
     if (tag === 'AH') this.pid = {};
     this.accept(tag, this.m[tag]);
