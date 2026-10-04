@@ -92,10 +92,16 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
     saveTimer = setTimeout(() => {
       saveTimer = null;
       if (!session) return;
-      const data = {savedAt: clock.now(), state: session.toJSON()};
-      fs.mkdirSync(logsDir, {recursive: true});
-      fs.writeFileSync(`${stateFile}.tmp`, JSON.stringify(data));
-      fs.renameSync(`${stateFile}.tmp`, stateFile);
+      // A failed save only costs the resume-after-restart; it mustn't
+      // become an uncaught exception, which turns the heater off.
+      try {
+        const data = {savedAt: clock.now(), state: session.toJSON()};
+        fs.mkdirSync(logsDir, {recursive: true});
+        fs.writeFileSync(`${stateFile}.tmp`, JSON.stringify(data));
+        fs.renameSync(`${stateFile}.tmp`, stateFile);
+      } catch (err) {
+        console.error(`couldn't save the session: ${err.message}`);
+      }
     }, 200);
   }
 

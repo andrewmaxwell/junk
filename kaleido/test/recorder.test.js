@@ -125,3 +125,24 @@ test('weight out and tasting notes patch the files later', async () => {
   assert.throws(() => recorder.setWeightOut(99, 100), /no roast #99/);
   await finish(ctx);
 });
+
+test("a log that can't be saved doesn't stop the roast", async () => {
+  const ctx = setup();
+  const {dir, clock, sim, session} = ctx;
+  // The folder vanishes and a file takes its place: every write now fails.
+  fs.rmSync(dir, {recursive: true});
+  fs.writeFileSync(dir, '');
+  const alerts = [];
+  session.on('alert', (a) => alerts.push(a));
+  let off = false;
+  autopilot(session, sim, clock, {batches: [ESPRESSO]}).then(
+    () => (off = true),
+  );
+  await clock.until(() => off, 3 * HOUR, 5000);
+  assert.ok(session.batch == null && session.phase === 'OFF');
+  const saveAlerts = alerts.filter((a) => /couldn't save/i.test(a.text));
+  assert.equal(saveAlerts.length, 1, 'reported once, not on every retry');
+  fs.rmSync(dir);
+  fs.mkdirSync(dir);
+  await finish(ctx);
+});

@@ -7,6 +7,11 @@
 //   #38_colombian_supremo_espresso_26-10-04_1103.json
 //
 // Roast numbers continue from the highest # in the directory.
+//
+// Saving is never allowed to stop a roast. The writes run inside the
+// session's own events (charge, step, drop), so an exception here would
+// otherwise reach main.js's crash handler, which turns the heater off. A
+// failed write is reported as an alert instead, and the next write retries.
 
 import fs from 'fs';
 import path from 'path';
@@ -39,9 +44,13 @@ export class Recorder {
   // The next roast number: one past the highest in the directory (or handed
   // out this session).
   nextRoastNumber() {
-    for (const f of fs.readdirSync(this.dir)) {
-      const m = /^#(\d+)_/.exec(f);
-      if (m) this.lastNumber = Math.max(this.lastNumber, Number(m[1]));
+    try {
+      for (const f of fs.readdirSync(this.dir)) {
+        const m = /^#(\d+)_/.exec(f);
+        if (m) this.lastNumber = Math.max(this.lastNumber, Number(m[1]));
+      }
+    } catch (err) {
+      this.failed(err);
     }
     return ++this.lastNumber;
   }
@@ -65,15 +74,31 @@ export class Recorder {
   write(b) {
     if (!b?.file) return;
     this.lastWrite = b.samples.at(-1)?.t ?? 0;
-    const {alog, json} = this.paths(b.file);
-    const alogData = buildAlog(b, {
-      beanName: this.beanName(b.bean),
-      batchPos: b.batchPos,
-      uuid: b.uuid,
-      template: this.template,
-    });
-    writeAlog(alog, alogData);
-    writeJSON(json, this.sidecar(b));
+    try {
+      const {alog, json} = this.paths(b.file);
+      const alogData = buildAlog(b, {
+        beanName: this.beanName(b.bean),
+        batchPos: b.batchPos,
+        uuid: b.uuid,
+        template: this.template,
+      });
+      writeAlog(alog, alogData);
+      writeJSON(json, this.sidecar(b));
+      this.failing = false;
+    } catch (err) {
+      this.failed(err);
+    }
+  }
+
+  // Say so once per run of failures, not on every retry.
+  failed(err) {
+    if (this.failing) return;
+    this.failing = true;
+    console.error(`recorder: ${err.message}`);
+    this.session.alert(
+      'warn',
+      `Couldn't save the roast log (${err.message}). The roast carries on.`,
+    );
   }
 
   beanName(slug) {
