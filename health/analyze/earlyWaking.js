@@ -12,7 +12,10 @@ const nights = await query(`
       lag(tags) OVER w AS tags_yday,
       lag(energy) OVER w AS energy_yday,
       lag(exercise) OVER w AS exercise_yday,
-      lag(outdoor_temp_max) OVER w AS temp_max_yday
+      lag(outdoor_temp_max) OVER w AS temp_max_yday,
+      lag(drive_min) OVER w AS drive_min_yday,
+      lag(hours_out) OVER w AS hours_out_yday,
+      lag(places_visited) OVER w AS places_yday
     FROM days WINDOW w AS (ORDER BY day)
   ),
   medians AS (
@@ -53,7 +56,13 @@ const nights = await query(`
     CASE WHEN d.energy_yday IS NOT NULL THEN d.energy_yday <= 3 END AS energy_3_or_less_yday,
     CASE WHEN d.energy_yday IS NOT NULL THEN list_has_any(d.tags_yday, ['tired', 'sleepy_day', 'woke_tired']) END AS tired_noted_yday,
     CASE WHEN d.energy_yday IS NOT NULL THEN list_has_any(d.tags_yday, ['away', 'travel']) END AS away_yday,
-    CASE WHEN d.energy_yday IS NOT NULL THEN list_contains(d.tags_yday, 'sick') END AS sick_yday
+    CASE WHEN d.energy_yday IS NOT NULL THEN list_contains(d.tags_yday, 'sick') END AS sick_yday,
+    d.slept_km_from_home >= 50 AS slept_away,
+    d.tz_shift_h <> 0 AS other_time_zone,
+    d.drive_min_yday >= 180 AS long_drive_yday,
+    d.hours_out_yday >= 10 AS long_day_out_yday,
+    d.hours_out_yday < 1 AS stayed_home_yday,
+    d.places_yday >= 4 AS many_places_yday
   FROM d
   CROSS JOIN medians m
   LEFT JOIN overnight o USING (day)
@@ -85,6 +94,12 @@ const exposures = [
   ['tired_noted_yday', 'Tired or sleepy noted the day before'],
   ['sick_yday', 'Sick the day before'],
   ['away_yday', 'Traveling or away'],
+  ['slept_away', 'Location: slept 50+ km from home'],
+  ['other_time_zone', 'Location: outside the home time zone'],
+  ['long_drive_yday', 'Location: 3+ hours in a car the day before'],
+  ['long_day_out_yday', 'Location: 10+ hours away from home the day before'],
+  ['stayed_home_yday', 'Location: under 1 hour away from home the day before'],
+  ['many_places_yday', 'Location: 4+ places visited the day before'],
 ];
 
 console.log(

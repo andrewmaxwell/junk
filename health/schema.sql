@@ -1,8 +1,8 @@
 -- Builds health.duckdb from the files in data/. Run by build.js, which splits
 -- statements on lines containing only "--".
 --
--- Every timestamp is local wall clock time (America/Chicago) as a plain
--- TIMESTAMP, so times line up across sources.
+-- Every timestamp is local wall clock time as a plain TIMESTAMP, so times
+-- line up across sources: America/Chicago at home, the local zone on trips.
 --
 -- The day rule: a night belongs to the day you wake up on. night_day() maps
 -- any timestamp to that day by shifting it 12 hours forward, so 10pm Monday
@@ -71,20 +71,81 @@ FROM read_csv('Aranet4*.csv', header = true, all_varchar = true,
   names = ['column0', 'column1', 'column2', 'column3', 'column4']);
 --
 
--- Open-Meteo hourly weather and air quality for home, fetched in UTC.
+-- Open-Meteo hourly weather and air quality, fetched in UTC: for home, and
+-- for where Andrew was on days he spent 50+ km away (place is "lat,lon"). Away
+-- days use only the away rows, in that place's local time.
 CREATE MACRO utc_to_local(t) AS (t || ':00+00')::TIMESTAMPTZ AT TIME ZONE 'America/Chicago';
 --
 CREATE TABLE weather AS
-SELECT utc_to_local(time) AS ts, * EXCLUDE (time)
-FROM read_json('weather/hourly.jsonl', columns = {time: 'VARCHAR', temperature_2m: 'DOUBLE', relative_humidity_2m: 'DOUBLE', dew_point_2m: 'DOUBLE', apparent_temperature: 'DOUBLE', pressure_msl: 'DOUBLE', surface_pressure: 'DOUBLE', precipitation: 'DOUBLE', cloud_cover: 'DOUBLE', wind_speed_10m: 'DOUBLE', wind_gusts_10m: 'DOUBLE', shortwave_radiation: 'DOUBLE'});
+WITH away AS (
+  SELECT time::TIMESTAMP + to_minutes(utc_offset_min) AS ts, * EXCLUDE (time, utc_offset_min)
+  FROM read_json('weather/away_hourly.jsonl', columns = {time: 'VARCHAR', temperature_2m: 'DOUBLE', relative_humidity_2m: 'DOUBLE', dew_point_2m: 'DOUBLE', apparent_temperature: 'DOUBLE', pressure_msl: 'DOUBLE', surface_pressure: 'DOUBLE', precipitation: 'DOUBLE', cloud_cover: 'DOUBLE', wind_speed_10m: 'DOUBLE', wind_gusts_10m: 'DOUBLE', shortwave_radiation: 'DOUBLE', elevation: 'DOUBLE', place: 'VARCHAR', utc_offset_min: 'INT'})
+)
+SELECT * FROM away
+UNION ALL BY NAME
+SELECT 'home' AS place, utc_to_local(time) AS ts, * EXCLUDE (time)
+FROM read_json('weather/hourly.jsonl', columns = {time: 'VARCHAR', temperature_2m: 'DOUBLE', relative_humidity_2m: 'DOUBLE', dew_point_2m: 'DOUBLE', apparent_temperature: 'DOUBLE', pressure_msl: 'DOUBLE', surface_pressure: 'DOUBLE', precipitation: 'DOUBLE', cloud_cover: 'DOUBLE', wind_speed_10m: 'DOUBLE', wind_gusts_10m: 'DOUBLE', shortwave_radiation: 'DOUBLE', elevation: 'DOUBLE'})
+WHERE utc_to_local(time)::DATE NOT IN (SELECT ts::DATE FROM away);
 --
 CREATE TABLE sun AS
 SELECT utc_to_local(sunrise)::DATE AS day, utc_to_local(sunrise) AS sunrise, utc_to_local(sunset) AS sunset
 FROM read_json('weather/sun.jsonl', columns = {day: 'VARCHAR', sunrise: 'VARCHAR', sunset: 'VARCHAR'});
 --
 CREATE TABLE outdoor_air AS
-SELECT utc_to_local(time) AS ts, * EXCLUDE (time)
-FROM read_json('weather/air.jsonl', columns = {time: 'VARCHAR', pm2_5: 'DOUBLE', pm10: 'DOUBLE', ozone: 'DOUBLE', nitrogen_dioxide: 'DOUBLE', us_aqi: 'DOUBLE', dust: 'DOUBLE'});
+WITH away AS (
+  SELECT time::TIMESTAMP + to_minutes(utc_offset_min) AS ts, * EXCLUDE (time, utc_offset_min)
+  FROM read_json('weather/away_air.jsonl', columns = {time: 'VARCHAR', pm2_5: 'DOUBLE', pm10: 'DOUBLE', ozone: 'DOUBLE', nitrogen_dioxide: 'DOUBLE', us_aqi: 'DOUBLE', dust: 'DOUBLE', place: 'VARCHAR', utc_offset_min: 'INT'})
+)
+SELECT * FROM away
+UNION ALL BY NAME
+SELECT 'home' AS place, utc_to_local(time) AS ts, * EXCLUDE (time)
+FROM read_json('weather/air.jsonl', columns = {time: 'VARCHAR', pm2_5: 'DOUBLE', pm10: 'DOUBLE', ozone: 'DOUBLE', nitrogen_dioxide: 'DOUBLE', us_aqi: 'DOUBLE', dust: 'DOUBLE'})
+WHERE utc_to_local(time)::DATE NOT IN (SELECT ts::DATE FROM away);
+--
+
+-- Google Maps Timeline, exported from the phone (2024-08 onward). Times carry
+-- the UTC offset of wherever Andrew was, so their wall clock is already local,
+-- including on trips. Points look like "38.1°, -90.2°".
+CREATE MACRO latlng(s) AS {
+  lat: split_part(replace(s, '°', ''), ',', 1)::DOUBLE,
+  lon: split_part(replace(s, '°', ''), ',', 2)::DOUBLE};
+--
+CREATE MACRO km_between(a, b) AS 12742 * asin(sqrt(
+  sin(radians(b.lat - a.lat) / 2) ^ 2
+  + cos(radians(a.lat)) * cos(radians(b.lat)) * sin(radians(b.lon - a.lon) / 2) ^ 2));
+--
+CREATE TABLE timeline_segments AS
+SELECT unnest(semanticSegments, recursive := false) AS s
+FROM read_json('Timeline.json', maximum_object_size = 500000000, columns = {
+  semanticSegments: 'STRUCT(
+    startTime VARCHAR, endTime VARCHAR, startTimeTimezoneUtcOffsetMinutes INT,
+    visit STRUCT(topCandidate STRUCT(placeId VARCHAR, semanticType VARCHAR, placeLocation STRUCT(latLng VARCHAR))),
+    activity STRUCT(distanceMeters DOUBLE, topCandidate STRUCT(type VARCHAR))
+  )[]'});
+--
+-- Places Andrew stayed. Google labels home; other kinds (work, aliased) are
+-- guesses and not reliable.
+CREATE TABLE places AS
+WITH v AS (
+  SELECT left(s.startTime, 19)::TIMESTAMP AS start, left(s.endTime, 19)::TIMESTAMP AS "end",
+    s.startTimeTimezoneUtcOffsetMinutes AS utc_offset_min,
+    s.visit.topCandidate.placeId AS place_id,
+    lower(s.visit.topCandidate.semanticType) AS kind,
+    latlng(s.visit.topCandidate.placeLocation.latLng) AS loc
+  FROM timeline_segments WHERE s.visit IS NOT NULL
+),
+home AS (SELECT {lat: avg(loc.lat), lon: avg(loc.lon)} AS loc FROM v WHERE kind = 'home')
+SELECT v.* EXCLUDE (loc), v.loc.lat AS lat, v.loc.lon AS lon,
+  CASE WHEN kind = 'home' THEN 0 ELSE round(km_between(v.loc, home.loc), 1) END AS km_from_home
+FROM v, home;
+--
+CREATE TABLE travel AS
+SELECT left(s.startTime, 19)::TIMESTAMP AS start, left(s.endTime, 19)::TIMESTAMP AS "end",
+  lower(s.activity.topCandidate.type) AS mode,
+  round(s.activity.distanceMeters / 1000, 1) AS km
+FROM timeline_segments WHERE s.activity IS NOT NULL;
+--
+DROP TABLE timeline_segments;
 --
 
 -- CPAP (ResMed AirSense 11). cpap_nights.date is the evening the night
@@ -213,11 +274,12 @@ FULL JOIN (
 --
 
 -- Google Calendar headache log, 2021 onward. Titles like "Headache
--- (<medication>)" carry the medication and suspected cause.
+-- (<medication>)" carry the medication and suspected cause. Times are
+-- converted to wherever Andrew was.
 CREATE TABLE headaches AS
 SELECT
-  coalesce(start.dateTime::TIMESTAMPTZ AT TIME ZONE 'America/Chicago', start.date::TIMESTAMP) AS start,
-  coalesce("end".dateTime::TIMESTAMPTZ AT TIME ZONE 'America/Chicago', "end".date::TIMESTAMP) AS "end",
+  coalesce(trip_local(start.dateTime::TIMESTAMPTZ AT TIME ZONE 'America/Chicago'), start.date::TIMESTAMP) AS start,
+  coalesce(trip_local("end".dateTime::TIMESTAMPTZ AT TIME ZONE 'America/Chicago'), "end".date::TIMESTAMP) AS "end",
   summary AS title
 FROM read_json('calendar/primary.json', format = 'array', columns = {
   summary: 'VARCHAR',
@@ -294,6 +356,48 @@ fit AS (
   FROM sleep WHERE main_sleep
   QUALIFY row_number() OVER (PARTITION BY night_day("end") ORDER BY minutes_asleep DESC) = 1
 ),
+-- Wakes from Fitbit sleep stages. These catch time awake with the mask still
+-- on, which the CPAP can't see (Andrew rests with it on for up to an hour
+-- before giving up). Awake stages less than 5 minutes apart count as one wake.
+fit_wakes AS (
+  SELECT sleep_id, min(start) AS start, max("end") AS "end",
+    date_diff('minute', min(start), max("end")) AS minutes,
+    arg_min(stage_before, start) AS stage_before
+  FROM (
+    SELECT *, sum(new_wake::INT) OVER (PARTITION BY sleep_id ORDER BY start) AS wake_no
+    FROM (
+      SELECT *, coalesce(start > lag("end") OVER w + INTERVAL 5 MINUTE, true) AS new_wake
+      FROM (
+        SELECT *, lag(stage) OVER (PARTITION BY sleep_id ORDER BY start) AS stage_before
+        FROM sleep_stages
+      )
+      WHERE stage = 'AWAKE'
+      WINDOW w AS (PARTITION BY sleep_id ORDER BY start)
+    )
+  )
+  GROUP BY sleep_id, wake_no
+),
+fit_night AS (
+  SELECT night_day(s."end") AS day,
+    -- Minutes from mask on (or Fitbit's sleep start) to the first sleep stage.
+    date_diff('minute', coalesce(cs.bedtime, s.start),
+      (SELECT min(st.start) FROM sleep_stages st WHERE st.sleep_id = s.id AND st.stage <> 'AWAKE')) AS fitbit_sleep_onset_min,
+    -- Awake after first falling asleep, until Fitbit's sleep ends.
+    coalesce(sum(w.minutes) FILTER (WHERE w.stage_before IS NOT NULL), 0) AS fitbit_awake_in_bed_min,
+    min(w.start) FILTER (WHERE w.minutes >= 30 AND w.stage_before IS NOT NULL) AS fitbit_long_wake,
+    arg_min(w.minutes, w.start) FILTER (WHERE w.minutes >= 30 AND w.stage_before IS NOT NULL) AS fitbit_long_wake_min,
+    arg_min(w.stage_before, w.start) FILTER (WHERE w.minutes >= 30 AND w.stage_before IS NOT NULL) AS fitbit_long_wake_from,
+    -- Same idea as the CPAP insomnia flag: 30+ minutes awake starting
+    -- 3-6am, or up for good in that window.
+    bool_or(w.minutes >= 30 AND w.stage_before IS NOT NULL AND hour(w.start) BETWEEN 3 AND 5)
+      OR hour(any_value(s."end")) BETWEEN 3 AND 5 AS fitbit_insomnia
+  FROM sleep s
+  LEFT JOIN fit_wakes w ON w.sleep_id = s.id
+  LEFT JOIN cpap_sleep cs ON cs.day = night_day(s."end")
+  WHERE s.main_sleep
+  GROUP BY s.id, s.start, s."end", cs.bedtime
+  QUALIFY row_number() OVER (PARTITION BY night_day(s."end") ORDER BY any_value(s.minutes_asleep) DESC) = 1
+),
 bedroom AS (
   SELECT night_day(ts) AS day,
     round(avg(co2_ppm)) AS bedroom_co2_avg, max(co2_ppm) AS bedroom_co2_max,
@@ -311,18 +415,53 @@ wx AS (
     round(avg(pressure_msl), 1) AS pressure_avg,
     round(max(pressure_msl) - min(pressure_msl), 1) AS pressure_range,
     round(sum(precipitation), 1) AS precip_mm, round(avg(cloud_cover)) AS cloud_cover,
-    max(wind_gusts_10m) AS wind_gust_max
+    max(wind_gusts_10m) AS wind_gust_max,
+    round(avg(elevation)) AS elevation_m
   FROM weather GROUP BY ALL
 ),
--- Change in sea-level pressure over the 24 hours before 8am.
+-- Change in sea-level pressure over the 24 hours before 8am, at one place
+-- (null the first day at a new place).
 wx_change AS (
   SELECT ts::DATE AS day,
-    round(pressure_msl - lag(pressure_msl, 24) OVER (ORDER BY ts), 1) AS pressure_change_24h
+    round(pressure_msl - first_value(pressure_msl) OVER (PARTITION BY place ORDER BY ts
+      RANGE BETWEEN INTERVAL 24 HOUR PRECEDING AND INTERVAL 24 HOUR PRECEDING), 1) AS pressure_change_24h
   FROM weather QUALIFY hour(ts) = 8
 ),
 aq AS (
   SELECT ts::DATE AS day, round(avg(pm2_5), 1) AS pm25, max(us_aqi) AS aqi_max, round(max(ozone)) AS ozone_max
   FROM outdoor_air GROUP BY ALL
+),
+-- Where Andrew slept: the place he was at 3am, by the night rule. Null when
+-- Timeline has no visit then (gaps, or before 2024-08).
+slept AS (
+  SELECT d.day,
+    p.km_from_home AS slept_km_from_home,
+    -- Hours ahead of home time (America/Chicago) at 3am.
+    round(date_diff('minute',
+      ((d.day + TIME '03:00' - to_minutes(p.utc_offset_min))::VARCHAR || '+00')::TIMESTAMPTZ AT TIME ZONE 'America/Chicago',
+      d.day + TIME '03:00') / 60, 1) AS tz_shift_h
+  FROM spine d
+  JOIN places p ON d.day + TIME '03:00' BETWEEN p.start AND p."end"
+  QUALIFY row_number() OVER (PARTITION BY d.day ORDER BY p.start DESC) = 1
+),
+-- Daytime whereabouts (calendar day). Days with no Timeline data are null.
+outings AS (
+  SELECT day,
+    max(km_from_home) AS km_from_home_max,
+    round(coalesce(sum(minutes) FILTER (WHERE kind <> 'home'), 0) / 60, 1) AS hours_out,
+    count(DISTINCT place_id) FILTER (WHERE kind <> 'home' AND minutes >= 10) AS places_visited
+  FROM (
+    SELECT d.day, p.place_id, p.kind, p.km_from_home,
+      date_diff('minute', greatest(p.start, d.day::TIMESTAMP), least(p."end", d.day + INTERVAL 1 DAY)) AS minutes
+    FROM places p,
+      LATERAL (SELECT unnest(range(p.start::DATE, p."end"::DATE + 1, INTERVAL 1 DAY))::DATE AS day) d
+  ) GROUP BY ALL
+),
+trips_day AS (
+  SELECT start::DATE AS day,
+    sum(date_diff('minute', start, "end")) FILTER (WHERE mode IN ('in_passenger_vehicle', 'in_bus')) AS drive_min,
+    bool_or(mode = 'flying') AS flew
+  FROM travel GROUP BY ALL
 ),
 -- Phone and watch both count steps, so take whichever counted more.
 tag_days AS (
@@ -344,11 +483,16 @@ SELECT
   cs.bedtime, cs.final_wake, cs.awake_mid_night_min, cs.insomnia_wake,
   cs.insomnia_wake IS NOT NULL AS insomnia,
   fit.* EXCLUDE (day),
+  fn.* EXCLUDE (day),
   fd.* EXCLUDE (day),
   bedroom.* EXCLUDE (day), indoor_day.indoor_co2_day_avg,
   wx.* EXCLUDE (day), wx_change.pressure_change_24h,
   aq.* EXCLUDE (day),
-  step_days.steps
+  step_days.steps,
+  slept.slept_km_from_home, slept.tz_shift_h,
+  outings.km_from_home_max, outings.hours_out, outings.places_visited,
+  CASE WHEN outings.day IS NOT NULL THEN coalesce(trips_day.drive_min, 0) END AS drive_min,
+  CASE WHEN outings.day IS NOT NULL THEN coalesce(trips_day.flew, false) END AS flew
 FROM spine
 LEFT JOIN journal j USING (day)
 LEFT JOIN cal USING (day)
@@ -356,6 +500,7 @@ LEFT JOIN cpap USING (day)
 LEFT JOIN cpap_ev USING (day)
 LEFT JOIN cpap_sleep cs USING (day)
 LEFT JOIN fit USING (day)
+LEFT JOIN fit_night fn USING (day)
 LEFT JOIN fitbit_daily fd USING (day)
 LEFT JOIN bedroom USING (day)
 LEFT JOIN indoor_day USING (day)
@@ -364,5 +509,8 @@ LEFT JOIN wx_change USING (day)
 LEFT JOIN aq USING (day)
 LEFT JOIN step_days USING (day)
 LEFT JOIN tag_days USING (day)
+LEFT JOIN slept USING (day)
+LEFT JOIN outings USING (day)
+LEFT JOIN trips_day USING (day)
 LEFT JOIN sun USING (day)
 ORDER BY spine.day;
