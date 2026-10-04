@@ -21,31 +21,59 @@ let procedures = [];
 const references = {}; // roast number → curve (or a pending promise)
 let ws = null;
 let mic = null; // {stop, pops: [ms], level}
-let confirmDone = false;
-let confirmOff = false;
+let serverUp = false;
+let lostServer = false; // a connection failed or dropped (not just loading)
 
 // ---- server connection
 
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => {
+    serverUp = true;
+    renderBar();
+  };
   ws.onmessage = ({data}) => handle(JSON.parse(data));
   ws.onclose = () => {
-    $('conn').textContent = 'server not running';
-    $('conn').className = 'label down';
+    serverUp = false;
+    lostServer = true;
+    renderBar();
     setTimeout(connect, 1000);
   };
 }
 
 function act(action, args = {}) {
-  ws?.send(JSON.stringify({type: 'action', action, args}));
+  if (ws?.readyState !== WebSocket.OPEN)
+    return toast("Not connected to the app server, so that didn't happen.");
+  ws.send(JSON.stringify({type: 'action', action, args}));
 }
+
+// Things that can't be undone (ending a roast, turning everything off) take
+// a second click within 3 s, so a stray click can't do them.
+const confirming = new Set();
+const confirmTimers = {};
+function confirmed(key, rerender) {
+  clearTimeout(confirmTimers[key]);
+  if (confirming.has(key)) {
+    confirming.delete(key);
+    rerender();
+    return true;
+  }
+  confirming.add(key);
+  confirmTimers[key] = setTimeout(() => {
+    confirming.delete(key);
+    rerender();
+  }, 3000);
+  rerender();
+  return false;
+}
+const rerenderSide = () => renderSide();
 
 function handle(msg) {
   if (msg.type === 'state') {
     state = msg.state;
     renderAll();
   } else if (msg.type === 'history') {
-    samples = msg.samples;
+    samples = withRoR(msg.samples);
     scheduleChart();
   } else if (msg.type === 'sample') {
     samples.push(msg.sample);
@@ -62,6 +90,18 @@ function handle(msg) {
   } else if (msg.type === 'error') {
     toast(msg.message);
   }
+}
+
+// The history the server sends on connect is raw readings; live ones come
+// with their rate of rise. Fill it in the same way (a 30 s slope of BT).
+function withRoR(xs) {
+  let start = 0;
+  return xs.map((s, i) => {
+    if (s.ror != null) return s;
+    while (s.t - xs[start].t > 30_000) start++;
+    const window = xs.slice(start, i + 1).filter((x) => x.BT != null);
+    return {...s, ror: slope(window, 'BT')};
+  });
 }
 
 function toast(text) {
@@ -93,33 +133,77 @@ function renderReadouts(s) {
   const b = state?.batch;
   const end = b?.drop?.t ?? s?.t;
   $('timer').textContent = b?.charge && end ? mmss(end - b.charge.t) : '–';
+  // The tab title, for when the page is behind another window.
+  document.title = s?.BT != null ? `${f(s.BT)}° ${phaseName()}` : 'Kaleido';
+  renderStop();
+}
+
+function phaseName() {
+  if (!state) return '';
+  const b = state.batch;
+  if (b?.drop && !b.beansOut) return 'Drop now';
+  return PHASES[state.phase] ?? state.phase;
+}
+
+// STOP is for when the heater might be on. Once the machine has confirmed
+// it's off (and nothing is about to turn it on), there's nothing to stop.
+function renderStop() {
+  const btn = $('stop');
+  const heating = ['PREHEAT', 'READY', 'ROASTING'].includes(state?.phase);
+  const off = state && !heating && samples.at(-1)?.HS === 0;
+  if (off) {
+    confirming.delete('stop');
+    btn.classList.remove('confirm');
+  }
+  btn.disabled = !!off;
+  btn.textContent = off
+    ? 'Heater off'
+    : confirming.has('stop')
+      ? 'Click again: heater off'
+      : 'STOP';
+  btn.classList.toggle('confirm', !off && confirming.has('stop'));
+  btn.title = off
+    ? 'The roaster reports the heater is off.'
+    : 'Heater off now. Air and drum keep running.';
 }
 
 function renderBar() {
   const conn = $('conn');
+  $('offline').className = !serverUp && lostServer ? 'on' : '';
+  $('bar').classList.toggle('stale', !serverUp || !state?.connected);
+  if (!serverUp) {
+    if (lostServer) document.title = 'Not connected · Kaleido';
+    conn.textContent = state ? 'APP SERVER NOT RUNNING' : 'connecting…';
+    conn.className = state ? 'label down' : 'label';
+    return;
+  }
   if (!state) return;
   conn.textContent =
     (state.connected ? 'roaster connected' : 'ROASTER NOT CONNECTED') +
     (state.mode === 'sim' ? ' (simulator)' : '');
   conn.className = state.connected ? 'label' : 'label down';
-  $('phaseText').textContent = PHASES[state.phase] ?? state.phase;
+  $('phaseText').textContent = phaseName();
   const b = state.batch;
   $('alarm').className = b?.drop && !b.beansOut ? 'on' : '';
+  renderStop();
 }
 
 // ---- side panel
 
 // Only rebuilt when something it shows changes, so typing in it isn't
-// interrupted by the readings arriving every 1.5 s.
+// interrupted by the readings arriving every 1.5 s. Things do change while
+// you type (a step fires mid-roast, an alert comes in), so a rebuild keeps
+// what's in the form fields and which one has the cursor.
 let sideKey = '';
 function renderSide() {
   const s = state;
+  if (!s) return;
   const key = JSON.stringify([
     s.phase,
     s.mode,
     s.next,
     s.batch && [s.batch.number, s.batch.fc, s.batch.sc, s.batch.drop],
-    s.batch && [s.batch.beansOut, s.batch.steps.length],
+    s.batch && [s.batch.beansOut, s.batch.steps.length, s.batch.weightIn],
     s.planned,
     s.overrides,
     s.cooling,
@@ -128,16 +212,25 @@ function renderSide() {
     s.alerts,
     procedures.length,
     !!mic,
-    confirmDone,
-    confirmOff,
+    [...confirming],
   ]);
   if (key === sideKey) return;
   sideKey = key;
-  $('side').innerHTML = [
+  const side = $('side');
+  const fields = [...side.querySelectorAll('input[id], select[id]')].map(
+    (el) => [el.id, el.value],
+  );
+  const focused = side.contains(document.activeElement)
+    ? document.activeElement.id
+    : null;
+  // While roasting, the roast comes first; otherwise the beans you're about
+  // to roast come before their procedure.
+  const roasting = s.phase === 'ROASTING';
+  side.innerHTML = [
     statusSection(),
     roastSection(),
-    stepsSection(),
-    nextSection(),
+    roasting ? stepsSection() : nextSection(),
+    roasting ? nextSection() : stepsSection(),
     coolingSection(),
     weightOutSection(),
     alertsSection(),
@@ -147,17 +240,38 @@ function renderSide() {
   ]
     .filter(Boolean)
     .join('');
+  syncVariantsIfFresh();
+  // Only put back what was really typed or chosen, and only a choice the
+  // rebuilt list still has (the bean list may have just loaded).
+  const restore = (id, value) => {
+    const el = $(id);
+    if (!el || value === '') return;
+    if (
+      el.tagName === 'SELECT' &&
+      ![...el.options].some((o) => o.value === value)
+    )
+      return;
+    el.value = value;
+  };
+  const kept = Object.fromEntries(fields);
+  if (kept.bean) {
+    restore('bean', kept.bean);
+    syncVariants();
+  }
+  for (const [id, value] of fields) if (id !== 'bean') restore(id, value);
+  if (focused) $(focused)?.focus();
 }
 
-const section = (title, body) =>
-  `<section>${title ? `<h2>${title}</h2>` : ''}${body}</section>`;
+const section = (title, body, cls = '') =>
+  `<section>${title ? `<h2 class="${cls}">${title}</h2>` : ''}${body}</section>`;
+const confirmClass = (key) => (confirming.has(key) ? 'confirm' : '');
 
 function statusSection() {
   const {phase, next} = state;
   if (phase === 'IDLE' || phase === 'OFF')
     return section(
       '',
-      `<p class="note">${phase === 'OFF' ? 'All off. ' : ''}Preheating takes 15–18 minutes from cold.</p>
+      `<p class="note">${phase === 'OFF' ? 'All off. ' : ''}Preheating takes 15–18 minutes from cold, less if the roaster is still warm.</p>
        <button class="big primary" data-act="startSession">Start preheating</button>`,
     );
   if (phase === 'PREHEAT')
@@ -178,7 +292,7 @@ function statusSection() {
       'Shutting down',
       `<p class="note">Heater off; air and drum run until BT is under 60 °C, then everything turns off.</p>
        <p id="shutdownInfo"></p>
-       <button data-act="offNow">${confirmOff ? 'Click again: everything off now' : 'Turn everything off now'}</button>`,
+       <button data-act="offNow" class="${confirmClass('off')}">${confirming.has('off') ? 'Click again: everything off now' : 'Turn everything off now'}</button>`,
     );
   return '';
 }
@@ -201,18 +315,29 @@ function roastSection() {
     </div>`;
   };
   return section(
-    `#${b.number} ${esc(b.beanName)}${variant}, ${f(b.weightIn)} g`,
+    `#${b.number ?? ''} ${esc(b.beanName)}${variant}, ${f(b.weightIn)} g`,
     `<div class="row" style="flex-direction: column; align-items: stretch">
        <button class="big" data-act="markFC" ${b.fc ? 'disabled' : ''}>
          ${b.fc ? `First crack at ${mmss(b.fc.t - b.charge.t)}` : 'First crack'}</button>
        <div class="note" id="devInfo"></div>
-       <button class="big" data-act="markSC">Second crack (drops now)</button>
-       <button data-act="dropNow">Drop now</button>
+       <button class="big ${confirmClass('sc')}" data-act="markSC">${
+         confirming.has('sc')
+           ? 'Click again: second crack, drop now'
+           : 'Second crack (drops now)'
+       }</button>
+       <button data-act="dropNow" class="${confirmClass('drop')}">${
+         confirming.has('drop') ? 'Click again to drop now' : 'Drop now'
+       }</button>
      </div>
      <div style="margin-top: 10px">
        ${ctrl('burner', 'HP', 'Burner')}
        ${ctrl('air', 'FC', 'Air')}
+     </div>
+     <div class="row note">
+       <label>Weight in <input id="batchWeight" type="number" min="50" max="250" step="0.1" value="${b.weightIn ?? ''}"> g</label>
+       <button data-act="saveBatchWeight">Save</button>
      </div>`,
+    'batch',
   );
 }
 
@@ -247,7 +372,7 @@ function stepsSection() {
   return section(
     b
       ? 'Procedure'
-      : `Procedure: ${esc(beanName(state.next.bean))} (${esc(proc.variant)})`,
+      : `Procedure: ${esc(beanName(state.next.bean))}${proc.variant ? ` (${esc(proc.variant)})` : ''}`,
     `<table class="steps">
        <tr class="${b ? 'done' : ''}"><td>charge</td><td>burner ${proc.charge.burner}%, SV ${proc.charge.sv}</td><td>${b ? '✓ 0:00' : ''}</td></tr>
        ${rows.join('')}
@@ -262,7 +387,7 @@ function nextSection() {
   if (next && !nextSection.editing)
     return section(
       phase === 'ROASTING' ? 'Next batch' : 'Beans',
-      `<div class="row">${esc(beanName(next.bean))} (${esc(next.variant)}), ${f(next.weightIn)} g
+      `<div class="row">${esc(beanName(next.bean))}${next.variant ? ` (${esc(next.variant)})` : ''}, ${f(next.weightIn)} g
          <button data-act="editNext">Change</button></div>`,
     );
   const options = procedures
@@ -277,6 +402,7 @@ function nextSection() {
      <div class="row" style="margin-top: 6px">
        <label>Weight in <input id="weightIn" type="number" min="50" max="250" step="0.1"> g</label>
        <button class="primary" data-act="selectBatch">Set</button>
+       ${next ? '<button data-act="cancelEdit">Cancel</button>' : ''}
      </div>`,
   );
 }
@@ -289,36 +415,55 @@ function coolingSection() {
   );
 }
 
+// The batch that just finished: how it went, and its weight out.
 function weightOutSection() {
   const last = state.lastBatch;
   if (!last) return '';
+  const variant = last.variant ? ` (${esc(last.variant)})` : '';
+  const summary = [];
+  if (last.drop)
+    summary.push(
+      `Dropped at ${mmss(last.drop.s * 1000)}, ${f(last.drop.BT, 1)}°`,
+    );
+  if (last.fc && last.drop) {
+    const dev = last.drop.s - last.fc.s;
+    summary.push(
+      `FC ${mmss(last.fc.s * 1000)}, development ${mmss(dev * 1000)} (${f((dev / last.drop.s) * 100)}%)`,
+    );
+  }
+  let weight;
   if (last.weightOut != null) {
     const loss = last.weightIn
       ? ` (${f(((last.weightIn - last.weightOut) / last.weightIn) * 100, 1)}% loss)`
       : '';
-    return section(
-      `Roast #${last.number}`,
-      `<p class="note">${f(last.weightIn)} g → ${f(last.weightOut, 1)} g${loss}</p>`,
-    );
-  }
+    weight = `<p class="note">${f(last.weightIn)} g → ${f(last.weightOut, 1)} g${loss}</p>`;
+  } else
+    weight = `<div class="row"><label>Weight out <input id="weightOut-${last.number}" type="number" min="0" step="0.1"> g</label>
+       <button class="primary" data-act="saveWeightOut" data-number="${last.number}">Save</button></div>`;
   return section(
-    `Roast #${last.number}: weight out`,
-    `<div class="row"><input id="weightOut" type="number" min="0" step="0.1"> g
-       <button class="primary" data-act="saveWeightOut" data-number="${last.number}">Save</button></div>`,
+    `Last roast: #${last.number} ${esc(last.beanName ?? beanName(last.bean))}${variant}`,
+    `${summary.map((x) => `<p class="note" style="margin: 0 0 4px">${x}</p>`).join('')}${weight}`,
   );
 }
 
 function alertsSection() {
   if (!state.alerts.length) return '';
   const icon = {urgent: '⚠', warn: '!', info: 'i'};
+  // Newest first, with a repeat of the same alert folded into one line.
+  const rows = [];
+  for (const a of state.alerts.slice().reverse()) {
+    const prev = rows.at(-1);
+    if (prev && prev.text === a.text && prev.level === a.level) prev.count++;
+    else rows.push({...a, count: 1});
+  }
+  const clock = (t) =>
+    new Date(t).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
   return section(
     'Alerts',
-    state.alerts
-      .slice()
-      .reverse()
+    rows
       .map(
         (a) =>
-          `<div class="alert ${a.level}"><span class="icon">${icon[a.level] ?? 'i'} ${a.level === 'urgent' ? 'Urgent' : 'Warning'}</span><span>${esc(a.text)}</span></div>`,
+          `<div class="alert ${a.level}"><span class="icon">${icon[a.level] ?? 'i'}</span><span>${esc(a.text)}${a.count > 1 ? ` (×${a.count})` : ''}</span><span class="when">${a.t ? clock(a.t) : ''}</span></div>`,
       )
       .join(''),
   );
@@ -350,12 +495,15 @@ function doneSection() {
   const {phase, doneRequested} = state;
   if (!['PREHEAT', 'READY', 'ROASTING'].includes(phase)) return '';
   if (doneRequested)
-    return section('', `<p class="note">Shutting down after this batch.</p>`);
+    return section(
+      '',
+      `<p class="note">Shutting down after this batch. To keep going instead, choose the next beans.</p>`,
+    );
   const label =
     phase === 'ROASTING' ? 'Shut down after this batch' : 'Done for today';
   return section(
     '',
-    `<button data-act="done">${confirmDone ? 'Click again to confirm' : label}</button>`,
+    `<button data-act="done" class="${confirmClass('done')}">${confirming.has('done') ? `Click again: ${label.toLowerCase()}` : label}</button>`,
   );
 }
 
@@ -374,8 +522,13 @@ function syncVariants() {
 const HANDLERS = {
   startSession: () => act('startSession'),
   markFC: () => act('markFC'),
-  markSC: () => act('markSC'),
-  dropNow: () => act('dropNow'),
+  markSC: () => confirmed('sc', rerenderSide) && act('markSC'),
+  dropNow: () => confirmed('drop', rerenderSide) && act('dropNow'),
+  saveBatchWeight: () => {
+    const grams = Number($('batchWeight').value);
+    if (!(grams > 0)) return toast('Enter the weight in grams.');
+    act('setWeightIn', {grams});
+  },
   coolingOff: () => act('setCooling', {on: false}),
   simCharge: () => act('simCharge'),
   simDischarge: () => act('simDischarge'),
@@ -392,7 +545,13 @@ const HANDLERS = {
     renderSide();
     syncVariants();
   },
+  cancelEdit: () => {
+    nextSection.editing = false;
+    sideKey = '';
+    renderSide();
+  },
   selectBatch: () => {
+    if (!$('bean').value) return toast('Choose the beans first.');
     const weightIn = Number($('weightIn').value);
     if (!(weightIn > 0)) return toast('Enter the weight in grams.');
     nextSection.editing = false;
@@ -403,36 +562,12 @@ const HANDLERS = {
     });
   },
   saveWeightOut: (el) => {
-    const grams = Number($('weightOut').value);
+    const grams = Number($(`weightOut-${el.dataset.number}`).value);
     if (!(grams > 0)) return toast('Enter the weight in grams.');
     act('setWeightOut', {number: Number(el.dataset.number), grams});
   },
-  offNow: () => {
-    if (!confirmOff) {
-      confirmOff = true;
-      setTimeout(() => {
-        confirmOff = false;
-        renderSide();
-      }, 4000);
-    } else {
-      confirmOff = false;
-      act('offNow');
-    }
-    renderSide();
-  },
-  done: () => {
-    if (!confirmDone) {
-      confirmDone = true;
-      setTimeout(() => {
-        confirmDone = false;
-        renderSide();
-      }, 4000);
-    } else {
-      confirmDone = false;
-      act('done');
-    }
-    renderSide();
-  },
+  offNow: () => confirmed('off', rerenderSide) && act('offNow'),
+  done: () => confirmed('done', rerenderSide) && act('done'),
   micOn: async () => {
     const pops = [];
     try {
@@ -474,19 +609,11 @@ $('beansOut').onclick = () => act('beansOut');
 
 // STOP takes two clicks within 3 s, so a stray click can't end a roast.
 $('stop').onclick = () => {
-  const btn = $('stop');
-  if (btn.classList.contains('confirm')) {
-    btn.classList.remove('confirm');
-    btn.textContent = 'STOP';
-    act('emergencyStop');
-    return;
-  }
-  btn.classList.add('confirm');
-  btn.textContent = 'Click again: heater off';
-  setTimeout(() => {
-    btn.classList.remove('confirm');
-    btn.textContent = 'STOP';
-  }, 3000);
+  if (ws?.readyState !== WebSocket.OPEN)
+    return toast(
+      "The app server isn't running, so STOP can't reach the roaster. Run node kaleido/server/stop.js",
+    );
+  if (confirmed('stop', renderStop)) act('emergencyStop');
 };
 
 // ---- live numbers inside the side panel (updated every reading)
@@ -516,22 +643,24 @@ function renderLive(s) {
 }
 
 // How close preheat is to "ready" (the server decides; this just shows it):
-// how long BT has held near 185, and whether ET is still rising.
+// how long BT has held near the setpoint, and whether ET is still rising.
 function preheatProgress() {
   const last = samples.at(-1);
   if (!last) return '';
+  const {sv, forSeconds, btWithinC, maxEtRiseCPerMin} = state.preheat;
+  const forMs = forSeconds * 1000;
   let i = samples.length - 1;
-  while (i > 0 && Math.abs(samples[i - 1].BT - 185) <= 1.5) i--;
-  const held = Math.abs(last.BT - 185) <= 1.5 ? last.t - samples[i].t : 0;
-  const recent = samples.filter((x) => last.t - x.t <= 180_000);
+  while (i > 0 && Math.abs(samples[i - 1].BT - sv) <= btWithinC) i--;
+  const held = Math.abs(last.BT - sv) <= btWithinC ? last.t - samples[i].t : 0;
+  const recent = samples.filter((x) => last.t - x.t <= forMs);
   const etRise = slope(recent, 'ET');
   const et =
     etRise == null
       ? ''
-      : etRise > 0.5
+      : etRise > maxEtRiseCPerMin
         ? ` · ET still rising ${f(etRise, 1)}°/min (drum soaking up heat)`
         : ' · ET steady';
-  return `BT ${f(last.BT, 1)}°, steady for ${mmss(Math.min(held, 180_000))} of 3:00${et}`;
+  return `BT ${f(last.BT, 1)}°, steady at ${sv}° for ${mmss(Math.min(held, forMs))} of ${mmss(forMs)}${et}`;
 }
 
 // Roughly how long (ms) until BT cools to target: exponential decay toward
@@ -649,7 +778,7 @@ function renderChart() {
         strong: true,
       });
   } else if (state.phase === 'PREHEAT' || state.phase === 'READY')
-    guides.push({y: 185, label: 'preheat 185°'});
+    guides.push({y: state.preheat.sv, label: `preheat ${state.preheat.sv}°`});
   const pops = (b?.charge && mic ? mic.pops : []).map(
     (t) => (t - Date.now() + last.t - zero) / 1000,
   );
@@ -659,8 +788,12 @@ function renderChart() {
       x,
       BT: samples.map((s) => s.BT ?? null),
       ET: samples.map((s) => s.ET ?? null),
+      // RoR is a 30 s slope, so it means nothing until 30 s past the
+      // turning point (before that it still sees the plunge at charge).
       ror: samples.map((s) =>
-        b?.charge && s.t < (b.tp?.t ?? Infinity) ? null : (s.ror ?? null),
+        b?.charge && s.t >= b.charge.t && s.t < (b.tp?.t ?? Infinity) + 30_000
+          ? null
+          : (s.ror ?? null),
       ),
       HP: samples.map((s) => s.HP ?? null),
       FC: samples.map((s) => s.FC ?? null),
@@ -683,7 +816,6 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
 function renderAll() {
   renderBar();
   renderSide();
-  syncVariantsIfFresh();
   renderReadouts(samples.at(-1));
   if (samples.length) renderLive(samples.at(-1));
   scheduleChart();

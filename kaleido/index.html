@@ -180,6 +180,23 @@
   #stop.confirm {
     animation: pulse 0.6s infinite;
   }
+  /* nothing to stop: the machine has confirmed the heater is off */
+  #stop:disabled {
+    background: var(--button);
+    color: var(--text-muted);
+    border-color: var(--border);
+    opacity: 1;
+  }
+  /* a second click is needed: outline the button and pulse it */
+  #side button.confirm {
+    outline: 2px solid var(--critical);
+    outline-offset: 1px;
+    animation: pulse 0.6s infinite;
+  }
+  /* readings that aren't live (server or roaster gone) fade out */
+  #bar.stale .readout:not(#phase) .value {
+    opacity: 0.3;
+  }
   #conn {
     font-size: 13px;
     color: var(--text-secondary);
@@ -214,6 +231,23 @@
     50% {
       filter: brightness(1.25);
     }
+  }
+  #offline {
+    display: none;
+    padding: 10px 16px;
+    background: var(--critical);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  #offline.on {
+    display: block;
+  }
+  #offline code {
+    font-weight: 400;
+    background: rgba(0, 0, 0, 0.25);
+    padding: 1px 6px;
+    border-radius: 4px;
   }
   #hint {
     display: none;
@@ -252,6 +286,12 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
+  }
+  section h2.batch {
+    font-size: 16px;
+    color: var(--text-primary);
+    text-transform: none;
+    letter-spacing: 0;
   }
   section h2 {
     font-size: 13px;
@@ -317,6 +357,13 @@
   }
   .alert .icon {
     font-weight: 700;
+    white-space: nowrap;
+  }
+  .alert .when {
+    margin-left: auto;
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
   .alert.urgent .icon {
     color: var(--critical);
@@ -396,6 +443,11 @@
 <div id="alarm">
   <span>⚠ DROP NOW: open the door</span>
   <button id="beansOut">Beans are out</button>
+</div>
+<div id="offline">
+  Lost the app server. These numbers aren't live. If it crashed, the guardian
+  turned the heater off. Restart it with
+  <code>node kaleido/server/main.js</code>
 </div>
 <div id="hint"></div>
 <main>

@@ -59,6 +59,8 @@ export function createCharts(el) {
     const {ctx, bbox} = u;
     ctx.save();
     ctx.font = `${11 * devicePixelRatio}px system-ui`;
+    const line = 13 * devicePixelRatio;
+    const rowEnds = []; // right edge of the last label on each text row
     for (const m of overlay.markers) {
       const x = u.valToPos(m.x, 'x', true);
       if (x < bbox.left || x > bbox.left + bbox.width) continue;
@@ -72,11 +74,17 @@ export function createCharts(el) {
       ctx.lineTo(x, bbox.top + bbox.height);
       ctx.stroke();
       if (labels && m.label) {
+        // Markers close together (FC right after a step) would print their
+        // labels on top of each other: use the first row that has room.
+        const left = x + 3 * devicePixelRatio;
+        let row = rowEnds.findIndex((end) => end < left);
+        if (row < 0) row = rowEnds.length;
+        rowEnds[row] = left + ctx.measureText(m.label).width + 4;
         ctx.fillStyle = m.strong ? ink.text : ink.muted;
         ctx.fillText(
           m.label,
-          x + 3 * devicePixelRatio,
-          bbox.top + 12 * devicePixelRatio,
+          left,
+          bbox.top + 12 * devicePixelRatio + row * line,
         );
       }
     }
@@ -123,6 +131,9 @@ export function createCharts(el) {
   const common = (height, showX) => ({
     width: el.clientWidth,
     height,
+    // The same padding everywhere, so a time lines up across all three plots
+    // (uPlot otherwise pads only the bottom one for its x labels).
+    padding: [8, 20, 0, 0],
     cursor: {sync: {key: 'roast'}, drag: {x: false, y: false}},
     scales: {x: {time: false, range: () => xRange}},
     legend: {live: true},
@@ -178,7 +189,14 @@ export function createCharts(el) {
       ...common(Math.round(h * 0.22), false),
       scales: {
         x: {time: false, range: () => xRange},
-        y: {range: () => [0, 25]},
+        // 0-25 covers a roast; widen for a fast preheat or the fall
+        // after a drop rather than clipping the line.
+        y: {
+          range: (u, min, max) => [
+            Math.max(-30, Math.min(0, min ?? 0)),
+            Math.min(60, Math.max(25, max ?? 25)),
+          ],
+        },
       },
       series: [
         {label: 'time', value: (u, v) => (v == null ? '–' : mmss(v))},
@@ -254,10 +272,12 @@ export function createCharts(el) {
       controls.setSize({width: w, height: Math.round(avail * 0.22)});
     },
     destroy() {
+      observer.disconnect();
       plots.forEach((p) => p.destroy());
     },
   };
   // The container settles its size after layout (and on window resizes).
-  new ResizeObserver(() => api.resize()).observe(el);
+  const observer = new ResizeObserver(() => api.resize());
+  observer.observe(el);
   return api;
 }

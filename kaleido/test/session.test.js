@@ -130,6 +130,25 @@ test("won't call for or detect a charge until the beans are chosen", async () =>
   sim.chargeBeans(155);
   await clock.advance(60_000);
   assert.equal(session.phase, 'READY');
+  const alerts = log.filter((x) => x.e === 'alert').map((x) => x.a);
+  assert.equal(alerts.length, 1, 'the unexpected charge is flagged, once');
+  assert.equal(alerts[0].level, 'urgent');
+  assert.match(alerts[0].text, /no beans are chosen/);
+  await finish(ctx);
+});
+
+test('choosing the beans right after pouring them in still starts the roast', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session, log} = ctx;
+  session.start();
+  await clock.until(() => session.phase === 'READY', HOUR, 5000);
+  const pouredAt = clock.now();
+  sim.chargeBeans(155);
+  await clock.until(() => log.some((x) => x.e === 'alert'), 30_000, 500);
+  session.selectBatch(ESPRESSO);
+  await clock.advance(5000);
+  assert.equal(session.phase, 'ROASTING');
+  assert.ok(Math.abs(session.batch.charge.t - pouredAt) < 3000, 'backdated');
   await finish(ctx);
 });
 

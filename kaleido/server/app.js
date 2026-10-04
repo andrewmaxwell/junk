@@ -63,9 +63,18 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
       broadcast({type: 'alert', alert: a});
     });
     session.on('batchComplete', (b) => {
-      lastBatch = {number: b.number, bean: b.bean, variant: b.variant};
-      lastBatch.weightIn = b.weightIn;
-      lastBatch.weightOut = b.weightOut ?? null;
+      // Times are seconds since charge, for the "last roast" summary.
+      const rel = (m) => m && {s: (m.t - b.charge.t) / 1000, BT: m.BT};
+      lastBatch = {
+        number: b.number,
+        bean: b.bean,
+        beanName: beans[b.bean]?.name ?? b.bean,
+        variant: b.variant,
+        weightIn: b.weightIn,
+        weightOut: b.weightOut ?? null,
+        fc: rel(b.fc),
+        drop: rel(b.drop),
+      };
     });
     for (const e of ['phase', 'charge', 'tp', 'step', 'fc', 'sc', 'drop'])
       session.on(e, changed);
@@ -105,6 +114,10 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
       console.log(`couldn't resume the saved session: ${err.message}`);
     }
   }
+  // With no session, nothing should be heating. The roaster doesn't report
+  // the heater switch until it's set on this connection (and it can be
+  // heating while unreported), so set it: then the UI knows it's off.
+  if (!session) machine.set({HS: 0});
 
   machine.on('sample', (r) => {
     if (session) return; // the session forwards its own samples
@@ -127,6 +140,7 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
       if (session && session.phase !== 'OFF')
         throw new Error('a session is already running');
       idle = [];
+      alerts.length = 0; // yesterday's alerts don't belong to this session
       newSession();
     },
     selectBatch: ({bean, variant, weightIn}) =>
@@ -164,6 +178,7 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
     const b = s?.batch;
     return {
       mode: sim ? 'sim' : 'real',
+      preheat: {sv: preheat.sv, ...preheat.stable},
       connected: machine.connected,
       phase: s?.phase ?? 'IDLE',
       cooling: s?.cooling ?? false,

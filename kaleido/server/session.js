@@ -315,10 +315,26 @@ export class Session extends EventEmitter {
   }
 
   // Beans going in show up as a sudden BT drop from the steady preheat
-  // temperature. The roast clock is backdated to just before the fall.
+  // temperature (see chargePoint).
   checkCharge(s) {
     this.promptCharge(false);
-    if (!this.next) return;
+    const at = this.chargePoint(s);
+    if (!at) return;
+    if (this.next) return this.startRoast(at);
+    // Beans went in before any were chosen. Don't guess what they are, but
+    // say so loudly: choosing now (while the fall is fresh) still starts it.
+    if (!this.alarms.unchosenCharge) {
+      this.alarms.unchosenCharge = true;
+      this.alert(
+        'urgent',
+        'That looked like a charge, but no beans are chosen. Choose them now to start the roast.',
+      );
+    }
+  }
+
+  // The reading just before a sudden BT fall from the steady temperature, if
+  // one is under way: the roast clock is backdated to it.
+  chargePoint(s) {
     const [from, to] = CHARGE.baselineMs;
     const base = this.recent.filter(
       (x) => s.t - x.t <= from && s.t - x.t >= to,
@@ -333,7 +349,7 @@ export class Session extends EventEmitter {
     // Charge at the last reading before the fall, as if CHARGE had been
     // pressed as the beans went in (that's what Artisan would record).
     const at = this.recent[Math.max(0, i - 1)];
-    this.startRoast({t: at.t, BT: at.BT});
+    return {t: at.t, BT: at.BT};
   }
 
   startRoast(charge) {
