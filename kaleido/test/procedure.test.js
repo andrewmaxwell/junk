@@ -109,6 +109,12 @@ test('preheat is stable when BT holds and ET stops rising (falling is fine)', ()
     'ET falling',
   );
   assert.ok(!stable(flat, (s) => 170 + s / 60), 'ET rising');
+  // The real first batch of 2026-10-04: ET overshot as BT reached SV, fell
+  // ~10 °C, then climbed 2.5 °C/min. One fit over the window reads that V as
+  // flat; it isn't ready.
+  const dipThenClimb = (s) =>
+    s < 80 ? 175 - (s * 12) / 80 : 163 + ((s - 80) * 2.5) / 60;
+  assert.ok(!stable(flat, dipThenClimb), 'ET dipped, now climbing');
   assert.ok(!stable((i) => (i === 60 ? 187 : 185), flat), 'BT left the band');
   assert.ok(!preheatStable(window(flat, flat).slice(0, 60), 185, cfg));
 });

@@ -49,7 +49,7 @@ analyze.js *          prints a compact summary of one or more roasts for Claude
 
 ## Session behavior
 
-- **Ready** means the machine has confirmed every setting, BT has stayed within 1.5 °C of SV for 3 minutes, and ET isn't *rising* faster than 0.5 °C/min. Falling ET is fine: between batches you charged with ET still falling 0.5–1.5 °C/min from the last roast.
+- **Ready** means the machine has confirmed every setting, BT has stayed within 1.5 °C of SV for 3 minutes, and ET isn't *rising* faster than 0.5 °C/min over those 3 minutes *or* the last 1.5 (ET overshoots, dips, then climbs once BT reaches SV, and one fit across that reads as flat; that called a cold drum ready after 7 minutes on 2026-10-04). Replayed on the real cold-start logs, ready comes at 12–16 minutes with ET 177–183 °C, before every real charge. Falling ET is fine: between batches you charged with ET still falling 0.5–1.5 °C/min from the last roast.
 - **Charge** is only ever auto-detected; there's no button (the user's choice). It needs a bean chosen first. Without one, the app says "choose the next beans" and doesn't start a roast. A charge-like BT drop raises an urgent alert instead, and choosing the beans while the fall is fresh (within about 25 s) still starts the roast, backdated. Detection: 2 readings 5 °C or more below the BT average from 10–30 seconds earlier. A real charge drops BT about 70 °C, so there's plenty of margin. The roast clock is backdated to the last reading before the fall.
 - **Turning point** is the first reading 2 °C above the lowest BT so far. Steps arm only after it.
 - **Triggers** (steps and drop) need 3 consecutive readings at or above their temperature. At ~5 °C/min near the drop, that lands about 0.2–0.5 °C past the target.

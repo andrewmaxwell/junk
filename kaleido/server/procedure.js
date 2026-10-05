@@ -89,8 +89,18 @@ export function preheatStable(samples, sv, cfg) {
   if (recent[0].t > tEnd - windowMs + 5000) return false; // not enough history
   if (recent.some((s) => s.BT == null || Math.abs(s.BT - sv) > cfg.btWithinC))
     return false;
+  // ET must be flat over the whole window AND its second half. When BT first
+  // reaches SV, ET overshoots, dips, then climbs for ~10 more minutes while
+  // the drum soaks; one line fit across that dip-and-climb reads as flat
+  // (real first batch, 2026-10-04: "ready" after 7 min with ET climbing
+  // 2.5 °C/min, 10 °C short of where real charges were).
   const etRise = rateOfRise(recent, windowMs, 'ET');
-  return etRise != null && etRise <= cfg.maxEtRiseCPerMin;
+  const etRiseLately = rateOfRise(recent, windowMs / 2, 'ET');
+  return (
+    etRise != null &&
+    etRiseLately != null &&
+    Math.max(etRise, etRiseLately) <= cfg.maxEtRiseCPerMin
+  );
 }
 
 // Follows a procedure through one roast, sample by sample. feed() returns the
