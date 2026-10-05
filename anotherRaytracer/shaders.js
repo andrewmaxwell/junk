@@ -217,6 +217,9 @@ vec3 trace(vec3 o, vec3 d) {
   vec3 through = vec3(1.);
   // True until the path hits a diffuse surface
   bool seenByCamera = true;
+  // Probability of the random choices made so far that the throughput was
+  // boosted to make up for, like whether glass reflected or refracted
+  float choiceProb = 1.;
   // Nonzero when a diffuse surface randomly picked this ray's direction: the
   // probability density it picked it with
   float bouncePdf = 0.;
@@ -238,9 +241,11 @@ vec3 trace(vec3 o, vec3 d) {
       // The light is far brighter than the screen can show. Clamping it to
       // white here, before pixel samples are averaged, lets its edges
       // antialias; otherwise a pixel 1% covered by the light shows as white.
-      // This comes after the throughput, so a light seen through glass or in
-      // a mirror is still white, not clamped and then dimmed to gray.
-      if (seenByCamera) e = min(e, vec3(1.));
+      // Paths that got here by random choices clamp higher, to keep the
+      // boost that makes up for the paths that went elsewhere. Otherwise a
+      // light behind glass, which only about half of the paths reach, would
+      // average out to gray.
+      if (seenByCamera) e = min(e, vec3(1. / choiceProb));
       color += e * (seenByCamera ? 1. : indirectScale(e));
       break; // lights don't reflect anything
     }
@@ -251,6 +256,7 @@ vec3 trace(vec3 o, vec3 d) {
       float p = min(0.95, max(sColor.r, max(sColor.g, sColor.b)) + surface[s].x);
       if (rand() >= p) break;
       through /= p;
+      choiceProb *= p;
     }
 
     vec3 p = o + d * hitDist;
@@ -326,9 +332,11 @@ vec3 trace(vec3 o, vec3 d) {
           float P = 0.25 + 0.5 * reflectance;
           if (rand() < P) {
             through *= reflectance / P;
+            choiceProb *= P;
           } else {
             mirror = t;
             through *= (1. - reflectance) / (1. - P);
+            choiceProb *= 1. - P;
           }
         }
       }
