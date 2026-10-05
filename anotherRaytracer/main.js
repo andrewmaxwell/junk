@@ -17,6 +17,8 @@ const maxSamples = Number(params.get('spp') ?? 4096);
  * say how much headroom the screen has; brighter than it just clips.
  */
 const headroom = Number(params.get('headroom') ?? 8);
+/** In SDR with tone mapping, lights clamp here, which toneMap shows as white */
+const sdrWhite = 4;
 
 const scene = (scenes[sceneName] ?? scenes.cornell)();
 const sampling = Math.max(0, ['mis', 'light', 'bsdf'].indexOf(samplingName));
@@ -46,7 +48,17 @@ const device = await adapter.requestDevice({
 device.lost.then((info) => console.error('WebGPU device lost:', info.message));
 
 const context = /** @type {GPUCanvasContext} */ (canvas.getContext('webgpu'));
+// Remembered per browser, since some (Chrome on macOS, as of 154) say the
+// screen is HDR but then show HDR canvases clipped
 let hdr = matchMedia('(dynamic-range: high)').matches;
+try {
+  const saved = localStorage.getItem('anotherRaytracer.hdr');
+  if (saved) hdr = saved === 'on';
+} catch {
+  // Storage blocked; use the default
+}
+// In SDR, whether to ease bright areas into white instead of clipping them
+let toneMapping = true;
 const configure = () =>
   context.configure({
     device,
@@ -82,7 +94,7 @@ const displayPipeline = device.createRenderPipeline({
   fragment: {module: displayModule, targets: [{format: 'rgba16float'}]},
 });
 
-// Params in shaders.js: 4 × (vec3f + u32), then 5 scalars, padded to 16 bytes
+// Params in shaders.js: 4 × (vec3f + u32), then 6 scalars, padded to 16 bytes
 const paramsData = new ArrayBuffer(96);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
@@ -224,7 +236,9 @@ const render = () => {
   paramsU32[17] = scene.objects.length;
   paramsU32[18] = width;
   paramsU32[19] = height;
-  paramsF32[20] = hdr ? headroom : 1;
+  const toneMap = !hdr && toneMapping;
+  paramsF32[20] = hdr ? headroom : toneMap ? sdrWhite : 1;
+  paramsU32[21] = +toneMap;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -284,8 +298,9 @@ const loop = () => {
   stats.textContent =
     `${status} · ${samplesPerPixel} spp · ${rate.toFixed(0)} spp/s · ` +
     `${width}×${height} · ${sceneName} · sampling: ${samplingName} · ` +
-    `${hdr ? 'HDR' : 'SDR'} · drag: orbit · shift/right drag: pan · scroll: zoom · ` +
-    'r: reset view · h: HDR on/off · space: pause';
+    `${hdr ? 'HDR' : toneMapping ? 'SDR, tone mapped' : 'SDR, clipped'} · ` +
+    'drag: orbit · shift/right drag: pan · scroll: zoom · r: reset view · ' +
+    'h: HDR on/off · t: tone mapping on/off · space: pause';
   requestAnimationFrame(loop);
 };
 
@@ -338,9 +353,18 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'r') {
     resetCamera();
     cameraMoved();
+  } else if (e.key === 't') {
+    // Lights clamp differently with tone mapping, so start over
+    toneMapping = !toneMapping;
+    restart();
   } else if (e.key === 'h') {
     // Lights clamp to the screen's brightest, so start over
     hdr = !hdr;
+    try {
+      localStorage.setItem('anotherRaytracer.hdr', hdr ? 'on' : 'off');
+    } catch {
+      // Storage blocked; the choice lasts until reload
+    }
     configure();
     restart();
   }

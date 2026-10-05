@@ -33,8 +33,13 @@ struct Params {
   objectCount: u32,
   width: u32,
   height: u32,
-  /** The brightest the screen can show, as a multiple of white: 1 for SDR */
+  /**
+   * How bright lights may get, as a multiple of white: the screen's headroom
+   * in HDR, or in SDR, the brightness that tone mapping shows as white
+   */
   maxBrightness: f32,
+  /** 1 to ease brightness over 1 into white for SDR screens, 0 to clip */
+  toneMap: u32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -392,10 +397,24 @@ fn vertex(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   return vec4f(corners[i], 0., 1.);
 }
 
+/**
+ * Below the knee, brightness is left alone. Above it, it eases toward white
+ * instead of clipping, so bright areas keep their shading: 1 shows as 0.85,
+ * 2 as 0.99. Each channel eases separately, so very bright colors wash out
+ * toward white, like film.
+ */
+const KNEE = 0.6;
+fn toneMap(x: vec3f) -> vec3f {
+  let eased = KNEE + (1. - KNEE) * (1. - exp((KNEE - x) / (1. - KNEE)));
+  return select(x, eased, x > vec3f(KNEE));
+}
+
 @fragment
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let s = sums[u32(pos.y) * params.width + u32(pos.x)];
+  var color = s.rgb / max(s.w, 1.);
+  if (params.toneMap == 1u) { color = toneMap(color); }
   // The canvas takes sRGB-encoded values. In HDR, values over 1 are brighter
   // than white; in SDR the canvas clamps them.
-  return vec4f(pow(s.rgb / max(s.w, 1.), vec3f(1. / 2.2)), 1.);
+  return vec4f(pow(color, vec3f(1. / 2.2)), 1.);
 }`;
