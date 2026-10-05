@@ -10,9 +10,6 @@ export const MIRROR = 1;
 export const GLASS = 2;
 export const LIGHT = 3;
 
-/** Must match MAX_OBJECTS in shaders.js */
-export const MAX_OBJECTS = 16;
-
 /**
  * @typedef {{
  *   shape: number,
@@ -207,26 +204,17 @@ function veachScene() {
 export const scenes = {cornell: cornellScene, veach: veachScene};
 
 /**
- * Packs shapes into arrays of vec4s, one array per uniform in shaders.js.
- * @type {(objects: Shape[]) => Record<string, Float32Array>} */
-export const packObjects = (objects) => {
-  if (objects.length > MAX_OBJECTS) {
-    throw new Error(`At most ${MAX_OBJECTS} objects`);
-  }
-  /** @type {Record<string, (s: Shape) => number[]>} */
-  const fields = {
-    centerRadius: (s) => [...s.center, s.radius],
-    normalShape: (s) => [...s.normal, s.shape],
-    uHalf: (s) => [...s.u, s.halfWidth],
-    vHalf: (s) => [...s.v, s.halfHeight],
-    colorMaterial: (s) => [...s.color, s.material],
-    surface: (s) => [s.gloss, s.shininess, +s.oneSided, 0],
-  };
-  return Object.fromEntries(
-    Object.entries(fields).map(([name, get]) => {
-      const arr = new Float32Array(MAX_OBJECTS * 4);
-      objects.forEach((s, i) => arr.set(get(s), i * 4));
-      return [name, arr];
-    }),
+ * Packs shapes into the `Shape` structs of the `objects` buffer in shaders.js:
+ * six vec4s per shape.
+ * @type {(objects: Shape[]) => Float32Array} */
+export const packObjects = (objects) =>
+  new Float32Array(
+    objects.flatMap((s) => [
+      ...[...s.center, s.radius],
+      ...[...s.normal, s.shape],
+      ...[...s.u, s.halfWidth],
+      ...[...s.v, s.halfHeight],
+      ...[...s.color, s.material],
+      ...[s.gloss, s.shininess, +s.oneSided, 0],
+    ]),
   );
-};

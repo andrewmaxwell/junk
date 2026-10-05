@@ -1,5 +1,5 @@
 import {packObjects, scenes} from './scenes.js';
-import {displayShader, traceShader, vertexShader} from './shaders.js';
+import {displayShader, traceShader} from './shaders.js';
 
 const params = new URLSearchParams(location.search);
 /** 'cornell' (default) or 'veach'; see `scenes` in scenes.js */
@@ -12,84 +12,98 @@ const clamp = Number(params.get('clamp') ?? 20);
 const scale = Number(params.get('scale') ?? 1);
 /** Stop refining after this many samples per pixel */
 const maxSamples = Number(params.get('spp') ?? 4096);
+/**
+ * In HDR, how many times brighter than white lights may get. Browsers don't
+ * say how much headroom the screen has; brighter than it just clips.
+ */
+const headroom = Number(params.get('headroom') ?? 8);
 
 const scene = (scenes[sceneName] ?? scenes.cornell)();
-const sampling = ['mis', 'light', 'bsdf'].indexOf(samplingName);
+const sampling = Math.max(0, ['mis', 'light', 'bsdf'].indexOf(samplingName));
 
 const canvas = /** @type {HTMLCanvasElement} */ (
   document.querySelector('canvas')
 );
 const stats = /** @type {HTMLElement} */ (document.querySelector('#stats'));
 
-const gl = /** @type {WebGL2RenderingContext} */ (canvas.getContext('webgl2'));
-if (!gl || !gl.getExtension('EXT_color_buffer_float')) {
-  stats.textContent = 'This needs WebGL2 with float render targets.';
-  throw new Error('No float render targets');
-}
-
 ///////////////////////////////
-// GL setup
+// WebGPU setup
 ///////////////////////////////
 
-/** @type {(type: number, source: string) => WebGLShader} */
-const compile = (type, source) => {
-  const shader = /** @type {WebGLShader} */ (gl.createShader(type));
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    throw new Error(gl.getShaderInfoLog(shader) ?? 'compile failed');
-  }
-  return shader;
-};
-
-/** @type {(fragmentSource: string) => {program: WebGLProgram, uniforms: Record<string, WebGLUniformLocation | null>}} */
-const makeProgram = (fragmentSource) => {
-  const program = /** @type {WebGLProgram} */ (gl.createProgram());
-  gl.attachShader(program, compile(gl.VERTEX_SHADER, vertexShader));
-  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fragmentSource));
-  gl.bindAttribLocation(program, 0, 'corner');
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    throw new Error(gl.getProgramInfoLog(program) ?? 'link failed');
-  }
-  /** @type {Record<string, WebGLUniformLocation | null>} */
-  const uniforms = {};
-  const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
-  for (let i = 0; i < count; i++) {
-    const name = /** @type {WebGLActiveInfo} */ (
-      gl.getActiveUniform(program, i)
-    ).name.replace('[0]', '');
-    uniforms[name] = gl.getUniformLocation(program, name);
-  }
-  return {program, uniforms};
-};
-
-const tracer = makeProgram(traceShader);
-const display = makeProgram(displayShader);
-
-// One triangle that covers the whole screen
-gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-gl.bufferData(
-  gl.ARRAY_BUFFER,
-  new Float32Array([-1, -1, 3, -1, -1, 3]),
-  gl.STATIC_DRAW,
-);
-gl.enableVertexAttribArray(0);
-gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-// The scene doesn't change, so its uniforms are set once
-gl.useProgram(tracer.program);
-gl.uniform1i(tracer.uniforms.objectCount, scene.objects.length);
-for (const [name, values] of Object.entries(packObjects(scene.objects))) {
-  gl.uniform4fv(tracer.uniforms[name], values);
+const adapter = await navigator.gpu?.requestAdapter();
+if (!adapter) {
+  stats.textContent = 'This needs WebGPU.';
+  throw new Error('No WebGPU');
 }
-gl.uniform1i(tracer.uniforms.sampling, Math.max(0, sampling));
-gl.uniform1f(tracer.uniforms.maxIndirect, clamp || 1e30);
+const device = await adapter.requestDevice({
+  // The sums buffer is 16 bytes per pixel, which can pass the default limit
+  // on big screens
+  requiredLimits: {
+    maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+    maxBufferSize: adapter.limits.maxBufferSize,
+  },
+});
+device.lost.then((info) => console.error('WebGPU device lost:', info.message));
 
-// Two float textures holding running sums of samples, in alpha the count.
-// Each draw reads one and writes the other.
-/** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer}[]} */
-let targets = [];
+const context = /** @type {GPUCanvasContext} */ (canvas.getContext('webgpu'));
+let hdr = matchMedia('(dynamic-range: high)').matches;
+const configure = () =>
+  context.configure({
+    device,
+    // Float, so values over 1 survive to the screen
+    format: 'rgba16float',
+    alphaMode: 'opaque',
+    // 'extended' shows values over 1 as brighter than white
+    toneMapping: {mode: hdr ? 'extended' : 'standard'},
+  });
+configure();
+
+/** @type {(code: string) => GPUShaderModule} */
+const compile = (code) => {
+  const module = device.createShaderModule({code});
+  module.getCompilationInfo().then(({messages}) => {
+    for (const m of messages) {
+      console[m.type === 'error' ? 'error' : 'warn'](
+        `${m.lineNum}:${m.linePos} ${m.message}`,
+      );
+    }
+  });
+  return module;
+};
+
+const tracePipeline = device.createComputePipeline({
+  layout: 'auto',
+  compute: {module: compile(traceShader)},
+});
+const displayModule = compile(displayShader);
+const displayPipeline = device.createRenderPipeline({
+  layout: 'auto',
+  vertex: {module: displayModule},
+  fragment: {module: displayModule, targets: [{format: 'rgba16float'}]},
+});
+
+// Params in shaders.js: 4 × (vec3f + u32), then 5 scalars, padded to 16 bytes
+const paramsData = new ArrayBuffer(96);
+const paramsF32 = new Float32Array(paramsData);
+const paramsU32 = new Uint32Array(paramsData);
+const paramsBuffer = device.createBuffer({
+  size: paramsData.byteLength,
+  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+});
+
+const objectData = packObjects(scene.objects);
+const objectBuffer = device.createBuffer({
+  size: objectData.byteLength,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+device.queue.writeBuffer(objectBuffer, 0, objectData);
+
+/** @type {GPUBuffer | undefined} */
+let sumsBuffer;
+/** @type {GPUBindGroup} */
+let traceBindGroup;
+/** @type {GPUBindGroup} */
+let displayBindGroup;
 let width = 0;
 let height = 0;
 
@@ -98,28 +112,25 @@ const resize = () => {
   height = Math.max(1, Math.round(canvas.clientHeight * scale));
   canvas.width = width;
   canvas.height = height;
-  for (const {texture, framebuffer} of targets) {
-    gl.deleteTexture(texture);
-    gl.deleteFramebuffer(framebuffer);
-  }
-  targets = [0, 1].map(() => {
-    const texture = /** @type {WebGLTexture} */ (gl.createTexture());
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, width, height);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    const framebuffer = /** @type {WebGLFramebuffer} */ (
-      gl.createFramebuffer()
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,
-      gl.COLOR_ATTACHMENT0,
-      gl.TEXTURE_2D,
-      texture,
-      0,
-    );
-    return {texture, framebuffer};
+  sumsBuffer?.destroy();
+  sumsBuffer = device.createBuffer({
+    size: width * height * 16,
+    usage: GPUBufferUsage.STORAGE,
+  });
+  traceBindGroup = device.createBindGroup({
+    layout: tracePipeline.getBindGroupLayout(0),
+    entries: [
+      {binding: 0, resource: {buffer: paramsBuffer}},
+      {binding: 1, resource: {buffer: objectBuffer}},
+      {binding: 2, resource: {buffer: sumsBuffer}},
+    ],
+  });
+  displayBindGroup = device.createBindGroup({
+    layout: displayPipeline.getBindGroupLayout(0),
+    entries: [
+      {binding: 0, resource: {buffer: paramsBuffer}},
+      {binding: 1, resource: {buffer: sumsBuffer}},
+    ],
   });
   restart();
 };
@@ -179,72 +190,102 @@ let samplesPerFrame = 1;
 let paused = false;
 // True while the camera is moving, so frames stay quick
 let moving = false;
+// At most two frames are queued on the GPU: enough that it never waits for
+// the next, few enough that the camera stays responsive
+let framesInFlight = 0;
+// When the GPU last finished a frame
+let lastDone = 0;
+let startTime = performance.now();
 
 function restart() {
   frame = 0;
   samplesPerPixel = 0;
+  startTime = performance.now();
 }
 
-let lastTime = performance.now();
-let renderMs = 0;
+const render = () => {
+  const {position, forward, right, up} = cameraBasis();
+  const {zoom} = scene.camera;
+  paramsF32.set(position, 0);
+  paramsU32[3] = frame;
+  paramsF32.set(forward, 4);
+  paramsU32[7] = randomSeed++;
+  paramsF32.set(
+    right.map((r) => (r * zoom * width) / height),
+    8,
+  );
+  paramsU32[11] = samplesPerFrame;
+  paramsF32.set(
+    up.map((u) => u * zoom),
+    12,
+  );
+  paramsU32[15] = sampling;
+  paramsF32[16] = clamp || 1e30;
+  paramsU32[17] = scene.objects.length;
+  paramsU32[18] = width;
+  paramsU32[19] = height;
+  paramsF32[20] = hdr ? headroom : 1;
+  device.queue.writeBuffer(paramsBuffer, 0, paramsData);
+
+  const encoder = device.createCommandEncoder();
+  const trace = encoder.beginComputePass();
+  trace.setPipeline(tracePipeline);
+  trace.setBindGroup(0, traceBindGroup);
+  trace.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+  trace.end();
+
+  const display = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view: context.getCurrentTexture().createView(),
+        loadOp: 'clear',
+        storeOp: 'store',
+      },
+    ],
+  });
+  display.setPipeline(displayPipeline);
+  display.setBindGroup(0, displayBindGroup);
+  display.draw(3);
+  display.end();
+  device.queue.submit([encoder.finish()]);
+
+  frame++;
+  samplesPerPixel += samplesPerFrame;
+};
 
 const loop = () => {
-  const now = performance.now();
-  const dt = now - lastTime;
-  lastTime = now;
-
   const done = samplesPerPixel >= maxSamples;
-  if (!paused && !done) {
-    // Take more samples per frame while the GPU keeps up, fewer when it
-    // doesn't. Moving the camera goes back to one, to stay responsive.
+  if (framesInFlight < 2 && !paused && !done) {
     if (moving) samplesPerFrame = 1;
-    else if (frame > 2 && dt < 20) samplesPerFrame++;
-    else if (dt > 35) samplesPerFrame = Math.max(1, samplesPerFrame - 1);
     samplesPerFrame = Math.min(samplesPerFrame, maxSamples - samplesPerPixel);
-    // Ignore long gaps, like while the tab was hidden
-    if (frame) renderMs += Math.min(dt, 100);
-
-    const {position, forward, right, up} = cameraBasis();
-    const {zoom} = scene.camera;
-    const [read, write] = frame % 2 ? targets : [targets[1], targets[0]];
-    gl.useProgram(tracer.program);
-    gl.uniform3fv(tracer.uniforms.camPos, position);
-    gl.uniform3fv(tracer.uniforms.camForward, forward);
-    gl.uniform3fv(
-      tracer.uniforms.camRight,
-      right.map((r) => (r * zoom * width) / height),
-    );
-    gl.uniform3fv(
-      tracer.uniforms.camUp,
-      up.map((u) => u * zoom),
-    );
-    gl.uniform1i(tracer.uniforms.frame, frame);
-    gl.uniform1ui(tracer.uniforms.randomSeed, randomSeed++);
-    gl.uniform1i(tracer.uniforms.samplesPerFrame, samplesPerFrame);
-    gl.uniform1i(tracer.uniforms.previous, 0);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, read.texture);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, write.framebuffer);
-    gl.viewport(0, 0, width, height);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-    gl.useProgram(display.program);
-    gl.uniform1i(display.uniforms.sums, 0);
-    gl.bindTexture(gl.TEXTURE_2D, write.texture);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-    frame++;
-    samplesPerPixel += samplesPerFrame;
+    const wasMoving = moving;
     moving = false;
+    framesInFlight++;
+    const submitted = performance.now();
+    render();
+    device.queue.onSubmittedWorkDone().then(() => {
+      framesInFlight--;
+      // Take more samples per frame while the GPU keeps up, fewer when it
+      // doesn't. Moving the camera goes back to one, to stay responsive.
+      // It started on the GPU when submitted or when the one before it
+      // finished, whichever was later.
+      const now = performance.now();
+      const ms = now - Math.max(submitted, lastDone);
+      lastDone = now;
+      if (wasMoving) return;
+      if (ms < 25) samplesPerFrame++;
+      else if (ms > 40) samplesPerFrame = Math.max(1, samplesPerFrame - 1);
+    });
   }
 
   const status = done ? 'done' : paused ? 'paused' : 'rendering';
-  const rate = renderMs ? (samplesPerPixel / renderMs) * 1000 : 0;
+  const secs = (performance.now() - startTime) / 1000;
+  const rate = secs ? samplesPerPixel / secs : 0;
   stats.textContent =
     `${status} · ${samplesPerPixel} spp · ${rate.toFixed(0)} spp/s · ` +
     `${width}×${height} · ${sceneName} · sampling: ${samplingName} · ` +
-    'drag: orbit · shift/right drag: pan · scroll: zoom · r: reset view · space: pause';
+    `${hdr ? 'HDR' : 'SDR'} · drag: orbit · shift/right drag: pan · scroll: zoom · ` +
+    'r: reset view · h: HDR on/off · space: pause';
   requestAnimationFrame(loop);
 };
 
@@ -252,7 +293,6 @@ const loop = () => {
 const cameraMoved = () => {
   moving = true;
   restart();
-  renderMs = 0;
 };
 
 ///////////////////////////////
@@ -298,6 +338,11 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'r') {
     resetCamera();
     cameraMoved();
+  } else if (e.key === 'h') {
+    // Lights clamp to the screen's brightest, so start over
+    hdr = !hdr;
+    configure();
+    restart();
   }
 });
 new ResizeObserver(resize).observe(canvas);
