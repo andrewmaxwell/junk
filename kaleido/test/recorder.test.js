@@ -85,17 +85,30 @@ test('a roast is written as it happens, then finalized', async () => {
   const [ci, dry, fc, , , , drop] = d.timeindex;
   assert.ok(ci < dry && dry < fc && fc < drop);
   assert.equal(d.computed.DROP_time, side.drop.t);
+  // Events sit on the reading that caused them, so both files agree.
+  assert.equal(d.computed.DROP_BT, side.drop.BT);
+  assert.equal(d.computed.FCs_BT, side.fc.BT);
   assert.ok(d.computed.DROP_BT >= 207.4);
   assert.equal(d.title, 'Colombian Supremo (espresso)');
   assert.equal(d.roastbatchnr, 42);
   assert.deepEqual(d.weight, [155, 0, 'g']);
   assert.equal(d.signature, undefined, 'never claims to be from Artisan');
-  // The burner/air changes are there as Artisan events, in roast order.
+  // The burner/air changes are there as Artisan events, in roast order,
+  // ending with the burner off at the drop.
   const burner = d.specialevents
     .map((i, k) => [i, d.specialeventstype[k], d.specialeventsStrings[k]])
-    .filter(([i, type]) => type === 3 && i > ci && i <= drop)
+    .filter(([i, type]) => type === 3 && i > ci && i <= drop + 3)
     .map(([, , s]) => s);
-  assert.deepEqual(burner, ['Q55', 'Q45', 'Q40', 'Q35', 'Q30', 'Q25', 'Q15']);
+  assert.deepEqual(burner, [
+    'Q55',
+    'Q45',
+    'Q40',
+    'Q35',
+    'Q30',
+    'Q25',
+    'Q15',
+    'Q0',
+  ]);
   // The sidecar has what Artisan can't hold.
   assert.equal(side.steps.length, 6);
   assert.ok(side.steps.every((s, i) => i === 0 || s.t > side.steps[i - 1].t));

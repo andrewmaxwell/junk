@@ -171,11 +171,14 @@ const or = (x, missing) => (x == null || !Number.isFinite(x) ? missing : x);
 const EVENT_TYPES = {FC: 0, RC: 1, HP: 3};
 const eventValue = (pct) => pct / 10 + 1;
 
-// Index of the first sample at or after time t (ms), or null.
+// Index of the last sample at or before time t (ms), or null: the reading
+// an event was based on. (A drop is marked a moment after the reading that
+// triggered it; the next reading is 1.5 s later and ~0.5 °C hotter.)
 function indexAt(samples, t) {
-  if (t == null) return null;
-  const i = samples.findIndex((s) => s.t >= t);
-  return i < 0 ? null : i;
+  if (t == null || !samples.length || samples[0].t > t) return null;
+  let i = samples.length - 1;
+  while (samples[i].t > t) i--;
+  return i;
 }
 
 // batch: a session batch record. info: {beanName, batchPos, uuid, template}.
@@ -204,13 +207,15 @@ export function buildAlog(batch, {beanName, batchPos, uuid, template}) {
   const timeindex = [ci, dri ?? 0, fci ?? 0, 0, sci ?? 0, 0, dpi ?? 0, 0];
 
   // Control changes as Artisan events. The burner reads back the PID's duty
-  // in auto mode, so only manual-mode burner changes count.
+  // in auto mode, so only burner changes in manual mode count, plus the
+  // drop's burner-off (it arrives in the same reading as auto mode).
   const ev = {i: [], type: [], value: [], text: []};
   for (let i = 1; i < S.length; i++)
     for (const k of ['HP', 'FC', 'RC']) {
       const v = S[i][k];
       if (v == null || v === S[i - 1][k]) continue;
-      if (k === 'HP' && S[i].AH !== 0) continue;
+      const burnerOffLeavingManual = v === 0 && S[i - 1].AH === 0;
+      if (k === 'HP' && S[i].AH !== 0 && !burnerOffLeavingManual) continue;
       ev.i.push(i);
       ev.type.push(EVENT_TYPES[k]);
       ev.value.push(eventValue(v));
