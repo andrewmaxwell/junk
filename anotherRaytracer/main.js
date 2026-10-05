@@ -6,18 +6,24 @@ const pixels = width * height;
 // Leave some cores for everything else
 const threads = Math.max(1, Math.floor(navigator.hardwareConcurrency / 2));
 
-// Adaptive sampling: every pixel gets at least minSamples, then keeps getting
-// more only while its estimated noise is above noiseThreshold (in display
-// brightness, 0 to 1), up to maxSamples.
+// Adaptive sampling: every pixel gets at least minSamples, then each
+// tileSize × tileSize tile keeps getting more only while its estimated noise is
+// above noiseThreshold (in display brightness, 0 to 1), up to maxSamples.
 const minSamples = 32;
 const maxSamples = 2048;
-const noiseThreshold = 0.025;
+const noiseThreshold = 0.02;
+const tileSize = 8;
 
 const canvas = document.querySelector('canvas');
 const stats = document.querySelector('#stats');
 
+const params = new URLSearchParams(location.search);
 /** 'mis' (default), 'light' or 'bsdf'; see `sampling` in worker.js */
-const sampling = new URLSearchParams(location.search).get('sampling') ?? 'mis';
+const sampling = params.get('sampling') ?? 'mis';
+/** 'cornell' (default) or 'veach'; see `scenes` in worker.js */
+const scene = params.get('scene') ?? 'cornell';
+/** Cap on bounced light per sample; 0 for none. See `maxIndirect` in worker.js */
+const clamp = Number(params.get('clamp') ?? 20);
 
 // Per pixel: summed color, summed brightness and brightness squared (for
 // estimating noise), and sample count
@@ -44,36 +50,35 @@ const pixelNoise = (p) => {
 };
 
 // Which pixels still need samples
-const needsWork = new Uint8Array(pixels);
 const active = new Uint8Array(pixels);
 let activeCount = pixels;
 
+// Noise is judged per tile rather than per pixel: one pixel's noise estimate
+// is itself noisy, so pixels whose first samples happened to agree would stop
+// too early. Tiles stop as a unit, when the root-mean-square noise of their
+// pixels is low enough, so a few noisy pixels keep the whole tile going.
 const updateActive = () => {
-  for (let p = 0; p < pixels; p++) {
-    needsWork[p] = +(counts[p] < maxSamples && pixelNoise(p) > noiseThreshold);
-  }
-  // Also sample the neighbors of noisy pixels, so a pixel whose first samples
-  // happened to agree doesn't stop early next to one that's clearly noisy.
   activeCount = 0;
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const p = y * width + x;
-      let on = 0;
-      for (
-        let ny = Math.max(0, y - 1);
-        ny <= Math.min(height - 1, y + 1);
-        ny++
-      ) {
-        for (
-          let nx = Math.max(0, x - 1);
-          nx <= Math.min(width - 1, x + 1);
-          nx++
-        ) {
-          on |= needsWork[ny * width + nx];
+  for (let ty = 0; ty < height; ty += tileSize) {
+    for (let tx = 0; tx < width; tx += tileSize) {
+      const yEnd = Math.min(height, ty + tileSize);
+      const xEnd = Math.min(width, tx + tileSize);
+      let sumSq = 0;
+      let n = 0;
+      for (let y = ty; y < yEnd; y++) {
+        for (let x = tx; x < xEnd; x++) {
+          sumSq += pixelNoise(y * width + x) ** 2;
+          n++;
         }
       }
-      active[p] = on & +(counts[p] < maxSamples);
-      activeCount += active[p];
+      const on = Math.sqrt(sumSq / n) > noiseThreshold;
+      for (let y = ty; y < yEnd; y++) {
+        for (let x = tx; x < xEnd; x++) {
+          const p = y * width + x;
+          active[p] = +(on && counts[p] < maxSamples);
+          activeCount += active[p];
+        }
+      }
     }
   }
 };
@@ -98,7 +103,7 @@ const requestFrame = (w) => {
   if (isRunning()) {
     const mask = active.slice();
     pending.set(w, mask);
-    w.postMessage({width, height, sampling, active: mask});
+    w.postMessage({width, height, sampling, scene, clamp, active: mask});
   } else {
     idle.push(w);
   }
@@ -155,7 +160,12 @@ const heatmap = makeGradient([
 const toByte = (x) => gamma(x) * 255;
 const render = makeRenderer(canvas, width, height, (_, vals, p) => {
   const n = counts[p];
-  if (showHeatmap) return heatmap(Math.log2(n || 1) / Math.log2(maxSamples));
+  if (showHeatmap) {
+    // Dark purple at minSamples up to pale yellow at maxSamples, on a log scale
+    return heatmap(
+      Math.log(n / minSamples) / Math.log(maxSamples / minSamples),
+    );
+  }
   if (!n) return color(0, 0, 0);
   return color(
     toByte(vals[p * 3] / n),
@@ -196,7 +206,7 @@ const loop = () => {
         : `${done}% converged`;
     stats.textContent =
       `${status} · ${(totalSamples / pixels).toFixed(0)} avg spp · ${secs.toFixed(0)}s · ` +
-      `${threads} threads · sampling: ${sampling} · space: pause · h: sample heatmap`;
+      `${threads} threads · ${scene} · sampling: ${sampling} · space: pause · h: samples per pixel (${minSamples} purple → ${maxSamples} yellow)`;
   }
   requestAnimationFrame(loop);
 };

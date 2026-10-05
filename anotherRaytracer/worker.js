@@ -1,8 +1,12 @@
-// A path tracer for a scene of spheres. The math is written out on plain
-// numbers instead of vector objects: creating a new Vec3 for every operation
-// spent most of the time allocating and garbage collecting.
+// A path tracer for scenes of spheres and flat plates. The math is written
+// out on plain numbers instead of vector objects: creating a new Vec3 for
+// every operation spent most of the time allocating and garbage collecting.
 
 const EPSILON = 1e-4;
+
+// Shapes
+const SPHERE = 0;
+const PLATE = 1;
 
 // Materials
 const DIFFUSE = 0;
@@ -12,52 +16,200 @@ const LIGHT = 3;
 
 /**
  * @typedef {{
- *   radius: number, x: number, y: number, z: number,
+ *   shape: number,
+ *   x: number, y: number, z: number,
+ *   radius: number,
+ *   nx: number, ny: number, nz: number,
+ *   ux: number, uy: number, uz: number,
+ *   vx: number, vy: number, vz: number,
+ *   halfWidth: number, halfHeight: number,
  *   r: number, g: number, b: number,
  *   material: number,
- * }} Sphere
+ *   gloss: number,
+ *   shininess: number,
+ * }} Shape
+ * (x, y, z) is the center. Spheres use `radius`. Plates are rectangles with
+ * normal n, spanning halfWidth along u and halfHeight along v.
+ *
  * r, g, b is the surface color, or for lights, the emitted light.
+ *
+ * Diffuse surfaces can have a glossy coat, like plastic: `gloss` is the
+ * fraction of light it reflects (0 to 1), and `shininess` is how tight its
+ * reflections are (around 10 is satin, 1000 is nearly a mirror).
  */
 
-/** @type {(radius: number, center: number[], color: number[], material: number) => Sphere} */
-const sphere = (radius, [x, y, z], [r, g, b], material) => ({
-  radius,
-  x,
-  y,
-  z,
-  r,
-  g,
-  b,
-  material,
+/** Every shape has every field, so JS engines can optimize property access.
+ * @type {(fields: Partial<Shape>) => Shape} */
+const shape = (fields) => ({
+  shape: SPHERE,
+  x: 0,
+  y: 0,
+  z: 0,
+  radius: 0,
+  nx: 0,
+  ny: 0,
+  nz: 0,
+  ux: 0,
+  uy: 0,
+  uz: 0,
+  vx: 0,
+  vy: 0,
+  vz: 0,
+  halfWidth: 0,
+  halfHeight: 0,
+  r: 0,
+  g: 0,
+  b: 0,
+  material: DIFFUSE,
+  gloss: 0,
+  shininess: 0,
+  ...fields,
 });
 
-///////////////////////////////
-// Scene
-///////////////////////////////
+/** @type {(radius: number, center: number[], color: number[], material: number, gloss?: number, shininess?: number) => Shape} */
+const sphere = (
+  radius,
+  [x, y, z],
+  [r, g, b],
+  material,
+  gloss = 0,
+  shininess = 0,
+) => shape({radius, x, y, z, r, g, b, material, gloss, shininess});
 
-// Walls are huge spheres, which look flat from inside the room
-const wallRad = 1e5;
+/**
+ * A rectangle facing `normal`, which must be perpendicular to the x axis.
+ * It spans halfWidth along x.
+ * @type {(center: number[], normal: number[], halfWidth: number, halfHeight: number, color: number[], material: number, gloss?: number, shininess?: number) => Shape} */
+const plate = (
+  [x, y, z],
+  [nx, ny, nz],
+  halfWidth,
+  halfHeight,
+  [r, g, b],
+  material,
+  gloss = 0,
+  shininess = 0,
+) =>
+  // u is the x axis, and v = n × u
+  shape({
+    shape: PLATE,
+    x,
+    y,
+    z,
+    nx,
+    ny,
+    nz,
+    ux: 1,
+    vy: nz,
+    vz: -ny,
+    halfWidth,
+    halfHeight,
+    r,
+    g,
+    b,
+    material,
+    gloss,
+    shininess,
+  });
 
-/** @type {Sphere[]} */
-const spheres = [
-  sphere(wallRad, [wallRad, 50, 50], [0.2, 0.8, 0.2], DIFFUSE), // left wall
-  sphere(wallRad, [-99901, 50, 50], [0.2, 0.2, 0.8], DIFFUSE), // right wall
-  sphere(wallRad, [50, 50, wallRad - 150], [1, 1, 1], DIFFUSE), // far wall
-  sphere(wallRad, [50, wallRad, 50], [0.8, 0.2, 0.2], DIFFUSE), // floor
-  sphere(wallRad, [50, 100 - wallRad, 50], [0.8, 0.8, 0.2], DIFFUSE), // ceiling
-  sphere(12, [35, 74, 60], [25, 25, 25], LIGHT), // light
-  sphere(16.5, [27, 36.5, 47], [0.9, 0.9, 0.9], MIRROR), // mirror ball
-  sphere(20, [73, 25, 75], [0.9, 0.9, 0.9], GLASS), // glass ball
-  sphere(10, [60, 65, 0], [0.5, 0.5, 0.5], DIFFUSE), // upper matte ball
-  sphere(16, [20, 16, 160], [0.5, 0.5, 0.5], DIFFUSE), // lower left matte ball
-];
-const lights = spheres.filter((s) => s.material === LIGHT);
-
-const camera = {
-  position: [50, 50, 350],
-  direction: [0, -0.05, -1],
-  zoom: 0.5,
+/** @type {(v: number[]) => number[]} */
+const normalize = ([x, y, z]) => {
+  const len = Math.hypot(x, y, z);
+  return [x / len, y / len, z / len];
 };
+
+///////////////////////////////
+// Scenes
+///////////////////////////////
+
+/**
+ * @typedef {{
+ *   objects: Shape[],
+ *   camera: {position: number[], direction: number[], zoom: number, start: number},
+ * }} Scene
+ */
+
+/** @type {() => Scene} */
+function cornellScene() {
+  // Walls are huge spheres, which look flat from inside the room
+  const wallRad = 1e5;
+  return {
+    objects: [
+      sphere(wallRad, [wallRad, 50, 50], [0.2, 0.8, 0.2], DIFFUSE), // left wall
+      sphere(wallRad, [-99901, 50, 50], [0.2, 0.2, 0.8], DIFFUSE), // right wall
+      sphere(wallRad, [50, 50, wallRad - 150], [1, 1, 1], DIFFUSE), // far wall
+      sphere(wallRad, [50, wallRad, 50], [0.8, 0.2, 0.2], DIFFUSE, 0.2, 100), // floor
+      sphere(wallRad, [50, 100 - wallRad, 50], [0.8, 0.8, 0.2], DIFFUSE), // ceiling
+      sphere(12, [35, 74, 60], [25, 25, 25], LIGHT), // big light
+      sphere(1.5, [72, 55, 125], [400, 320, 220], LIGHT), // small warm light
+      sphere(16.5, [27, 36.5, 47], [0.9, 0.9, 0.9], MIRROR), // mirror ball
+      sphere(20, [73, 25, 75], [0.9, 0.9, 0.9], GLASS), // glass ball
+      sphere(10, [60, 65, 0], [0.5, 0.5, 0.5], DIFFUSE, 0.5, 30), // upper satin ball
+      sphere(16, [20, 16, 160], [0.3, 0.3, 0.35], DIFFUSE, 0.6, 2000), // lower left polished ball
+    ],
+    // Rays start 140 units in front of the camera, inside the room
+    camera: {
+      position: [50, 50, 350],
+      direction: [0, -0.05, -1],
+      zoom: 0.5,
+      start: 140,
+    },
+  };
+}
+
+/**
+ * The classic MIS test scene from Eric Veach's thesis: glossy plates, sharp
+ * at the top to rough at the bottom, reflecting lights of equal power, tiny on
+ * the left to large on the right. Light sampling is noisy where sharp plates
+ * reflect big lights; bounce sampling is noisy where rough plates reflect
+ * small lights; MIS handles both.
+ * @type {() => Scene} */
+function veachScene() {
+  const eye = [0, 2, 20];
+  const lightRow = [0, 5, -3];
+  /** @type {Shape[]} */
+  const objects = [
+    sphere(1e5, [0, -4 - 1e5, 0], [0.25, 0.25, 0.25], DIFFUSE), // floor
+  ];
+
+  const radii = [0.03, 0.1, 0.3, 0.9];
+  const colors = [
+    [1, 0.55, 0.45],
+    [1, 0.9, 0.5],
+    [0.55, 1, 0.6],
+    [0.5, 0.7, 1],
+  ];
+  radii.forEach((radius, i) => {
+    // Brightness ∝ 1 / area, so every light gives off the same total power
+    const power = 3.2 / (radius * radius);
+    const color = colors[i].map((c) => c * power);
+    const center = [-3.75 + 2.5 * i, lightRow[1], lightRow[2]];
+    objects.push(sphere(radius, center, color, LIGHT));
+  });
+
+  [10000, 1500, 250, 50].forEach((shininess, i) => {
+    const center = [0, 0.2 - 0.85 * i, -1.5 + 1.4 * i];
+    // Tilt each plate to reflect the camera's view up toward the lights
+    const toEye = normalize(eye.map((e, k) => e - center[k]));
+    const toLights = normalize(lightRow.map((l, k) => l - center[k]));
+    const normal = normalize(toEye.map((e, k) => e + toLights[k]));
+    objects.push(
+      plate(center, normal, 4.5, 0.4, [0, 0, 0], DIFFUSE, 1, shininess),
+    );
+  });
+
+  return {
+    objects,
+    camera: {position: eye, direction: [0, -0.06, -1], zoom: 0.6, start: 0},
+  };
+}
+
+/** @type {Record<string, Scene>} */
+const scenes = {cornell: cornellScene(), veach: veachScene()};
+
+// The current scene, set from the main thread via `?scene=`
+let {objects, camera} = scenes.cornell;
+let lights = objects.filter((s) => s.material === LIGHT);
 
 /**
  * How diffuse surfaces find light, set from the main thread via `?sampling=`:
@@ -67,6 +219,23 @@ const camera = {
  * @type {'bsdf' | 'light' | 'mis'} */
 let sampling = 'mis';
 
+/**
+ * Caps how bright one sample of bounced light can be, as a multiple of white.
+ * Rare paths like light -> glass -> wall -> camera are correct but very
+ * bright and hard to find, so without this they show up as speckles that take
+ * ages to average out. Capping them makes those effects (caustics, mostly) a
+ * bit dimmer than they should be. Direct light is never capped. Set from the
+ * main thread via `?clamp=`; 0 means no cap.
+ */
+let maxIndirect = 20;
+
+/** Scale factor that caps a bounced-light contribution at maxIndirect.
+ * @type {(r: number, g: number, b: number) => number} */
+function indirectScale(r, g, b) {
+  const brightest = Math.max(r, g, b);
+  return brightest > maxIndirect ? maxIndirect / brightest : 1;
+}
+
 ///////////////////////////////
 // Geometry helpers
 ///////////////////////////////
@@ -74,22 +243,39 @@ let sampling = 'mis';
 /** Distance to the hit found by the last call to intersect */
 let hitDist = 0;
 
-/** Index of the closest sphere hit by a ray, or -1. Sets hitDist.
+/** Index of the closest object hit by a ray, or -1. Sets hitDist.
  * @type {(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number) => number} */
 function intersect(ox, oy, oz, dx, dy, dz) {
   let hit = -1;
   hitDist = Infinity;
-  for (let i = 0; i < spheres.length; i++) {
-    const s = spheres[i];
+  for (let i = 0; i < objects.length; i++) {
+    const s = objects[i];
     const px = s.x - ox;
     const py = s.y - oy;
     const pz = s.z - oz;
-    const b = px * dx + py * dy + pz * dz;
-    let det = b * b - (px * px + py * py + pz * pz) + s.radius * s.radius;
-    if (det < 0) continue;
-    det = Math.sqrt(det);
-    let t = b - det;
-    if (t <= EPSILON) t = b + det;
+    let t = 0;
+    if (s.shape === SPHERE) {
+      const b = px * dx + py * dy + pz * dz;
+      let det = b * b - (px * px + py * py + pz * pz) + s.radius * s.radius;
+      if (det < 0) continue;
+      det = Math.sqrt(det);
+      t = b - det;
+      if (t <= EPSILON) t = b + det;
+    } else {
+      // Where the ray crosses the plate's plane, if that's within the plate
+      const facing = dx * s.nx + dy * s.ny + dz * s.nz;
+      if (!facing) continue;
+      t = (px * s.nx + py * s.ny + pz * s.nz) / facing;
+      const hx = dx * t - px;
+      const hy = dy * t - py;
+      const hz = dz * t - pz;
+      if (
+        Math.abs(hx * s.ux + hy * s.uy + hz * s.uz) > s.halfWidth ||
+        Math.abs(hx * s.vx + hy * s.vy + hz * s.vz) > s.halfHeight
+      ) {
+        continue;
+      }
+    }
     if (t > EPSILON && t < hitDist) {
       hitDist = t;
       hit = i;
@@ -134,7 +320,7 @@ function directionAround(wx, wy, wz, cosA, phi) {
 }
 
 /** Cosine of the half-angle of the cone of directions from a point that hit light.
- * @type {(px: number, py: number, pz: number, light: Sphere) => number} */
+ * @type {(px: number, py: number, pz: number, light: Shape) => number} */
 function lightConeCos(px, py, pz, light) {
   const lx = light.x - px;
   const ly = light.y - py;
@@ -151,12 +337,55 @@ function powerHeuristic(a, b) {
 }
 
 /** How much a light hit by a random diffuse bounce from (px, py, pz) should count.
- * @type {(px: number, py: number, pz: number, bouncePdf: number, light: Sphere) => number} */
+ * @type {(px: number, py: number, pz: number, bouncePdf: number, light: Shape) => number} */
 function bounceLightWeight(px, py, pz, bouncePdf, light) {
   if (sampling === 'bsdf') return 1;
   if (sampling === 'light') return 0; // light sampling already counted it
   const lightPdf = 1 / (2 * Math.PI * (1 - lightConeCos(px, py, pz, light)));
   return powerHeuristic(bouncePdf, lightPdf);
+}
+
+/** Scratch output for evalSurface, to avoid allocating */
+const bsdf = new Float64Array(3);
+
+/**
+ * For a diffuse (maybe glossy) surface, writes into `bsdf` how much light
+ * arriving from direction l it scatters toward the viewer, and returns the
+ * probability density that sampleSurface picks l.
+ * (rx, ry, rz) is the viewing direction mirrored about the normal, and
+ * cosTheta is the cosine between l and the normal.
+ * @type {(s: Shape, cosTheta: number, rx: number, ry: number, rz: number, lx: number, ly: number, lz: number) => number} */
+function evalSurface(s, cosTheta, rx, ry, rz, lx, ly, lz) {
+  const diffuse = (1 - s.gloss) / Math.PI;
+  let glossy = 0;
+  let glossyPdf = 0;
+  if (s.gloss) {
+    // Phong lobe: strongest in the mirror direction, falling off as
+    // cos(angle from it) ^ shininess
+    const cosAlpha = Math.max(0, rx * lx + ry * ly + rz * lz);
+    const lobe = cosAlpha ** s.shininess / (2 * Math.PI);
+    glossy = s.gloss * (s.shininess + 2) * lobe;
+    glossyPdf = (s.shininess + 1) * lobe;
+  }
+  bsdf[0] = diffuse * s.r + glossy;
+  bsdf[1] = diffuse * s.g + glossy;
+  bsdf[2] = diffuse * s.b + glossy;
+  // sampleSurface picks the glossy lobe with probability `gloss`
+  return (1 - s.gloss) * (cosTheta / Math.PI) + s.gloss * glossyPdf;
+}
+
+/**
+ * Picks a random bounce direction off a diffuse (maybe glossy) surface,
+ * written into `dir`: from the glossy lobe with probability `gloss`,
+ * otherwise favoring directions near the normal.
+ * @type {(s: Shape, nx: number, ny: number, nz: number, rx: number, ry: number, rz: number) => void} */
+function sampleSurface(s, nx, ny, nz, rx, ry, rz) {
+  const phi = 2 * Math.PI * Math.random();
+  if (Math.random() < s.gloss) {
+    directionAround(rx, ry, rz, Math.random() ** (1 / (s.shininess + 1)), phi);
+  } else {
+    directionAround(nx, ny, nz, Math.sqrt(1 - Math.random()), phi);
+  }
 }
 
 ///////////////////////////////
@@ -185,7 +414,7 @@ function trace(ox, oy, oz, dx, dy, dz, out) {
   for (let depth = 0; ; depth++) {
     const i = intersect(ox, oy, oz, dx, dy, dz);
     if (i < 0) break;
-    const s = spheres[i];
+    const s = objects[i];
 
     if (s.material === LIGHT) {
       const w = bouncePdf ? bounceLightWeight(ox, oy, oz, bouncePdf, s) : 1;
@@ -200,34 +429,33 @@ function trace(ox, oy, oz, dx, dy, dz, out) {
         eg = Math.min(1, eg);
         eb = Math.min(1, eb);
       }
-      r += tr * er;
-      g += tg * eg;
-      b += tb * eb;
+      er *= tr;
+      eg *= tg;
+      eb *= tb;
+      const k = seenByCamera ? 1 : indirectScale(er, eg, eb);
+      r += er * k;
+      g += eg * k;
+      b += eb * k;
       break; // lights don't reflect anything
     }
 
-    let cr = s.r;
-    let cg = s.g;
-    let cb = s.b;
     // Russian roulette: after a few bounces, end the path at random, and
     // boost the survivors to make up for the ones that ended
     if (depth >= 5) {
-      const p = Math.min(0.95, Math.max(cr, cg, cb));
+      const p = Math.min(0.95, Math.max(s.r, s.g, s.b) + s.gloss);
       if (Math.random() >= p) break;
-      cr /= p;
-      cg /= p;
-      cb /= p;
+      tr /= p;
+      tg /= p;
+      tb /= p;
     }
-    tr *= cr;
-    tg *= cg;
-    tb *= cb;
 
     const px = ox + dx * hitDist;
     const py = oy + dy * hitDist;
     const pz = oz + dz * hitDist;
-    const nx = (px - s.x) / s.radius;
-    const ny = (py - s.y) / s.radius;
-    const nz = (pz - s.z) / s.radius;
+    const isSphere = s.shape === SPHERE;
+    const nx = isSphere ? (px - s.x) / s.radius : s.nx;
+    const ny = isSphere ? (py - s.y) / s.radius : s.ny;
+    const nz = isSphere ? (pz - s.z) / s.radius : s.nz;
     // Normal facing the side the ray came from
     const into = nx * dx + ny * dy + nz * dz < 0;
     const nlx = into ? nx : -nx;
@@ -235,6 +463,13 @@ function trace(ox, oy, oz, dx, dy, dz, out) {
     const nlz = into ? nz : -nz;
 
     if (s.material === DIFFUSE) {
+      // Viewing direction mirrored about the normal, the center of the
+      // glossy lobe
+      const dn = 2 * (dx * nlx + dy * nly + dz * nlz);
+      const rx = dx - nlx * dn;
+      const ry = dy - nly * dn;
+      const rz = dz - nlz * dn;
+
       // Direct light: aim a ray at each light rather than waiting for a
       // random bounce to stumble into one.
       for (const light of sampling === 'bsdf' ? [] : lights) {
@@ -255,30 +490,49 @@ function trace(ox, oy, oz, dx, dy, dz, out) {
         if (cosSurface <= 0) continue; // light is behind this surface
 
         // Shadow ray: only counts if nothing is in the way
-        if (spheres[intersect(px, py, pz, dir[0], dir[1], dir[2])] !== light) {
+        if (objects[intersect(px, py, pz, dir[0], dir[1], dir[2])] !== light) {
           continue;
         }
 
-        // radiance * cos(theta) * BRDF (1/pi) / pdf (1/solidAngle)
+        // radiance * BSDF * cos(theta) / pdf (1/solidAngle)
         const solidAngle = 2 * Math.PI * (1 - cosMax);
+        const pdf = evalSurface(
+          s,
+          cosSurface,
+          rx,
+          ry,
+          rz,
+          dir[0],
+          dir[1],
+          dir[2],
+        );
         const weight =
-          sampling === 'mis'
-            ? powerHeuristic(1 / solidAngle, cosSurface / Math.PI)
-            : 1;
-        const f = (weight * cosSurface * solidAngle) / Math.PI;
-        r += tr * light.r * f;
-        g += tg * light.g * f;
-        b += tb * light.b * f;
+          sampling === 'mis' ? powerHeuristic(1 / solidAngle, pdf) : 1;
+        const f = weight * cosSurface * solidAngle;
+        const lr = tr * light.r * bsdf[0] * f;
+        const lg = tg * light.g * bsdf[1] * f;
+        const lb = tb * light.b * bsdf[2] * f;
+        // Light reaching the first surface the camera sees is direct light
+        const k = seenByCamera ? 1 : indirectScale(lr, lg, lb);
+        r += lr * k;
+        g += lg * k;
+        b += lb * k;
       }
 
-      // Indirect light: bounce in a random direction, favoring ones near the
-      // normal, with density cos(theta) / pi. If this hits a light,
+      // Indirect light: bounce in a random direction. If this hits a light,
       // bounceLightWeight keeps it from being double counted with the above.
-      const cosA = Math.sqrt(1 - Math.random());
-      directionAround(nlx, nly, nlz, cosA, 2 * Math.PI * Math.random());
-      bouncePdf = cosA / Math.PI;
+      sampleSurface(s, nlx, nly, nlz, rx, ry, rz);
+      const cosTheta = dir[0] * nlx + dir[1] * nly + dir[2] * nlz;
+      if (cosTheta <= 0) break; // glossy lobe pointed into the surface
+      bouncePdf = evalSurface(s, cosTheta, rx, ry, rz, dir[0], dir[1], dir[2]);
+      tr *= (bsdf[0] * cosTheta) / bouncePdf;
+      tg *= (bsdf[1] * cosTheta) / bouncePdf;
+      tb *= (bsdf[2] * cosTheta) / bouncePdf;
       seenByCamera = false;
     } else {
+      tr *= s.r;
+      tg *= s.g;
+      tb *= s.b;
       bouncePdf = 0;
       const dn = 2 * (dx * nx + dy * ny + dz * nz);
       dir[0] = dx - nx * dn;
@@ -335,10 +589,13 @@ function trace(ox, oy, oz, dx, dy, dz, out) {
 
 /**
  * Renders one sample for each pixel whose `active` entry is nonzero.
- * @type {(e: MessageEvent<{width: number, height: number, sampling: typeof sampling, active?: Uint8Array}>) => void} */
+ * @type {(e: MessageEvent<{width: number, height: number, sampling: typeof sampling, scene: string, clamp: number, active?: Uint8Array}>) => void} */
 self.onmessage = ({data}) => {
   const {width, height, active} = data;
   sampling = data.sampling;
+  maxIndirect = data.clamp || Infinity;
+  ({objects, camera} = scenes[data.scene] ?? scenes.cornell);
+  lights = objects.filter((s) => s.material === LIGHT);
   const res = new Float32Array(width * height * 3);
   const color = new Float64Array(3);
 
@@ -369,8 +626,16 @@ self.onmessage = ({data}) => {
       dx /= dLen;
       dy /= dLen;
       dz /= dLen;
-      // Start past the camera's position, inside the room
-      trace(cx + dx * 140, cy + dy * 140, cz + dz * 140, dx, dy, dz, color);
+      const start = camera.start;
+      trace(
+        cx + dx * start,
+        cy + dy * start,
+        cz + dz * start,
+        dx,
+        dy,
+        dz,
+        color,
+      );
       res[p * 3] = color[0];
       res[p * 3 + 1] = color[1];
       res[p * 3 + 2] = color[2];
