@@ -23,6 +23,7 @@ let ws = null;
 let mic = null; // {stop, pops: [ms], level}
 let serverUp = false;
 let lostServer = false; // a connection failed or dropped (not just loading)
+let restarting = false; // the server said it's restarting on purpose
 
 // ---- server connection
 
@@ -30,6 +31,7 @@ function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = () => {
     serverUp = true;
+    restarting = false;
     renderBar();
   };
   ws.onmessage = ({data}) => handle(JSON.parse(data));
@@ -87,6 +89,8 @@ function handle(msg) {
     say(msg.text, msg.urgent);
   } else if (msg.type === 'chime') {
     chime(msg.kind);
+  } else if (msg.type === 'restarting') {
+    restarting = true;
   } else if (msg.type === 'error') {
     toast(msg.message);
   }
@@ -170,6 +174,8 @@ function renderStop() {
 function renderBar() {
   const conn = $('conn');
   $('offline').className = !serverUp && lostServer ? 'on' : '';
+  $('offlineCrash').hidden = restarting;
+  $('offlineRestart').hidden = !restarting;
   $('bar').classList.toggle('stale', !serverUp || !state?.connected);
   if (!serverUp) {
     if (lostServer) document.title = 'Not connected · Kaleido';

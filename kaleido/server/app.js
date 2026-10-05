@@ -89,20 +89,22 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
   function save() {
     changed();
     if (saveTimer) return;
-    saveTimer = setTimeout(() => {
-      saveTimer = null;
-      if (!session) return;
-      // A failed save only costs the resume-after-restart; it mustn't
-      // become an uncaught exception, which turns the heater off.
-      try {
-        const data = {savedAt: clock.now(), state: session.toJSON()};
-        fs.mkdirSync(logsDir, {recursive: true});
-        fs.writeFileSync(`${stateFile}.tmp`, JSON.stringify(data));
-        fs.renameSync(`${stateFile}.tmp`, stateFile);
-      } catch (err) {
-        console.error(`couldn't save the session: ${err.message}`);
-      }
-    }, 200);
+    saveTimer = setTimeout(saveNow, 200);
+  }
+  function saveNow() {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    if (!session) return;
+    // A failed save only costs the resume-after-restart; it mustn't become
+    // an uncaught exception, which turns the heater off.
+    try {
+      const data = {savedAt: clock.now(), state: session.toJSON()};
+      fs.mkdirSync(logsDir, {recursive: true});
+      fs.writeFileSync(`${stateFile}.tmp`, JSON.stringify(data));
+      fs.renameSync(`${stateFile}.tmp`, stateFile);
+    } catch (err) {
+      console.error(`couldn't save the session: ${err.message}`);
+    }
   }
 
   // Resume a session that was cut off (not in the sim: the simulated
@@ -307,5 +309,11 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
       `kaleido: http://localhost:${port}/  (${sim ? 'simulated roaster' : 'real roaster'})`,
     ),
   );
-  return {server, getSession: () => session};
+  return {
+    server,
+    getSession: () => session,
+    saveNow,
+    // Tell the browsers it's a planned restart, not a crash.
+    restarting: () => broadcast({type: 'restarting'}),
+  };
 }
