@@ -6,8 +6,6 @@ This project is **not** a plain static page like the rest of the repo. It needs 
 
 ## Layout
 
-Files marked * aren't built yet.
-
 ```
 server/
   main.js        node kaleido/server/main.js [--sim [--speed 10]]: the app at http://localhost:3100/
@@ -45,7 +43,6 @@ beans.json            canonical bean slugs → name, supplier, old filename alia
 logs/                 .alog + .json sidecar per roast
 logs-sim/             what --sim runs write (gitignored)
 selftests/            self-test reports from the real roaster
-analyze.js *          prints a compact summary of one or more roasts for Claude
 ```
 
 ## Session behavior
@@ -102,7 +99,8 @@ A procedure's `variants` (e.g. `espresso`, `pourover`) are a shallow override of
 3. ✅ `alog.js` + `recorder.js`. Output passes Artisan's own type validation; still to do: open one in Artisan by hand.
 4. ✅ `selftest.js`, run on the real roaster (reports in `selftests/`; results under "Measured on this roaster" and the protocol facts below).
 5. ✅ The browser UI and pop detection (tested in Chrome against the sim; the mic detector is untested against real cracks).
-6. `analyze.js`.
+
+There's deliberately no `analyze.js`: Claude analyzes roasts directly (see below). Write one only if analyses start disagreeing with each other or comparing many roasts gets slow.
 
 ## UI
 
@@ -202,10 +200,19 @@ When asked to analyze roasts or improve a procedure:
 
 Resolve bean names through `beans.json` (old filenames use inconsistent spellings). Roast numbers aren't unique in old logs (#7 and #25 appear twice); identify by filename when ambiguous.
 
-1. Run `node kaleido/analyze.js <roast#...>` to get a summary instead of reading raw `.alog` files. They're large. The summary covers the phase times, FC and drop temp, development time and %, the RoR curve and any crash or flick, which steps fired and when, overrides, weight loss, and tasting notes.
-2. Compare the roast to that bean's earlier roasts and to the procedure's `reference`.
-3. Propose concrete edits to `procedures/<bean>.json`, and explain the reasoning in terms of the curve and the tasting notes. Prefer one or two changes per iteration, so cause and effect stay readable.
-4. After the user agrees, apply the edits and append a `history` entry (`date`, `afterRoast`, `change`, `why`).
+1. Get the facts:
+   - **App roasts (#38 on)** have a sidecar `#N_….json` (about 5 KB). Read it: charge, TP, FC, SC, drop (with its `reason`), each step with its time and BT, overrides, alerts, weights, and notes. All times are seconds since charge.
+   - **The curve** is in the `.alog` (90–130 KB, mostly sample arrays). Don't read it raw. Write a small one-off script with `readAlog()` and `channels()` from `server/alog.js`, which gives `t` (seconds since the start of the log), `BT`, `ET`, `HP`, `FC`, and so on. `timeindex` gives sample indices for `[CHARGE, DRY, FCs, FCe, SCs, SCe, DROP, COOL]` (0 = unset).
+   - **Older Artisan roasts** have no sidecar. Take events from `timeindex`, weights from `weight` (`[in, out, unit]`), and Artisan's own numbers from `computed`.
+2. Compute these the same way every time, so roasts stay comparable:
+   - **Phases**, measured from charge: drying ends at DRY (the first BT ≥ 152 °C after the TP), Maillard runs from DRY to FC, and development from FC to the drop.
+   - **Development %** = (drop − FC) / drop × 100. The UI uses the same formula.
+   - **RoR** = `rateOfRise()` from `server/procedure.js`: a 30 s least-squares slope in °C/min, the same one the app shows. It takes samples as `{t, BT}` with `t` in **ms**, so multiply `.alog` times by 1000. Report it every 30 s from 1 minute after the TP to the drop.
+   - **Crash and flick:** consecutive 30 s readings jump by about ±1.5 °C/min from noise alone, so judge them against the bean's earlier roasts, not fixed thresholds. Recent Colombian Supremo roasts (#30, #31, #37, #38) all fall 3–4 °C/min in the minute after FC, then rise 1.5–2 °C/min around 8.5–9 minutes, so that's normal for this bean on this machine. Call out a crash or flick only when it's clearly bigger than the bean's usual.
+   - **Weight loss** = (in − out) / in × 100.
+3. Compare the roast to that bean's earlier roasts (within the same variant, for drop and development) and to the procedure's `reference`.
+4. Propose concrete edits to `procedures/<bean>.json`, and explain the reasoning in terms of the curve and the tasting notes. Prefer one or two changes per iteration, so cause and effect stay readable.
+5. After the user agrees, apply the edits and append a `history` entry (`date`, `afterRoast`, `change`, `why`).
 
 ## Drafting a procedure for a new bean
 
