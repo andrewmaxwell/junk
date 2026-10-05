@@ -314,7 +314,5 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
     server,
     getSession: () => session,
     saveNow,
-    // Tell the browsers it's a planned restart, not a crash.
-    restarting: () => broadcast({type: 'restarting'}),
   };
 }

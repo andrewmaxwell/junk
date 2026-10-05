@@ -32,8 +32,6 @@ server/
                  patches weight out / tasting notes in later
   stop.js        emergency stop (heater off) for when the app is gone: emergencyStop()
   guardian.js    separate process: heater off if the app dies or hangs
-  supervisor.js  what `main.js` becomes on the real roaster: runs the app as a child, restarts
-                 it after a crash, and (once the tests pass) when its code changes
   selftest.js    empty-drum hardware checks (main.js --selftest); reports go to selftests/
 test/            node --test kaleido/test/*.test.js
 index.html, main.js   browser UI: readouts, charts, side panel of actions, alarm banner
@@ -150,15 +148,9 @@ The M1 LITE can only be controlled over USB, so if our process dies with the bur
 - If the app dies (crash or kill -9), the guardian grabs the freed port and runs `emergencyStop()` from `stop.js`, then says so with macOS `say`.
 - If the app hangs (heartbeat older than 15 s), the guardian kills it first, then does the same.
 - On a clean exit, the app deletes the heartbeat, but only after the heater is confirmed off. If that confirmation fails, the guardian tries again.
-- The heartbeat file holds the app's pid. After a restart, the old app's guardian sees a different pid, so it knows a new app took over and exits without touching the port or the file. The app stops its heartbeat timer before deleting the file on the way out, or one last beat would write it back and make its own guardian think it crashed.
+- The heartbeat file holds the app's pid. If you restart the app while the old guardian is still busy, it sees a different pid, knows a new app took over, and exits without touching the port or the file. The app stops its heartbeat timer before deleting the file on the way out, or one last beat would write it back and make its own guardian think it crashed.
 - Its log is `logs/.guardian.log`.
 - Verified on the real roaster with kill -9: the heater was off within about 2 s.
-
-**Restarts (`supervisor.js`).** On the real roaster, `main.js` is a small supervisor, and the app runs as its child (`--child`). `--no-supervisor` turns this off.
-- **After a crash** (or the guardian killing a hung app), it waits for the guardian to finish (the heartbeat file disappears), then restarts at once. The saved session resumes, mid-roast included. A crash means the heater has been off since, so speed matters. More than 3 crashes in 10 minutes means a bug, so it stops and says so out loud.
-- **When `server/*.js`, `preheat.json`, or `beans.json` changes,** it runs the tests. If they pass, it asks the app to restart, and the app waits until no batch is at stake (`safeToRestart`): no session, PREHEAT with no batch record open, SHUTDOWN, or OFF. Never ROASTING. Never READY either, because READY resumes as PREHEAT, and beans poured in during PREHEAT aren't detected. If the tests fail, the old code keeps running.
-- **A quit** (exit 0, SIGTERM, or Ctrl-C within the last 10 s) isn't restarted.
-- Browser files (`index.html`, `main.js`, `ui/`) need only a page reload, not a restart.
 
 `main.js` also runs `caffeinate -is` while the app is up. Still not covered: the laptop losing power, or the lid closing. Leave the lid open.
 

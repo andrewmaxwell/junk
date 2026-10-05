@@ -82,25 +82,40 @@ export function rateOfRise(samples, windowMs = 30_000, key = 'BT') {
 // still hotter than it needs to be, and real second batches were charged with
 // ET falling 0.5-1.5 °C/min, after a 5-8 minute preheat.
 export function preheatStable(samples, sv, cfg) {
+  return preheatProgress(samples, sv, cfg).ready;
+}
+
+// Where preheat stands, for the check above and for the UI (which shows
+// exactly this, so it can't disagree with the server):
+//   heldMs   how long BT has been in the band, from these samples
+//   etRise   ET's rate (°C/min): the larger of the window's and its second
+//            half's
+//   ready    BT held the whole window, and ET isn't rising
+export function preheatProgress(samples, sv, cfg) {
   const windowMs = cfg.forSeconds * 1000;
-  if (!samples.length) return false;
+  if (!samples.length) return {heldMs: 0, etRise: null, ready: false};
   const tEnd = samples.at(-1).t;
+  const inBand = (s) => s.BT != null && Math.abs(s.BT - sv) <= cfg.btWithinC;
+  let i = samples.length - 1;
+  while (i > 0 && inBand(samples[i]) && inBand(samples[i - 1])) i--;
+  const heldMs = inBand(samples.at(-1)) ? tEnd - samples[i].t : 0;
   const recent = samples.filter((s) => tEnd - s.t <= windowMs);
-  if (recent[0].t > tEnd - windowMs + 5000) return false; // not enough history
-  if (recent.some((s) => s.BT == null || Math.abs(s.BT - sv) > cfg.btWithinC))
-    return false;
   // ET must be flat over the whole window AND its second half. When BT first
   // reaches SV, ET overshoots, dips, then climbs for ~10 more minutes while
   // the drum soaks; one line fit across that dip-and-climb reads as flat
   // (real first batch, 2026-10-04: "ready" after 7 min with ET climbing
   // 2.5 °C/min, 10 °C short of where real charges were).
-  const etRise = rateOfRise(recent, windowMs, 'ET');
-  const etRiseLately = rateOfRise(recent, windowMs / 2, 'ET');
-  return (
+  const rates = [
+    rateOfRise(recent, windowMs, 'ET'),
+    rateOfRise(recent, windowMs / 2, 'ET'),
+  ];
+  const etRise = rates.includes(null) ? null : Math.max(...rates);
+  const ready =
+    recent[0].t <= tEnd - windowMs + 5000 && // enough history
+    recent.every(inBand) &&
     etRise != null &&
-    etRiseLately != null &&
-    Math.max(etRise, etRiseLately) <= cfg.maxEtRiseCPerMin
-  );
+    etRise <= cfg.maxEtRiseCPerMin;
+  return {heldMs, etRise, ready};
 }
 
 // Follows a procedure through one roast, sample by sample. feed() returns the

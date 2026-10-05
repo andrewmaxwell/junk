@@ -23,7 +23,6 @@ let ws = null;
 let mic = null; // {stop, pops: [ms], level}
 let serverUp = false;
 let lostServer = false; // a connection failed or dropped (not just loading)
-let restarting = false; // the server said it's restarting on purpose
 
 // ---- server connection
 
@@ -31,7 +30,6 @@ function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = () => {
     serverUp = true;
-    restarting = false;
     renderBar();
   };
   ws.onmessage = ({data}) => handle(JSON.parse(data));
@@ -89,8 +87,6 @@ function handle(msg) {
     say(msg.text, msg.urgent);
   } else if (msg.type === 'chime') {
     chime(msg.kind);
-  } else if (msg.type === 'restarting') {
-    restarting = true;
   } else if (msg.type === 'error') {
     toast(msg.message);
   }
@@ -174,8 +170,6 @@ function renderStop() {
 function renderBar() {
   const conn = $('conn');
   $('offline').className = !serverUp && lostServer ? 'on' : '';
-  $('offlineCrash').hidden = restarting;
-  $('offlineRestart').hidden = !restarting;
   $('bar').classList.toggle('stale', !serverUp || !state?.connected);
   if (!serverUp) {
     if (lostServer) document.title = 'Not connected · Kaleido';
@@ -631,7 +625,7 @@ function renderLive(s) {
   if (!state) return;
   const b = state.batch;
   const pre = $('preheatInfo');
-  if (pre) pre.textContent = preheatProgress();
+  if (pre) pre.textContent = preheatText(s);
   const shut = $('shutdownInfo');
   if (shut) {
     const eta = coolingEta(60);
@@ -651,25 +645,22 @@ function renderLive(s) {
   renderHint();
 }
 
-// How close preheat is to "ready" (the server decides; this just shows it):
-// how long BT has held near the setpoint, and whether ET is still rising.
-function preheatProgress() {
-  const last = samples.at(-1);
-  if (!last) return '';
-  const {sv, forSeconds, btWithinC, maxEtRiseCPerMin} = state.preheat;
+// How close preheat is to "ready", exactly as the server counts it (the
+// reading's `preheat`, from session.js preheatStatus). After a server
+// restart its count starts over, and so does this.
+function preheatText(s) {
+  const p = s.preheat;
+  if (!p) return '';
+  const {sv, forSeconds, maxEtRiseCPerMin} = state.preheat;
   const forMs = forSeconds * 1000;
-  let i = samples.length - 1;
-  while (i > 0 && Math.abs(samples[i - 1].BT - sv) <= btWithinC) i--;
-  const held = Math.abs(last.BT - sv) <= btWithinC ? last.t - samples[i].t : 0;
-  const recent = samples.filter((x) => last.t - x.t <= forMs);
-  const etRise = slope(recent, 'ET');
   const et =
-    etRise == null
+    p.etRise == null
       ? ''
-      : etRise > maxEtRiseCPerMin
-        ? ` · ET still rising ${f(etRise, 1)}°/min (drum soaking up heat)`
+      : p.etRise > maxEtRiseCPerMin
+        ? ` · ET still rising ${f(p.etRise, 2)}°/min, ready at ${maxEtRiseCPerMin} (drum soaking up heat)`
         : ' · ET steady';
-  return `BT ${f(last.BT, 1)}°, steady at ${sv}° for ${mmss(Math.min(held, forMs))} of ${mmss(forMs)}${et}`;
+  const waiting = p.waitingFor ? ` · waiting for ${p.waitingFor}` : '';
+  return `BT ${f(s.BT, 1)}°, steady at ${sv}° for ${mmss(Math.min(p.heldMs, forMs))} of ${mmss(forMs)}${et}${waiting}`;
 }
 
 // Roughly how long (ms) until BT cools to target: exponential decay toward

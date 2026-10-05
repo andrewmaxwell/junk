@@ -82,7 +82,7 @@ test("a restarted app's heartbeat is left to its own guardian", async () => {
 
 test('stops retrying once a restarted app takes over, without crying wolf', async () => {
   // Our app crashed (its pid is still in the heartbeat); the stop can't get
-  // the port because the supervisor's new app already has it.
+  // the port because a restarted app already has it.
   const {opts, calls, heartbeatFile} = setup({
     alive: false,
     stopResults: [{ok: false, message: 'busy'}],

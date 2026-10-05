@@ -19,11 +19,6 @@
 // Self-test: the empty-drum hardware checks in selftest.js. Asks before it
 // fires the burner. The report goes to kaleido/selftests/ (logs-sim/ for --sim).
 //   node kaleido/server/main.js --selftest [--no-heat] [--no-cable] [--sim]
-//
-// The app on the real roaster runs under supervisor.js, which restarts it
-// after a crash and (once the tests pass) when its code changes. This
-// process becomes the supervisor and runs the app as a child (--child).
-// --no-supervisor runs the app directly.
 
 import fs from 'fs';
 import {createClock} from './clock.js';
@@ -39,25 +34,12 @@ import readline from 'readline';
 import {spawn} from 'child_process';
 import {HEARTBEAT_MS} from './guardian.js';
 import {startApp} from './app.js';
-import {supervise, safeToRestart, RESTART} from './supervisor.js';
 
 const args = process.argv.slice(2);
 const SIM = args.includes('--sim');
 const AUTOPILOT = SIM && args.includes('--autopilot');
 const SELFTEST = args.includes('--selftest');
 const MONITOR = args.includes('--monitor');
-
-if (!SIM && !SELFTEST && !MONITOR && !args.includes('--child')) {
-  if (!args.includes('--no-supervisor')) {
-    await supervise({
-      script: new URL(import.meta.url).pathname,
-      args,
-      root: new URL('..', import.meta.url).pathname,
-      heartbeatFile: new URL('../logs/.heartbeat', import.meta.url).pathname,
-    });
-    process.exit();
-  }
-}
 const portArg = args.indexOf('--port');
 const PORT = portArg >= 0 ? Number(args[portArg + 1]) : 3100;
 const speedArg = args.indexOf('--speed');
@@ -129,21 +111,6 @@ else if (MONITOR) {
   app = startApp({machine, clock, sim, port: PORT, logsDir: dir.pathname});
 }
 machine.run();
-
-// The supervisor asks for a restart when the code changes. Wait until no
-// batch is at stake (supervisor.js: safeToRestart), then exit for it.
-process.on('message', (msg) => {
-  if (msg?.type !== 'restartWhenSafe' || !app) return;
-  log('new code: restarting when no batch is at stake');
-  const timer = setInterval(async () => {
-    if (quitting || !safeToRestart(app.getSession())) return;
-    clearInterval(timer);
-    quitting = true;
-    log('restarting to load the new code');
-    app.restarting();
-    await heaterOffAndExit(RESTART, {cool: false});
-  }, 1000);
-});
 
 function runAutopilot() {
   const preheat = JSON.parse(
@@ -259,15 +226,13 @@ async function runSelfTestCLI() {
 // (air and drum keep running while it's hot). Monitor mode never touches the
 // controls, so it doesn't start now. Not covered: kill -9, power loss, the
 // laptop sleeping (see caffeinate below); for those, kaleido/server/stop.js.
-// cool: false leaves the air and drum as they are (a planned restart; the
-// session that resumes sets them).
-async function heaterOffAndExit(code, {cool = true} = {}) {
+async function heaterOffAndExit(code) {
   const active =
     SELFTEST ||
     (app && !['IDLE', 'OFF'].includes(app.getSession()?.phase ?? 'IDLE'));
   let confirmed = false;
   if (!MONITOR && !AUTOPILOT && machine.connected) {
-    const hot = cool && active && machine.state.BT >= 60;
+    const hot = active && machine.state.BT >= 60;
     machine.set({HS: 0, AH: 0, HP: 0, ...(hot && {FC: 100, RC: 90})});
     const end = Date.now() + 5000;
     while (!machine.settled() && Date.now() < end)

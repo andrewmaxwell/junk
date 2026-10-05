@@ -21,7 +21,7 @@
 //   'off'                     shutdown finished; everything is off
 
 import {EventEmitter} from 'events';
-import {RoastTracker, preheatStable, rateOfRise} from './procedure.js';
+import {RoastTracker, preheatProgress, rateOfRise} from './procedure.js';
 
 export const SHUTDOWN = {air: 100, coolBelowC: 60};
 const KEEP_RECENT_MS = 10 * 60_000; // samples kept for stability/RoR checks
@@ -272,9 +272,13 @@ export class Session extends EventEmitter {
     this.log.push(s);
     const ror = rateOfRise(this.recent);
     const roastMs = this.batch?.charge ? s.t - this.batch.charge.t : null;
-    this.emit('sample', {...s, ror, phase: this.phase, roastMs});
+    const preheat = this.phase === 'PREHEAT' ? this.preheatStatus() : null;
+    this.emit('sample', {...s, ror, phase: this.phase, roastMs, preheat});
 
-    if (this.phase === 'PREHEAT') this.checkPreheat();
+    // (A sample listener can change the phase, so the status computed above
+    // may not exist.)
+    if (this.phase === 'PREHEAT')
+      this.checkPreheat(preheat ?? this.preheatStatus());
     else if (this.phase === 'READY') this.checkCharge(s);
     else if (this.phase === 'ROASTING') this.checkRoast(s, ror);
     else if (this.phase === 'SHUTDOWN') this.checkShutdown(s);
@@ -298,11 +302,24 @@ export class Session extends EventEmitter {
 
   // ---- phase logic
 
-  checkPreheat() {
-    if (!this.machine.settled()) return;
-    if (this.batch?.drop && !this.batch.beansOut) return; // beans still in
-    if (!preheatStable(this.recent, this.preheat.sv, this.preheat.stable))
-      return;
+  // How preheat stands (procedure.js: preheatProgress), plus anything else
+  // it's waiting for. The UI shows this as is.
+  preheatStatus() {
+    const p = preheatProgress(
+      this.recent,
+      this.preheat.sv,
+      this.preheat.stable,
+    );
+    const waitingFor = !this.machine.settled()
+      ? 'the roaster to confirm its settings'
+      : this.batch?.drop && !this.batch.beansOut
+        ? 'the beans to come out'
+        : null;
+    return {...p, waitingFor, ready: p.ready && !waitingFor};
+  }
+
+  checkPreheat(status) {
+    if (!status.ready) return;
     this.setPhase('READY');
     this.promptCharge(true);
   }
