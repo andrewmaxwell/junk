@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>House Splat</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "playcanvas": "https://cdn.jsdelivr.net/npm/playcanvas@2.22.6/build/playcanvas.mjs"
+        }
+      }
+    </script>
+    <style>
+      :root {
+        --panel: rgba(15, 17, 21, 0.72);
+        --text: #f3f4f6;
+        --muted: #9ca3af;
+        --accent: #3b82f6;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        font: 14px/1.4 system-ui, sans-serif;
+        color: var(--text);
+        background: #b8c9db;
+      }
+      canvas {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        cursor: grab;
+      }
+      canvas.dragging {
+        cursor: grabbing;
+      }
+      .panel {
+        position: fixed;
+        background: var(--panel);
+        backdrop-filter: blur(8px);
+        border-radius: 10px;
+        padding: 8px 12px;
+        z-index: 1;
+      }
+      #loading {
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: min(280px, calc(100vw - 32px));
+        box-sizing: border-box;
+        text-align: center;
+      }
+      #bar {
+        height: 4px;
+        margin-top: 8px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.15);
+        overflow: hidden;
+      }
+      #bar div {
+        height: 100%;
+        width: 0;
+        background: var(--accent);
+      }
+      #hud {
+        left: 16px;
+        bottom: 16px;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      #hud button {
+        font: inherit;
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.1);
+        border: 0;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      #hud button:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
+      #hud button.on {
+        background: var(--accent);
+      }
+      #status {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        margin-left: 4px;
+        white-space: nowrap;
+      }
+      #help {
+        top: 16px;
+        left: 16px;
+        max-width: calc(100vw - 56px);
+      }
+      #help h1 {
+        font-size: 15px;
+        margin: 0 0 4px;
+      }
+      #help table {
+        border-spacing: 0 2px;
+        color: var(--muted);
+      }
+      #help td:first-child {
+        color: var(--text);
+        padding-right: 12px;
+        white-space: nowrap;
+      }
+      .touch .mouse,
+      body:not(.touch) .touch-only {
+        display: none;
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading" class="panel">
+      <span id="loadingText">Loading splat…</span>
+      <div id="bar"><div></div></div>
+    </div>
+    <div id="help" class="panel" hidden>
+      <h1>House splat</h1>
+      <table>
+        <tr class="mouse"><td>Drag</td><td>look around</td></tr>
+        <tr class="mouse"><td>W A S D</td><td>fly (Shift = faster)</td></tr>
+        <tr class="mouse"><td>Q / E</td><td>down / up</td></tr>
+        <tr class="mouse"><td>Scroll</td><td>move forward / back</td></tr>
+        <tr class="mouse"><td>Right drag</td><td>slide sideways</td></tr>
+        <tr class="mouse"><td>[ / ]</td><td>previous / next drone photo spot</td></tr>
+        <tr class="mouse"><td>T</td><td>replay the drone's flight</td></tr>
+        <tr class="mouse"><td>R</td><td>back to the overview</td></tr>
+        <tr class="touch-only"><td>One finger</td><td>look around</td></tr>
+        <tr class="touch-only"><td>Pinch</td><td>move forward / back</td></tr>
+        <tr class="touch-only"><td>Two fingers</td><td>slide</td></tr>
+        <tr><td>H</td><td>hide this help</td></tr>
+      </table>
+    </div>
+    <div id="hud" class="panel" hidden>
+      <button id="prev" title="Previous drone photo spot ([)">◀</button>
+      <button id="tour" title="Replay the drone's flight (T)">Tour</button>
+      <button id="next" title="Next drone photo spot (])">▶</button>
+      <button id="helpButton" title="Controls (H)">?</button>
+      <span id="status"></span>
+    </div>
+    <canvas id="canvas"></canvas>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
