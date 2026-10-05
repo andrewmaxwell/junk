@@ -26,7 +26,9 @@ class PopDetector extends AudioWorkletProcessor {
     }
     const rms = Math.sqrt(sum / ch.length);
     // A pop: a peak far above the background, not too soon after the last.
-    if (peak > this.floor * 12 && peak > 0.01 && currentTime - this.last > 0.06) {
+    // One sound rings for a while: roast #38 logged three "pops" 0.1 s apart
+    // at 177 °C, a minute before first crack, enough for the hint on its own.
+    if (peak > this.floor * 12 && peak > 0.01 && currentTime - this.last > 0.25) {
       this.last = currentTime;
       this.port.postMessage({pop: peak / this.floor});
     } else {

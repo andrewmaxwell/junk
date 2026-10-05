@@ -13,6 +13,11 @@
 // The session is saved to disk on every change. If the server restarts
 // mid-session (crash, laptop sleep), it resumes from that file, as long as
 // it's less than RESUME_WITHIN_MS old.
+//
+// Only pages served from this machine may open the WebSocket. Browsers don't
+// stop other sites from connecting to ws://localhost, so without the check
+// any page you have open could send actions (burner to 100%). Checking the
+// Origin's host, not the Host header, also covers DNS rebinding.
 
 import fs from 'fs';
 import path from 'path';
@@ -25,9 +30,13 @@ import {loadProcedure, rateOfRise, PROCEDURES_DIR} from './procedure.js';
 import {readAlog, channels} from './alog.js';
 
 const ROOT = new URL('..', import.meta.url).pathname;
-const RESUME_WITHIN_MS = 30 * 60_000;
+const RESUME_WITHIN_MS = 30 * 60_000; // (a roast in progress: see session.js)
 const KEEP_IDLE_MS = 30 * 60_000; // readings kept for the chart with no session
 const readJSON = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
+const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+// Browsers always send an Origin; other programs on this machine may not.
+export const allowedOrigin = (origin) =>
+  origin == null || LOCAL_ORIGIN.test(origin);
 
 export function startApp({machine, clock, sim, port = 3100, logsDir}) {
   const preheat = readJSON(path.join(ROOT, 'preheat.json'));
@@ -41,7 +50,7 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
 
   // ---- session
 
-  function newSession(saved = null) {
+  function newSession(saved = null, downMs = 0) {
     session?.detach();
     session?.removeAllListeners();
     session = new Session({
@@ -81,7 +90,7 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
     session.on('beansOut', changed);
     session.on('batchComplete', changed);
     session.on('persist', save);
-    session.start(saved);
+    session.start(saved, {downMs});
     changed();
   }
 
@@ -250,7 +259,11 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
   app.use(express.static(ROOT, {index: 'index.html'}));
 
   const server = http.createServer(app);
-  const wss = new WebSocketServer({server, path: '/ws'});
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    verifyClient: ({origin}) => allowedOrigin(origin),
+  });
   const send = (ws, msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg));
   function broadcast(msg) {
     const text = JSON.stringify(msg);
@@ -290,11 +303,12 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
   if (!sim && fs.existsSync(stateFile)) {
     try {
       const {savedAt, state} = readJSON(stateFile);
-      if (state.phase !== 'OFF' && clock.now() - savedAt < RESUME_WITHIN_MS) {
+      const downMs = clock.now() - savedAt;
+      if (state.phase !== 'OFF' && downMs < RESUME_WITHIN_MS) {
         console.log(
-          `resuming the session saved ${Math.round((clock.now() - savedAt) / 1000)} s ago (${state.phase})`,
+          `resuming the session saved ${Math.round(downMs / 1000)} s ago (${state.phase})`,
         );
-        newSession(state);
+        newSession(state, downMs);
       }
     } catch (err) {
       console.log(`couldn't resume the saved session: ${err.message}`);

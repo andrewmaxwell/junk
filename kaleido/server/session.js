@@ -32,6 +32,10 @@ const RECORD_AFTER_DROP_MS = 60_000; // after the drop, once the beans are out
 const DROP_WARNING_S = 30;
 const STALL = {windowMs: 60_000, belowCPerMin: 1, repeatMs: 120_000};
 const LONG_ROAST_MS = 16 * 60_000;
+// A roast resumes after a restart only if the app was down less than this.
+// Longer, and the beans have sat without heat (or are already out), so
+// carrying on with the procedure would be roasting something else.
+const RESUME_ROAST_WITHIN_MS = 2 * 60_000;
 // A charge is a sudden BT fall from the temperature before it. In preheat
 // (beans can go in before "ready": 3 of the 12 real roasts before #38 did)
 // the fall must be bigger, because BT is still settling there: real preheats
@@ -79,7 +83,8 @@ export class Session extends EventEmitter {
 
   // ---- lifecycle
 
-  start(saved = null) {
+  // saved: from toJSON(). downMs: how long ago it was saved.
+  start(saved = null, {downMs = 0} = {}) {
     if (saved) this.restore(saved);
     this.machine.on('sample', this.onSample);
     this.machine.on('stuck', this.onStuck);
@@ -87,7 +92,9 @@ export class Session extends EventEmitter {
     if (this.phase === 'NEW') {
       this.setPhase('PREHEAT');
       this.say('Preheating.');
-    } else this.apply();
+    } else if (this.phase === 'ROASTING' && downMs > RESUME_ROAST_WITHIN_MS)
+      this.endInterruptedRoast(downMs);
+    else this.apply();
   }
 
   detach() {
@@ -495,6 +502,27 @@ export class Session extends EventEmitter {
     this.overrides = {};
     this.say('Drop now!', {urgent: true});
     this.alarms.drop = this.clock.now();
+    if (this.doneRequested) this.shutdown();
+    else this.setPhase('PREHEAT');
+    this.emit('drop', b, b.drop);
+  }
+
+  // Closes a roast the app was down for too long (see RESUME_ROAST_WITHIN_MS)
+  // where its record stops, then preheats (or shuts down, if asked to). The
+  // record closes on the next reading.
+  endInterruptedRoast(downMs) {
+    const b = this.batch;
+    const last = this.log.at(-1) ?? b.charge;
+    const at = {t: last.t, BT: last.BT};
+    b.drop = {...at, reason: 'interrupted'};
+    b.beansOut = at;
+    this.tracker.dropped = true;
+    this.overrides = {};
+    const mins = Math.max(1, Math.round(downMs / 60_000));
+    this.alert(
+      'urgent',
+      `The app was off for ${mins} minutes mid-roast, so roast #${b.number ?? ''} has ended. Take the beans out if they're still in.`,
+    );
     if (this.doneRequested) this.shutdown();
     else this.setPhase('PREHEAT');
     this.emit('drop', b, b.drop);

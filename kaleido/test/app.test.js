@@ -9,7 +9,8 @@ import path from 'path';
 import {createVirtualClock} from '../server/clock.js';
 import {Machine} from '../server/machine.js';
 import {SimKaleido} from '../server/sim.js';
-import {startApp} from '../server/app.js';
+import WebSocket from 'ws';
+import {startApp, allowedOrigin} from '../server/app.js';
 
 function start(saved) {
   const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaleido-app-'));
@@ -71,5 +72,28 @@ test('with nothing to resume, the heater is set off', async () => {
   const {app, machine, stop} = start(null);
   assert.equal(app.getSession(), null);
   assert.equal(machine.desired.HS, 0);
+  await stop();
+});
+
+test('only pages from this machine may use the WebSocket', async () => {
+  assert.ok(allowedOrigin('http://localhost:3100'));
+  assert.ok(allowedOrigin('http://127.0.0.1:3100'));
+  assert.ok(allowedOrigin(undefined), 'not a browser');
+  assert.ok(!allowedOrigin('https://example.com'));
+  assert.ok(!allowedOrigin('http://localhost.example.com:3100'));
+  assert.ok(!allowedOrigin('http://evil.com:3100'), 'DNS rebinding');
+
+  const {app, stop} = start(null);
+  if (!app.server.listening)
+    await new Promise((r) => app.server.once('listening', r));
+  const url = `ws://127.0.0.1:${app.server.address().port}/ws`;
+  const opens = (origin) =>
+    new Promise((resolve) => {
+      const ws = new WebSocket(url, {origin});
+      ws.on('open', () => (ws.close(), resolve(true)));
+      ws.on('error', () => resolve(false));
+    });
+  assert.equal(await opens('http://localhost:3100'), true);
+  assert.equal(await opens('https://example.com'), false);
   await stop();
 });

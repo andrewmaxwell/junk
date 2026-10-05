@@ -3,7 +3,7 @@
 // actions back over the WebSocket.
 
 import {createCharts} from './ui/charts.js';
-import {say, chime, unlock} from './ui/sound.js';
+import {say, chime, unlock, busy} from './ui/sound.js';
 import {listen, clusters} from './ui/pops.js';
 
 const $ = (id) => document.getElementById(id);
@@ -576,6 +576,7 @@ const HANDLERS = {
     try {
       const stop = await listen({
         onPop: (intensity) => {
+          if (busy()) return; // our own speech or chime, not the beans
           pops.push(Date.now());
           act('pop', {intensity});
           renderHint();

@@ -2,6 +2,19 @@
 // to run from one (the "Start" overlay does it).
 
 let ctx = null;
+let quietAt = 0; // performance.now() once our last sound has died away
+const ECHO_MS = 300; // the room still rings a little after
+
+// True while the app itself is making sound (and just after), which the
+// microphone would otherwise hear as pops: speech is full of clicks above
+// the crack detector's 1.5 kHz cutoff.
+export const busy = () =>
+  speechSynthesis.speaking ||
+  speechSynthesis.pending ||
+  performance.now() < quietAt;
+
+const quietAfter = (ms) =>
+  (quietAt = Math.max(quietAt, performance.now() + ms + ECHO_MS));
 
 export function unlock() {
   ctx ??= new AudioContext();
@@ -16,6 +29,7 @@ export function say(text, urgent = false) {
   if (urgent) speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.rate = 1.05;
+  u.onend = () => quietAfter(0);
   speechSynthesis.speak(u);
 }
 
@@ -39,6 +53,7 @@ export function chime(kind) {
   if (!ctx) return;
   const notes = CHIMES[kind] ?? CHIMES.event;
   const t0 = ctx.currentTime + 0.01;
+  quietAfter((0.01 + Math.max(...notes.map(([, s, d]) => s + d))) * 1000);
   for (const [freq, start, dur] of notes) {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();

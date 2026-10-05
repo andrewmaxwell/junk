@@ -290,6 +290,40 @@ test('a restart mid-roast picks up where it left off', async () => {
   await finish(b);
 });
 
+test('a restart long after the app died mid-roast ends that roast instead of reheating it', async () => {
+  const clock = createVirtualClock();
+  const sim = new SimKaleido({clock, dropRate: 0});
+  const a = setup({clock, sim});
+  a.session.start();
+  autopilot(a.session, sim, clock, {batches: [ESPRESSO]});
+  await clock.until(() => a.session.batch?.steps.length === 3, 2 * HOUR, 1500);
+  const saved = JSON.parse(JSON.stringify(a.session.toJSON()));
+  const lastT = saved.log.at(-1).t;
+  a.session.removeAllListeners();
+  a.session.detach();
+  await finish(a);
+  await clock.advance(5 * 60_000);
+
+  const b = setup({clock, sim});
+  b.session.start(saved, {downMs: 5 * 60_000});
+  assert.equal(b.session.phase, 'PREHEAT');
+  assert.equal(b.machine.desired.AH, 1, 'back on the preheat PID');
+  const drop = b.log.find((x) => x.e === 'drop').b;
+  assert.equal(drop.reason, 'interrupted');
+  assert.equal(drop.t, lastT, 'where the record stopped');
+  assert.match(
+    b.log.find((x) => x.e === 'alert').a.text,
+    /off for 5 minutes mid-roast/,
+  );
+  await clock.advance(5000);
+  assert.ok(
+    b.log.some((x) => x.e === 'batchComplete'),
+    'record closed',
+  );
+  assert.equal(b.session.batch, null);
+  await finish(b);
+});
+
 test('a restart while ready proves the preheat again before calling for beans', async () => {
   const clock = createVirtualClock();
   const sim = new SimKaleido({clock, dropRate: 0, random: seeded(5)});

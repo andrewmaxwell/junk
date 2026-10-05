@@ -1,6 +1,6 @@
 Kaleido - 2026 - Automated roast controller for a Kaleido M1 LITE that follows a per-bean procedure and learns from every batch.
 
-> **Status:** built and tested against a simulated roaster. It hasn't run on the real one yet; run the self-test first (see below).
+> **Status:** in use on the real roaster since roast #38 (2026-10-04), after the hardware self-test passed. New behavior is tested in the simulator first.
 
 ## Running it
 
@@ -8,7 +8,7 @@ Kaleido - 2026 - Automated roast controller for a Kaleido M1 LITE that follows a
 - `node kaleido/server/main.js --sim --speed 20` does the same with a simulated roaster, so you can try the whole flow anywhere. Its roasts go to `logs-sim/`.
 - **Stopping.** The roaster has no panel, so the computer is the only way to turn the burner off:
   - **STOP** (top right, click twice) turns the heater off now. Mid-roast it also calls for the drop. The air and drum keep running to cool.
-  - Quitting the server (Ctrl-C twice) or a crash also turns the heater off first. The session is saved, so restarting within 30 minutes resumes it, heat included.
+  - Quitting the server (Ctrl-C twice) or a crash also turns the heater off first. The session is saved, so restarting within 30 minutes resumes it, heat included. A roast resumes only if the app was off for less than 2 minutes. After longer than that, the app ends the roast and goes back to preheating, because the beans have sat without heat.
   - A separate guardian process watches the app. If the app crashes, is killed, or hangs, the guardian turns the heater off within seconds and says so out loud. The roaster itself would keep heating.
   - If something still seems wrong, run `node kaleido/server/stop.js` for heater off with the fans left running, or `--all` once the roaster is cool. The very last resort is unplugging the roaster.
   - While the app runs, it keeps the Mac awake with `caffeinate`, but closing the lid can still put it to sleep. Leave the lid open.

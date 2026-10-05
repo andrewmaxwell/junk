@@ -14,7 +14,8 @@ server/
                  --monitor (read-only on real hardware), --sim --autopilot (terminal demo),
                  --selftest [--no-heat] [--no-cable]
   app.js         HTTP + WebSocket server for the UI; saves the session to logs/.session.json
-                 and resumes it after a restart (if < 30 min old)
+                 and resumes it after a restart (if < 30 min old; a roast only if < 2 min)
+                 WebSocket only from localhost origins
   clock.js       real clock (with a speed-up for the sim) and a virtual clock for tests
   protocol.js    encode {[TAG VAL]}, parse {sid,VAR:val,...}
   port.js        the USB serial transport (finds the port, maps tty→cu)
@@ -57,7 +58,7 @@ analyze.js *          prints a compact summary of one or more roasts for Claude
 - **At drop**, the app sends `HP 0` while still in manual mode, then switches to the preheat settings with the cooling fan on. It repeats "Drop now!" every 5 s until the beans are out: you press the button, or BT falls 10 °C below the drop temperature (about 12 s on the real machine). The batch record closes a minute after the drop, and `batchComplete` fires.
 - **Alerts never change the heat.** A stall alert fires when RoR has been under 1 °C/min for a minute after the turning point. A long-roast alert fires at 16 minutes. A stuck-control alert fires after 8 s.
 - **Shutdown** turns the heater off and runs air at 100% with the drum at 90% until BT is under 60 °C. Then everything goes off, and `off` fires only after the machine confirms it.
-- **Saving state.** `toJSON()` and `start(saved)` let a restarted server resume mid-roast without firing any step twice. `app.js` saves it to `logs/.session.json`. A session saved in READY resumes as PREHEAT, because the heater was off while the app was down and a cooled drum must not be called ready.
+- **Saving state.** `toJSON()` and `start(saved)` let a restarted server resume mid-roast without firing any step twice. `app.js` saves it to `logs/.session.json`. A session saved in READY resumes as PREHEAT, because the heater was off while the app was down and a cooled drum must not be called ready. A session saved in ROASTING resumes only if the app was down less than 2 minutes (`RESUME_ROAST_WITHIN_MS`). After longer than that, `endInterruptedRoast()` closes the record where it stopped (drop reason `interrupted`), alerts, and preheats (or shuts down, if that was asked for).
 
 ## Simulator
 
@@ -99,7 +100,7 @@ A procedure's `variants` (e.g. `espresso`, `pourover`) are a shallow override of
 1. ✅ `protocol.js`, `port.js`, `machine.js` (the reconciler), and `sim.js` (fit to `logs/`).
 2. ✅ `session.js` and `procedure.js`, tested end to end in the sim at high speed.
 3. ✅ `alog.js` + `recorder.js`. Output passes Artisan's own type validation; still to do: open one in Artisan by hand.
-4. ✅ `selftest.js` (passes in the sim). Still to do: run it on the real roaster, and fold what the report's `observations` show back into the protocol facts below.
+4. ✅ `selftest.js`, run on the real roaster (reports in `selftests/`; results under "Measured on this roaster" and the protocol facts below).
 5. ✅ The browser UI and pop detection (tested in Chrome against the sim; the mic detector is untested against real cracks).
 6. `analyze.js`.
 
@@ -110,10 +111,11 @@ A procedure's `variants` (e.g. `espresso`, `pourover`) are a shallow override of
 - **Side panel:** rebuilt only when its inputs change (see `renderSide`'s key). Things still change mid-typing (a step fires, an alert arrives), so a rebuild keeps form values and focus by element id. Give per-batch inputs per-batch ids (`weightOut-<n>`). Numbers that change every reading update in place by id (`preheatInfo`, `devInfo`, `dropEta`).
 - **Two clicks for anything irreversible:** STOP, second crack, drop now, done for today, and everything off each need a second click within 3 s (`confirmed()` in `main.js`).
 - **STOP** turns into a disabled "Heater off" once the phase isn't heating and the machine reports `HS 0`. An unreported HS counts as possibly on, so with no session the server sets `HS 0` at startup to make it known.
+- **WebSocket origin.** `app.js` accepts only `localhost`, `127.0.0.1`, or `[::1]` origins, or none (non-browser clients). Browsers let any site open a WebSocket to localhost, and checking the Origin's host (not the Host header) also covers DNS rebinding.
 - **Not live:** if the app server or the roaster drops out, the readouts fade. A lost server also shows a banner, and actions show a toast instead of silently doing nothing.
 - **No charge button** (the user's choice): charging is auto-detected. In `--sim`, "Pour beans in" and "Open the door" stand in for the person.
 - **The drop alarm** (a full-width banner, speech, and a chime every 5 s) lasts until the beans are out, and the batch record stays open until then too.
-- **Crack listening** high-passes the mic at 1.5 kHz and reports transients 12× or more above an adaptive floor. Three pops within 8 s shows a hint banner. Pops are logged in the sidecar, but they never act.
+- **Crack listening** high-passes the mic at 1.5 kHz and reports transients 12× or more above an adaptive floor, at most one per 0.25 s. One sound rings for a while: in #38, three "pops" 0.1 s apart at 177 °C would have shown a hint a minute before FC. Pops heard while the app is speaking or chiming (plus 0.3 s of echo; `busy()` in `ui/sound.js`) are ignored. Three pops within 8 s shows a hint banner. Pops are logged in the sidecar, but they never act.
 
 ## Self-test
 
