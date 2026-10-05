@@ -180,7 +180,9 @@ float evalSurface(int s, float cosTheta, vec3 r, vec3 l, out vec3 bsdf) {
   if (gloss > 0.) {
     // Phong lobe: strongest in the mirror direction, falling off as
     // cos(angle from it) ^ shininess
-    float lobe = pow(max(0., dot(r, l)), shininess) / (2. * PI);
+    // Clamped to 1 too: a cosine a hair over 1 raised to a high shininess
+    // can overflow
+    float lobe = pow(clamp(dot(r, l), 0., 1.), shininess) / (2. * PI);
     glossy = gloss * (shininess + 2.) * lobe;
     glossyPdf = (shininess + 1.) * lobe;
   }
@@ -220,6 +222,10 @@ vec3 trace(vec3 o, vec3 d) {
   float bouncePdf = 0.;
 
   for (int depth = 0; depth < 100; depth++) {
+    // In 32-bit floats, each new direction built from the last one is a bit
+    // off unit length, and that compounds over bounces. Even 0.3% too long
+    // makes a glossy lobe like cos ^ 2000 overflow to infinity.
+    d = normalize(d);
     float hitDist;
     int s = intersect(o, d, hitDist);
     if (s < 0) break;
@@ -248,7 +254,7 @@ vec3 trace(vec3 o, vec3 d) {
 
     vec3 p = o + d * hitDist;
     vec3 n = int(normalShape[s].w) == SPHERE
-      ? (p - centerRadius[s].xyz) / centerRadius[s].w
+      ? normalize(p - centerRadius[s].xyz)
       : normalShape[s].xyz;
     // Normal facing the side the ray came from
     bool into = dot(n, d) < 0.;
@@ -292,6 +298,9 @@ vec3 trace(vec3 o, vec3 d) {
       float cosTheta = dot(next, nl);
       if (cosTheta <= 0.) break; // glossy lobe pointed into the surface
       bouncePdf = evalSurface(s, cosTheta, r, next, bsdf);
+      // Far out in a tight lobe, cos ^ shininess underflows to 0, and 0 / 0
+      // would be NaN. A direction that's never picked carries no light.
+      if (bouncePdf <= 0.) break;
       through *= bsdf * cosTheta / bouncePdf;
       seenByCamera = false;
       d = next;
@@ -306,7 +315,10 @@ vec3 trace(vec3 o, vec3 d) {
         // Otherwise total internal reflection: keep the mirror direction
         if (t != vec3(0.)) {
           // Fresnel: how much reflects vs refracts (Schlick's approximation)
-          float c = 1. - (into ? -dot(d, nl) : dot(t, n));
+          // Clamped because rounding can push it just below 0, and GPU
+          // pow() of a negative number is NaN, which would stick in the
+          // pixel's sum forever as a white dot
+          float c = clamp(1. - (into ? -dot(d, nl) : dot(t, n)), 0., 1.);
           float reflectance = 0.04 + 0.96 * pow(c, 5.);
           // Pick one at random, with probability P of reflecting, and
           // divide by that probability to stay unbiased
