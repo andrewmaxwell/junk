@@ -32,8 +32,11 @@ import {Recorder} from './recorder.js';
 import {runSelfTest} from './selftest.js';
 import readline from 'readline';
 import {spawn} from 'child_process';
-import {HEARTBEAT_MS} from './guardian.js';
+import {HEARTBEAT_MS, runningApp} from './guardian.js';
 import {startApp} from './app.js';
+
+const LOGS_DIR = new URL('../logs/', import.meta.url).pathname;
+const HEARTBEAT_FILE = `${LOGS_DIR}.heartbeat`;
 
 const args = process.argv.slice(2);
 const SIM = args.includes('--sim');
@@ -107,6 +110,17 @@ else if (MONITOR) {
   machine.on('sample', (r) => log(reading(r)));
   if (SIM) machine.set({TS: 185, HS: 1, AH: 1, FC: 30, RC: 90});
 } else {
+  // One app at a time. A second one would write its pid to the heartbeat,
+  // so the first app's guardian would take it for a restart and leave, and
+  // the first app would carry on with no guardian.
+  const other = SIM ? null : runningApp(HEARTBEAT_FILE);
+  if (other) {
+    console.log(
+      `kaleido is already running (pid ${other}): http://localhost:${PORT}/`,
+    );
+    console.log(`If it isn't, delete ${HEARTBEAT_FILE} and start again.`);
+    process.exit(1);
+  }
   const dir = new URL(SIM ? '../logs-sim/' : '../logs/', import.meta.url);
   app = startApp({machine, clock, sim, port: PORT, logsDir: dir.pathname});
 }
@@ -233,11 +247,13 @@ async function heaterOffAndExit(code) {
   let confirmed = false;
   if (!MONITOR && !AUTOPILOT && machine.connected) {
     const hot = active && machine.state.BT >= 60;
-    machine.set({HS: 0, AH: 0, HP: 0, ...(hot && {FC: 100, RC: 90})});
+    // Locked off: the session is still running while we wait, and a step or
+    // a click must not turn the heat back on.
+    machine.heaterOff(hot ? {FC: 100, RC: 90} : {});
     const end = Date.now() + 5000;
-    while (!machine.settled() && Date.now() < end)
+    while (!machine.heaterConfirmedOff() && Date.now() < end)
       await new Promise((r) => setTimeout(r, 100));
-    confirmed = machine.settled();
+    confirmed = machine.heaterConfirmedOff();
     log(
       confirmed
         ? 'heater off.'
@@ -316,11 +332,10 @@ function removeHeartbeat() {
   }
 }
 if (app && !SIM) {
-  const logs = new URL('../logs/', import.meta.url).pathname;
-  heartbeatFile = `${logs}.heartbeat`;
+  heartbeatFile = HEARTBEAT_FILE;
   beat();
   heartbeatTimer = setInterval(beat, HEARTBEAT_MS);
-  const out = fs.openSync(`${logs}.guardian.log`, 'a');
+  const out = fs.openSync(`${LOGS_DIR}.guardian.log`, 'a');
   const guardian = new URL('./guardian.js', import.meta.url).pathname;
   spawn(process.execPath, [guardian, String(process.pid), heartbeatFile], {
     stdio: ['ignore', out, out],

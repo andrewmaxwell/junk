@@ -33,6 +33,24 @@ export function assess({heartbeatAge, appAlive, owner, pid}) {
   return 'ok';
 }
 
+// The pid of another live app that owns the heartbeat file, or null. (A
+// stale file from a crashed app names a dead pid, so it doesn't count.)
+export function runningApp(heartbeatFile) {
+  let pid;
+  try {
+    pid = Number(fs.readFileSync(heartbeatFile, 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!pid || pid === process.pid) return null;
+  try {
+    process.kill(pid, 0);
+    return pid;
+  } catch (err) {
+    return err.code === 'EPERM' ? pid : null; // EPERM: alive, not ours
+  }
+}
+
 export async function guard({
   pid,
   heartbeatFile,

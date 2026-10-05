@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import {guard} from '../server/guardian.js';
+import {guard, runningApp} from '../server/guardian.js';
 
 function setup({
   ageMs = 0,
@@ -97,4 +97,16 @@ test('stops retrying once a restarted app takes over, without crying wolf', asyn
   assert.equal(calls.stop, 1);
   assert.deepEqual(calls.said, [], 'no "unplug the roaster"');
   assert.ok(fs.existsSync(heartbeatFile), "the new app's heartbeat stays");
+});
+
+test('a second app can tell one is already running', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guardian-'));
+  const file = path.join(dir, '.heartbeat');
+  assert.equal(runningApp(file), null, 'no heartbeat');
+  fs.writeFileSync(file, String(process.ppid)); // a live process
+  assert.equal(runningApp(file), process.ppid);
+  fs.writeFileSync(file, String(process.pid)); // our own
+  assert.equal(runningApp(file), null);
+  fs.writeFileSync(file, '999999'); // a crashed app's
+  assert.equal(runningApp(file), null);
 });

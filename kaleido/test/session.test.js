@@ -137,6 +137,71 @@ test("won't call for or detect a charge until the beans are chosen", async () =>
   await finish(ctx);
 });
 
+test('beans poured in before "ready" still start the roast', async () => {
+  // 3 of the 12 real roasts before #38 were charged before the app would
+  // have called the preheat ready.
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session} = ctx;
+  session.start();
+  session.selectBatch(ESPRESSO);
+  await clock.advance(8 * 60_000); // BT at the setpoint, the drum still soaking
+  assert.equal(session.phase, 'PREHEAT');
+  const pouredAt = clock.now();
+  sim.chargeBeans(155);
+  await clock.advance(20_000);
+  assert.equal(session.phase, 'ROASTING');
+  assert.ok(Math.abs(session.batch.charge.t - pouredAt) < 3000, 'backdated');
+  await finish(ctx);
+});
+
+test('a charge in preheat with no beans chosen is flagged', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session, log} = ctx;
+  session.start();
+  await clock.advance(8 * 60_000);
+  sim.chargeBeans(155);
+  await clock.advance(20_000);
+  assert.equal(session.phase, 'PREHEAT');
+  const alerts = log.filter((x) => x.e === 'alert').map((x) => x.a);
+  assert.match(alerts.at(-1).text, /no beans are chosen/);
+  await finish(ctx);
+});
+
+test("the beans coming out after a drop don't look like the next charge", async () => {
+  // The next batch is chosen right away, so a false charge would start it.
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session, log} = ctx;
+  session.start();
+  autopilot(session, sim, clock, {batches: [ESPRESSO, ESPRESSO]});
+  await clock.until(() => log.some((x) => x.e === 'drop'), 2 * HOUR, 5000);
+  sim.chargeBeans = () => {}; // nobody pours the second batch in
+  await clock.advance(15 * 60_000);
+  assert.equal(log.filter((x) => x.e === 'charge').length, 1);
+  await finish(ctx);
+});
+
+test('quitting mid-roast keeps the heater off even if a step fires', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, machine, session} = ctx;
+  session.start();
+  session.selectBatch(ESPRESSO);
+  await clock.until(() => session.phase === 'READY', HOUR, 5000);
+  sim.chargeBeans(155);
+  // One reading before the first step fires, do what main.js does on quit.
+  await clock.until(
+    () => session.tracker?.nextStep === 0 && session.tracker.stepCount === 2,
+    HOUR,
+    100,
+  );
+  machine.heaterOff();
+  await clock.advance(10_000);
+  assert.equal(session.batch.steps.length, 1, 'the step did fire');
+  assert.equal(machine.desired.HS, 0);
+  assert.equal(sim.m.HS, 0);
+  assert.ok(machine.heaterConfirmedOff());
+  await finish(ctx);
+});
+
 test('choosing the beans right after pouring them in still starts the roast', async () => {
   const ctx = setup({dropRate: 0});
   const {clock, sim, session, log} = ctx;

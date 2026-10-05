@@ -156,3 +156,18 @@ test('a setpoint above the machine maximum is clamped, so it still settles', asy
   assert.equal(sim.m.TS, 240);
   await machine.stop();
 });
+
+test('once the heater is locked off, nothing turns it back on', async () => {
+  const {clock, sim, machine} = await setup();
+  machine.set(PREHEAT);
+  await until(clock, () => machine.settled(), 10_000);
+  machine.heaterOff({FC: 100});
+  // What a step firing (or a click) does while main.js waits to quit.
+  machine.set({TS: 230, HS: 1, AH: 0, HP: 45});
+  await until(clock, () => machine.heaterConfirmedOff(), 10_000);
+  assert.deepEqual(
+    {HS: sim.m.HS, AH: sim.m.AH, HP: sim.m.HP, FC: sim.m.FC, TS: sim.m.TS},
+    {HS: 0, AH: 0, HP: 0, FC: 100, TS: 230},
+  );
+  await machine.stop();
+});

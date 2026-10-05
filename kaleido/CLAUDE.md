@@ -51,6 +51,7 @@ analyze.js *          prints a compact summary of one or more roasts for Claude
 
 - **Ready** means the machine has confirmed every setting, BT has stayed within 1.5 °C of SV for 3 minutes, and ET isn't *rising* faster than 0.5 °C/min over those 3 minutes *or* the last 1.5 (ET overshoots, dips, then climbs once BT reaches SV, and one fit across that reads as flat; that called a cold drum ready after 7 minutes on 2026-10-04). Replayed on the real cold-start logs, ready comes at 12–16 minutes with ET 177–183 °C, before every real charge. Falling ET is fine: between batches you charged with ET still falling 0.5–1.5 °C/min from the last roast.
 - **Charge** is only ever auto-detected; there's no button (the user's choice). It needs a bean chosen first. Without one, the app says "choose the next beans" and doesn't start a roast. A charge-like BT drop raises an urgent alert instead, and choosing the beans while the fall is fresh (within about 25 s) still starts the roast, backdated. Detection: 2 readings 5 °C or more below the BT average from 10–30 seconds earlier. A real charge drops BT about 70 °C, so there's plenty of margin. The roast clock is backdated to the last reading before the fall.
+- **Charging before "ready"** starts the roast too. 3 of the 12 real roasts before #38 were charged before the app would have called the preheat ready. In PREHEAT the fall must be 20 °C, not 5, and detection is off while the last batch's record is still open (its beans coming out look like a charge). Real preheats swing up to 8.5 °C in that 10–30 s window (cooling after a drop), and every real charge fell 25 °C within 6–10 s. Replayed on all 40 real logs, it never fires before the real charge and catches every one within 9 s.
 - **Turning point** is the first reading 2 °C above the lowest BT so far. Steps arm only after it.
 - **Triggers** (steps and drop) need 3 consecutive readings at or above their temperature. At ~5 °C/min near the drop, that lands about 0.2–0.5 °C past the target.
 - **At drop**, the app sends `HP 0` while still in manual mode, then switches to the preheat settings with the cooling fan on. It repeats "Drop now!" every 5 s until the beans are out: you press the button, or BT falls 10 °C below the drop temperature (about 12 s on the real machine). The batch record closes a minute after the drop, and `batchComplete` fires.
@@ -144,11 +145,14 @@ The M1 LITE can only be controlled over USB, so if our process dies with the bur
 - uncaught exceptions (`heaterOffAndExit` in `main.js`)
 - `server/stop.js` for when the app is gone
 
+`heaterOffAndExit` uses `machine.heaterOff()`, which locks HS/AH/HP at 0 for the rest of the process. The session keeps running while it waits for the roaster to confirm, and before the lock, a step firing in that wait turned the heat back on, and the wait then "confirmed" it. It also waits for the roaster to report `HS 0` (`heaterConfirmedOff()`), not just for everything to match.
+
 **The roaster keeps heating with no computer.** The self-test's watchdog check (2026-10-04) went silent for 45 s at 60% manual burner: BT went 195 → 205 °C and HP still read 60 afterward. So there's one more layer, `guardian.js`. It's a detached process that `main.js` starts in app mode (not `--sim`). It watches the app's pid and `logs/.heartbeat`, which the app touches every 2 s.
 - If the app dies (crash or kill -9), the guardian grabs the freed port and runs `emergencyStop()` from `stop.js`, then says so with macOS `say`.
 - If the app hangs (heartbeat older than 15 s), the guardian kills it first, then does the same.
 - On a clean exit, the app deletes the heartbeat, but only after the heater is confirmed off. If that confirmation fails, the guardian tries again.
 - The heartbeat file holds the app's pid. If you restart the app while the old guardian is still busy, it sees a different pid, knows a new app took over, and exits without touching the port or the file. The app stops its heartbeat timer before deleting the file on the way out, or one last beat would write it back and make its own guardian think it crashed.
+- **One app at a time.** A second app would write its pid to the heartbeat, so the first app's guardian would think it was restarted and leave. So `main.js` refuses to start while the heartbeat names another live process (`runningApp()` in `guardian.js`).
 - Its log is `logs/.guardian.log`.
 - Verified on the real roaster with kill -9: the heater was off within about 2 s.
 

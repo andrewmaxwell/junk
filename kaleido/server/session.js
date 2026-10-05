@@ -32,7 +32,17 @@ const RECORD_AFTER_DROP_MS = 60_000; // after the drop, once the beans are out
 const DROP_WARNING_S = 30;
 const STALL = {windowMs: 60_000, belowCPerMin: 1, repeatMs: 120_000};
 const LONG_ROAST_MS = 16 * 60_000;
-const CHARGE = {fall: 5, baselineMs: [30_000, 10_000], confirm: 2};
+// A charge is a sudden BT fall from the temperature before it. In preheat
+// (beans can go in before "ready": 3 of the 12 real roasts before #38 did)
+// the fall must be bigger, because BT is still settling there: real preheats
+// swing up to 8.5 °C in this window (cooling after the last drop), while every
+// real charge fell 25 °C within 6-10 s.
+const CHARGE = {
+  fall: 5,
+  preheatFall: 20,
+  baselineMs: [30_000, 10_000],
+  confirm: 2,
+};
 const NAMES = {
   TS: 'Setpoint',
   HS: 'Heater',
@@ -277,10 +287,16 @@ export class Session extends EventEmitter {
 
     // (A sample listener can change the phase, so the status computed above
     // may not exist.)
-    if (this.phase === 'PREHEAT')
-      this.checkPreheat(preheat ?? this.preheatStatus());
-    else if (this.phase === 'READY') this.checkCharge(s);
-    else if (this.phase === 'ROASTING') this.checkRoast(s, ror);
+    if (this.phase === 'PREHEAT') {
+      // (Not while the last batch's record is open: its beans coming out
+      // look like a charge.)
+      if (!this.batch) this.checkCharge(s, CHARGE.preheatFall);
+      if (this.phase === 'PREHEAT')
+        this.checkPreheat(preheat ?? this.preheatStatus());
+    } else if (this.phase === 'READY') {
+      this.promptCharge(false);
+      this.checkCharge(s, CHARGE.fall);
+    } else if (this.phase === 'ROASTING') this.checkRoast(s, ror);
     else if (this.phase === 'SHUTDOWN') this.checkShutdown(s);
     else if (this.phase === 'OFF') this.checkOff();
     if (this.batch?.drop) this.checkAfterDrop(s);
@@ -333,9 +349,8 @@ export class Session extends EventEmitter {
 
   // Beans going in show up as a sudden BT drop from the steady preheat
   // temperature (see chargePoint).
-  checkCharge(s) {
-    this.promptCharge(false);
-    const at = this.chargePoint(s);
+  checkCharge(s, fall) {
+    const at = this.chargePoint(s, fall);
     if (!at) return;
     if (this.next) return this.startRoast(at);
     // Beans went in before any were chosen. Don't guess what they are, but
@@ -349,9 +364,9 @@ export class Session extends EventEmitter {
     }
   }
 
-  // The reading just before a sudden BT fall from the steady temperature, if
-  // one is under way: the roast clock is backdated to it.
-  chargePoint(s) {
+  // The reading just before a sudden BT fall of `fall` °C from the steady
+  // temperature, if one is under way: the roast clock is backdated to it.
+  chargePoint(s, fall) {
     const [from, to] = CHARGE.baselineMs;
     const base = this.recent.filter(
       (x) => s.t - x.t <= from && s.t - x.t >= to,
@@ -360,7 +375,7 @@ export class Session extends EventEmitter {
     const baseBT = base.reduce((a, x) => a + x.BT, 0) / base.length;
     const falling = this.recent.slice(-CHARGE.confirm);
     if (falling.length < CHARGE.confirm) return;
-    if (!falling.every((x) => x.BT <= baseBT - CHARGE.fall)) return;
+    if (!falling.every((x) => x.BT <= baseBT - fall)) return;
     let i = this.recent.length - 1;
     while (i > 0 && this.recent[i - 1].BT < baseBT - 1) i--;
     // Charge at the last reading before the fall, as if CHARGE had been

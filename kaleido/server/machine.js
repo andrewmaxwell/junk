@@ -22,6 +22,8 @@ export const CONTROLS = ['TS', 'HS', 'AH', 'FC', 'RC', 'CS', 'HP'];
 // would never be sent.
 export const MAX_TS = 240;
 
+const HEAT_OFF = {HS: 0, AH: 0, HP: 0};
+
 export class Machine extends EventEmitter {
   constructor({
     openTransport,
@@ -57,6 +59,7 @@ export class Machine extends EventEmitter {
     for (let [k, v] of Object.entries(values)) {
       if (!CONTROLS.includes(k)) throw new Error(`unknown control ${k}`);
       if (k === 'TS') v = Math.min(v, MAX_TS);
+      if (this.heatLocked && k in HEAT_OFF) v = HEAT_OFF[k];
       if (this.desired[k] !== v) {
         this.desired[k] = v;
         delete this.lastSent[k];
@@ -64,6 +67,22 @@ export class Machine extends EventEmitter {
       }
     }
     this.reconcile();
+  }
+
+  // Heater off for good, for a process on its way out. Whatever sets the
+  // desired state afterwards (a step firing, a click in the UI) can't turn
+  // the heat back on; without this, a step that fired while main.js waited
+  // for the heater-off to be confirmed turned it back on, and the wait then
+  // "confirmed" that.
+  heaterOff(others = {}) {
+    this.heatLocked = true;
+    this.set({...HEAT_OFF, ...others});
+  }
+
+  // The roaster itself reports the heater off, and every desired control
+  // matches.
+  heaterConfirmedOff() {
+    return this.state.HS === 0 && this.settled();
   }
 
   // Event markers shown on the machine's display. Best effort, not reconciled.
