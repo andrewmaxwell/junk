@@ -234,12 +234,13 @@ vec3 trace(vec3 o, vec3 d) {
 
     if (material == LIGHT) {
       float w = bouncePdf > 0. ? bounceLightWeight(o, bouncePdf, s) : 1.;
-      vec3 e = sColor * w;
+      vec3 e = sColor * w * through;
       // The light is far brighter than the screen can show. Clamping it to
       // white here, before pixel samples are averaged, lets its edges
       // antialias; otherwise a pixel 1% covered by the light shows as white.
+      // This comes after the throughput, so a light seen through glass or in
+      // a mirror is still white, not clamped and then dimmed to gray.
       if (seenByCamera) e = min(e, vec3(1.));
-      e *= through;
       color += e * (seenByCamera ? 1. : indirectScale(e));
       break; // lights don't reflect anything
     }
