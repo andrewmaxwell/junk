@@ -10,7 +10,15 @@ import {Session} from '../server/session.js';
 import {Recorder} from '../server/recorder.js';
 import {loadProcedure} from '../server/procedure.js';
 import {autopilot} from '../server/autopilot.js';
-import {readAlog, parseAlog, toPython, channels} from '../server/alog.js';
+import {EventEmitter} from 'events';
+import {fileURLToPath} from 'url';
+import {
+  readAlog,
+  writeAlog,
+  parseAlog,
+  toPython,
+  channels,
+} from '../server/alog.js';
 
 const preheat = JSON.parse(
   fs.readFileSync(new URL('../preheat.json', import.meta.url), 'utf8'),
@@ -137,6 +145,35 @@ test('weight out and tasting notes patch the files later', async () => {
   ]);
   assert.throws(() => recorder.setWeightOut(99, 100), /no roast #99/);
   await finish(ctx);
+});
+
+test('notes on an older Artisan roast add up instead of replacing each other', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaleido-'));
+  const base = path.join(dir, '#7_ethiopiques_v2_26-06-14_1418');
+  // ('#' would start a URL fragment, so build the path from the folder.)
+  const logs = fileURLToPath(new URL('../logs/', import.meta.url));
+  fs.copyFileSync(
+    path.join(logs, '#7_ethiopiques_v2_26-06-14_1418.alog'),
+    `${base}.alog`,
+  );
+  const d0 = readAlog(`${base}.alog`);
+  d0.cuppingnotes = 'Typed into Artisan.';
+  writeAlog(`${base}.alog`, d0);
+  const session = new EventEmitter();
+  const recorder = new Recorder({session, dir, beans});
+  recorder.addNote(7, 'Blueberry.', new Date('2026-10-05'));
+  recorder.setWeightOut(7, 130);
+  recorder.addNote(7, 'Even better a week on.', new Date('2026-10-12'));
+  const d = readAlog(`${base}.alog`);
+  assert.equal(
+    d.cuppingnotes,
+    'Typed into Artisan.\nBlueberry.\nEven better a week on.',
+  );
+  assert.equal(d.weight[1], 130);
+  const side = JSON.parse(fs.readFileSync(`${base}.json`, 'utf8'));
+  assert.equal(side.notes.length, 3);
+  assert.equal(side.weightOut, 130);
+  fs.rmSync(dir, {recursive: true});
 });
 
 test("a log that can't be saved doesn't stop the roast", async () => {

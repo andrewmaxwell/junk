@@ -203,7 +203,7 @@ Resolve bean names through `beans.json` (old filenames use inconsistent spelling
 1. Get the facts:
    - **App roasts (#38 on)** have a sidecar `#N_….json` (about 5 KB). Read it: charge, TP, FC, SC, drop (with its `reason`), each step with its time and BT, overrides, alerts, weights, and notes. All times are seconds since charge.
    - **The curve** is in the `.alog` (90–130 KB, mostly sample arrays). Don't read it raw. Write a small one-off script with `readAlog()` and `channels()` from `server/alog.js`, which gives `t` (seconds since the start of the log), `BT`, `ET`, `HP`, `FC`, and so on. `timeindex` gives sample indices for `[CHARGE, DRY, FCs, FCe, SCs, SCe, DROP, COOL]` (0 = unset).
-   - **Older Artisan roasts** have no sidecar. Take events from `timeindex`, weights from `weight` (`[in, out, unit]`), and Artisan's own numbers from `computed`.
+   - **Older Artisan roasts** have no full sidecar: at most a small one holding notes and weight out (see "Recording tasting notes"). Take events from `timeindex`, weights from `weight` (`[in, out, unit]`), and Artisan's own numbers from `computed`.
 2. Compute these the same way every time, so roasts stay comparable:
    - **Phases**, measured from charge: drying ends at DRY (the first BT ≥ 152 °C after the TP), Maillard runs from DRY to FC, and development from FC to the drop.
    - **Development %** = (drop − FC) / drop × 100. The UI uses the same formula.
@@ -213,6 +213,15 @@ Resolve bean names through `beans.json` (old filenames use inconsistent spelling
 3. Compare the roast to that bean's earlier roasts (within the same variant, for drop and development) and to the procedure's `reference`.
 4. Propose concrete edits to `procedures/<bean>.json`, and explain the reasoning in terms of the curve and the tasting notes. Prefer one or two changes per iteration, so cause and effect stay readable.
 5. After the user agrees, apply the edits and append a `history` entry (`date`, `afterRoast`, `change`, `why`).
+
+## Recording tasting notes
+
+The user tells Claude about drinks in passing ("a latte with 11 g of the Colombian Supremo from 9/21 was excellent"). Record them without being asked again:
+
+- **Find the roast** from the bean (through `beans.json`) and the roast date in the filename. If more than one roast of that bean is from that date, record the note on each, say in the text that it isn't known which one it was, and ask. Once the user knows, remove the note from the others.
+- **Write the note as a dated entry**: what the drink was, grams of each bean, any blend partners with their roast numbers, days since roasting, and the user's own words about taste and grind. Put a blend's note on every roast in it.
+- **Use `Recorder.addNote(number, text, date)`** from `server/recorder.js`, in a one-off script with a stub session (`new EventEmitter()`) and `dir` set to `logs/`. Weight out goes through `setWeightOut()` the same way. Each call updates the sidecar and mirrors into the `.alog`'s `cuppingnotes` and `weight`. An older Artisan roast gets a small sidecar on its first note, so later notes add up; any cupping notes already typed into Artisan become its first note. Don't edit the files by hand.
+- **Check that no other field changed**: parse the old and new `.alog` and compare. Commit the log files.
 
 ## Drafting a procedure for a new bean
 

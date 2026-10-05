@@ -163,13 +163,20 @@ export class Recorder {
       .find((f) => f.startsWith(`#${number}_`) && f.endsWith('.alog'));
     if (!file) throw new Error(`no roast #${number} in ${this.dir}`);
     const {alog, json} = this.paths(file.slice(0, -'.alog'.length));
+    const d = readAlog(alog);
+    // An older Artisan-only roast gets a sidecar now, holding just these, so
+    // its notes add up instead of each one replacing the last in the .alog.
+    // Any cupping notes already typed into Artisan become the first note.
     const side = fs.existsSync(json)
       ? JSON.parse(fs.readFileSync(json, 'utf8'))
-      : {roast: number, notes: []}; // an older Artisan-only roast
+      : {
+          roast: number,
+          alog: file,
+          notes: d.cuppingnotes ? [{date: null, text: d.cuppingnotes}] : [],
+        };
     change(side);
-    if (fs.existsSync(json)) writeJSON(json, side);
+    writeJSON(json, side);
     // Mirror into the .alog fields Artisan shows.
-    const d = readAlog(alog);
     if (side.weightOut != null) {
       d.weight[1] = side.weightOut;
       d.computed.weightout = side.weightOut;
