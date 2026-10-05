@@ -107,26 +107,6 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
     }
   }
 
-  // Resume a session that was cut off (not in the sim: the simulated
-  // roaster starts cold every time, so there's nothing to resume).
-  if (!sim && fs.existsSync(stateFile)) {
-    try {
-      const {savedAt, state} = readJSON(stateFile);
-      if (state.phase !== 'OFF' && clock.now() - savedAt < RESUME_WITHIN_MS) {
-        console.log(
-          `resuming the session saved ${Math.round((clock.now() - savedAt) / 1000)} s ago (${state.phase})`,
-        );
-        newSession(state);
-      }
-    } catch (err) {
-      console.log(`couldn't resume the saved session: ${err.message}`);
-    }
-  }
-  // With no session, nothing should be heating. The roaster doesn't report
-  // the heater switch until it's set on this connection (and it can be
-  // heating while unreported), so set it: then the UI knows it's off.
-  if (!session) machine.set({HS: 0});
-
   machine.on('sample', (r) => {
     if (session) return; // the session forwards its own samples
     idle.push(r);
@@ -303,6 +283,27 @@ export function startApp({machine, clock, sim, port = 3100, logsDir}) {
       }
     });
   });
+
+  // Resume a session that was cut off (not in the sim: the simulated
+  // roaster starts cold every time, so there's nothing to resume). This
+  // comes last, once everything a session's events touch exists.
+  if (!sim && fs.existsSync(stateFile)) {
+    try {
+      const {savedAt, state} = readJSON(stateFile);
+      if (state.phase !== 'OFF' && clock.now() - savedAt < RESUME_WITHIN_MS) {
+        console.log(
+          `resuming the session saved ${Math.round((clock.now() - savedAt) / 1000)} s ago (${state.phase})`,
+        );
+        newSession(state);
+      }
+    } catch (err) {
+      console.log(`couldn't resume the saved session: ${err.message}`);
+    }
+  }
+  // With no session, nothing should be heating. The roaster doesn't report
+  // the heater switch until it's set on this connection (and it can be
+  // heating while unreported), so set it: then the UI knows it's off.
+  if (!session) machine.set({HS: 0});
 
   server.listen(port, '127.0.0.1', () =>
     console.log(

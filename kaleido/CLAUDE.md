@@ -150,6 +150,7 @@ The M1 LITE can only be controlled over USB, so if our process dies with the bur
 - If the app dies (crash or kill -9), the guardian grabs the freed port and runs `emergencyStop()` from `stop.js`, then says so with macOS `say`.
 - If the app hangs (heartbeat older than 15 s), the guardian kills it first, then does the same.
 - On a clean exit, the app deletes the heartbeat, but only after the heater is confirmed off. If that confirmation fails, the guardian tries again.
+- The heartbeat file holds the app's pid. After a restart, the old app's guardian sees a different pid, so it knows a new app took over and exits without touching the port or the file. The app stops its heartbeat timer before deleting the file on the way out, or one last beat would write it back and make its own guardian think it crashed.
 - Its log is `logs/.guardian.log`.
 - Verified on the real roaster with kill -9: the heater was off within about 2 s.
 

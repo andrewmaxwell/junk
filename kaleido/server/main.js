@@ -324,12 +324,28 @@ for (const event of ['uncaughtException', 'unhandledRejection'])
   });
 
 // The guardian (guardian.js) turns the heater off if this process dies or
-// hangs: it watches our pid and a heartbeat file we touch every 2 s.
+// hangs: it watches our pid and a heartbeat file we rewrite every 2 s. The
+// file holds our pid, so after a restart the old app's guardian can tell a
+// new app took over (and leaves it alone).
 let heartbeatFile = null;
+let heartbeatTimer = null;
+function beat() {
+  try {
+    fs.writeFileSync(heartbeatFile, String(process.pid));
+  } catch (err) {
+    // A missed beat only worries the guardian; it mustn't crash the app.
+    console.error(`heartbeat: ${err.message}`);
+  }
+}
 function removeHeartbeat() {
   if (!heartbeatFile) return;
+  // Stop beating first, or the next beat writes it back while we're on the
+  // way out, and our guardian takes us for crashed.
+  clearInterval(heartbeatTimer);
   try {
-    fs.unlinkSync(heartbeatFile);
+    // Only ours: a restarted app may already have written its own.
+    if (fs.readFileSync(heartbeatFile, 'utf8') === String(process.pid))
+      fs.unlinkSync(heartbeatFile);
   } catch {
     // already gone
   }
@@ -337,11 +353,8 @@ function removeHeartbeat() {
 if (app && !SIM) {
   const logs = new URL('../logs/', import.meta.url).pathname;
   heartbeatFile = `${logs}.heartbeat`;
-  fs.writeFileSync(heartbeatFile, '');
-  setInterval(() => {
-    const t = new Date();
-    fs.utimesSync(heartbeatFile, t, t);
-  }, HEARTBEAT_MS);
+  beat();
+  heartbeatTimer = setInterval(beat, HEARTBEAT_MS);
   const out = fs.openSync(`${logs}.guardian.log`, 'a');
   const guardian = new URL('./guardian.js', import.meta.url).pathname;
   spawn(process.execPath, [guardian, String(process.pid), heartbeatFile], {

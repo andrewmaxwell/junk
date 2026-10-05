@@ -25,6 +25,7 @@ const MAX_CRASHES = 3;
 const CRASH_WINDOW_MS = 10 * 60_000;
 const QUIT_GRACE_MS = 10_000; // a Ctrl-C this recently means the user quit
 const GUARDIAN_WAIT_MS = 30_000;
+const TESTS_TIMEOUT_MS = 3 * 60_000; // a hung test must not block restarts
 
 // Whether the app can restart without risk to a batch. Never mid-roast, or
 // while its record is still open. Never in READY either: a restart resumes
@@ -67,16 +68,28 @@ export async function supervise({
   process.on('SIGINT', onInt);
   process.on('SIGTERM', onTerm);
 
-  const unwatch = watchCode(root, async () => {
+  // One test run at a time. A change during a run gets a fresh run after
+  // it, so the code that's tested is the code that's on disk.
+  let testing = false;
+  let changedAgain = false;
+  const onCodeChange = async () => {
+    if (testing) return (changedAgain = true);
+    testing = true;
     log('code changed; running the tests');
     const ok = await runTests(root, log);
+    testing = false;
+    if (changedAgain) {
+      changedAgain = false;
+      return onCodeChange();
+    }
     if (!ok) {
       log('tests FAILED: still running the old code (see above)');
       return;
     }
     log('tests pass; the app restarts the next time no batch is at stake');
     if (child?.connected) child.send({type: 'restartWhenSafe'});
-  });
+  };
+  const unwatch = watchCode(root, onCodeChange);
 
   try {
     await keepRunning();
@@ -150,15 +163,21 @@ function runTests(root, log) {
   const env = {...process.env};
   delete env.NODE_TEST_CONTEXT;
   return new Promise((resolve) =>
-    execFile(process.execPath, ['--test', ...tests], {env}, (err, stdout) => {
-      if (err)
-        log(
-          stdout
-            .split('\n')
-            .filter((l) => /✖|fail/.test(l))
-            .join('\n'),
-        );
-      resolve(!err);
-    }),
+    execFile(
+      process.execPath,
+      ['--test', ...tests],
+      {env, timeout: TESTS_TIMEOUT_MS},
+      (err, stdout) => {
+        if (err?.killed) log('the tests took too long (a test is hanging?)');
+        else if (err)
+          log(
+            stdout
+              .split('\n')
+              .filter((l) => /✖|fail/.test(l))
+              .join('\n'),
+          );
+        resolve(!err);
+      },
+    ),
   );
 }

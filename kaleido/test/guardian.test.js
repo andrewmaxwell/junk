@@ -69,3 +69,32 @@ test('keeps trying while the port is still busy, then says to unplug', async () 
   assert.equal(b.calls.stop, 5);
   assert.match(b.calls.said[0], /Unplug the roaster/);
 });
+
+test("a restarted app's heartbeat is left to its own guardian", async () => {
+  // The app was restarted: our app (4242) is gone, and the heartbeat now
+  // holds the new app's pid. Not a crash; don't fight it for the port.
+  const {opts, calls, heartbeatFile} = setup({alive: false});
+  fs.writeFileSync(heartbeatFile, '5151');
+  assert.equal(await guard(opts), 'replaced');
+  assert.equal(calls.stop, 0);
+  assert.equal(fs.readFileSync(heartbeatFile, 'utf8'), '5151', 'untouched');
+});
+
+test('stops retrying once a restarted app takes over, without crying wolf', async () => {
+  // Our app crashed (its pid is still in the heartbeat); the stop can't get
+  // the port because the supervisor's new app already has it.
+  const {opts, calls, heartbeatFile} = setup({
+    alive: false,
+    stopResults: [{ok: false, message: 'busy'}],
+  });
+  fs.writeFileSync(heartbeatFile, '4242');
+  opts.stop = async () => {
+    calls.stop++;
+    fs.writeFileSync(heartbeatFile, '5151'); // the new app's first beat
+    return {ok: false, message: 'busy'};
+  };
+  assert.equal(await guard(opts), 'replaced');
+  assert.equal(calls.stop, 1);
+  assert.deepEqual(calls.said, [], 'no "unplug the roaster"');
+  assert.ok(fs.existsSync(heartbeatFile), "the new app's heartbeat stays");
+});

@@ -4,8 +4,12 @@
 //
 // main.js starts it (detached) when the app starts:
 //   node kaleido/server/guardian.js <app pid> <heartbeat file>
-// The app touches the heartbeat file every 2 s and deletes it on a clean exit.
+// The app writes its pid to the heartbeat file every 2 s and deletes it on a
+// clean exit.
 //   - file gone            → the app exited cleanly; the guardian exits too
+//   - another app's pid    → a restarted app took over (with its own
+//                            guardian); this one exits, and never touches
+//                            the new app's port or heartbeat
 //   - app process gone     → it crashed or was killed; its port is free now
 //   - heartbeat > 15 s old → it's hung; kill it so the port frees up
 // In the last two cases the guardian turns the heater off (fans keep running
@@ -19,9 +23,11 @@ import {emergencyStop} from './stop.js';
 export const HEARTBEAT_MS = 2000;
 export const HUNG_MS = 15_000;
 
-// One look. Returns 'ok', 'clean' (stop watching), or why to step in.
-export function assess({heartbeatAge, appAlive}) {
+// One look. Returns 'ok', 'clean' or 'replaced' (stop watching), or why to
+// step in. owner: the pid in the heartbeat file (null if it has none).
+export function assess({heartbeatAge, appAlive, owner, pid}) {
   if (heartbeatAge == null) return 'clean';
+  if (owner != null && owner !== pid) return 'replaced';
   if (!appAlive) return 'the app stopped';
   if (heartbeatAge > HUNG_MS) return 'the app stopped responding';
   return 'ok';
@@ -45,6 +51,14 @@ export async function guard({
   announce = (text) => spawn('say', [text], {stdio: 'ignore'}),
   log = console.log,
 }) {
+  // The pid written in the heartbeat file, or null (none, or no file).
+  const owner = () => {
+    try {
+      return Number(fs.readFileSync(heartbeatFile, 'utf8')) || null;
+    } catch {
+      return null;
+    }
+  };
   for (;;) {
     let heartbeatAge = null;
     try {
@@ -52,15 +66,29 @@ export async function guard({
     } catch {
       // gone: a clean exit
     }
-    const verdict = assess({heartbeatAge, appAlive: isAlive(pid)});
-    if (verdict === 'clean') return 'clean';
+    const verdict = assess({
+      heartbeatAge,
+      appAlive: isAlive(pid),
+      owner: owner(),
+      pid,
+    });
+    if (verdict === 'clean' || verdict === 'replaced') return verdict;
     if (verdict !== 'ok') {
       log(`guardian: ${verdict}; turning the heater off`);
       if (isAlive(pid)) kill(pid);
-      // The port frees up once the app is gone; retry until the stop lands.
+      // The port frees up once the app is gone; retry until the stop lands,
+      // unless a restarted app takes over first (it holds the port and has
+      // its own guardian).
       let result;
       for (let i = 0; i < 5; i++) {
         await sleep(1000);
+        const o = owner();
+        if (o != null && o !== pid) {
+          log(
+            'guardian: a restarted app took over; leaving it to its guardian',
+          );
+          return 'replaced';
+        }
         result = await stop();
         if (result.ok) break;
       }
@@ -70,11 +98,14 @@ export async function guard({
           ? `Roaster app ${verdict.replace('the app ', '')}. Heater off.`
           : 'Roaster app stopped and I could not turn the heater off. Unplug the roaster.',
       );
-      try {
-        fs.unlinkSync(heartbeatFile);
-      } catch {
-        // already gone
-      }
+      // Only our app's heartbeat: a new app's belongs to its own guardian.
+      const o = owner();
+      if (o == null || o === pid)
+        try {
+          fs.unlinkSync(heartbeatFile);
+        } catch {
+          // already gone
+        }
       return verdict;
     }
     await sleep(1000);
