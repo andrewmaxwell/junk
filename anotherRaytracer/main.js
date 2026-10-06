@@ -1,8 +1,8 @@
 import {packObjects, scenes} from './scenes.js';
-import {displayShader, traceShader} from './shaders.js';
+import {displayShader, tileShader, traceShader} from './shaders.js';
 
 const params = new URLSearchParams(location.search);
-/** 'cornell' (default) or 'veach'; see `scenes` in scenes.js */
+/** 'cornell' (default), 'veach' or 'shafts'; see `scenes` in scenes.js */
 const sceneName = params.get('scene') ?? 'cornell';
 /** 'mis' (default), 'light' or 'bsdf'; see `sampling` in shaders.js */
 const samplingName = params.get('sampling') ?? 'mis';
@@ -19,8 +19,18 @@ const maxSamples = Number(params.get('spp') ?? 4096);
 const headroom = Number(params.get('headroom') ?? 8);
 /** In SDR with tone mapping, lights clamp here, which toneMap shows as white */
 const sdrWhite = 4;
+/**
+ * Adaptive sampling stops refining a tile once its noise is below this, in
+ * display brightness from 0 to 1; 0 to refine everything. See `noiseThreshold`
+ * in shaders.js
+ */
+const noiseThreshold = Number(params.get('noise') ?? 0.02);
+/** How strongly glass splits light into rainbows. See `dispersion` in shaders.js */
+const dispersionAmount = Number(params.get('dispersion') ?? 1);
 
 const scene = (scenes[sceneName] ?? scenes.cornell)();
+/** Fog density, defaulting to the scene's. See `fogDensity` in shaders.js */
+const fogAmount = Number(params.get('fog') ?? scene.fog ?? 0);
 const sampling = Math.max(0, ['mis', 'light', 'bsdf'].indexOf(samplingName));
 
 const canvas = /** @type {HTMLCanvasElement} */ (
@@ -87,6 +97,10 @@ const tracePipeline = device.createComputePipeline({
   layout: 'auto',
   compute: {module: compile(traceShader)},
 });
+const tilePipeline = device.createComputePipeline({
+  layout: 'auto',
+  compute: {module: compile(tileShader)},
+});
 const displayModule = compile(displayShader);
 const displayPipeline = device.createRenderPipeline({
   layout: 'auto',
@@ -94,8 +108,8 @@ const displayPipeline = device.createRenderPipeline({
   fragment: {module: displayModule, targets: [{format: 'rgba16float'}]},
 });
 
-// Params in shaders.js: 4 × (vec3f + u32), then 6 scalars, padded to 16 bytes
-const paramsData = new ArrayBuffer(96);
+// Params in shaders.js: 4 × (vec3f + u32), then 10 scalars, padded to 16 bytes
+const paramsData = new ArrayBuffer(112);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
 const paramsBuffer = device.createBuffer({
@@ -110,40 +124,69 @@ const objectBuffer = device.createBuffer({
 });
 device.queue.writeBuffer(objectBuffer, 0, objectData);
 
-/** @type {GPUBuffer | undefined} */
-let sumsBuffer;
+// How many tiles adaptive sampling still refines, counted on the GPU and
+// copied back to show and to know when to stop
+const activeTilesBuffer = device.createBuffer({
+  size: 4,
+  usage:
+    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+});
+const activeTilesRead = device.createBuffer({
+  size: 4,
+  usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+});
+let readingActiveTiles = false;
+
+/** @type {GPUBuffer[]} */
+let pixelBuffers = [];
 /** @type {GPUBindGroup} */
 let traceBindGroup;
+/** @type {GPUBindGroup} */
+let tileBindGroup;
 /** @type {GPUBindGroup} */
 let displayBindGroup;
 let width = 0;
 let height = 0;
+let tileCount = 0;
 
 const resize = () => {
   width = Math.max(1, Math.round(canvas.clientWidth * scale));
   height = Math.max(1, Math.round(canvas.clientHeight * scale));
   canvas.width = width;
   canvas.height = height;
-  sumsBuffer?.destroy();
-  sumsBuffer = device.createBuffer({
-    size: width * height * 16,
-    usage: GPUBufferUsage.STORAGE,
-  });
-  traceBindGroup = device.createBindGroup({
-    layout: tracePipeline.getBindGroupLayout(0),
-    entries: [
-      {binding: 0, resource: {buffer: paramsBuffer}},
-      {binding: 1, resource: {buffer: objectBuffer}},
-      {binding: 2, resource: {buffer: sumsBuffer}},
-    ],
-  });
-  displayBindGroup = device.createBindGroup({
-    layout: displayPipeline.getBindGroupLayout(0),
-    entries: [
-      {binding: 0, resource: {buffer: paramsBuffer}},
-      {binding: 1, resource: {buffer: sumsBuffer}},
-    ],
-  });
+  tileCount = Math.ceil(width / 8) * Math.ceil(height / 8);
+  for (const b of pixelBuffers) b.destroy();
+  /** @type {(size: number) => GPUBuffer} */
+  const storage = (size) =>
+    device.createBuffer({size, usage: GPUBufferUsage.STORAGE});
+  const sums = storage(width * height * 16);
+  const sqSums = storage(width * height * 4);
+  const tiles = storage(tileCount * 4);
+  pixelBuffers = [sums, sqSums, tiles];
+  /** @type {(pipeline: GPUPipelineBase, buffers: GPUBuffer[]) => GPUBindGroup} */
+  const bindGroup = (pipeline, buffers) =>
+    device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: buffers.map((buffer, binding) => ({
+        binding,
+        resource: {buffer},
+      })),
+    });
+  traceBindGroup = bindGroup(tracePipeline, [
+    paramsBuffer,
+    objectBuffer,
+    sums,
+    sqSums,
+    tiles,
+  ]);
+  tileBindGroup = bindGroup(tilePipeline, [
+    paramsBuffer,
+    sums,
+    sqSums,
+    tiles,
+    activeTilesBuffer,
+  ]);
+  displayBindGroup = bindGroup(displayPipeline, [paramsBuffer, sums, tiles]);
   restart();
 };
 
@@ -200,6 +243,13 @@ let randomSeed = 0;
 let samplesPerPixel = 0;
 let samplesPerFrame = 1;
 let paused = false;
+let fog = fogAmount > 0;
+let dispersion = dispersionAmount > 0;
+let showTiles = false;
+// Tiles still refining, as of the last count read back; -1 until then
+let activeTiles = -1;
+// Counts once per restart, so counts from before one are ignored
+let restarts = 0;
 // True while the camera is moving, so frames stay quick
 let moving = false;
 // At most two frames are queued on the GPU: enough that it never waits for
@@ -212,6 +262,8 @@ let startTime = performance.now();
 function restart() {
   frame = 0;
   samplesPerPixel = 0;
+  activeTiles = -1;
+  restarts++;
   startTime = performance.now();
 }
 
@@ -239,14 +291,27 @@ const render = () => {
   const toneMap = !hdr && toneMapping;
   paramsF32[20] = hdr ? headroom : toneMap ? sdrWhite : 1;
   paramsU32[21] = +toneMap;
+  paramsF32[22] = fog ? fogAmount : 0;
+  paramsF32[23] = dispersion ? dispersionAmount : 0;
+  paramsF32[24] = noiseThreshold;
+  paramsU32[25] = +showTiles;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
-  const trace = encoder.beginComputePass();
-  trace.setPipeline(tracePipeline);
-  trace.setBindGroup(0, traceBindGroup);
-  trace.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
-  trace.end();
+  encoder.clearBuffer(activeTilesBuffer);
+  const pass = encoder.beginComputePass();
+  // Pick the tiles that still need samples, then sample them
+  pass.setPipeline(tilePipeline);
+  pass.setBindGroup(0, tileBindGroup);
+  pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+  pass.setPipeline(tracePipeline);
+  pass.setBindGroup(0, traceBindGroup);
+  pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+  pass.end();
+  const readActiveTiles = !readingActiveTiles;
+  if (readActiveTiles) {
+    encoder.copyBufferToBuffer(activeTilesBuffer, 0, activeTilesRead, 0, 4);
+  }
 
   const display = encoder.beginRenderPass({
     colorAttachments: [
@@ -262,13 +327,23 @@ const render = () => {
   display.draw(3);
   display.end();
   device.queue.submit([encoder.finish()]);
+  if (readActiveTiles) {
+    readingActiveTiles = true;
+    const restartsThen = restarts;
+    activeTilesRead.mapAsync(GPUMapMode.READ).then(() => {
+      const count = new Uint32Array(activeTilesRead.getMappedRange())[0];
+      activeTilesRead.unmap();
+      readingActiveTiles = false;
+      if (restartsThen === restarts) activeTiles = count;
+    });
+  }
 
   frame++;
   samplesPerPixel += samplesPerFrame;
 };
 
 const loop = () => {
-  const done = samplesPerPixel >= maxSamples;
+  const done = samplesPerPixel >= maxSamples || activeTiles === 0;
   if (framesInFlight < 2 && !paused && !done) {
     if (moving) samplesPerFrame = 1;
     samplesPerFrame = Math.min(samplesPerFrame, maxSamples - samplesPerPixel);
@@ -297,10 +372,13 @@ const loop = () => {
   const rate = secs ? samplesPerPixel / secs : 0;
   stats.textContent =
     `${status} · ${samplesPerPixel} spp · ${rate.toFixed(0)} spp/s · ` +
+    `${activeTiles < 0 ? '–' : Math.round((100 * activeTiles) / tileCount)}% refining · ` +
     `${width}×${height} · ${sceneName} · sampling: ${samplingName} · ` +
     `${hdr ? 'HDR' : toneMapping ? 'SDR, tone mapped' : 'SDR, clipped'} · ` +
+    `fog ${fog ? 'on' : 'off'} · dispersion ${dispersion ? 'on' : 'off'} · ` +
     'drag: orbit · shift/right drag: pan · scroll: zoom · r: reset view · ' +
-    'h: HDR on/off · t: tone mapping on/off · space: pause';
+    'h: HDR on/off · t: tone mapping on/off · f: fog · d: dispersion · ' +
+    'n: show refining tiles · space: pause';
   requestAnimationFrame(loop);
 };
 
@@ -353,6 +431,14 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'r') {
     resetCamera();
     cameraMoved();
+  } else if (e.key === 'f') {
+    fog = !fog && fogAmount > 0;
+    restart();
+  } else if (e.key === 'd') {
+    dispersion = !dispersion && dispersionAmount > 0;
+    restart();
+  } else if (e.key === 'n') {
+    showTiles = !showTiles;
   } else if (e.key === 't') {
     // Lights clamp differently with tone mapping, so start over
     toneMapping = !toneMapping;

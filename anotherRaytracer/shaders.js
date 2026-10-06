@@ -40,9 +40,39 @@ struct Params {
   maxBrightness: f32,
   /** 1 to ease brightness over 1 into white for SDR screens, 0 to clip */
   toneMap: u32,
+  /**
+   * Fog filling the scene: the chance per unit of distance that light
+   * scatters off it. 0 for none.
+   */
+  fogDensity: f32,
+  /**
+   * How much glass's index of refraction varies with wavelength, splitting
+   * white light into rainbows. 0 for none, which is also less noisy.
+   */
+  dispersion: f32,
+  /**
+   * Adaptive sampling: a tile stops getting samples once its estimated noise
+   * is below this, in display brightness from 0 to 1. 0 to never stop.
+   */
+  noiseThreshold: f32,
+  /** 1 to highlight the tiles that are still getting samples */
+  showTiles: u32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
+
+/** Pixels per side of the tiles that adaptive sampling stops as a unit */
+const TILE = 8u;
+
+/** Index of the tile that pixel id is in */
+fn tileIndex(id: vec2u) -> u32 {
+  return (id.y / TILE) * ((params.width + TILE - 1u) / TILE) + id.x / TILE;
+}
+
+/** How bright a linear RGB color looks */
+fn brightness(c: vec3f) -> f32 {
+  return dot(c, vec3f(0.2126, 0.7152, 0.0722));
+}
 `;
 
 export const traceShader = /* wgsl */ `${common}
@@ -59,6 +89,14 @@ const MIRROR = 1;
 const GLASS = 2;
 const LIGHT = 3;
 
+/** Fraction of light that fog scatters rather than absorbs */
+const FOG_ALBEDO = 0.9;
+/**
+ * Fog's phase function, the share of scattered light that goes in each
+ * direction: the same for all, since it's 1 / (the sphere's 4π steradians)
+ */
+const PHASE = 1. / (4. * PI);
+
 /** Packed by packObjects in scenes.js */
 struct Shape {
   centerRadius: vec4f,
@@ -72,6 +110,10 @@ struct Shape {
 @group(0) @binding(1) var<storage, read> objects: array<Shape>;
 /** Per pixel: summed color, and in w the sample count */
 @group(0) @binding(2) var<storage, read_write> sums: array<vec4f>;
+/** Per pixel: summed squared brightness, for estimating noise */
+@group(0) @binding(3) var<storage, read_write> sqSums: array<f32>;
+/** Per tile: 1 if it still needs samples. Written by tileShader. */
+@group(0) @binding(4) var<storage, read> tiles: array<u32>;
 
 ///////////////////////////////
 // Random numbers
@@ -214,6 +256,68 @@ fn sampleSurface(s: u32, n: vec3f, r: vec3f) -> vec3f {
   return directionAround(n, sqrt(1. - rand()), phi);
 }
 
+/** A random direction, any way at all */
+fn sampleSphere() -> vec3f {
+  return directionAround(vec3f(0., 1., 0.), 1. - 2. * rand(), 2. * PI * rand());
+}
+
+/**
+ * Picks a random direction from p toward a light, uniformly within the cone
+ * it covers. Returns the direction, and in w the cone's solid angle.
+ */
+fn sampleLight(p: vec3f, light: u32) -> vec4f {
+  let w = normalize(objects[light].centerRadius.xyz - p);
+  let oneMinusCos = lightConeOneMinusCos(p, light);
+  let l = directionAround(w, 1. - rand() * oneMinusCos, 2. * PI * rand());
+  return vec4f(l, 2. * PI * oneMinusCos);
+}
+
+/** Fraction of the light that gets from p along l to the light: 0 if blocked, less in fog */
+fn lightVisibility(p: vec3f, l: vec3f, light: u32) -> f32 {
+  if (intersect(p, l) != i32(light)) { return 0.; }
+  return exp(-params.fogDensity * hitDist);
+}
+
+///////////////////////////////
+// Dispersion
+///////////////////////////////
+
+// Wavelengths that paths through glass pick from, in nanometers
+const MIN_WAVELENGTH = 380.;
+const MAX_WAVELENGTH = 720.;
+
+/** One side of the piecewise Gaussians in wavelengthColor */
+fn lobe(x: f32, mean: f32, below: f32, above: f32) -> f32 {
+  let t = (x - mean) / select(above, below, x < mean);
+  return exp(-0.5 * t * t);
+}
+
+/**
+ * How a wavelength looks in linear RGB, scaled so that the average over all
+ * of them is white. A path that picks one at random and multiplies its color
+ * by this comes out the same color on average, but bends by that wavelength
+ * in glass. Uses the fit of the CIE 1931 color matching functions from
+ * "Simple Analytic Approximations to the CIE XYZ Color Matching Functions"
+ * (Wyman, Sloan & Shirley), with colors outside sRGB clipped. The scale
+ * factors make each channel average 1 between MIN_ and MAX_WAVELENGTH.
+ */
+fn wavelengthColor(w: f32) -> vec3f {
+  let x = 1.056 * lobe(w, 599.8, 37.9, 31.) + 0.362 * lobe(w, 442., 16., 26.7) - 0.065 * lobe(w, 501.1, 20.4, 26.2);
+  let y = 0.821 * lobe(w, 568.8, 46.9, 40.5) + 0.286 * lobe(w, 530.9, 16.3, 31.1);
+  let z = 1.217 * lobe(w, 437., 11.8, 36.) + 0.681 * lobe(w, 459., 26., 13.8);
+  let rgb = vec3f(
+    3.2406 * x - 1.5372 * y - 0.4986 * z,
+    -0.9689 * x + 1.8758 * y + 0.0415 * z,
+    0.0557 * x - 0.204 * y + 1.057 * z,
+  );
+  return max(rgb, vec3f(0.)) * vec3f(1.9299, 2.9470, 3.1109);
+}
+
+/** Glass's index of refraction at a wavelength: 1.5 for yellow, more for blue */
+fn glassIndex(w: f32) -> f32 {
+  return 1.5 + params.dispersion * 0.025 * ((550. / w) * (550. / w) - 1.);
+}
+
 ///////////////////////////////
 // Path tracing
 ///////////////////////////////
@@ -227,14 +331,19 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   // Throughput: the fraction of light arriving at the current hit that makes
   // it back to the camera, after all the surfaces it has bounced off so far
   var through = vec3f(1.);
-  // True until the path hits a diffuse surface
+  // True until the path hits a diffuse surface or scatters in fog
   var seenByCamera = true;
   // Probability of the random choices made so far that the throughput was
   // boosted to make up for, like whether glass reflected or refracted
   var choiceProb = 1.;
-  // Nonzero when a diffuse surface randomly picked this ray's direction: the
-  // probability density it picked it with
+  // Nonzero when a diffuse surface or fog randomly picked this ray's
+  // direction: the probability density it picked it with
   var bouncePdf = 0.;
+  // Once the path refracts through glass, the one wavelength it follows from
+  // then on (0 before), and that wavelength's color. Light is multiplied by
+  // the color after clamping, so clamping doesn't change its hue.
+  var wavelength = 0.;
+  var tint = vec3f(1.);
 
   for (var depth = 0; depth < 100; depth++) {
     // In 32-bit floats, each new direction built from the last one is a bit
@@ -242,6 +351,42 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // makes a glossy lobe like cos ^ 2000 overflow to infinity.
     d = normalize(d);
     let hit = intersect(o, d);
+
+    // Fog: the ray scatters after a random distance, sooner in denser fog.
+    // If that's before what it hit, it scatters instead of getting there.
+    let fogDist = select(1e30, -log(1. - rand()) / params.fogDensity, params.fogDensity > 0.);
+    if (fogDist < hitDist) {
+      // Fog absorbs some light. After a few bounces, end the path with that
+      // probability instead, so survivors don't get dimmer.
+      if (depth < 5) {
+        through *= FOG_ALBEDO;
+      } else if (rand() >= FOG_ALBEDO) {
+        break;
+      }
+      let p = o + d * fogDist;
+
+      // Direct light, as for diffuse surfaces below. Fog scatters light
+      // evenly in all directions.
+      for (var light = 0u; light < params.objectCount && params.sampling != 2u; light++) {
+        if (i32(objects[light].colorMaterial.w) != LIGHT) { continue; }
+        let ls = sampleLight(p, light);
+        let visible = lightVisibility(p, ls.xyz, light);
+        if (visible == 0.) { continue; }
+        var weight = 1.;
+        if (params.sampling == 0u) { weight = powerHeuristic(1. / ls.w, PHASE); }
+        let c = through * objects[light].colorMaterial.rgb * (PHASE * visible * weight * ls.w);
+        color += tint * c * select(indirectScale(c), 1., seenByCamera);
+      }
+
+      // Indirect light: scatter in a random direction. Its density equals
+      // the phase function, so the throughput is unchanged.
+      bouncePdf = PHASE;
+      seenByCamera = false;
+      o = p;
+      d = sampleSphere();
+      continue;
+    }
+
     if (hit < 0) { break; }
     let s = u32(hit);
     let shape = objects[s];
@@ -260,9 +405,9 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         // choices clamp higher, to keep the boost that makes up for the
         // paths that went elsewhere. Otherwise a light behind glass, which
         // only about half of the paths reach, would average out too dim.
-        color += min(e, vec3f(params.maxBrightness / choiceProb));
+        color += tint * min(e, vec3f(params.maxBrightness / choiceProb));
       } else {
-        color += e * indirectScale(e);
+        color += tint * e * indirectScale(e);
       }
       break; // lights don't reflect anything
     }
@@ -295,27 +440,23 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // random bounce to stumble into one.
       for (var light = 0u; light < params.objectCount && params.sampling != 2u; light++) {
         if (i32(objects[light].colorMaterial.w) != LIGHT) { continue; }
-        let w = normalize(objects[light].centerRadius.xyz - p);
-
-        // The light covers a cone of directions around w. Pick one uniformly.
-        let oneMinusCos = lightConeOneMinusCos(p, light);
-        let cosA = 1. - rand() * oneMinusCos;
-        let l = directionAround(w, cosA, 2. * PI * rand());
+        let ls = sampleLight(p, light);
+        let l = ls.xyz;
 
         let cosSurface = dot(l, nl);
         if (cosSurface <= 0.) { continue; } // light is behind this surface
 
         // Shadow ray: only counts if nothing is in the way
-        if (intersect(p, l) != i32(light)) { continue; }
+        let visible = lightVisibility(p, l, light);
+        if (visible == 0.) { continue; }
 
         // radiance * BSDF * cos(theta) / pdf (1/solidAngle)
-        let solidAngle = 2. * PI * oneMinusCos;
         let pdf = evalSurface(s, cosSurface, r, l, &bsdf);
         var weight = 1.;
-        if (params.sampling == 0u) { weight = powerHeuristic(1. / solidAngle, pdf); }
-        let c = through * objects[light].colorMaterial.rgb * bsdf * (weight * cosSurface * solidAngle);
+        if (params.sampling == 0u) { weight = powerHeuristic(1. / ls.w, pdf); }
+        let c = through * objects[light].colorMaterial.rgb * bsdf * (weight * cosSurface * ls.w * visible);
         // Light reaching the first surface the camera sees is direct light
-        color += c * select(indirectScale(c), 1., seenByCamera);
+        color += tint * c * select(indirectScale(c), 1., seenByCamera);
       }
 
       // Indirect light: bounce in a random direction. If this hits a light,
@@ -336,8 +477,9 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       var next = reflect(d, n);
 
       if (material == GLASS) {
-        let nnt = select(1.5, 1. / 1.5, into);
-        let t = refract(d, nl, nnt);
+        var index = 1.5;
+        if (wavelength > 0.) { index = glassIndex(wavelength); }
+        let t = refract(d, nl, select(index, 1. / index, into));
         // Otherwise total internal reflection: keep the mirror direction
         if (any(t != vec3f(0.))) {
           // Fresnel: how much reflects vs refracts (Schlick's approximation)
@@ -356,6 +498,19 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
             next = t;
             through *= (1. - reflectance) / (1. - P);
             choiceProb *= 1. - P;
+            // Dispersion: the first time the path refracts, it picks a
+            // wavelength to follow, and bends by that wavelength's index
+            // instead. Reflection doesn't depend on wavelength (much), so
+            // paths that only reflect skip this, and the noise it adds.
+            if (wavelength == 0. && params.dispersion > 0.) {
+              wavelength = mix(MIN_WAVELENGTH, MAX_WAVELENGTH, rand());
+              tint = wavelengthColor(wavelength);
+              let i = glassIndex(wavelength);
+              let bent = refract(d, nl, select(i, 1. / i, into));
+              // Rarely, a wavelength that bends more reflects entirely
+              // where yellow wouldn't
+              next = select(reflect(d, n), bent, any(bent != vec3f(0.)));
+            }
           }
         }
       }
@@ -366,29 +521,101 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   return color;
 }
 
-@compute @workgroup_size(8, 8)
+@compute @workgroup_size(TILE, TILE)
 fn main(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= params.width || id.y >= params.height) { return; }
+  // Adaptive sampling: skip tiles that are already smooth enough
+  if (tiles[tileIndex(id.xy)] == 0u) { return; }
   seed = pcg(id.x + pcg(id.y + pcg(params.seed)));
   let size = vec2f(f32(params.width), f32(params.height));
 
   var sum = vec3f(0.);
+  var sqSum = 0.;
   for (var i = 0u; i < params.samplesPerFrame; i++) {
     // Jitter within the pixel for antialiasing. y = 0 is the top row.
     let jx = rand();
     let jy = rand();
     let screen = vec2f((f32(id.x) + jx) / size.x - 0.5, 0.5 - (f32(id.y) + jy) / size.y);
     let d = normalize(params.camForward + params.camRight * screen.x + params.camUp * screen.y);
-    sum += trace(params.camPos, d);
+    let c = trace(params.camPos, d);
+    sum += c;
+    sqSum += brightness(c) * brightness(c);
   }
   let index = id.y * params.width + id.x;
   var prev = vec4f(0.);
-  if (params.frame > 0u) { prev = sums[index]; }
+  var prevSq = 0.;
+  if (params.frame > 0u) {
+    prev = sums[index];
+    prevSq = sqSums[index];
+  }
   sums[index] = prev + vec4f(sum, f32(params.samplesPerFrame));
+  sqSums[index] = prevSq + sqSum;
+}`;
+
+/**
+ * Adaptive sampling. Runs before each trace dispatch, one workgroup per tile,
+ * and marks which tiles still need samples.
+ *
+ * Noise is judged per tile rather than per pixel: one pixel's noise estimate
+ * is itself noisy, so pixels whose first samples happened to agree would stop
+ * too early. Tiles stop as a unit, when the root-mean-square noise of their
+ * pixels is low enough, so a few noisy pixels keep the whole tile going.
+ */
+export const tileShader = /* wgsl */ `${common}
+@group(0) @binding(1) var<storage, read> sums: array<vec4f>;
+@group(0) @binding(2) var<storage, read> sqSums: array<f32>;
+@group(0) @binding(3) var<storage, read_write> tiles: array<u32>;
+/** How many tiles are still going, for main.js to show and to know when to stop */
+@group(0) @binding(4) var<storage, read_write> activeTiles: atomic<u32>;
+
+/** Every tile gets at least this many samples before its noise is trusted */
+const MIN_SAMPLES = 32.;
+
+/** Each pixel's squared noise */
+var<workgroup> noise: array<f32, TILE * TILE>;
+
+/** Brightness as displayed, roughly: clipped to white, with gamma */
+fn display(x: f32) -> f32 {
+  return pow(clamp(x, 0., 1.), 1. / 2.2);
+}
+
+@compute @workgroup_size(TILE, TILE)
+fn main(@builtin(global_invocation_id) id: vec3u, @builtin(local_invocation_index) local: u32) {
+  var n = 0.;
+  if (id.x < params.width && id.y < params.height) {
+    let s = sums[id.y * params.width + id.x];
+    let count = max(s.w, 1.);
+    let mean = brightness(s.rgb) / count;
+    let variance = max(0., sqSums[id.y * params.width + id.x] / count - mean * mean);
+    // Standard error: how far the average of the samples is likely to be off
+    let stdErr = sqrt(variance / count);
+    // In display brightness, where dark values are stretched by gamma
+    let e = display(mean + stdErr) - display(mean - stdErr);
+    n = e * e;
+  }
+  noise[local] = n;
+  workgroupBarrier();
+  if (local != 0u) { return; }
+
+  // Thread 0 is the tile's top left pixel. Every pixel in a tile has the same
+  // sample count.
+  var total = 0.;
+  for (var i = 0u; i < TILE * TILE; i++) { total += noise[i]; }
+  let pixels = min(TILE, params.width - id.x) * min(TILE, params.height - id.y);
+  let rms = sqrt(total / f32(pixels));
+  let count = sums[id.y * params.width + id.x].w;
+  let refining =
+    params.frame == 0u || // the sums are from before a restart
+    params.noiseThreshold == 0. ||
+    count < MIN_SAMPLES ||
+    rms > params.noiseThreshold;
+  tiles[tileIndex(id.xy)] = u32(refining);
+  if (refining) { atomicAdd(&activeTiles, 1u); }
 }`;
 
 export const displayShader = /* wgsl */ `${common}
 @group(0) @binding(1) var<storage, read> sums: array<vec4f>;
+@group(0) @binding(2) var<storage, read> tiles: array<u32>;
 
 // One triangle that covers the whole screen
 @vertex
@@ -414,6 +641,9 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let s = sums[u32(pos.y) * params.width + u32(pos.x)];
   var color = s.rgb / max(s.w, 1.);
   if (params.toneMap == 1u) { color = toneMap(color); }
+  if (params.showTiles == 1u && tiles[tileIndex(vec2u(pos.xy))] == 1u) {
+    color = mix(color, vec3f(1., 0., 0.), 0.3);
+  }
   // The canvas takes sRGB-encoded values. In HDR, values over 1 are brighter
   // than white; in SDR the canvas clamps them.
   return vec4f(pow(color, vec3f(1. / 2.2)), 1.);

@@ -100,8 +100,11 @@ const plate = (
  * @typedef {{
  *   objects: Shape[],
  *   camera: {position: number[], target: number[], zoom: number},
+ *   fog?: number,
  * }} Scene
  * The camera orbits `target`. `zoom` is the image height at distance 1.
+ * `fog` is the fog's density: the chance per unit of distance that light
+ * scatters off it.
  */
 
 /** @type {() => Scene} */
@@ -145,6 +148,7 @@ function cornellScene() {
       sphere(16, [20, 16, 160], [0.3, 0.3, 0.35], DIFFUSE, 0.6, 2000), // lower left polished ball
     ],
     camera: {position: [50, 50, 350], target: [50, 33, 10], zoom: 0.5},
+    fog: 0.002,
   };
 }
 
@@ -200,8 +204,58 @@ function veachScene() {
   };
 }
 
+/**
+ * A dark, foggy room lit only by a light outside a window with blinds, so the
+ * light comes in as beams, with a glass ball and a mirror ball in them.
+ * @type {() => Scene} */
+function shaftsScene() {
+  // The room spans x 0 to 100, y 0 to 100, and z from -100 forward. The front
+  // is open. The window is in the left wall, at y 40 to 80 and z -50 to 0.
+  const big = 1000;
+  const gray = [0.4, 0.4, 0.4];
+  const wall = {oneSided: true};
+  // The left wall is two-sided, so it blocks the light outside it
+  /** @type {(y0: number, y1: number, z0: number, z1: number) => Shape} */
+  const leftWall = (y0, y1, z0, z1) =>
+    plate(
+      [0, (y0 + y1) / 2, (z0 + z1) / 2],
+      [1, 0, 0],
+      [0, 0, 1],
+      (z1 - z0) / 2,
+      (y1 - y0) / 2,
+      gray,
+    );
+  const objects = [
+    plate([50, 0, 0], [0, 1, 0], [1, 0, 0], big, big, gray, wall), // floor
+    // The ceiling stops at the walls, so it doesn't shade the light outside
+    plate([50, 100, 0], [0, -1, 0], [1, 0, 0], 50, big, gray, wall),
+    plate([50, 50, -100], [0, 0, 1], [1, 0, 0], big, big, gray, wall), // back wall
+    plate([100, 50, 0], [-1, 0, 0], [0, 0, 1], big, big, gray, wall), // right wall
+    leftWall(0, 40, -big, big), // below the window
+    leftWall(80, 100, -big, big), // above it
+    leftWall(40, 80, -big, -50), // behind it
+    leftWall(40, 80, 0, big), // in front of it
+    // Outside, small and far, so the beams have sharp edges
+    sphere(1.5, [-120, 150, -30], [90000, 83000, 72000], LIGHT),
+    sphere(12, [45, 12, -20], [0.95, 0.95, 0.95], GLASS),
+    sphere(10, [75, 10, -60], [0.9, 0.9, 0.9], MIRROR),
+  ];
+  // Blinds across the window, 4 tall with gaps of 6. Each gap lets in a
+  // sheet of light, seen edge on from the front.
+  for (let y = 40; y < 80; y += 10) objects.push(leftWall(y, y + 4, -50, 0));
+  return {
+    objects,
+    camera: {position: [60, 45, 110], target: [40, 35, -30], zoom: 0.8},
+    fog: 0.004,
+  };
+}
+
 /** @type {Record<string, () => Scene>} */
-export const scenes = {cornell: cornellScene, veach: veachScene};
+export const scenes = {
+  cornell: cornellScene,
+  veach: veachScene,
+  shafts: shaftsScene,
+};
 
 /**
  * Packs shapes into the `Shape` structs of the `objects` buffer in shaders.js:
