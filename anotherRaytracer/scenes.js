@@ -211,7 +211,9 @@ function shaftsScene() {
   // The room spans x 0 to 100, y 0 to 100, and z from -100 forward. The front
   // is open. The window is in the left wall, at y 40 to 80 and z -50 to 0.
   const big = 1000;
-  const gray = [0.4, 0.4, 0.4];
+  // Cool walls and a warm floor, against warm late-afternoon light
+  const gray = [0.32, 0.37, 0.45];
+  const floor = [0.5, 0.4, 0.3];
   const wall = {oneSided: true};
   // The left wall is two-sided, so it blocks the light outside it
   /** @type {(y0: number, y1: number, z0: number, z1: number) => Shape} */
@@ -225,7 +227,7 @@ function shaftsScene() {
       gray,
     );
   const objects = [
-    plate([50, 0, 0], [0, 1, 0], [1, 0, 0], big, big, gray, wall), // floor
+    plate([50, 0, 0], [0, 1, 0], [1, 0, 0], big, big, floor, wall), // floor
     // The ceiling stops at the walls, so it doesn't shade the light outside
     plate([50, 100, 0], [0, -1, 0], [1, 0, 0], 50, big, gray, wall),
     plate([50, 50, -100], [0, 0, 1], [1, 0, 0], big, big, gray, wall), // back wall
@@ -235,13 +237,16 @@ function shaftsScene() {
     leftWall(40, 80, -big, -50), // behind it
     leftWall(40, 80, 0, big), // in front of it
     // Outside, small and far, so the beams have sharp edges
-    sphere(1.5, [-120, 150, -30], [90000, 83000, 72000], LIGHT),
+    sphere(1.5, [-120, 150, -30], [170000, 130000, 85000], LIGHT),
+    // Dim blue sky behind the camera, through the open front, so shadows
+    // and fog outside the beams are cool
+    sphere(30, [50, 60, 260], [1.5, 2.5, 5], LIGHT),
     sphere(12, [45, 12, -20], [0.95, 0.95, 0.95], GLASS),
-    sphere(10, [75, 10, -60], [0.9, 0.9, 0.9], MIRROR),
+    sphere(10, [75, 10, -60], [0.95, 0.64, 0.54], MIRROR), // copper
   ];
-  // Blinds across the window, 4 tall with gaps of 6. Each gap lets in a
-  // sheet of light, seen edge on from the front.
-  for (let y = 40; y < 80; y += 10) objects.push(leftWall(y, y + 4, -50, 0));
+  // Blinds across the window, 5.5 tall with gaps of 2.5. Each gap lets in a
+  // thin sheet of light, seen edge on from the front.
+  for (let y = 40; y < 80; y += 8) objects.push(leftWall(y, y + 5.5, -50, 0));
   return {
     objects,
     camera: {position: [60, 45, 110], target: [40, 35, -30], zoom: 0.8},
