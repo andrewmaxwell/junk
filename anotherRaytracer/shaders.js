@@ -57,6 +57,8 @@ struct Params {
   noiseThreshold: f32,
   /** 1 to highlight the tiles that are still getting samples */
   showTiles: u32,
+  /** The display multiplies brightness by this */
+  exposure: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -639,7 +641,7 @@ fn toneMap(x: vec3f) -> vec3f {
 @fragment
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let s = sums[u32(pos.y) * params.width + u32(pos.x)];
-  var color = s.rgb / max(s.w, 1.);
+  var color = s.rgb / max(s.w, 1.) * params.exposure;
   if (params.toneMap == 1u) { color = toneMap(color); }
   if (params.showTiles == 1u && tiles[tileIndex(vec2u(pos.xy))] == 1u) {
     color = mix(color, vec3f(1., 0., 0.), 0.3);

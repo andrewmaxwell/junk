@@ -148,7 +148,6 @@ function cornellScene() {
       sphere(16, [20, 16, 160], [0.3, 0.3, 0.35], DIFFUSE, 0.6, 2000), // lower left polished ball
     ],
     camera: {position: [50, 50, 350], target: [50, 33, 10], zoom: 0.5},
-    fog: 0.002,
   };
 }
 
