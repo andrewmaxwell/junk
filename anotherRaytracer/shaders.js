@@ -275,7 +275,7 @@ fn powerHeuristic(a: f32, b: f32) -> f32 {
 fn bounceLightWeight(p: vec3f, bouncePdf: f32, light: u32) -> f32 {
   if (params.sampling == 2u) { return 1.; }
   if (params.sampling == 1u) { return 0.; } // light sampling already counted it
-  let lightPdf = lightPickProb(p, light) / (2. * PI * lightConeOneMinusCos(p, light));
+  let lightPdf = lightPickProb(p, vec3f(0.), false, light) / (2. * PI * lightConeOneMinusCos(p, light));
   return powerHeuristic(bouncePdf, lightPdf);
 }
 
@@ -348,35 +348,76 @@ fn sampleLight(p: vec3f, light: u32) -> vec4f {
 // from there. One shadow ray instead of one per light.
 
 /**
- * Roughly how much light a light gives p, ignoring what's in the way: its
- * brightness times how big it looks from p
+ * Roughly how much light a light gives the point p, ignoring what's in the
+ * way: its brightness times how big it looks from p. Or with alongRay, how
+ * much it gives the fog along the ray from p in direction d: its brightness
+ * times its size, over its distance from the ray.
  */
-fn lightGuess(p: vec3f, light: u32) -> f32 {
-  return brightness(objects[light].colorMaterial.rgb) * lightConeOneMinusCos(p, light);
+fn lightGuess(p: vec3f, d: vec3f, alongRay: bool, light: u32) -> f32 {
+  let b = brightness(objects[light].colorMaterial.rgb);
+  if (!alongRay) { return b * lightConeOneMinusCos(p, light); }
+  let c = objects[light].centerRadius.xyz - p;
+  let r = objects[light].centerRadius.w;
+  return b * r * r / max(length(c - d * dot(c, d)), r);
 }
 
 /**
- * The probability that pickLight picks this light from p. Half the time it
- * picks evenly, so a light that looks dim, or is bright but blocked, still
- * gets picked sometimes; the other half, in proportion to lightGuess.
+ * The probability that pickLight picks this light. Half the time it picks
+ * evenly, so a light that looks dim, or is bright but blocked, still gets
+ * picked sometimes; the other half, in proportion to lightGuess.
  */
-fn lightPickProb(p: vec3f, light: u32) -> f32 {
+fn lightPickProb(p: vec3f, d: vec3f, alongRay: bool, light: u32) -> f32 {
   var total = 0.;
-  for (var i = 0u; i < params.lightCount; i++) { total += lightGuess(p, i); }
-  return 0.5 / f32(params.lightCount) + 0.5 * lightGuess(p, light) / total;
+  for (var i = 0u; i < params.lightCount; i++) { total += lightGuess(p, d, alongRay, i); }
+  return 0.5 / f32(params.lightCount) + 0.5 * lightGuess(p, d, alongRay, light) / total;
 }
 
 /** Picks one light as lightPickProb describes, given u uniform in [0, 1) */
-fn pickLight(p: vec3f, u: f32) -> u32 {
+fn pickLight(p: vec3f, d: vec3f, alongRay: bool, u: f32) -> u32 {
   if (u < 0.5) { return min(u32(u * 2. * f32(params.lightCount)), params.lightCount - 1u); }
   var total = 0.;
-  for (var i = 0u; i < params.lightCount; i++) { total += lightGuess(p, i); }
+  for (var i = 0u; i < params.lightCount; i++) { total += lightGuess(p, d, alongRay, i); }
   var left = (u - 0.5) * 2. * total;
   for (var i = 0u; i < params.lightCount - 1u; i++) {
-    left -= lightGuess(p, i);
+    left -= lightGuess(p, d, alongRay, i);
     if (left < 0.) { return i; }
   }
   return params.lightCount - 1u;
+}
+
+/**
+ * For equiangular sampling along a ray toward a light: the angles from the
+ * light to the ray's start and end (measured from the closest point), the
+ * distance to that closest point, and how close it is
+ */
+fn equiangularAngles(o: vec3f, d: vec3f, tMax: f32, light: u32) -> vec4f {
+  let c = objects[light].centerRadius.xyz - o;
+  // Distance along the ray to the point closest to the light, and how close
+  let along = dot(c, d);
+  let gap = max(length(c - d * along), 1e-3);
+  return vec4f(atan2(-along, gap), atan2(tMax - along, gap), along, gap);
+}
+
+/**
+ * Equiangular sampling, from "Importance Sampling Techniques for Path
+ * Tracing in Participating Media" (Kulla & Fajardo). Fog lit by a small
+ * light is far brighter close to it, falling off with distance squared, so
+ * picking scatter points by distance traveled finds that glow only rarely.
+ * This picks a distance t along the ray o + t d, up to tMax, evenly by the
+ * angle it's seen at from the light, which crowds them near the light in
+ * proportion to that falloff. Returns t, and in y its probability density.
+ */
+fn sampleEquiangular(o: vec3f, d: vec3f, tMax: f32, light: u32, u: f32) -> vec2f {
+  let a = equiangularAngles(o, d, tMax, light);
+  let t = clamp(a.z + a.w * tan(mix(a.x, a.y, u)), 0., tMax);
+  return vec2f(t, equiangularPdf(o, d, tMax, light, t));
+}
+
+/** The probability density that sampleEquiangular picks t */
+fn equiangularPdf(o: vec3f, d: vec3f, tMax: f32, light: u32, t: f32) -> f32 {
+  let a = equiangularAngles(o, d, tMax, light);
+  let s = t - a.z;
+  return a.w / ((a.y - a.x) * (a.w * a.w + s * s));
 }
 
 /** Fraction of the light that gets from p along l to the light: 0 if blocked, less in fog */
@@ -458,12 +499,43 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // makes a glossy lobe like cos ^ 2000 overflow to infinity.
     d = normalize(d);
     let hit = intersect(o, d);
+    // Saved, since shadow rays change hitDist
+    let end = hitDist;
+    let fogLit = params.fogDensity > 0. && params.sampling != 2u && params.lightCount > 0u;
+    // Only on rays the camera sees directly, where the glow around lights
+    // shows the most. Later bounces aren't worth the extra shadow ray.
+    let equiangular = fogLit && seenByCamera;
+
+    // Direct light on the fog along this ray, at a distance picked by
+    // equiangular sampling. Scattering in the fog below finds it too, so
+    // the two are weighted by how likely each was to pick that distance
+    // (with that light): equiangular wins near small lights, and scattering
+    // in dense fog, where light doesn't get far.
+    if (equiangular) {
+      let u = rand2();
+      let light = pickLight(o, d, true, u.x);
+      let eq = sampleEquiangular(o, d, end, light, u.y);
+      let p = o + d * eq.x;
+      let ls = sampleLight(p, light);
+      let visible = lightVisibility(p, ls.xyz, light);
+      if (visible > 0.) {
+        let pick = lightPickProb(p, vec3f(0.), false, light);
+        let transmittance = exp(-params.fogDensity * eq.x);
+        let pdf = lightPickProb(o, d, true, light) * eq.y;
+        let scatterPdf = params.fogDensity * transmittance * pick;
+        var weight = powerHeuristic(pdf, scatterPdf);
+        if (params.sampling == 0u) { weight *= powerHeuristic(pick / ls.w, PHASE); }
+        let scattered = transmittance * params.fogDensity * FOG_ALBEDO;
+        let c = through * objects[light].colorMaterial.rgb * (scattered * PHASE * visible * weight * ls.w / pdf);
+        color += tint * c * select(indirectScale(c), 1., seenByCamera);
+      }
+    }
 
     // Fog: the ray scatters after a random distance, sooner in denser fog.
     // If that's before what it hit, it scatters instead of getting there.
     var fogDist = 1e30;
     if (params.fogDensity > 0.) { fogDist = -log(1. - rand2().x) / params.fogDensity; }
-    if (fogDist < hitDist) {
+    if (fogDist < end) {
       // Fog absorbs some light. After a few bounces, end the path with that
       // probability instead, so survivors don't get dimmer.
       if (depth < 5) {
@@ -473,16 +545,22 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       }
       let p = o + d * fogDist;
 
-      // Direct light, as for diffuse surfaces below. Fog scatters light
-      // evenly in all directions.
-      if (params.sampling != 2u && params.lightCount > 0u) {
-        let light = pickLight(p, rand2().x);
-        let pick = lightPickProb(p, light);
+      // Direct light, as for diffuse surfaces below, weighted against the
+      // equiangular sample above if there was one. Fog scatters light evenly
+      // in all directions.
+      if (fogLit) {
+        let light = pickLight(p, vec3f(0.), false, rand2().x);
+        let pick = lightPickProb(p, vec3f(0.), false, light);
         let ls = sampleLight(p, light);
         let visible = lightVisibility(p, ls.xyz, light);
         if (visible > 0.) {
           var weight = 1.;
-          if (params.sampling == 0u) { weight = powerHeuristic(pick / ls.w, PHASE); }
+          if (equiangular) {
+            let scatterPdf = params.fogDensity * exp(-params.fogDensity * fogDist) * pick;
+            let eqPdf = lightPickProb(o, d, true, light) * equiangularPdf(o, d, end, light, fogDist);
+            weight = powerHeuristic(scatterPdf, eqPdf);
+          }
+          if (params.sampling == 0u) { weight *= powerHeuristic(pick / ls.w, PHASE); }
           let c = through * objects[light].colorMaterial.rgb * (PHASE * visible * weight * ls.w / pick);
           color += tint * c * select(indirectScale(c), 1., seenByCamera);
         }
@@ -531,7 +609,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       choiceProb *= q;
     }
 
-    let p = o + d * hitDist;
+    let p = o + d * end;
     var n = shape.normalShape.xyz;
     if (i32(shape.normalShape.w) == SPHERE) {
       n = normalize(p - shape.centerRadius.xyz);
@@ -551,8 +629,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // Direct light: aim a ray at a light rather than waiting for a random
       // bounce to stumble into one.
       if (params.sampling != 2u && params.lightCount > 0u) {
-        let light = pickLight(p, choices.x);
-        let pick = lightPickProb(p, light);
+        let light = pickLight(p, vec3f(0.), false, choices.x);
+        let pick = lightPickProb(p, vec3f(0.), false, light);
         let ls = sampleLight(p, light);
         let l = ls.xyz;
         let cosSurface = dot(l, nl);

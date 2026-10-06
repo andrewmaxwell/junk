@@ -11,7 +11,7 @@ Scenes:
 How it renders:
 
 - Each bounce aims a shadow ray at one light, picked by how bright it looks from there, and also bounces at random. Multiple importance sampling weighs the two so each covers where the other is noisy.
-- **fog** scatters light evenly in all directions, so beams of light show up in it.
+- **fog** scatters light evenly in all directions, so beams of light show up in it. On rays the camera sees directly, equiangular sampling also checks the fog closest to a light, where its glow is brightest, so halos around lights clear up quickly.
 - **glass dispersion**: the first time a path refracts, it follows one random wavelength, which bends by its own amount, so glass casts rainbow-edged caustics.
 - **depth of field** traces rays from random points on a lens, focused at the distance you click.
 - The first few random choices of each sample come from a scrambled Sobol sequence, which spreads samples more evenly than plain random numbers, so noise fades faster.
