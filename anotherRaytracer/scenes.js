@@ -211,9 +211,10 @@ function shaftsScene() {
   // The room spans x 0 to 100, y 0 to 100, and z from -100 forward. The front
   // is open. The window is in the left wall, at y 40 to 80 and z -50 to 0.
   const big = 1000;
-  // Cool walls and a warm floor, against warm late-afternoon light
-  const gray = [0.32, 0.37, 0.45];
-  const floor = [0.5, 0.4, 0.3];
+  // Cool walls and a warm floor, against warm late-afternoon light. Dark,
+  // so little light bounces around to fill the fog with haze.
+  const gray = [0.2, 0.23, 0.3];
+  const floor = [0.32, 0.25, 0.18];
   const wall = {oneSided: true};
   // The left wall is two-sided, so it blocks the light outside it
   /** @type {(y0: number, y1: number, z0: number, z1: number) => Shape} */
@@ -237,10 +238,10 @@ function shaftsScene() {
     leftWall(40, 80, -big, -50), // behind it
     leftWall(40, 80, 0, big), // in front of it
     // Outside, small and far, so the beams have sharp edges
-    sphere(1.5, [-120, 150, -30], [170000, 130000, 85000], LIGHT),
+    sphere(1.5, [-120, 150, -30], [220000, 170000, 110000], LIGHT),
     // Dim blue sky behind the camera, through the open front, so shadows
     // and fog outside the beams are cool
-    sphere(30, [50, 60, 260], [1.5, 2.5, 5], LIGHT),
+    sphere(30, [50, 60, 260], [0.8, 1.4, 3.2], LIGHT),
     sphere(12, [45, 12, -20], [0.95, 0.95, 0.95], GLASS),
     sphere(10, [75, 10, -60], [0.95, 0.64, 0.54], MIRROR), // copper
   ];

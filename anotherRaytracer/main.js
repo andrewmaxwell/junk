@@ -34,6 +34,8 @@ const defaults = {
   fog: 0,
   /** Brightens or darkens the display, in stops (doublings) */
   exposure: 0,
+  /** Over 1 deepens shadows and brightens highlights; see applyContrast in shaders.js */
+  contrast: 1.25,
   /**
    * Depth of field: the camera lens's radius, as a fraction of the distance
    * in focus. 0 keeps everything sharp. Click the image to focus.
@@ -157,7 +159,7 @@ const displayPipeline = device.createRenderPipeline({
   fragment: {module: displayModule, targets: [{format: 'rgba16float'}]},
 });
 
-// Params in shaders.js: 4 × (vec3f + u32), then 15 scalars, padded to 16 bytes
+// Params in shaders.js: 4 × (vec3f + u32), then 16 scalars
 const paramsData = new ArrayBuffer(128);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
@@ -371,6 +373,7 @@ const render = (trace = true) => {
   paramsF32[28] = camera.focus;
   paramsU32[29] = lightCount;
   paramsU32[30] = +(settings.sequence === 'sobol');
+  paramsF32[31] = settings.contrast;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -608,6 +611,10 @@ display
     saveSettings();
     redraw = true;
   });
+display.add(settings, 'contrast', 0.5, 2, 0.05).onChange(() => {
+  saveSettings();
+  redraw = true;
+});
 display.add(view, 'hdr').name('HDR (h)').onChange(saveHdr).listen();
 display
   .add(view, 'toneMapping')

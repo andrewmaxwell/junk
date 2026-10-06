@@ -70,6 +70,8 @@ struct Params {
   lightCount: u32,
   /** 1 to use the Sobol sequence for the first few random choices; see rand2 */
   sobol: u32,
+  /** The display's contrast; see applyContrast */
+  contrast: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -842,10 +844,20 @@ fn toneMap(x: vec3f) -> vec3f {
   return select(x, eased, x > vec3f(KNEE));
 }
 
+/**
+ * Over 1, darkens what's darker than middle gray and brightens what's
+ * brighter, by raising brightness relative to middle gray to this power.
+ * Each channel separately, so colors get a bit richer too.
+ */
+const MIDDLE_GRAY = 0.18;
+fn applyContrast(x: vec3f) -> vec3f {
+  return MIDDLE_GRAY * pow(max(x, vec3f(0.)) / MIDDLE_GRAY, vec3f(params.contrast));
+}
+
 @fragment
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let s = sums[u32(pos.y) * params.width + u32(pos.x)];
-  var color = s.rgb / max(s.w, 1.) * params.exposure;
+  var color = applyContrast(s.rgb / max(s.w, 1.) * params.exposure);
   if (params.toneMap == 1u) { color = toneMap(color); }
   if (params.showTiles == 1u && tiles[tileIndex(vec2u(pos.xy))] == 1u) {
     color = mix(color, vec3f(1., 0., 0.), 0.3);
