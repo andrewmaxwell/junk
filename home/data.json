@@ -1,5 +1,11 @@
 [
   {
+    "filePath": "anotherRaytracer",
+    "title": "Another Raytracer",
+    "year": 2026,
+    "desc": "A WebGPU path tracer with fog, rainbow glass, and depth of field."
+  },
+  {
     "filePath": "drinks",
     "title": "Barista Bot",
     "year": 2026,

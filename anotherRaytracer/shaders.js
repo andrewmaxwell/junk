@@ -59,6 +59,17 @@ struct Params {
   showTiles: u32,
   /** The display multiplies brightness by this */
   exposure: f32,
+  /**
+   * Depth of field: rays start from random points on a lens this big around
+   * the camera, and meet again focusDistance in front of it, so only things
+   * that far away are sharp. 0 for a pinhole camera, all sharp.
+   */
+  lensRadius: f32,
+  focusDistance: f32,
+  /** Lights are the first lightCount objects */
+  lightCount: u32,
+  /** 1 to use the Sobol sequence for the first few random choices; see rand2 */
+  sobol: u32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -136,6 +147,61 @@ fn rand() -> f32 {
   return f32(seed >> 8u) / 16777216.;
 }
 
+// Plain random numbers clump, leaving gaps that take many samples to fill.
+// The Sobol sequence spreads each pixel's samples evenly instead, so noise
+// fades faster. Each pixel gets its own scrambled copy, so neighbors don't
+// share a pattern, following "Practical Hash-based Owen Scrambling" (Burley).
+
+/** Pairs of random choices per sample that use Sobol; the rest use rand */
+const SOBOL_PAIRS = 8u;
+/** Which sample of its pixel this is, counting from the last restart */
+var<private> sampleIndex: u32;
+/** Different for every pixel, but the same every frame */
+var<private> pixelSeed: u32;
+/** How many rand2 calls this sample has made */
+var<private> dimension: u32;
+
+/** The first two dimensions of the Sobol sequence, as 32-bit fractions */
+fn sobol(index: u32) -> vec2u {
+  // The second dimension's direction numbers each xor the one before with
+  // itself shifted right by 1
+  var v = 1u << 31u;
+  var y = 0u;
+  for (var i = index; i != 0u; i >>= 1u) {
+    if ((i & 1u) != 0u) { y ^= v; }
+    v ^= v >> 1u;
+  }
+  return vec2u(reverseBits(index), y);
+}
+
+/** Owen scrambling: randomly flips bits, each depending on the bits above it */
+fn scramble(x: u32, seed: u32) -> u32 {
+  var v = reverseBits(x);
+  v ^= v * 0x3d20adeau;
+  v += seed;
+  v *= (seed >> 16u) | 1u;
+  v ^= v * 0x05526c56u;
+  v ^= v * 0x53a22864u;
+  return reverseBits(v);
+}
+
+/**
+ * Two numbers uniform in [0, 1), for a 2D choice like a direction. Each call
+ * within a sample gets its own shuffle of the sequence, so different choices
+ * don't line up with each other.
+ */
+fn rand2() -> vec2f {
+  if (params.sobol == 0u || dimension >= SOBOL_PAIRS) {
+    return vec2f(rand(), rand());
+  }
+  let s = pcg(pixelSeed + pcg(dimension));
+  dimension++;
+  let v = sobol(scramble(sampleIndex, s));
+  let x = scramble(v.x, pcg(s + 1u));
+  let y = scramble(v.y, pcg(s + 2u));
+  return vec2f(vec2u(x, y) >> vec2u(8u)) / 16777216.;
+}
+
 ///////////////////////////////
 // Geometry helpers
 ///////////////////////////////
@@ -209,7 +275,7 @@ fn powerHeuristic(a: f32, b: f32) -> f32 {
 fn bounceLightWeight(p: vec3f, bouncePdf: f32, light: u32) -> f32 {
   if (params.sampling == 2u) { return 1.; }
   if (params.sampling == 1u) { return 0.; } // light sampling already counted it
-  let lightPdf = 1. / (2. * PI * lightConeOneMinusCos(p, light));
+  let lightPdf = lightPickProb(p, light) / (2. * PI * lightConeOneMinusCos(p, light));
   return powerHeuristic(bouncePdf, lightPdf);
 }
 
@@ -247,20 +313,22 @@ fn evalSurface(s: u32, cosTheta: f32, r: vec3f, l: vec3f, bsdf: ptr<function, ve
 
 /**
  * Picks a random bounce direction off a diffuse (maybe glossy) surface: from
- * the glossy lobe with probability gloss, otherwise favoring directions near
- * the normal.
+ * the glossy lobe if choice (uniform in [0, 1)) is under gloss, otherwise
+ * favoring directions near the normal.
  */
-fn sampleSurface(s: u32, n: vec3f, r: vec3f) -> vec3f {
-  let phi = 2. * PI * rand();
-  if (rand() < objects[s].surface.x) {
-    return directionAround(r, pow(rand(), 1. / (objects[s].surface.y + 1.)), phi);
+fn sampleSurface(s: u32, n: vec3f, r: vec3f, choice: f32) -> vec3f {
+  let u = rand2();
+  let phi = 2. * PI * u.y;
+  if (choice < objects[s].surface.x) {
+    return directionAround(r, pow(u.x, 1. / (objects[s].surface.y + 1.)), phi);
   }
-  return directionAround(n, sqrt(1. - rand()), phi);
+  return directionAround(n, sqrt(1. - u.x), phi);
 }
 
 /** A random direction, any way at all */
 fn sampleSphere() -> vec3f {
-  return directionAround(vec3f(0., 1., 0.), 1. - 2. * rand(), 2. * PI * rand());
+  let u = rand2();
+  return directionAround(vec3f(0., 1., 0.), 1. - 2. * u.x, 2. * PI * u.y);
 }
 
 /**
@@ -270,8 +338,45 @@ fn sampleSphere() -> vec3f {
 fn sampleLight(p: vec3f, light: u32) -> vec4f {
   let w = normalize(objects[light].centerRadius.xyz - p);
   let oneMinusCos = lightConeOneMinusCos(p, light);
-  let l = directionAround(w, 1. - rand() * oneMinusCos, 2. * PI * rand());
+  let u = rand2();
+  let l = directionAround(w, 1. - u.x * oneMinusCos, 2. * PI * u.y);
   return vec4f(l, 2. * PI * oneMinusCos);
+}
+
+// Rather than aiming a ray at every light from every bounce, each bounce
+// aims at one, picked at random and favoring the ones that look brightest
+// from there. One shadow ray instead of one per light.
+
+/**
+ * Roughly how much light a light gives p, ignoring what's in the way: its
+ * brightness times how big it looks from p
+ */
+fn lightGuess(p: vec3f, light: u32) -> f32 {
+  return brightness(objects[light].colorMaterial.rgb) * lightConeOneMinusCos(p, light);
+}
+
+/**
+ * The probability that pickLight picks this light from p. Half the time it
+ * picks evenly, so a light that looks dim, or is bright but blocked, still
+ * gets picked sometimes; the other half, in proportion to lightGuess.
+ */
+fn lightPickProb(p: vec3f, light: u32) -> f32 {
+  var total = 0.;
+  for (var i = 0u; i < params.lightCount; i++) { total += lightGuess(p, i); }
+  return 0.5 / f32(params.lightCount) + 0.5 * lightGuess(p, light) / total;
+}
+
+/** Picks one light as lightPickProb describes, given u uniform in [0, 1) */
+fn pickLight(p: vec3f, u: f32) -> u32 {
+  if (u < 0.5) { return min(u32(u * 2. * f32(params.lightCount)), params.lightCount - 1u); }
+  var total = 0.;
+  for (var i = 0u; i < params.lightCount; i++) { total += lightGuess(p, i); }
+  var left = (u - 0.5) * 2. * total;
+  for (var i = 0u; i < params.lightCount - 1u; i++) {
+    left -= lightGuess(p, i);
+    if (left < 0.) { return i; }
+  }
+  return params.lightCount - 1u;
 }
 
 /** Fraction of the light that gets from p along l to the light: 0 if blocked, less in fog */
@@ -356,7 +461,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
     // Fog: the ray scatters after a random distance, sooner in denser fog.
     // If that's before what it hit, it scatters instead of getting there.
-    let fogDist = select(1e30, -log(1. - rand()) / params.fogDensity, params.fogDensity > 0.);
+    var fogDist = 1e30;
+    if (params.fogDensity > 0.) { fogDist = -log(1. - rand2().x) / params.fogDensity; }
     if (fogDist < hitDist) {
       // Fog absorbs some light. After a few bounces, end the path with that
       // probability instead, so survivors don't get dimmer.
@@ -369,15 +475,17 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
       // Direct light, as for diffuse surfaces below. Fog scatters light
       // evenly in all directions.
-      for (var light = 0u; light < params.objectCount && params.sampling != 2u; light++) {
-        if (i32(objects[light].colorMaterial.w) != LIGHT) { continue; }
+      if (params.sampling != 2u && params.lightCount > 0u) {
+        let light = pickLight(p, rand2().x);
+        let pick = lightPickProb(p, light);
         let ls = sampleLight(p, light);
         let visible = lightVisibility(p, ls.xyz, light);
-        if (visible == 0.) { continue; }
-        var weight = 1.;
-        if (params.sampling == 0u) { weight = powerHeuristic(1. / ls.w, PHASE); }
-        let c = through * objects[light].colorMaterial.rgb * (PHASE * visible * weight * ls.w);
-        color += tint * c * select(indirectScale(c), 1., seenByCamera);
+        if (visible > 0.) {
+          var weight = 1.;
+          if (params.sampling == 0u) { weight = powerHeuristic(pick / ls.w, PHASE); }
+          let c = through * objects[light].colorMaterial.rgb * (PHASE * visible * weight * ls.w / pick);
+          color += tint * c * select(indirectScale(c), 1., seenByCamera);
+        }
       }
 
       // Indirect light: scatter in a random direction. Its density equals
@@ -437,33 +545,36 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // glossy lobe
       let r = reflect(d, nl);
       var bsdf: vec3f;
+      // Which light to aim at, and whether to bounce off the glossy coat
+      let choices = rand2();
 
-      // Direct light: aim a ray at each light rather than waiting for a
-      // random bounce to stumble into one.
-      for (var light = 0u; light < params.objectCount && params.sampling != 2u; light++) {
-        if (i32(objects[light].colorMaterial.w) != LIGHT) { continue; }
+      // Direct light: aim a ray at a light rather than waiting for a random
+      // bounce to stumble into one.
+      if (params.sampling != 2u && params.lightCount > 0u) {
+        let light = pickLight(p, choices.x);
+        let pick = lightPickProb(p, light);
         let ls = sampleLight(p, light);
         let l = ls.xyz;
-
         let cosSurface = dot(l, nl);
-        if (cosSurface <= 0.) { continue; } // light is behind this surface
-
-        // Shadow ray: only counts if nothing is in the way
-        let visible = lightVisibility(p, l, light);
-        if (visible == 0.) { continue; }
-
-        // radiance * BSDF * cos(theta) / pdf (1/solidAngle)
-        let pdf = evalSurface(s, cosSurface, r, l, &bsdf);
-        var weight = 1.;
-        if (params.sampling == 0u) { weight = powerHeuristic(1. / ls.w, pdf); }
-        let c = through * objects[light].colorMaterial.rgb * bsdf * (weight * cosSurface * ls.w * visible);
-        // Light reaching the first surface the camera sees is direct light
-        color += tint * c * select(indirectScale(c), 1., seenByCamera);
+        // Only counts if the light is in front of this surface, and nothing
+        // is in the way
+        var visible = 0.;
+        if (cosSurface > 0.) { visible = lightVisibility(p, l, light); }
+        if (visible > 0.) {
+          // radiance * BSDF * cos(theta) / pdf, where the pdf is the chance
+          // of picking this light over the cone's solid angle
+          let pdf = evalSurface(s, cosSurface, r, l, &bsdf);
+          var weight = 1.;
+          if (params.sampling == 0u) { weight = powerHeuristic(pick / ls.w, pdf); }
+          let c = through * objects[light].colorMaterial.rgb * bsdf * (weight * cosSurface * ls.w * visible / pick);
+          // Light reaching the first surface the camera sees is direct light
+          color += tint * c * select(indirectScale(c), 1., seenByCamera);
+        }
       }
 
       // Indirect light: bounce in a random direction. If this hits a light,
       // bounceLightWeight keeps it from being double counted with the above.
-      let next = sampleSurface(s, nl, r);
+      let next = sampleSurface(s, nl, r, choices.y);
       let cosTheta = dot(next, nl);
       if (cosTheta <= 0.) { break; } // glossy lobe pointed into the surface
       bouncePdf = evalSurface(s, cosTheta, r, next, &bsdf);
@@ -529,26 +640,41 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   // Adaptive sampling: skip tiles that are already smooth enough
   if (tiles[tileIndex(id.xy)] == 0u) { return; }
   seed = pcg(id.x + pcg(id.y + pcg(params.seed)));
+  pixelSeed = pcg(id.x + pcg(id.y));
   let size = vec2f(f32(params.width), f32(params.height));
-
-  var sum = vec3f(0.);
-  var sqSum = 0.;
-  for (var i = 0u; i < params.samplesPerFrame; i++) {
-    // Jitter within the pixel for antialiasing. y = 0 is the top row.
-    let jx = rand();
-    let jy = rand();
-    let screen = vec2f((f32(id.x) + jx) / size.x - 0.5, 0.5 - (f32(id.y) + jy) / size.y);
-    let d = normalize(params.camForward + params.camRight * screen.x + params.camUp * screen.y);
-    let c = trace(params.camPos, d);
-    sum += c;
-    sqSum += brightness(c) * brightness(c);
-  }
   let index = id.y * params.width + id.x;
   var prev = vec4f(0.);
   var prevSq = 0.;
   if (params.frame > 0u) {
     prev = sums[index];
     prevSq = sqSums[index];
+  }
+
+  var sum = vec3f(0.);
+  var sqSum = 0.;
+  for (var i = 0u; i < params.samplesPerFrame; i++) {
+    sampleIndex = u32(prev.w) + i;
+    dimension = 0u;
+    // Jitter within the pixel for antialiasing. y = 0 is the top row.
+    let jitter = rand2();
+    let screen = vec2f((f32(id.x) + jitter.x) / size.x - 0.5, 0.5 - (f32(id.y) + jitter.y) / size.y);
+    // Through the pixel, 1 unit in front of the camera
+    let d = params.camForward + params.camRight * screen.x + params.camUp * screen.y;
+    var o = params.camPos;
+    var dir = d;
+    if (params.lensRadius > 0.) {
+      // Start from a random point on the lens, aimed at where the pinhole
+      // ray crosses the plane in focus
+      let u = rand2();
+      let r = sqrt(u.x) * params.lensRadius;
+      let angle = 2. * PI * u.y;
+      let offset = (normalize(params.camRight) * cos(angle) + normalize(params.camUp) * sin(angle)) * r;
+      o += offset;
+      dir = d * params.focusDistance - offset;
+    }
+    let c = trace(o, normalize(dir));
+    sum += c;
+    sqSum += brightness(c) * brightness(c);
   }
   sums[index] = prev + vec4f(sum, f32(params.samplesPerFrame));
   sqSums[index] = prevSq + sqSum;

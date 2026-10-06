@@ -276,3 +276,38 @@ export const packObjects = (objects) =>
       ...[s.gloss, s.shininess, +s.oneSided, 0],
     ]),
   );
+
+/** @type {(a: number[], b: number[]) => number} */
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+/**
+ * Distance along a ray (from o in unit direction d) to the closest shape it
+ * hits, or Infinity. Matches `intersect` in shaders.js.
+ * @type {(objects: Shape[], o: number[], d: number[]) => number} */
+export const hitDistance = (objects, o, d) => {
+  let closest = Infinity;
+  for (const s of objects) {
+    const p = s.center.map((c, i) => c - o[i]);
+    let t;
+    if (s.shape === SPHERE) {
+      const b = dot(p, d);
+      const det = b * b - dot(p, p) + s.radius * s.radius;
+      if (det < 0) continue;
+      t = b - Math.sqrt(det);
+      if (t <= 0) t = b + Math.sqrt(det);
+    } else {
+      const facing = dot(d, s.normal);
+      if (facing === 0 || (s.oneSided && facing > 0)) continue;
+      t = dot(p, s.normal) / facing;
+      const h = d.map((x, i) => x * t - p[i]);
+      if (
+        Math.abs(dot(h, s.u)) > s.halfWidth ||
+        Math.abs(dot(h, s.v)) > s.halfHeight
+      ) {
+        continue;
+      }
+    }
+    if (t > 0 && t < closest) closest = t;
+  }
+  return closest;
+};

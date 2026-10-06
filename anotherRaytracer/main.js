@@ -1,5 +1,5 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
-import {packObjects, scenes} from './scenes.js';
+import {LIGHT, hitDistance, packObjects, scenes} from './scenes.js';
 import {displayShader, tileShader, traceShader} from './shaders.js';
 
 /**
@@ -34,6 +34,13 @@ const defaults = {
   fog: 0,
   /** Brightens or darkens the display, in stops (doublings) */
   exposure: 0,
+  /**
+   * Depth of field: the camera lens's radius, as a fraction of the distance
+   * in focus. 0 keeps everything sharp. Click the image to focus.
+   */
+  dof: 0,
+  /** 'sobol' or 'random'; see rand2 in shaders.js */
+  sequence: 'sobol',
 };
 /** @typedef {typeof defaults} Settings */
 
@@ -150,8 +157,8 @@ const displayPipeline = device.createRenderPipeline({
   fragment: {module: displayModule, targets: [{format: 'rgba16float'}]},
 });
 
-// Params in shaders.js: 4 × (vec3f + u32), then 10 scalars, padded to 16 bytes
-const paramsData = new ArrayBuffer(112);
+// Params in shaders.js: 4 × (vec3f + u32), then 15 scalars, padded to 16 bytes
+const paramsData = new ArrayBuffer(128);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
 const paramsBuffer = device.createBuffer({
@@ -160,6 +167,8 @@ const paramsBuffer = device.createBuffer({
 });
 
 let scene = scenes[settings.scene]();
+// The shader expects lights first
+let lightCount = 0;
 /** @type {GPUBuffer} */
 let objectBuffer;
 
@@ -234,10 +243,18 @@ const resize = () => {
 // Orbit camera
 ///////////////////////////////
 
-const camera = {target: [0, 0, 0], yaw: 0, pitch: 0, distance: 1};
+/** Orbits target. `focus` is the distance that depth of field keeps sharp. */
+const camera = {target: [0, 0, 0], yaw: 0, pitch: 0, distance: 1, focus: 1};
 
 const loadScene = () => {
   scene = scenes[settings.scene]();
+  // Lights first, as the shader expects
+  const isLight = (/** @type {{material: number}} */ s) => s.material === LIGHT;
+  scene.objects = [
+    ...scene.objects.filter(isLight),
+    ...scene.objects.filter((s) => !isLight(s)),
+  ];
+  lightCount = scene.objects.filter(isLight).length;
   objectBuffer?.destroy();
   const objectData = packObjects(scene.objects);
   objectBuffer = device.createBuffer({
@@ -256,6 +273,7 @@ function resetCamera() {
   camera.distance = Math.hypot(...offset);
   camera.yaw = Math.atan2(offset[0], offset[2]);
   camera.pitch = Math.asin(offset[1] / camera.distance);
+  camera.focus = camera.distance;
   cameraMoved();
 }
 
@@ -349,6 +367,10 @@ const render = (trace = true) => {
   paramsF32[24] = settings.noise;
   paramsU32[25] = +view.showTiles;
   paramsF32[26] = 2 ** settings.exposure;
+  paramsF32[27] = settings.dof * camera.focus;
+  paramsF32[28] = camera.focus;
+  paramsU32[29] = lightCount;
+  paramsU32[30] = +(settings.sequence === 'sobol');
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -436,8 +458,8 @@ const loop = () => {
     `${status} · ${samplesPerPixel} spp · ${rate.toFixed(0)} spp/s · ` +
     `${activeTiles < 0 ? '–' : Math.round((100 * activeTiles) / tileCount)}% refining · ` +
     `${width}×${height}\n` +
-    'drag: orbit · shift/right drag: pan · scroll: zoom · space: pause · ' +
-    'r: reset view';
+    'drag: orbit · shift/right drag: pan · scroll: zoom · click: focus · ' +
+    'space: pause · r: reset view';
   requestAnimationFrame(loop);
 };
 
@@ -452,11 +474,15 @@ const cameraMoved = () => {
 ///////////////////////////////
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+// How far the pointer has moved since it went down, to tell clicks from drags
+let dragged = 0;
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
+  dragged = 0;
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!e.buttons) return;
+  dragged += Math.abs(e.movementX) + Math.abs(e.movementY);
   if (e.shiftKey || e.buttons & 6) {
     // Pan: move the target so the scene follows the pointer
     const {right, up} = cameraBasis();
@@ -478,11 +504,46 @@ canvas.addEventListener(
   'wheel',
   (e) => {
     e.preventDefault();
-    camera.distance *= Math.exp(e.deltaY * 0.001);
+    const factor = Math.exp(e.deltaY * 0.001);
+    camera.distance *= factor;
+    // Moving toward the target, keep the same thing in focus
+    camera.focus *= factor;
     cameraMoved();
   },
   {passive: false},
 );
+// Click: focus on whatever is under the pointer
+canvas.addEventListener('pointerup', (e) => {
+  if (e.button !== 0 || dragged > 3) return;
+  const {position, forward, right, up} = cameraBasis();
+  const {zoom} = scene.camera;
+  const x = (e.offsetX / canvas.clientWidth - 0.5) * zoom;
+  const y = (0.5 - e.offsetY / canvas.clientHeight) * zoom;
+  const aspect = canvas.clientWidth / canvas.clientHeight;
+  const d = normalize(
+    forward.map((f, i) => f + right[i] * x * aspect + up[i] * y),
+  );
+  const t = hitDistance(scene.objects, position, d);
+  if (!isFinite(t)) return;
+  // The lens focuses on a plane, so it's the depth that matters
+  camera.focus = t * forward.reduce((sum, f, i) => sum + f * d[i], 0);
+  if (settings.dof > 0) restart();
+});
+/** Downloads the image as shown, as a PNG */
+function saveImage() {
+  // A WebGPU canvas only keeps its image until the frame ends, so draw it
+  // again and capture it right away
+  render(false);
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `anotherRaytracer-${settings.scene}-${samplesPerPixel}spp.png`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  });
+}
+
 ///////////////////////////////
 // Settings panel
 ///////////////////////////////
@@ -515,6 +576,11 @@ gui.add(settings, 'scene', Object.keys(scenes)).onChange(() => {
 });
 gui.add(view, 'paused').name('pause (space)').listen();
 gui.add({reset: resetCamera}, 'reset').name('reset view (r)');
+gui.add({saveImage}, 'saveImage').name('save image');
+gui
+  .add(settings, 'dof', 0, 0.05, 0.001)
+  .name('depth of field (click to focus)')
+  .onChange(changed);
 
 const light = gui.addFolder('Light');
 light.add(settings, 'fog', 0, 0.02, 0.0005).onChange(changed);
@@ -572,6 +638,10 @@ quality
   .name('noise target (0: none)')
   .onChange(keepGoing);
 quality.add(settings, 'spp', 16, 16384, 16).name('max spp').onChange(keepGoing);
+quality
+  .add(settings, 'sequence', {'Sobol (smoother)': 'sobol', random: 'random'})
+  .name('random numbers')
+  .onChange(changed);
 quality
   .add(view, 'showTiles')
   .name('show refining tiles (n)')

@@ -1,0 +1,23 @@
+Another Raytracer - 2026 - A WebGPU path tracer with fog, rainbow glass, and depth of field.
+
+A progressive path tracer in a WebGPU compute shader: spheres and flat plates, with diffuse, glossy, mirror, glass and light materials. Drag to orbit, shift-drag or right-drag to pan, scroll to zoom, and click to focus. The panel switches scenes and changes everything else; settings that differ from the defaults are kept in the URL, so the address bar is a shareable link. **save image** downloads a PNG.
+
+Scenes:
+
+- **cornell**: a Cornell-box hallway with a mirror ball, a glass ball, and glossy balls
+- **veach**: the multiple importance sampling test scene from Eric Veach's thesis
+- **shafts**: a foggy room lit through window blinds, with a glass ball and a copper ball in the beams
+
+How it renders:
+
+- Each bounce aims a shadow ray at one light, picked by how bright it looks from there, and also bounces at random. Multiple importance sampling weighs the two so each covers where the other is noisy.
+- **fog** scatters light evenly in all directions, so beams of light show up in it.
+- **glass dispersion**: the first time a path refracts, it follows one random wavelength, which bends by its own amount, so glass casts rainbow-edged caustics.
+- **depth of field** traces rays from random points on a lens, focused at the distance you click.
+- The first few random choices of each sample come from a scrambled Sobol sequence, which spreads samples more evenly than plain random numbers, so noise fades faster.
+- Adaptive sampling: every 8×8 tile gets at least 32 samples, then stops once its estimated noise is below the **noise target**. **show refining tiles** highlights the ones still going.
+- HDR screens show lights brighter than white (in Safari; Chrome on macOS clips them). On SDR screens, bright areas ease into white instead of clipping.
+
+- `main.js` – WebGPU setup, the frame loop, camera, controls, and the lil-gui panel
+- `shaders.js` – the path tracer, adaptive sampling, and display shaders (WGSL)
+- `scenes.js` – the scenes, and packing them for the GPU
