@@ -15,12 +15,13 @@ Scenes:
 How it renders:
 
 - Each bounce aims a shadow ray at one light, picked by how bright it looks from there, and also bounces at random. Multiple importance sampling weighs the two so each covers where the other is noisy.
-- **fog** scatters light evenly in all directions, so beams of light show up in it. On rays the camera sees directly, equiangular sampling also checks the fog closest to a light, where its glow is brightest, so halos around lights clear up quickly.
+- **fog** scatters light, so beams of light show up in it. **fog scatters forward** makes it scatter mostly onward, like real haze, so it glows brightest looking toward a light. **fog blue** makes it scatter blue more than red, like air, for a blue sky and an orange sun. On rays the camera sees directly, equiangular sampling also checks the fog closest to a light, where its glow is brightest, so halos around lights clear up quickly.
 - **glass dispersion**: the first time a path refracts, it follows one random wavelength, which bends by its own amount, so glass casts rainbow-edged caustics.
 - **depth of field** traces rays from random points on a lens, focused at the distance you click.
 - The first few random choices of each sample come from a scrambled Sobol sequence, which spreads samples more evenly than plain random numbers, so noise fades faster.
 - Adaptive sampling: every 8×8 tile gets at least 32 samples, then stops once its estimated noise is below the **noise target**. **show refining tiles** highlights the ones still going.
-- HDR screens show lights brighter than white (in Safari; Chrome on macOS clips them). On SDR screens, bright areas ease into white instead of clipping.
+- HDR screens show lights brighter than white (in Safari; Chrome on macOS clips them). On SDR screens, bright areas ease into white instead of clipping, keeping their color, so a bright orange light still looks orange.
+- Out-of-focus lights spread into discs that stay as bright as they should.
 
 - `main.js` – WebGPU setup, the frame loop, camera, controls, and the lil-gui panel
 - `shaders.js` – the path tracer, adaptive sampling, and display shaders (WGSL)

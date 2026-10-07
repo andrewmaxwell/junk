@@ -72,6 +72,17 @@ struct Params {
   sobol: u32,
   /** The display's contrast; see applyContrast */
   contrast: f32,
+  /**
+   * Which way fog scatters light, from -1 (back where it came from) through
+   * 0 (every direction evenly) to 1 (straight on). Real haze is around 0.7,
+   * so fog glows brightest looking toward a light.
+   */
+  fogForward: f32,
+  /**
+   * 0 for gray fog. Up to 1, it scatters blue light more than red, like air:
+   * blue sky, and lights seen through a lot of it turn orange.
+   */
+  fogBlue: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -107,10 +118,33 @@ const LIGHT = 3;
 /** Fraction of light that fog scatters rather than absorbs */
 const FOG_ALBEDO = 0.9;
 /**
- * Fog's phase function, the share of scattered light that goes in each
- * direction: the same for all, since it's 1 / (the sphere's 4π steradians)
+ * Fog's phase function: the share of light, traveling in direction a, that
+ * scatters into direction b, per steradian. Henyey-Greenstein, which leans
+ * forward by params.fogForward; with 0 it's 1 / (the sphere's 4π) for all.
  */
-const PHASE = 1. / (4. * PI);
+fn phase(a: vec3f, b: vec3f) -> f32 {
+  let g = params.fogForward;
+  let denom = 1. + g * g - 2. * g * dot(a, b);
+  return (1. - g * g) / (4. * PI * denom * sqrt(denom));
+}
+
+/**
+ * Fog's density in each color channel: the chance per unit of distance that
+ * light scatters off it. Rayleigh scattering goes as 1 / wavelength^4, for
+ * wavelengths near the middle of each channel.
+ */
+fn fogDensities() -> vec3f {
+  return params.fogDensity * pow(vec3f(550. / 610., 1., 550. / 465.), vec3f(4. * params.fogBlue));
+}
+
+/**
+ * The probability density that fog scatters a ray at distance t, given the
+ * fraction of light that gets that far in each channel: the distance is
+ * picked using one channel, at random (see trace), so it's their average.
+ */
+fn fogScatterPdf(transmittance: vec3f) -> f32 {
+  return dot(fogDensities() * transmittance, vec3f(1. / 3.));
+}
 
 /** Packed by packObjects in scenes.js */
 struct Shape {
@@ -327,10 +361,16 @@ fn sampleSurface(s: u32, n: vec3f, r: vec3f, choice: f32) -> vec3f {
   return directionAround(n, sqrt(1. - u.x), phi);
 }
 
-/** A random direction, any way at all */
-fn sampleSphere() -> vec3f {
+/** A random direction for light traveling in direction d to scatter in fog, picked in proportion to phase */
+fn samplePhase(d: vec3f) -> vec3f {
   let u = rand2();
-  return directionAround(vec3f(0., 1., 0.), 1. - 2. * u.x, 2. * PI * u.y);
+  let g = params.fogForward;
+  var cosA = 1. - 2. * u.x;
+  if (abs(g) > 1e-3) {
+    let k = (1. - g * g) / (1. - g + 2. * g * u.x);
+    cosA = (1. + g * g - k * k) / (2. * g);
+  }
+  return directionAround(d, clamp(cosA, -1., 1.), 2. * PI * u.y);
 }
 
 /**
@@ -422,10 +462,10 @@ fn equiangularPdf(o: vec3f, d: vec3f, tMax: f32, light: u32, t: f32) -> f32 {
   return a.w / ((a.y - a.x) * (a.w * a.w + s * s));
 }
 
-/** Fraction of the light that gets from p along l to the light: 0 if blocked, less in fog */
-fn lightVisibility(p: vec3f, l: vec3f, light: u32) -> f32 {
-  if (intersect(p, l) != i32(light)) { return 0.; }
-  return exp(-params.fogDensity * hitDist);
+/** Fraction of the light, per channel, that gets from p along l to the light: 0 if blocked, less in fog */
+fn lightVisibility(p: vec3f, l: vec3f, light: u32) -> vec3f {
+  if (intersect(p, l) != i32(light)) { return vec3f(0.); }
+  return exp(-fogDensities() * hitDist);
 }
 
 ///////////////////////////////
@@ -472,6 +512,24 @@ fn glassIndex(w: f32) -> f32 {
 // Path tracing
 ///////////////////////////////
 
+/**
+ * With depth of field, how many pixels something dist along a camera ray
+ * (from the lens, through any mirrors and glass) is blurred across: at
+ * least 1. A light blurred across n pixels can give each at most 1 / n of
+ * its brightness, so its samples can safely be n times brighter before the
+ * clamp in trace would dim it. Otherwise out-of-focus lights, spread into
+ * big discs, would come out much dimmer than they should.
+ */
+fn blurArea(direction: vec3f, dist: f32) -> f32 {
+  if (params.lensRadius == 0.) { return 1.; }
+  let depth = dist * dot(direction, params.camForward);
+  // Radius of the circle of confusion on the image plane at distance 1, and
+  // the size of a pixel there
+  let radius = params.lensRadius * abs(1. / depth - 1. / params.focusDistance);
+  let pixel = length(params.camUp) / f32(params.height);
+  return max(1., PI * radius * radius / (pixel * pixel));
+}
+
 /** Follows one path from the camera, returning the light it carries. */
 fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   var o = origin;
@@ -494,6 +552,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   // the color after clamping, so clamping doesn't change its hue.
   var wavelength = 0.;
   var tint = vec3f(1.);
+  // How far the path has gone while seenByCamera, through mirrors and glass
+  var cameraDist = 0.;
 
   for (var depth = 0; depth < 100; depth++) {
     // In 32-bit floats, each new direction built from the last one is a bit
@@ -503,6 +563,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     let hit = intersect(o, d);
     // Saved, since shadow rays change hitDist
     let end = hitDist;
+    if (seenByCamera) { cameraDist += end; }
     let fogLit = params.fogDensity > 0. && params.sampling != 2u && params.lightCount > 0u;
     // Only on rays the camera sees directly, where the glow around lights
     // shows the most. Later bounces aren't worth the extra shadow ray.
@@ -520,23 +581,41 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       let p = o + d * eq.x;
       let ls = sampleLight(p, light);
       let visible = lightVisibility(p, ls.xyz, light);
-      if (visible > 0.) {
+      if (any(visible > vec3f(0.))) {
         let pick = lightPickProb(p, vec3f(0.), false, light);
-        let transmittance = exp(-params.fogDensity * eq.x);
+        let transmittance = exp(-fogDensities() * eq.x);
         let pdf = lightPickProb(o, d, true, light) * eq.y;
-        let scatterPdf = params.fogDensity * transmittance * pick;
+        let scatterPdf = fogScatterPdf(transmittance) * pick;
         var weight = powerHeuristic(pdf, scatterPdf);
-        if (params.sampling == 0u) { weight *= powerHeuristic(pick / ls.w, PHASE); }
-        let scattered = transmittance * params.fogDensity * FOG_ALBEDO;
-        let c = through * objects[light].colorMaterial.rgb * (scattered * PHASE * visible * weight * ls.w / pdf);
+        let ph = phase(d, ls.xyz);
+        if (params.sampling == 0u) { weight *= powerHeuristic(pick / ls.w, ph); }
+        let scattered = transmittance * fogDensities() * FOG_ALBEDO;
+        let c = through * objects[light].colorMaterial.rgb * scattered * visible * (ph * weight * ls.w / pdf);
         color += tint * c * select(indirectScale(c), 1., seenByCamera);
       }
     }
 
     // Fog: the ray scatters after a random distance, sooner in denser fog.
     // If that's before what it hit, it scatters instead of getting there.
+    // With blue fog, each channel has its own density; the distance is
+    // picked using one of them at random, and the throughput corrects for
+    // how likely the others were to stop there or get past it.
     var fogDist = 1e30;
-    if (params.fogDensity > 0.) { fogDist = -log(1. - rand2().x) / params.fogDensity; }
+    if (params.fogDensity > 0.) {
+      let u = rand2();
+      let densities = fogDensities();
+      let density = densities[min(u32(u.y * 3.), 2u)];
+      fogDist = -log(1. - u.x) / density;
+      // The max()es keep it from being 0 / 0, which is NaN, when so little
+      // light gets that far that it rounds to 0 in every channel
+      if (fogDist < end) {
+        let transmittance = exp(-densities * fogDist);
+        through *= densities * transmittance / max(fogScatterPdf(transmittance), 1e-30);
+      } else {
+        let transmittance = exp(-densities * end);
+        through *= transmittance / max(dot(transmittance, vec3f(1. / 3.)), 1e-30);
+      }
+    }
     if (fogDist < end) {
       // Fog absorbs some light. After a few bounces, end the path with that
       // probability instead, so survivors don't get dimmer.
@@ -555,25 +634,27 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         let pick = lightPickProb(p, vec3f(0.), false, light);
         let ls = sampleLight(p, light);
         let visible = lightVisibility(p, ls.xyz, light);
-        if (visible > 0.) {
+        if (any(visible > vec3f(0.))) {
           var weight = 1.;
           if (equiangular) {
-            let scatterPdf = params.fogDensity * exp(-params.fogDensity * fogDist) * pick;
+            let scatterPdf = fogScatterPdf(exp(-fogDensities() * fogDist)) * pick;
             let eqPdf = lightPickProb(o, d, true, light) * equiangularPdf(o, d, end, light, fogDist);
             weight = powerHeuristic(scatterPdf, eqPdf);
           }
-          if (params.sampling == 0u) { weight *= powerHeuristic(pick / ls.w, PHASE); }
-          let c = through * objects[light].colorMaterial.rgb * (PHASE * visible * weight * ls.w / pick);
+          let ph = phase(d, ls.xyz);
+          if (params.sampling == 0u) { weight *= powerHeuristic(pick / ls.w, ph); }
+          let c = through * objects[light].colorMaterial.rgb * visible * (ph * weight * ls.w / pick);
           color += tint * c * select(indirectScale(c), 1., seenByCamera);
         }
       }
 
       // Indirect light: scatter in a random direction. Its density equals
       // the phase function, so the throughput is unchanged.
-      bouncePdf = PHASE;
+      let next = samplePhase(d);
+      bouncePdf = phase(d, next);
       seenByCamera = false;
       o = p;
-      d = sampleSphere();
+      d = next;
       continue;
     }
 
@@ -595,7 +676,10 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         // choices clamp higher, to keep the boost that makes up for the
         // paths that went elsewhere. Otherwise a light behind glass, which
         // only about half of the paths reach, would average out too dim.
-        color += tint * min(e, vec3f(params.maxBrightness / choiceProb));
+        // The whole color is scaled down, so it keeps its hue; clamping
+        // each channel would turn colored lights white.
+        let limit = params.maxBrightness * blurArea(direction, cameraDist) / choiceProb;
+        color += tint * e * min(1., limit / max(e.r, max(e.g, e.b)));
       } else {
         color += tint * e * indirectScale(e);
       }
@@ -638,15 +722,15 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         let cosSurface = dot(l, nl);
         // Only counts if the light is in front of this surface, and nothing
         // is in the way
-        var visible = 0.;
+        var visible = vec3f(0.);
         if (cosSurface > 0.) { visible = lightVisibility(p + nl * EPSILON, l, light); }
-        if (visible > 0.) {
+        if (any(visible > vec3f(0.))) {
           // radiance * BSDF * cos(theta) / pdf, where the pdf is the chance
           // of picking this light over the cone's solid angle
           let pdf = evalSurface(s, cosSurface, r, l, &bsdf);
           var weight = 1.;
           if (params.sampling == 0u) { weight = powerHeuristic(pick / ls.w, pdf); }
-          let c = through * objects[light].colorMaterial.rgb * bsdf * (weight * cosSurface * ls.w * visible / pick);
+          let c = through * objects[light].colorMaterial.rgb * bsdf * visible * (weight * cosSurface * ls.w / pick);
           // Light reaching the first surface the camera sees is direct light
           color += tint * c * select(indirectScale(c), 1., seenByCamera);
         }
@@ -836,16 +920,29 @@ fn vertex(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   return vec4f(corners[i], 0., 1.);
 }
 
+/** The brightest of a color's channels */
+fn peak(c: vec3f) -> f32 {
+  return max(c.r, max(c.g, c.b));
+}
+
 /**
- * Below the knee, brightness is left alone. Above it, it eases toward white
- * instead of clipping, so bright areas keep their shading: 1 shows as 0.85,
- * 2 as 0.99. Each channel eases separately, so very bright colors wash out
- * toward white, like film.
+ * For SDR screens. Below the knee, brightness is left alone. Above it, it
+ * eases toward white instead of clipping, so bright areas keep their shading:
+ * 1 shows as 0.85, 2 as 0.99. The whole color is scaled by how much its
+ * brightest channel eases, so it keeps its hue; easing each channel
+ * separately would turn every bright color white. Then, like film or an eye,
+ * colors much brighter than white do wash out toward white, but gradually:
+ * a light 8 times white keeps most of its color.
  */
 const KNEE = 0.6;
+/** How far over white a color is when it's halfway washed out */
+const WASH_OUT = 16.;
 fn toneMap(x: vec3f) -> vec3f {
-  let eased = KNEE + (1. - KNEE) * (1. - exp((KNEE - x) / (1. - KNEE)));
-  return select(x, eased, x > vec3f(KNEE));
+  let p = peak(x);
+  if (p <= KNEE) { return x; }
+  let eased = KNEE + (1. - KNEE) * (1. - exp((KNEE - p) / (1. - KNEE)));
+  let over = max(p - 1., 0.);
+  return mix(x * (eased / p), vec3f(eased), over / (over + WASH_OUT));
 }
 
 /**
@@ -862,7 +959,13 @@ fn applyContrast(x: vec3f) -> vec3f {
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let s = sums[u32(pos.y) * params.width + u32(pos.x)];
   var color = applyContrast(s.rgb / max(s.w, 1.) * params.exposure);
-  if (params.toneMap == 1u) { color = toneMap(color); }
+  if (params.toneMap == 1u) {
+    color = toneMap(color);
+  } else if (peak(color) > params.maxBrightness) {
+    // Brighter than the screen can show. Scale the whole color down, rather
+    // than letting the screen clip each channel, which turns colors white.
+    color *= params.maxBrightness / peak(color);
+  }
   if (params.showTiles == 1u && tiles[tileIndex(vec2u(pos.xy))] == 1u) {
     color = mix(color, vec3f(1., 0., 0.), 0.3);
   }

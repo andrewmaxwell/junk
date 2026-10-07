@@ -100,7 +100,7 @@ const plate = (
  * @typedef {{
  *   objects: Shape[],
  *   camera: {position: number[], target: number[], zoom: number},
- *   defaults?: {fog?: number, dof?: number},
+ *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number},
  * }} Scene
  * The camera orbits `target`, and starts focused on it. `zoom` is the image
  * height at distance 1. `defaults` overrides the panel's defaults for this
@@ -383,7 +383,7 @@ function sunsetScene() {
       sphere(25, [120, 25, -180], [0.45, 0.35, 0.3], DIFFUSE),
     ],
     camera: {position: [60, 18, 160], target: [-45, 25, 0], zoom: 0.75},
-    defaults: {fog: 0.0002},
+    defaults: {fog: 0.0002, fogForward: 0.7, fogBlue: 1},
   };
 }
 

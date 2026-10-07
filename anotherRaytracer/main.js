@@ -32,6 +32,10 @@ const defaults = {
   dispersion: 1,
   /** Fog density; see `fogDensity` in shaders.js. Scenes can change this default. */
   fog: 0,
+  /** Which way fog scatters, -1 to 1; see `fogForward` in shaders.js. Scenes can change this default. */
+  fogForward: 0,
+  /** 0 for gray fog, up to 1 for sky blue; see `fogBlue` in shaders.js. Scenes can change this default. */
+  fogBlue: 0,
   /** Brightens or darkens the display, in stops (doublings) */
   exposure: 0,
   /** Over 1 deepens shadows and brightens highlights; see applyContrast in shaders.js */
@@ -60,7 +64,7 @@ for (const [key, value] of Object.entries(defaults)) {
 if (!(settings.scene in scenes)) settings.scene = defaults.scene;
 
 /** Settings each scene can pick its own default for; see `Scene` in scenes.js */
-const sceneKeys = ['fog', 'dof'];
+const sceneKeys = ['fog', 'fogForward', 'fogBlue', 'dof'];
 /** The default for a setting in this scene, which the URL leaves out */
 const sceneDefault = (/** @type {string} */ key) =>
   scenes[settings.scene]().defaults?.[key] ??
@@ -168,7 +172,7 @@ const displayPipeline = device.createRenderPipeline({
 });
 
 // Params in shaders.js: 4 × (vec3f + u32), then 16 scalars
-const paramsData = new ArrayBuffer(128);
+const paramsData = new ArrayBuffer(144);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
 const paramsBuffer = device.createBuffer({
@@ -382,6 +386,8 @@ const render = (trace = true) => {
   paramsU32[29] = lightCount;
   paramsU32[30] = +(settings.sequence === 'sobol');
   paramsF32[31] = settings.contrast;
+  paramsF32[32] = settings.fogForward;
+  paramsF32[33] = settings.fogBlue;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -594,7 +600,12 @@ gui
   .onChange(changed);
 
 const light = gui.addFolder('Light');
-light.add(settings, 'fog', 0, 0.02, 0.0005).onChange(changed);
+light.add(settings, 'fog', 0, 0.02, 0.0001).onChange(changed);
+light
+  .add(settings, 'fogForward', -0.9, 0.9, 0.05)
+  .name('fog scatters forward')
+  .onChange(changed);
+light.add(settings, 'fogBlue', 0, 1, 0.05).name('fog blue').onChange(changed);
 light
   .add(settings, 'dispersion', 0, 5, 0.1)
   .name('glass dispersion')
