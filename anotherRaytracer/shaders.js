@@ -83,9 +83,22 @@ struct Params {
    * blue sky, and lights seen through a lot of it turn orange.
    */
   fogBlue: f32,
+  /**
+   * Light tracing (see lightShader): how many pairs of a light and a glass or
+   * mirror ball to aim from it are in the pairs buffer. 0 when it's off.
+   */
+  pairCount: u32,
+  /** How many frames of light tracing the display averages */
+  lightFrames: u32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
+
+/**
+ * Light tracing adds up light in fixed point, since WebGPU can only add
+ * integers atomically: this many per unit of brightness
+ */
+const FIXED = 1024.;
 
 /** Pixels per side of the tiles that adaptive sampling stops as a unit */
 const TILE = 8u;
@@ -101,7 +114,8 @@ fn brightness(c: vec3f) -> f32 {
 }
 `;
 
-export const traceShader = /* wgsl */ `${common}
+/** Path tracing, shared by traceShader and lightShader */
+const tracing = /* wgsl */ `
 const PI = 3.14159265359;
 const EPSILON = 1e-3;
 
@@ -157,12 +171,27 @@ struct Shape {
 }
 
 @group(0) @binding(1) var<storage, read> objects: array<Shape>;
-/** Per pixel: summed color, and in w the sample count */
-@group(0) @binding(2) var<storage, read_write> sums: array<vec4f>;
-/** Per pixel: summed squared brightness, for estimating noise */
-@group(0) @binding(3) var<storage, read_write> sqSums: array<f32>;
-/** Per tile: 1 if it still needs samples. Written by tileShader. */
-@group(0) @binding(4) var<storage, read> tiles: array<u32>;
+/**
+ * For light tracing (see lightShader): pairs of a light and a glass or mirror
+ * ball to aim at from it. Each has the light's index, the ball's, the chance
+ * of picking this pair, and the chance of picking it or one before it. From
+ * aimPairs in main.js.
+ */
+@group(0) @binding(2) var<storage, read> pairs: array<vec4f>;
+
+/** Whether light tracing aims from this light at this ball, and so counts the caustics they make */
+fn isAimed(light: u32, ball: u32) -> bool {
+  for (var i = 0u; i < params.pairCount; i++) {
+    if (u32(pairs[i].x) == light && u32(pairs[i].y) == ball) { return true; }
+  }
+  return false;
+}
+
+/** Smooth glass and mirrors, which bounce light in one direction, not a spread */
+fn isSmooth(s: u32) -> bool {
+  let material = i32(objects[s].colorMaterial.w);
+  return material == GLASS || (material == MIRROR && objects[s].surface.y == 0.);
+}
 
 ///////////////////////////////
 // Random numbers
@@ -291,13 +320,13 @@ fn directionAround(w: vec3f, cosA: f32, phi: f32) -> vec3f {
 }
 
 /**
- * 1 - cos of the half-angle of the cone of directions from p that hit the
- * light. Written this way because cos is nearly 1 for small lights, and 1 -
- * cos would lose most of its precision in 32-bit floats.
+ * 1 - cos of the half-angle of the cone of directions from p that hit sphere
+ * s. Written this way because cos is nearly 1 for small spheres, and 1 - cos
+ * would lose most of its precision in 32-bit floats.
  */
-fn lightConeOneMinusCos(p: vec3f, light: u32) -> f32 {
-  let l = objects[light].centerRadius.xyz - p;
-  let r = objects[light].centerRadius.w;
+fn coneOneMinusCos(p: vec3f, s: u32) -> f32 {
+  let l = objects[s].centerRadius.xyz - p;
+  let r = objects[s].centerRadius.w;
   let sinMaxSq = min(1., r * r / dot(l, l));
   return sinMaxSq / (1. + sqrt(1. - sinMaxSq));
 }
@@ -311,7 +340,7 @@ fn powerHeuristic(a: f32, b: f32) -> f32 {
 fn bounceLightWeight(p: vec3f, bouncePdf: f32, light: u32) -> f32 {
   if (params.sampling == 2u) { return 1.; }
   if (params.sampling == 1u) { return 0.; } // light sampling already counted it
-  let lightPdf = lightPickProb(p, vec3f(0.), false, light) / (2. * PI * lightConeOneMinusCos(p, light));
+  let lightPdf = lightPickProb(p, vec3f(0.), false, light) / (2. * PI * coneOneMinusCos(p, light));
   return powerHeuristic(bouncePdf, lightPdf);
 }
 
@@ -322,40 +351,65 @@ fn indirectScale(c: vec3f) -> f32 {
 }
 
 /**
- * For a diffuse (maybe glossy) surface, sets bsdf to how much light arriving
- * from direction l it scatters toward the viewer, and returns the probability
- * density that sampleSurface picks l. r is the viewing direction mirrored
- * about the normal, and cosTheta is the cosine between l and the normal.
+ * The fraction of light a diffuse surface's glossy coat reflects, seen from
+ * an angle with this cosine to the normal. Like real gloss, it's gloss head
+ * on, but reflects more and more toward grazing angles, all of it at 90°
+ * (Schlick's approximation of Fresnel), so balls get bright rims. Rough
+ * metal is all coat.
  */
-fn evalSurface(s: u32, cosTheta: f32, r: vec3f, l: vec3f, bsdf: ptr<function, vec3f>) -> f32 {
+fn coatReflectance(s: u32, cosView: f32) -> f32 {
+  if (i32(objects[s].colorMaterial.w) == MIRROR) { return 1.; }
   let gloss = objects[s].surface.x;
+  if (gloss == 0.) { return 0.; }
+  return gloss + (1. - gloss) * pow(clamp(1. - cosView, 0., 1.), 5.);
+}
+
+/** How a diffuse (maybe glossy) surface or rough metal scatters light; see evalSurface */
+struct SurfaceEval {
+  /** How much light it scatters toward the viewer: diffuse plus glossy */
+  bsdf: vec3f,
+  /** The glossy coat's part of bsdf */
+  glossy: vec3f,
+  /** The probability density that sampleSurface picks this direction */
+  pdf: f32,
+}
+
+/**
+ * How a diffuse (maybe glossy) surface or rough metal scatters light
+ * arriving from direction l toward the viewer. nl is the normal on the
+ * viewer's side, and r is the viewing direction mirrored about it.
+ */
+fn evalSurface(s: u32, nl: vec3f, r: vec3f, l: vec3f) -> SurfaceEval {
+  let coat = coatReflectance(s, dot(r, nl));
   let shininess = objects[s].surface.y;
-  let diffuse = (1. - gloss) / PI;
-  var glossy = 0.;
+  let color = objects[s].colorMaterial.rgb;
+  var glossy = vec3f(0.);
   var glossyPdf = 0.;
-  if (gloss > 0.) {
+  if (coat > 0.) {
     // Phong lobe: strongest in the mirror direction, falling off as
     // cos(angle from it) ^ shininess
     // Clamped to 1 too: a cosine a hair over 1 raised to a high shininess
     // can overflow
     let lobe = pow(clamp(dot(r, l), 0., 1.), shininess) / (2. * PI);
-    glossy = gloss * (shininess + 2.) * lobe;
+    // Metal tints its reflections; a clear coat doesn't
+    let tint = select(vec3f(1.), color, i32(objects[s].colorMaterial.w) == MIRROR);
+    glossy = coat * (shininess + 2.) * lobe * tint;
     glossyPdf = (shininess + 1.) * lobe;
   }
-  *bsdf = diffuse * objects[s].colorMaterial.rgb + glossy;
-  // sampleSurface picks the glossy lobe with probability gloss
-  return (1. - gloss) * (cosTheta / PI) + gloss * glossyPdf;
+  // sampleSurface picks the glossy lobe with probability coat
+  let pdf = (1. - coat) * (max(dot(l, nl), 0.) / PI) + coat * glossyPdf;
+  return SurfaceEval((1. - coat) / PI * color + glossy, glossy, pdf);
 }
 
 /**
- * Picks a random bounce direction off a diffuse (maybe glossy) surface: from
- * the glossy lobe if choice (uniform in [0, 1)) is under gloss, otherwise
- * favoring directions near the normal.
+ * Picks a random bounce direction off a diffuse (maybe glossy) surface or
+ * rough metal: from the glossy lobe with probability coatReflectance (choice
+ * is uniform in [0, 1)), otherwise favoring directions near the normal.
  */
 fn sampleSurface(s: u32, n: vec3f, r: vec3f, choice: f32) -> vec3f {
   let u = rand2();
   let phi = 2. * PI * u.y;
-  if (choice < objects[s].surface.x) {
+  if (choice < coatReflectance(s, dot(r, n))) {
     return directionAround(r, pow(u.x, 1. / (objects[s].surface.y + 1.)), phi);
   }
   return directionAround(n, sqrt(1. - u.x), phi);
@@ -374,12 +428,13 @@ fn samplePhase(d: vec3f) -> vec3f {
 }
 
 /**
- * Picks a random direction from p toward a light, uniformly within the cone
- * it covers. Returns the direction, and in w the cone's solid angle.
+ * Picks a random direction from p toward sphere s (usually a light),
+ * uniformly within the cone it covers. Returns the direction, and in w the
+ * cone's solid angle.
  */
-fn sampleLight(p: vec3f, light: u32) -> vec4f {
-  let w = normalize(objects[light].centerRadius.xyz - p);
-  let oneMinusCos = lightConeOneMinusCos(p, light);
+fn sampleCone(p: vec3f, s: u32) -> vec4f {
+  let w = normalize(objects[s].centerRadius.xyz - p);
+  let oneMinusCos = coneOneMinusCos(p, s);
   let u = rand2();
   let l = directionAround(w, 1. - u.x * oneMinusCos, 2. * PI * u.y);
   return vec4f(l, 2. * PI * oneMinusCos);
@@ -397,7 +452,7 @@ fn sampleLight(p: vec3f, light: u32) -> vec4f {
  */
 fn lightGuess(p: vec3f, d: vec3f, alongRay: bool, light: u32) -> f32 {
   let b = brightness(objects[light].colorMaterial.rgb);
-  if (!alongRay) { return b * lightConeOneMinusCos(p, light); }
+  if (!alongRay) { return b * coneOneMinusCos(p, light); }
   let c = objects[light].centerRadius.xyz - p;
   let r = objects[light].centerRadius.w;
   return b * r * r / max(length(c - d * dot(c, d)), r);
@@ -530,6 +585,79 @@ fn blurArea(direction: vec3f, dist: f32) -> f32 {
   return max(1., PI * radius * radius / (pixel * pixel));
 }
 
+/**
+ * Bounces a ray in direction d off smooth glass or a mirror s, at a point
+ * with normal n, and returns its new direction. Glass reflects or refracts,
+ * picked at random. Updates the path's state, which trace describes.
+ */
+fn specularBounce(
+  s: u32,
+  d: vec3f,
+  n: vec3f,
+  through: ptr<function, vec3f>,
+  choiceProb: ptr<function, f32>,
+  wavelength: ptr<function, f32>,
+  tint: ptr<function, vec3f>,
+  inside: ptr<function, i32>,
+) -> vec3f {
+  let reflected = reflect(d, n);
+  if (i32(objects[s].colorMaterial.w) == MIRROR) {
+    *through *= objects[s].colorMaterial.rgb;
+    return reflected;
+  }
+  // Normal facing the side the ray came from
+  let into = dot(n, d) < 0.;
+  let nl = select(-n, n, into);
+  var index = 1.5;
+  if (*wavelength > 0.) { index = glassIndex(*wavelength); }
+  let t = refract(d, nl, select(index, 1. / index, into));
+  // Otherwise total internal reflection: keep the mirror direction
+  if (all(t == vec3f(0.))) { return reflected; }
+  // Fresnel: how much reflects vs refracts (Schlick's approximation)
+  // Clamped because rounding can push it just below 0, and GPU pow() of a
+  // negative number is NaN, which would stick in the pixel's sum forever as
+  // a white dot
+  let c = clamp(1. - select(dot(t, n), -dot(d, nl), into), 0., 1.);
+  let reflectance = 0.04 + 0.96 * pow(c, 5.);
+  // Pick one at random, with probability P of reflecting, and divide by that
+  // probability to stay unbiased
+  let P = 0.25 + 0.5 * reflectance;
+  if (rand() < P) {
+    *through *= reflectance / P;
+    *choiceProb *= P;
+    return reflected;
+  }
+  *through *= (1. - reflectance) / (1. - P);
+  *choiceProb *= 1. - P;
+  // Now inside the ball, or back out. Glass plates are too thin to be inside.
+  if (i32(objects[s].normalShape.w) == SPHERE) { *inside = select(-1, i32(s), into); }
+  // Dispersion: the first time the path refracts, it picks a wavelength to
+  // follow, and bends by that wavelength's index instead. Reflection doesn't
+  // depend on wavelength (much), so paths that only reflect skip this, and
+  // the noise it adds.
+  if (*wavelength == 0. && params.dispersion > 0.) {
+    *wavelength = mix(MIN_WAVELENGTH, MAX_WAVELENGTH, rand());
+    *tint = wavelengthColor(*wavelength);
+    let i = glassIndex(*wavelength);
+    let bent = refract(d, nl, select(i, 1. / i, into));
+    // Rarely, a wavelength that bends more reflects entirely where yellow
+    // wouldn't
+    return select(reflected, bent, any(bent != vec3f(0.)));
+  }
+  return t;
+}
+
+/**
+ * The fraction of light, per channel, that gets dist through glass ball s.
+ * Colored glass absorbs light as it goes, so thick parts are deeper colored
+ * than thin edges. Its color is what's left after going as far as its radius.
+ */
+fn glassTransmittance(s: i32, dist: f32) -> vec3f {
+  if (s < 0) { return vec3f(1.); }
+  let ball = objects[u32(s)];
+  return pow(ball.colorMaterial.rgb, vec3f(dist / ball.centerRadius.w));
+}
+
 /** Follows one path from the camera, returning the light it carries. */
 fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   var o = origin;
@@ -554,6 +682,21 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   var tint = vec3f(1.);
   // How far the path has gone while seenByCamera, through mirrors and glass
   var cameraDist = 0.;
+  // Which glass ball the path is inside, or -1
+  var inside = -1;
+  // Light tracing (see lightShader) finds light that reaches the first
+  // surface the camera sees through glass and mirrors (caustics) far better
+  // than bouncing off it at random and hoping to get through them to a light.
+  // So when this path does that, it leaves out what light tracing counts.
+  // caustic is true while the path has gone from that surface only through
+  // glass and mirrors, and lastBall is the last of those if it was a ball,
+  // or -1. Light tracing counts the light that took that path backward if it
+  // aims from the light at lastBall. causticKept is what it leaves to this
+  // path: the glossy coat's share, since light tracing only adds diffuse
+  // light.
+  var caustic = false;
+  var lastBall = -1;
+  var causticKept = vec3f(1.);
 
   for (var depth = 0; depth < 100; depth++) {
     // In 32-bit floats, each new direction built from the last one is a bit
@@ -579,7 +722,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       let light = pickLight(o, d, true, u.x);
       let eq = sampleEquiangular(o, d, end, light, u.y);
       let p = o + d * eq.x;
-      let ls = sampleLight(p, light);
+      let ls = sampleCone(p, light);
       let visible = lightVisibility(p, ls.xyz, light);
       if (any(visible > vec3f(0.))) {
         let pick = lightPickProb(p, vec3f(0.), false, light);
@@ -616,7 +759,9 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         through *= transmittance / max(dot(transmittance, vec3f(1. / 3.)), 1e-30);
       }
     }
+    through *= glassTransmittance(inside, min(fogDist, end));
     if (fogDist < end) {
+      caustic = false;
       // Fog absorbs some light. After a few bounces, end the path with that
       // probability instead, so survivors don't get dimmer.
       if (depth < 5) {
@@ -632,7 +777,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       if (fogLit) {
         let light = pickLight(p, vec3f(0.), false, rand2().x);
         let pick = lightPickProb(p, vec3f(0.), false, light);
-        let ls = sampleLight(p, light);
+        let ls = sampleCone(p, light);
         let visible = lightVisibility(p, ls.xyz, light);
         if (any(visible > vec3f(0.))) {
           var weight = 1.;
@@ -668,6 +813,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       var w = 1.;
       if (bouncePdf > 0.) { w = bounceLightWeight(o, bouncePdf, s); }
       var e = sColor * w * through;
+      if (caustic && lastBall >= 0 && isAimed(s, u32(lastBall))) { e *= causticKept; }
       if (seenByCamera) {
         // The light is far brighter than the screen can show. Clamping it
         // to the screen's brightest here, before pixel samples are averaged,
@@ -701,14 +847,12 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       n = normalize(p - shape.centerRadius.xyz);
     }
     // Normal facing the side the ray came from
-    let into = dot(n, d) < 0.;
-    let nl = select(-n, n, into);
+    let nl = select(-n, n, dot(n, d) < 0.);
 
-    if (material == DIFFUSE) {
+    if (!isSmooth(s)) {
       // Viewing direction mirrored about the normal, the center of the
       // glossy lobe
       let r = reflect(d, nl);
-      var bsdf: vec3f;
       // Which light to aim at, and whether to bounce off the glossy coat
       let choices = rand2();
 
@@ -717,7 +861,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       if (params.sampling != 2u && params.lightCount > 0u) {
         let light = pickLight(p, vec3f(0.), false, choices.x);
         let pick = lightPickProb(p, vec3f(0.), false, light);
-        let ls = sampleLight(p, light);
+        let ls = sampleCone(p, light);
         let l = ls.xyz;
         let cosSurface = dot(l, nl);
         // Only counts if the light is in front of this surface, and nothing
@@ -727,10 +871,10 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         if (any(visible > vec3f(0.))) {
           // radiance * BSDF * cos(theta) / pdf, where the pdf is the chance
           // of picking this light over the cone's solid angle
-          let pdf = evalSurface(s, cosSurface, r, l, &bsdf);
+          let ev = evalSurface(s, nl, r, l);
           var weight = 1.;
-          if (params.sampling == 0u) { weight = powerHeuristic(pick / ls.w, pdf); }
-          let c = through * objects[light].colorMaterial.rgb * bsdf * visible * (weight * cosSurface * ls.w / pick);
+          if (params.sampling == 0u) { weight = powerHeuristic(pick / ls.w, ev.pdf); }
+          let c = through * objects[light].colorMaterial.rgb * ev.bsdf * visible * (weight * cosSurface * ls.w / pick);
           // Light reaching the first surface the camera sees is direct light
           color += tint * c * select(indirectScale(c), 1., seenByCamera);
         }
@@ -741,57 +885,21 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       let next = sampleSurface(s, nl, r, choices.y);
       let cosTheta = dot(next, nl);
       if (cosTheta <= 0.) { break; } // glossy lobe pointed into the surface
-      bouncePdf = evalSurface(s, cosTheta, r, next, &bsdf);
+      let ev = evalSurface(s, nl, r, next);
+      bouncePdf = ev.pdf;
       // Far out in a tight lobe, cos ^ shininess underflows to 0, and 0 / 0
       // would be NaN. A direction that's never picked carries no light.
       if (bouncePdf <= 0.) { break; }
-      through *= bsdf * cosTheta / bouncePdf;
+      through *= ev.bsdf * cosTheta / bouncePdf;
+      caustic = depth == 0 && params.pairCount > 0u;
+      lastBall = -1;
+      causticKept = ev.glossy / max(ev.bsdf, vec3f(1e-30));
       seenByCamera = false;
       d = next;
     } else {
-      through *= sColor;
       bouncePdf = 0.;
-      var next = reflect(d, n);
-
-      if (material == GLASS) {
-        var index = 1.5;
-        if (wavelength > 0.) { index = glassIndex(wavelength); }
-        let t = refract(d, nl, select(index, 1. / index, into));
-        // Otherwise total internal reflection: keep the mirror direction
-        if (any(t != vec3f(0.))) {
-          // Fresnel: how much reflects vs refracts (Schlick's approximation)
-          // Clamped because rounding can push it just below 0, and GPU
-          // pow() of a negative number is NaN, which would stick in the
-          // pixel's sum forever as a white dot
-          let c = clamp(1. - select(dot(t, n), -dot(d, nl), into), 0., 1.);
-          let reflectance = 0.04 + 0.96 * pow(c, 5.);
-          // Pick one at random, with probability P of reflecting, and
-          // divide by that probability to stay unbiased
-          let P = 0.25 + 0.5 * reflectance;
-          if (rand() < P) {
-            through *= reflectance / P;
-            choiceProb *= P;
-          } else {
-            next = t;
-            through *= (1. - reflectance) / (1. - P);
-            choiceProb *= 1. - P;
-            // Dispersion: the first time the path refracts, it picks a
-            // wavelength to follow, and bends by that wavelength's index
-            // instead. Reflection doesn't depend on wavelength (much), so
-            // paths that only reflect skip this, and the noise it adds.
-            if (wavelength == 0. && params.dispersion > 0.) {
-              wavelength = mix(MIN_WAVELENGTH, MAX_WAVELENGTH, rand());
-              tint = wavelengthColor(wavelength);
-              let i = glassIndex(wavelength);
-              let bent = refract(d, nl, select(i, 1. / i, into));
-              // Rarely, a wavelength that bends more reflects entirely
-              // where yellow wouldn't
-              next = select(reflect(d, n), bent, any(bent != vec3f(0.)));
-            }
-          }
-        }
-      }
-      d = next;
+      lastBall = select(-1, i32(s), i32(shape.normalShape.w) == SPHERE);
+      d = specularBounce(s, d, n, &through, &choiceProb, &wavelength, &tint, &inside);
     }
     // Start the next ray a hair off the surface, on the side it's leaving
     // toward. From p itself, rounding can put it just inside a sphere, where
@@ -801,6 +909,24 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   }
   return color;
 }
+
+/** A random point on the camera's lens, or the pinhole without depth of field */
+fn lensPoint() -> vec3f {
+  if (params.lensRadius == 0.) { return params.camPos; }
+  let u = rand2();
+  let r = sqrt(u.x) * params.lensRadius;
+  let angle = 2. * PI * u.y;
+  return params.camPos + (normalize(params.camRight) * cos(angle) + normalize(params.camUp) * sin(angle)) * r;
+}
+`;
+
+export const traceShader = /* wgsl */ `${common}${tracing}
+/** Per pixel: summed color, and in w the sample count */
+@group(0) @binding(3) var<storage, read_write> sums: array<vec4f>;
+/** Per pixel: summed squared brightness, for estimating noise */
+@group(0) @binding(4) var<storage, read_write> sqSums: array<f32>;
+/** Per tile: 1 if it still needs samples. Written by tileShader. */
+@group(0) @binding(5) var<storage, read> tiles: array<u32>;
 
 @compute @workgroup_size(TILE, TILE)
 fn main(@builtin(global_invocation_id) id: vec3u) {
@@ -828,24 +954,193 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let screen = vec2f((f32(id.x) + jitter.x) / size.x - 0.5, 0.5 - (f32(id.y) + jitter.y) / size.y);
     // Through the pixel, 1 unit in front of the camera
     let d = params.camForward + params.camRight * screen.x + params.camUp * screen.y;
-    var o = params.camPos;
-    var dir = d;
-    if (params.lensRadius > 0.) {
-      // Start from a random point on the lens, aimed at where the pinhole
-      // ray crosses the plane in focus
-      let u = rand2();
-      let r = sqrt(u.x) * params.lensRadius;
-      let angle = 2. * PI * u.y;
-      let offset = (normalize(params.camRight) * cos(angle) + normalize(params.camUp) * sin(angle)) * r;
-      o += offset;
-      dir = d * params.focusDistance - offset;
-    }
-    let c = trace(o, normalize(dir));
+    // Start from a random point on the lens, aimed at where the pinhole ray
+    // crosses the plane in focus
+    let o = lensPoint();
+    let c = trace(o, normalize(d * params.focusDistance - (o - params.camPos)));
     sum += c;
     sqSum += brightness(c) * brightness(c);
   }
   sums[index] = prev + vec4f(sum, f32(params.samplesPerFrame));
   sqSums[index] = prevSq + sqSum;
+}`;
+
+/**
+ * Light tracing, for caustics: light focused by glass or reflected by mirror
+ * balls onto a diffuse surface. trace finds that light only when a random
+ * bounce off the surface happens to get through the glass to a light, which
+ * for a small light is so rare that caustics stay speckled for thousands of
+ * samples. This goes the other way: it starts paths at lights, aimed at
+ * glass and mirror balls, follows them through, and where they land on a
+ * diffuse surface, connects straight to the camera and adds their light to
+ * the pixel they show up in. trace leaves out what this counts; see
+ * `caustic` there.
+ *
+ * There's a thread for every LIGHT_SPACING × LIGHT_SPACING pixels, and
+ * each traces samplesPerFrame paths, adding their light to lightFrame. Then
+ * resolveShader moves the frame's total into lightSums.
+ */
+export const lightShader = /* wgsl */ `${common}${tracing}
+/** Per pixel: r, g and b of the light added this frame, in fixed point (see FIXED) */
+@group(0) @binding(3) var<storage, read_write> lightFrame: array<atomic<u32>>;
+
+/**
+ * One thread per this many pixels square. Light tracing's paths are only
+ * for caustics, which are usually a small part of the image, so this many
+ * fewer paths than trace's are enough, and much quicker. Copied in main.js.
+ */
+const LIGHT_SPACING = 2u;
+
+/** Whether a ray from o in direction d heads into sphere s, if nothing's in the way */
+fn hitsSphere(o: vec3f, d: vec3f, s: u32) -> bool {
+  let p = objects[s].centerRadius.xyz - o;
+  let r = objects[s].centerRadius.w;
+  let along = dot(p, d);
+  return along > 0. && dot(p, p) - along * along <= r * r;
+}
+
+/**
+ * Adds the light that point p, on a diffuse surface s with normal n, sends
+ * toward the camera, when power arrives there traveling in direction d.
+ * Only the diffuse part; trace adds what the glossy coat reflects.
+ */
+fn addToCamera(s: u32, p: vec3f, n: vec3f, d: vec3f, power: vec3f) {
+  let lens = lensPoint();
+  let dist = length(lens - p);
+  let w = (lens - p) / dist;
+  // The camera must be on the side the light arrives on
+  let nl = select(-n, n, dot(n, d) < 0.);
+  let cosSurface = dot(w, nl);
+  // Cosine of the angle from straight ahead
+  let cosCamera = -dot(w, params.camForward);
+  if (cosSurface <= 0. || cosCamera <= 0.) { return; }
+
+  // Which pixel: follow the ray from the lens through p to the plane in
+  // focus, and find where that is on the image plane, 1 in front of the
+  // camera, the way main aims camera rays. Without depth of field, it's just
+  // the direction from the camera.
+  let focus = select(params.focusDistance, 1., params.lensRadius == 0.);
+  let image = (lens - params.camPos - w * (focus / cosCamera)) / focus - params.camForward;
+  let x = (dot(image, params.camRight) / dot(params.camRight, params.camRight) + 0.5) * f32(params.width);
+  let y = (0.5 - dot(image, params.camUp) / dot(params.camUp, params.camUp)) * f32(params.height);
+  if (x < 0. || y < 0. || x >= f32(params.width) || y >= f32(params.height)) { return; }
+  // Nothing in the way
+  if (intersect(p + nl * EPSILON, w) >= 0 && hitDist < dist) { return; }
+
+  let diffuse = (1. - coatReflectance(s, cosSurface)) / PI * objects[s].colorMaterial.rgb;
+  // A pixel's area on the image plane
+  let pixelArea = length(params.camRight) * length(params.camUp) / f32(params.width * params.height);
+  let threads = ((params.width + LIGHT_SPACING - 1u) / LIGHT_SPACING) * ((params.height + LIGHT_SPACING - 1u) / LIGHT_SPACING);
+  let paths = f32(threads * params.samplesPerFrame);
+  // The power's brightness in the pixel. A pixel covers more of a surface
+  // that's farther away, tilted away, or toward the edges of the image, so
+  // the power is spread thinner there.
+  let c = power * diffuse * exp(-fogDensities() * dist) * cosSurface /
+    (pixelArea * dist * dist * cosCamera * cosCamera * cosCamera * paths);
+  let pixel = (u32(y) * params.width + u32(x)) * 3u;
+  for (var i = 0u; i < 3u; i++) {
+    // Rounded up or down at random, so rounding averages out
+    atomicAdd(&lightFrame[pixel + i], u32(min(c[i] * FIXED + rand(), 4e9)));
+  }
+}
+
+/** Follows one path from a light, through glass and mirrors, to the first diffuse surface it lands on */
+fn traceLight() {
+  // Pick a light and a ball to aim at
+  let u = rand();
+  var pick = 0u;
+  while (pick + 1u < params.pairCount && pairs[pick].w <= u) { pick++; }
+  let light = u32(pairs[pick].x);
+  let sphere = objects[light].centerRadius;
+
+  // A random point on the light, and a random direction from it into the
+  // ball's cone. Off the surface by a bit more for big lights, whose
+  // positions round more coarsely.
+  let u2 = rand2();
+  let normal = directionAround(vec3f(0., 1., 0.), 1. - 2. * u2.x, 2. * PI * u2.y);
+  var o = sphere.xyz + normal * (sphere.w * (1. + 1e-5) + EPSILON);
+  var d = sampleCone(o, u32(pairs[pick].y)).xyz;
+  let cosLight = dot(d, normal);
+  if (cosLight <= 0.) { return; } // the far side of the light from the ball
+
+  // The probability density of picking that point and direction. Aiming at
+  // any other ball whose cone it's also in could have picked it too.
+  var pdf = 0.;
+  for (var i = 0u; i < params.pairCount; i++) {
+    let ball = u32(pairs[i].y);
+    if (i == pick || (u32(pairs[i].x) == light && hitsSphere(o, d, ball))) {
+      pdf += pairs[i].z / (2. * PI * coneOneMinusCos(o, ball));
+    }
+  }
+  pdf /= 4. * PI * sphere.w * sphere.w;
+  // The power the path carries: radiance times cos, over the density
+  var power = objects[light].colorMaterial.rgb * cosLight / pdf;
+
+  var choiceProb = 1.; // unused here
+  var wavelength = 0.;
+  var tint = vec3f(1.);
+  var inside = -1;
+  for (var depth = 0; depth < 20; depth++) {
+    d = normalize(d);
+    let hit = intersect(o, d);
+    if (hit < 0) { return; }
+    let end = hitDist;
+    // Fog dims it on the way. The light it scatters is for trace to find.
+    power *= exp(-fogDensities() * end) * glassTransmittance(inside, end);
+    let s = u32(hit);
+    let shape = objects[s];
+    if (i32(shape.colorMaterial.w) == LIGHT) { return; }
+    let isSphere = i32(shape.normalShape.w) == SPHERE;
+    // Light that lands somewhere before reaching a ball it's aimed at is for
+    // trace
+    if (depth == 0 && !(isSmooth(s) && isSphere && isAimed(light, s))) { return; }
+
+    let p = o + d * end;
+    var n = shape.normalShape.xyz;
+    if (isSphere) { n = normalize(p - shape.centerRadius.xyz); }
+    if (!isSmooth(s)) {
+      addToCamera(s, p, n, d, power * tint);
+      return;
+    }
+    let nl = select(-n, n, dot(n, d) < 0.);
+    d = specularBounce(s, d, n, &power, &choiceProb, &wavelength, &tint, &inside);
+    // Off the surface, as in trace
+    o = p + nl * select(-EPSILON, EPSILON, dot(d, nl) > 0.);
+  }
+}
+
+@compute @workgroup_size(TILE, TILE)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x * LIGHT_SPACING >= params.width || id.y * LIGHT_SPACING >= params.height) { return; }
+  // Different random numbers than trace's
+  seed = pcg(id.x + pcg(id.y + pcg(params.seed ^ 0x9e3779b9u)));
+  // Plain random numbers. Sobol spreads out each pixel's samples, but these
+  // paths don't belong to a pixel.
+  dimension = SOBOL_PAIRS;
+  for (var i = 0u; i < params.samplesPerFrame; i++) { traceLight(); }
+}`;
+
+/**
+ * Runs after lightShader: adds each pixel's light from this frame to
+ * lightSums, and clears it for the next frame.
+ */
+export const resolveShader = /* wgsl */ `${common}
+@group(0) @binding(1) var<storage, read_write> lightFrame: array<u32>;
+/** Per pixel: light tracing's color summed over frames, and in w its summed squared brightness */
+@group(0) @binding(2) var<storage, read_write> lightSums: array<vec4f>;
+
+@compute @workgroup_size(TILE, TILE)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x >= params.width || id.y >= params.height) { return; }
+  let i = id.y * params.width + id.x;
+  var c = vec3f(0.);
+  for (var k = 0u; k < 3u; k++) {
+    c[k] = f32(lightFrame[i * 3u + k]) / FIXED;
+    lightFrame[i * 3u + k] = 0u;
+  }
+  var prev = vec4f(0.);
+  if (params.frame > 0u) { prev = lightSums[i]; }
+  lightSums[i] = prev + vec4f(c, brightness(c) * brightness(c));
 }`;
 
 /**
@@ -863,6 +1158,8 @@ export const tileShader = /* wgsl */ `${common}
 @group(0) @binding(3) var<storage, read_write> tiles: array<u32>;
 /** How many tiles are still going, for main.js to show and to know when to stop */
 @group(0) @binding(4) var<storage, read_write> activeTiles: atomic<u32>;
+/** From resolveShader. Light tracing's frames are samples too, with noise of their own. */
+@group(0) @binding(5) var<storage, read> lightSums: array<vec4f>;
 
 /** Every tile gets at least this many samples before its noise is trusted */
 const MIN_SAMPLES = 32.;
@@ -879,12 +1176,21 @@ fn display(x: f32) -> f32 {
 fn main(@builtin(global_invocation_id) id: vec3u, @builtin(local_invocation_index) local: u32) {
   var n = 0.;
   if (id.x < params.width && id.y < params.height) {
-    let s = sums[id.y * params.width + id.x];
+    let i = id.y * params.width + id.x;
+    let s = sums[i];
     let count = max(s.w, 1.);
-    let mean = brightness(s.rgb) / count;
-    let variance = max(0., sqSums[id.y * params.width + id.x] / count - mean * mean);
-    // Standard error: how far the average of the samples is likely to be off
-    let stdErr = sqrt(variance / count);
+    var mean = brightness(s.rgb) / count;
+    // Squared standard error: how far the average of the samples is likely
+    // to be off, squared
+    var errSq = max(0., sqSums[i] / count - mean * mean) / count;
+    let frames = f32(params.frame);
+    if (params.pairCount > 0u && frames > 0.) {
+      let l = lightSums[i];
+      let lightMean = brightness(l.rgb) / frames;
+      mean += lightMean;
+      errSq += max(0., l.w / frames - lightMean * lightMean) / frames;
+    }
+    let stdErr = sqrt(errSq);
     // In display brightness, where dark values are stretched by gamma
     let e = display(mean + stdErr) - display(mean - stdErr);
     n = e * e;
@@ -912,6 +1218,8 @@ fn main(@builtin(global_invocation_id) id: vec3u, @builtin(local_invocation_inde
 export const displayShader = /* wgsl */ `${common}
 @group(0) @binding(1) var<storage, read> sums: array<vec4f>;
 @group(0) @binding(2) var<storage, read> tiles: array<u32>;
+/** From resolveShader */
+@group(0) @binding(3) var<storage, read> lightSums: array<vec4f>;
 
 // One triangle that covers the whole screen
 @vertex
@@ -957,8 +1265,11 @@ fn applyContrast(x: vec3f) -> vec3f {
 
 @fragment
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
-  let s = sums[u32(pos.y) * params.width + u32(pos.x)];
-  var color = applyContrast(s.rgb / max(s.w, 1.) * params.exposure);
+  let i = u32(pos.y) * params.width + u32(pos.x);
+  let s = sums[i];
+  var light = s.rgb / max(s.w, 1.);
+  if (params.lightFrames > 0u) { light += lightSums[i].rgb / f32(params.lightFrames); }
+  var color = applyContrast(light * params.exposure);
   if (params.toneMap == 1u) {
     color = toneMap(color);
   } else if (peak(color) > params.maxBrightness) {

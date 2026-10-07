@@ -31,8 +31,14 @@ export const LIGHT = 3;
  * be spheres.
  *
  * Diffuse surfaces can have a glossy coat, like plastic: `gloss` is the
- * fraction of light it reflects (0 to 1), and `shininess` is how tight its
- * reflections are (around 10 is satin, 1000 is nearly a mirror).
+ * fraction of light it reflects head on (0 to 1; more toward grazing
+ * angles), and `shininess` is how tight its reflections are (around 10 is
+ * satin, 1000 is nearly a mirror). Mirrors with a `shininess` are rough
+ * metal, with blurry reflections tinted by `color`.
+ *
+ * Glass is colored by `color` as light goes through it: that's what's left
+ * after going as far as its radius. So glass should be spheres; glass
+ * plates are clear.
  *
  * One-sided plates are invisible from behind, so walls disappear when the
  * camera orbits outside them, like a dollhouse.
@@ -206,7 +212,7 @@ function veachScene() {
 
 /**
  * A dark, foggy room lit only by a light outside a window with blinds, so the
- * light comes in as beams, with a glass ball and a mirror ball in them.
+ * light comes in as beams, with a glass ball and a brushed copper ball in them.
  * @type {() => Scene} */
 function shaftsScene() {
   // The room spans x 0 to 100, y 0 to 100, and z from -100 forward. The front
@@ -244,7 +250,7 @@ function shaftsScene() {
     // and fog outside the beams are cool
     sphere(30, [50, 60, 260], [0.8, 1.4, 3.2], LIGHT),
     sphere(12, [45, 12, -20], [0.95, 0.95, 0.95], GLASS),
-    sphere(10, [75, 10, -60], [0.95, 0.64, 0.54], MIRROR), // copper
+    sphere(10, [75, 10, -60], [0.95, 0.64, 0.54], MIRROR, 0, 300), // brushed copper
   ];
   // Blinds across the window, 5.5 tall with gaps of 2.5. Each gap lets in a
   // thin sheet of light, seen edge on from the front.
@@ -275,7 +281,7 @@ function causticsScene() {
       sphere(150, [0, 600, 400], [0.15, 0.2, 0.3], LIGHT),
       sphere(12, [-8, 12, 0], [0.97, 0.97, 0.97], GLASS),
       sphere(7, [20, 7, -8], [0.95, 0.55, 0.45], GLASS), // amber
-      sphere(5, [8, 5, 18], [0.5, 0.75, 0.95], GLASS), // blue
+      sphere(5, [16, 5, 28], [0.5, 0.75, 0.95], GLASS), // blue
       sphere(3, [-22, 3, 18], [0.97, 0.97, 0.97], GLASS),
       sphere(6, [-32, 6, -10], [0.9, 0.9, 0.9], MIRROR),
     ],
