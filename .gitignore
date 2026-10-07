@@ -7,3 +7,4 @@ __pycache__/
 health/data/
 kaleido/logs-sim/
 kaleido/logs/.*
+.playwright-mcp/
