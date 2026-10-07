@@ -1,8 +1,8 @@
 // Shared fixtures. Every field the model reads is set explicitly, because a
 // missing one is the difference between testing the model and testing its
 // fallbacks — and the fallbacks have their own tests below.
-import { ACTIVITIES } from '../js/comfort.js';
-import { feltTemperature } from '../js/thermal.js';
+import {ACTIVITIES} from '../js/comfort.js';
+import {feltTemperature} from '../js/thermal.js';
 
 // A row with no radiation fields at all, which makes mean radiant temperature
 // degrade to roughly air temperature. That is the point: it takes the sun out
@@ -30,13 +30,17 @@ export function rowFeeling(target, activity = ACTIVITIES.walk, over = {}) {
   let hi = 140;
   for (let i = 0; i < 60; i++) {
     const mid = (lo + hi) / 2;
-    if (feltTemperature(neutral({ ...over, temperature_2m: mid }), activity) < target) lo = mid;
+    if (
+      feltTemperature(neutral({...over, temperature_2m: mid}), activity) <
+      target
+    )
+      lo = mid;
     else hi = mid;
   }
   // `hi` and not the midpoint: the loop's invariant is that `hi` feels at least
   // `target`, and a fixture built to sit on a category edge has to land on the
   // inside of it rather than a hair below.
-  return neutral({ ...over, temperature_2m: hi });
+  return neutral({...over, temperature_2m: hi});
 }
 
 export const hourly = (scores, start = new Date('2026-08-19T06:00:00')) =>

@@ -28,8 +28,8 @@ import {
   bandFor,
   FACTOR_LABELS,
 } from './comfort.js';
-import { renderComfortChart } from './chart.js';
-import { thermalStress } from './thermal.js';
+import {renderComfortChart} from './chart.js';
+import {thermalStress} from './thermal.js';
 
 // Open-Meteo's current block only advances every 15 minutes, so the old
 // once-a-minute poll re-downloaded four days of hourly data to learn nothing.
@@ -59,13 +59,50 @@ const HOUR_MS = 60 * 60 * 1000;
 const el = (id) => document.getElementById(id);
 const els = Object.fromEntries(
   [
-    'location-name', 'location-button', 'place-search', 'place-input', 'place-results', 'place-note',
-    'updated', 'activity-toggle', 'ring-bands', 'ring-progress', 'comfort-value', 'comfort-headline',
-    'comfort-reason', 'why-toggle', 'why-panel', 'band-scale', 'band-marks', 'why-lead', 'factor-rows',
-    'why-note', 'temp', 'feels-like', 'sky-label', 'sky-icon', 'wind', 'rain', 'humidity',
-    'air-quality', 'sun', 'daylight', 'daylight-label',
-    'wind-label', 'humidity-label', 'air-quality-label', 'sun-label', 'best-window', 'best-window-score',
-    'chart-delta', 'comfort-chart', 'day-row', 'chart-tip', 'chart-legend', 'percentile', 'status',
+    'location-name',
+    'location-button',
+    'place-search',
+    'place-input',
+    'place-results',
+    'place-note',
+    'updated',
+    'activity-toggle',
+    'ring-bands',
+    'ring-progress',
+    'comfort-value',
+    'comfort-headline',
+    'comfort-reason',
+    'why-toggle',
+    'why-panel',
+    'band-scale',
+    'band-marks',
+    'why-lead',
+    'factor-rows',
+    'why-note',
+    'temp',
+    'feels-like',
+    'sky-label',
+    'sky-icon',
+    'wind',
+    'rain',
+    'humidity',
+    'air-quality',
+    'sun',
+    'daylight',
+    'daylight-label',
+    'wind-label',
+    'humidity-label',
+    'air-quality-label',
+    'sun-label',
+    'best-window',
+    'best-window-score',
+    'chart-delta',
+    'comfort-chart',
+    'day-row',
+    'chart-tip',
+    'chart-legend',
+    'percentile',
+    'status',
   ].map((id) => [id.replace(/-(\w)/g, (_, c) => c.toUpperCase()), el(id)]),
 );
 
@@ -75,7 +112,7 @@ els.ringProgress.style.strokeDasharray = String(RING_CIRCUMFERENCE);
 // Paired with each band's upper edge, since a band only knows where it starts.
 const BANDS_ASCENDING = [...SCORE_BANDS]
   .sort((a, b) => a.min - b.min)
-  .map((band, i, all) => ({ ...band, max: all[i + 1]?.min ?? 100 }));
+  .map((band, i, all) => ({...band, max: all[i + 1]?.min ?? 100}));
 
 // The ring track, repainted as the scale itself. A bare 61 asserts a precision
 // it cannot deliver and answers none of the questions a reader actually has —
@@ -97,16 +134,20 @@ els.ringBands.innerHTML = BANDS_ASCENDING.map((band) => {
 // the number means. The end labels are pinned to the edges rather than centred
 // on their band, which would hang them off the side of the panel.
 els.bandScale.innerHTML = BANDS_ASCENDING.map(
-  (band) => `<span style="flex:${band.max - band.min};background:${band.color};opacity:0.5"></span>`,
+  (band) =>
+    `<span style="flex:${band.max - band.min};background:${band.color};opacity:0.5"></span>`,
 ).join('');
 
 els.bandMarks.innerHTML = BANDS_ASCENDING.map((band, i, all) => {
-  if (i === 0) return `<span style="left:0;transform:none">${band.label}</span>`;
-  if (i === all.length - 1) return `<span style="right:0;left:auto;transform:none">${band.label}</span>`;
+  if (i === 0)
+    return `<span style="left:0;transform:none">${band.label}</span>`;
+  if (i === all.length - 1)
+    return `<span style="right:0;left:auto;transform:none">${band.label}</span>`;
   return `<span style="left:${(band.min + band.max) / 2}%">${band.label}</span>`;
 }).join('');
 
-const formatTime = (date) => date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const formatTime = (date) =>
+  date.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
 
 function formatDuration(ms) {
   const minutes = Math.max(0, Math.round(ms / 60000));
@@ -114,15 +155,22 @@ function formatDuration(ms) {
   return hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
 }
 
-function renderScore({ score, penalties, limiter }, current, activity) {
+function renderScore({score, penalties, limiter}, current, activity) {
   // A missing score is unknown, not bad, so don't paint the ring alarm-red for it.
   const color = score === null ? 'var(--accent)' : bandFor(score).color;
   document.documentElement.style.setProperty('--score-color', color);
 
   els.comfortValue.textContent = score === null ? '--' : String(score);
-  els.ringProgress.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - (score ?? 0) / 100));
+  els.ringProgress.style.strokeDashoffset = String(
+    RING_CIRCUMFERENCE * (1 - (score ?? 0) / 100),
+  );
   els.comfortHeadline.textContent = comfortHeadline(score, activity);
-  els.comfortReason.textContent = comfortReason(current, limiter, penalties, activity);
+  els.comfortReason.textContent = comfortReason(
+    current,
+    limiter,
+    penalties,
+    activity,
+  );
   renderWhy(score, penalties);
 
   renderActivityScores(current, activity);
@@ -136,8 +184,10 @@ function renderScore({ score, penalties, limiter }, current, activity) {
 function renderActivityScores(current, selected) {
   for (const button of els.activityToggle.children) {
     const option = ACTIVITIES[button.dataset.activity];
-    const score = option === selected ? null : comfortScore(current, { activity: option });
-    button.querySelector('.activity-score').textContent = score === null ? '' : String(score);
+    const score =
+      option === selected ? null : comfortScore(current, {activity: option});
+    button.querySelector('.activity-score').textContent =
+      score === null ? '' : String(score);
   }
 }
 
@@ -166,11 +216,11 @@ function renderWhy(score, penalties) {
     .map(
       ([key, cost]) =>
         '<div class="factor-row">' +
-          `<span class="factor-name">${FACTOR_LABELS[key] ?? key}</span>` +
-          '<span class="factor-track">' +
-            `<span class="factor-fill" style="width:${Math.min(100, cost).toFixed(1)}%"></span>` +
-          '</span>' +
-          `<span class="factor-cost">−${Math.round(cost)}</span>` +
+        `<span class="factor-name">${FACTOR_LABELS[key] ?? key}</span>` +
+        '<span class="factor-track">' +
+        `<span class="factor-fill" style="width:${Math.min(100, cost).toFixed(1)}%"></span>` +
+        '</span>' +
+        `<span class="factor-cost">−${Math.round(cost)}</span>` +
         '</div>',
     )
     .join('');
@@ -179,7 +229,8 @@ function renderWhy(score, penalties) {
   if (total === null) {
     els.whyNote.textContent = '';
   } else if (!ranked.length) {
-    els.whyNote.textContent = 'Everything starts at 100, and nothing out there is taking much off.';
+    els.whyNote.textContent =
+      'Everything starts at 100, and nothing out there is taking much off.';
   } else if (ranked.length === 1) {
     els.whyNote.textContent =
       `Everything starts at 100. ${FACTOR_LABELS[ranked[0][0]]} is the only thing costing it, ` +
@@ -202,7 +253,9 @@ function renderConditions(current, activity) {
   const felt = feltTemperature(current, activity);
   const stress = thermalStress(felt);
   els.feelsLike.textContent =
-    felt === null ? 'Feels like –' : `Feels like ${Math.round(felt)}°${stress ? ` · ${stress}` : ''}`;
+    felt === null
+      ? 'Feels like –'
+      : `Feels like ${Math.round(felt)}°${stress ? ` · ${stress}` : ''}`;
   els.skyLabel.textContent = describeWeatherCode(current.weather_code);
   // The icon used to be a hardcoded sun-behind-cloud, which sat next to labels
   // like "Clear sky" and "Heavy snow" without ever changing.
@@ -212,28 +265,57 @@ function renderConditions(current, activity) {
   // Gusts only earn their space when they're meaningfully above sustained wind.
   const gusts = current.wind_gusts_10m;
   els.windLabel.textContent =
-    gusts >= current.wind_speed_10m + 8 ? `Gusts ${Math.round(gusts)} mph` : 'Wind';
+    gusts >= current.wind_speed_10m + 8
+      ? `Gusts ${Math.round(gusts)} mph`
+      : 'Wind';
 
   // Tiles read as "what it means" over the raw measurement, with the number
   // demoted to the label. One tile instead of two: the old Humidity tile was a
   // dew-point label sitting next to the dew point it was derived from, and long
   // values like "Oppressive · 73° dew" wrapped and broke the grid alignment.
-  setTile(els.humidity, els.humidityLabel, describeHumidity(current.dew_point_2m),
-    current.dew_point_2m, (v) => `${Math.round(v)}° dew point`, 'Humidity');
-  setTile(els.airQuality, els.airQualityLabel, describeAirQuality(current.us_aqi),
-    current.us_aqi, (v) => `AQI ${Math.round(v)}`, 'Air quality');
-  setTile(els.sun, els.sunLabel, describeUvIndex(current.uv_index),
-    current.uv_index, (v) => `UV index ${Math.round(v)}`, 'Sun');
+  setTile(
+    els.humidity,
+    els.humidityLabel,
+    describeHumidity(current.dew_point_2m),
+    current.dew_point_2m,
+    (v) => `${Math.round(v)}° dew point`,
+    'Humidity',
+  );
+  setTile(
+    els.airQuality,
+    els.airQualityLabel,
+    describeAirQuality(current.us_aqi),
+    current.us_aqi,
+    (v) => `AQI ${Math.round(v)}`,
+    'Air quality',
+  );
+  setTile(
+    els.sun,
+    els.sunLabel,
+    describeUvIndex(current.uv_index),
+    current.uv_index,
+    (v) => `UV index ${Math.round(v)}`,
+    'Sun',
+  );
 }
 
-function setTile(valueEl, labelEl, value, measurement, formatLabel, fallbackLabel) {
+function setTile(
+  valueEl,
+  labelEl,
+  value,
+  measurement,
+  formatLabel,
+  fallbackLabel,
+) {
   valueEl.textContent = value;
-  labelEl.textContent = Number.isFinite(measurement) ? formatLabel(measurement) : fallbackLabel;
+  labelEl.textContent = Number.isFinite(measurement)
+    ? formatLabel(measurement)
+    : fallbackLabel;
 }
 
 // "3h 22m of daylight left" is a decision; a sunrise and a sunset time are two
 // facts you have to do arithmetic on. Only one of them is ever the useful one.
-function renderDaylight({ now, sunrise, sunset, nextSunrise }) {
+function renderDaylight({now, sunrise, sunset, nextSunrise}) {
   if (sunrise && now < sunrise) {
     els.daylight.textContent = formatTime(sunrise);
     els.daylightLabel.textContent = 'Sunrise';
@@ -283,7 +365,7 @@ function scoreBand(row, offsets, activity) {
           ? row.soil_temperature_0cm + offset
           : null,
       },
-      { activity },
+      {activity},
     ),
   );
   if (ends.some((score) => score === null)) return undefined;
@@ -297,23 +379,30 @@ function renderChart(bundle, spread, now, bestWindow, activity, otherActivity) {
   const points = bundle.rows
     .filter((row) => row.time.getTime() >= from && row.time.getTime() <= to)
     .map((row) => {
-      const selected = scoreComfort(row, { activity });
+      const selected = scoreComfort(row, {activity});
       return {
         ...row,
         score: selected.score,
         limiter: selected.limiter,
-        otherScore: comfortScore(row, { activity: otherActivity }),
+        otherScore: comfortScore(row, {activity: otherActivity}),
         rate: precipitationRate(row),
         band: scoreBand(row, spread.get(row.key), activity),
       };
     });
 
-  renderComfortChart(els.comfortChart, els.dayRow, els.chartTip, els.chartLegend, points, {
-    now,
-    bestWindow,
-    activity,
-    otherActivity,
-  });
+  renderComfortChart(
+    els.comfortChart,
+    els.dayRow,
+    els.chartTip,
+    els.chartLegend,
+    points,
+    {
+      now,
+      bestWindow,
+      activity,
+      otherActivity,
+    },
+  );
   els.comfortChart.setAttribute(
     'aria-label',
     `${activity.label} and ${otherActivity.label.toLowerCase()} comfort scores from ` +
@@ -335,19 +424,24 @@ const PERCENTILE_QUALIFIERS = [
 // requests are worth avoiding, but re-scoring a few hundred rows is free, and
 // caching the scores meant a percentile computed for walking survived a switch
 // to sitting and answered the wrong question in the right sentence.
-let climatology = { key: null, rows: [], pending: null };
+let climatology = {key: null, rows: [], pending: null};
 
 async function renderPercentile(current, now, activity) {
-  const key = `${coords.lat},${coords.lon},${now.toDateString()},${now.getHours()}`;
+  const asked = coords;
+  const key = `${asked.lat},${asked.lon},${now.toDateString()},${now.getHours()}`;
   try {
     if (climatology.key !== key) {
       // Guarded so a refresh landing mid-flight doesn't fire five more requests.
-      climatology.pending ??= fetchClimatology(coords.lat, coords.lon, now);
-      const rows = await climatology.pending;
-      climatology = { key, pending: null, rows };
+      const cache = climatology;
+      cache.pending ??= fetchClimatology(asked.lat, asked.lon, now);
+      const rows = await cache.pending;
+      // `useCoords` swaps in a fresh cache, so an old place's years must not
+      // be written over it, or into the sentence under the new place's chart.
+      if (climatology !== cache) return;
+      climatology = {key, pending: null, rows};
     }
 
-    const scored = { activity, exclude: UNARCHIVED_FACTORS };
+    const scored = {activity, exclude: UNARCHIVED_FACTORS};
     const samples = climatology.rows
       .map((row) => comfortScore(row, scored))
       .filter((score) => score !== null);
@@ -360,6 +454,7 @@ async function renderPercentile(current, now, activity) {
         : `${PERCENTILE_QUALIFIERS.find(([min]) => percentile >= min)[1]} for ` +
           `${climatologyPhrase(now)} here · better than ${percentile}% of them`;
   } catch {
+    if (coords !== asked) return;
     climatology.pending = null;
     els.percentile.textContent = '';
   }
@@ -373,26 +468,29 @@ let activity = ACTIVITIES.walk;
 // round trip: every number on the card is derivable from data already in hand.
 let latest = null;
 
-const otherActivity = () => (activity === ACTIVITIES.walk ? ACTIVITIES.sit : ACTIVITIES.walk);
+const otherActivity = () =>
+  activity === ACTIVITIES.walk ? ACTIVITIES.sit : ACTIVITIES.walk;
 
 function render() {
   if (!latest) return;
-  const { bundle, spread } = latest;
-  const { now, current, history, upcoming } = bundle;
+  const {bundle, spread} = latest;
+  const {now, current, history, upcoming} = bundle;
   const other = otherActivity();
-  const result = scoreComfort(current, { activity });
+  const result = scoreComfort(current, {activity});
 
   renderScore(result, current, activity);
   renderConditions(current, activity);
   renderDaylight(bundle);
-  els.rain.textContent = rainOutlook(current, upcoming, { now });
-  const bestWindow = findBestWindow(upcoming, { now, activity });
+  els.rain.textContent = rainOutlook(current, upcoming, {now});
+  const bestWindow = findBestWindow(upcoming, {now, activity});
   renderBestWindow(bestWindow, now, result.score);
   renderChart(bundle, spread, now, bestWindow, activity, other);
 
   const delta = comfortDelta(history, result.score, now, activity);
   els.chartDelta.textContent =
-    delta === null || delta === 0 ? '' : `${delta > 0 ? '↑' : '↓'}${Math.abs(delta)} vs yesterday`;
+    delta === null || delta === 0
+      ? ''
+      : `${delta > 0 ? '↑' : '↓'}${Math.abs(delta)} vs yesterday`;
   els.chartDelta.classList.toggle('is-down', delta !== null && delta < 0);
 
   const ageMinutes = (now - current.time) / 60_000;
@@ -407,16 +505,21 @@ function render() {
 
 async function update() {
   if (!coords) return;
+  // A place picked while this was in flight makes the answer about somewhere
+  // else, and a slow one could otherwise land after the new place's own.
+  const asked = coords;
   try {
     const [bundle, spread] = await Promise.all([
-      fetchWeatherBundle(coords.lat, coords.lon),
-      fetchTemperatureSpread(coords.lat, coords.lon),
+      fetchWeatherBundle(asked.lat, asked.lon),
+      fetchTemperatureSpread(asked.lat, asked.lon),
     ]);
-    latest = { bundle, spread };
+    if (coords !== asked) return;
+    latest = {bundle, spread};
     els.status.textContent = '';
     lastUpdate = Date.now();
     render();
   } catch (err) {
+    if (coords !== asked) return;
     // Leave the last good render on screen rather than blanking the card.
     els.status.textContent = `Couldn't refresh: ${err.message}`;
   }
@@ -444,7 +547,10 @@ function buildActivityToggle() {
     if (!key || ACTIVITIES[key] === activity) return;
     activity = ACTIVITIES[key];
     for (const button of els.activityToggle.children) {
-      button.setAttribute('aria-pressed', String(button.dataset.activity === key));
+      button.setAttribute(
+        'aria-pressed',
+        String(button.dataset.activity === key),
+      );
     }
     render();
   });
@@ -499,8 +605,8 @@ function wireRefreshOnReturn() {
   });
 }
 
-function useCoords({ lat, lon, name = null }, { remember = true } = {}) {
-  coords = { lat, lon, name };
+function useCoords({lat, lon, name = null}, {remember = true} = {}) {
+  coords = {lat, lon, name};
   if (remember) localStorage.setItem(COORDS_KEY, JSON.stringify(coords));
 
   // A place picked by name is already named. Running it back through the
@@ -516,7 +622,7 @@ function useCoords({ lat, lon, name = null }, { remember = true } = {}) {
 
   // Nothing measured at the old place describes the new one.
   latest = null;
-  climatology = { key: null, rows: [], pending: null };
+  climatology = {key: null, rows: [], pending: null};
   els.status.textContent = 'Loading…';
   update();
   startRefreshing();
@@ -525,7 +631,9 @@ function useCoords({ lat, lon, name = null }, { remember = true } = {}) {
 function readCachedCoords() {
   try {
     const cached = JSON.parse(localStorage.getItem(COORDS_KEY) ?? 'null');
-    return Number.isFinite(cached?.lat) && Number.isFinite(cached?.lon) ? cached : null;
+    return Number.isFinite(cached?.lat) && Number.isFinite(cached?.lon)
+      ? cached
+      : null;
   } catch {
     return null;
   }
@@ -555,13 +663,14 @@ function openPlaceSearch(open) {
   }
 }
 
-function renderPlaceNote(text) {
+function renderPlaceNote(text, {error = false} = {}) {
   els.placeNote.innerHTML = '';
+  els.placeNote.classList.toggle('error', error);
   if (text) els.placeNote.append(`${text} `);
   const here = document.createElement('button');
   here.type = 'button';
   here.className = 'link-button';
-  here.textContent = 'Use my location';
+  here.textContent = error ? 'try again' : 'Use my location';
   here.addEventListener('click', () => {
     openPlaceSearch(false);
     requestLocation();
@@ -617,7 +726,7 @@ function wirePlaceSearch() {
     if (index === undefined) return;
     const place = searchResults[Number(index)];
     openPlaceSearch(false);
-    useCoords({ lat: place.lat, lon: place.lon, name: place.name });
+    useCoords({lat: place.lat, lon: place.lon, name: place.name});
   });
 }
 
@@ -625,35 +734,28 @@ function requestLocation() {
   els.status.textContent = 'Getting your location…';
   els.locationName.textContent = 'Locating…';
   navigator.geolocation.getCurrentPosition(
-    ({ coords: { latitude, longitude } }) => useCoords({ lat: latitude, lon: longitude }),
+    ({coords: {latitude, longitude}}) =>
+      useCoords({lat: latitude, lon: longitude}),
     (err) => {
       // A denied prompt used to leave a permanently empty card. The last known
       // position is nearly always still the right answer.
       const cached = readCachedCoords();
       if (cached) {
         els.status.textContent = 'Using your last known location.';
-        useCoords(cached, { remember: false });
+        useCoords(cached, {remember: false});
       } else {
-        // Not a dead end any more: there is a search box behind the header.
+        // Said at the top, next to the search box that is the way out. A note
+        // under the chart went unread, leaving what looked like a broken card.
         els.locationName.textContent = 'Choose a place';
-        els.status.innerHTML = '';
-        els.status.append(`Location unavailable (${err.message}). `);
-        const retry = document.createElement('button');
-        retry.type = 'button';
-        retry.className = 'link-button';
-        retry.textContent = 'Try again';
-        retry.addEventListener('click', requestLocation);
-        els.status.append(retry);
-        els.status.append(' or ');
-        const search = document.createElement('button');
-        search.type = 'button';
-        search.className = 'link-button';
-        search.textContent = 'search for a place';
-        search.addEventListener('click', () => openPlaceSearch(true));
-        els.status.append(search);
+        els.status.textContent = '';
+        openPlaceSearch(true);
+        renderPlaceNote(
+          `Couldn't get your location (${err.message}). Search for a place, or`,
+          {error: true},
+        );
       }
     },
-    { maximumAge: 5 * 60 * 1000, timeout: 10_000 },
+    {maximumAge: 5 * 60 * 1000, timeout: 10_000},
   );
 }
 
@@ -682,7 +784,7 @@ function init() {
   // for a location would quietly move them back home on every reload.
   const cached = readCachedCoords();
   if (cached?.name) {
-    useCoords(cached, { remember: false });
+    useCoords(cached, {remember: false});
     return;
   }
 

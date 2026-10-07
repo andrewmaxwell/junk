@@ -1,4 +1,4 @@
-import { FACTOR_LABELS } from './comfort.js';
+import {FACTOR_LABELS} from './comfort.js';
 
 const WIDTH = 640;
 const HEIGHT = 160;
@@ -26,7 +26,11 @@ const clamp01 = (n) => Math.min(1, Math.max(0, n));
 
 function rainOpacity(ratePerHour) {
   if (!(ratePerHour > 0)) return 0;
-  return RAIN_MIN_OPACITY + (RAIN_MAX_OPACITY - RAIN_MIN_OPACITY) * (1 - Math.exp(-ratePerHour / RAIN_SCALE));
+  return (
+    RAIN_MIN_OPACITY +
+    (RAIN_MAX_OPACITY - RAIN_MIN_OPACITY) *
+      (1 - Math.exp(-ratePerHour / RAIN_SCALE))
+  );
 }
 
 // --- Sky brightness ---------------------------------------------------------
@@ -45,7 +49,9 @@ const TWILIGHT_FLOOR = 0.12; // the dimmest daylight still reads as daytime
 
 function brightness(point) {
   if (point.is_day === 0) return 0;
-  const lit = clamp01(Math.sqrt(Math.max(0, point.shortwave_radiation ?? 0) / FULL_SUN));
+  const lit = clamp01(
+    Math.sqrt(Math.max(0, point.shortwave_radiation ?? 0) / FULL_SUN),
+  );
   return TWILIGHT_FLOOR + (1 - TWILIGHT_FLOOR) * lit;
 }
 
@@ -60,7 +66,11 @@ const NIGHT_MAX_OPACITY = 0.5;
 // One gradient-filled rect per channel rather than a rect per hour: per-hour
 // rects seam visibly where they abut, and a gradient interpolates dawn and dusk
 // for free instead of stepping through them.
-function skyWash(points, xScale, { id, fill, top, height, radius = 0, opacityFor }) {
+function skyWash(
+  points,
+  xScale,
+  {id, fill, top, height, radius = 0, opacityFor},
+) {
   const stops = points
     .map((point) => {
       const offset = clamp01(xScale(point.time.getTime()) / WIDTH) * 100;
@@ -88,7 +98,7 @@ const nightWash = (points, xScale) =>
 function bandEdges(point, xScale) {
   const left = Math.max(0, xScale(point.time.getTime() - HOUR_MS / 2));
   const right = Math.min(WIDTH, xScale(point.time.getTime() + HOUR_MS / 2));
-  return { left, width: Math.max(0, right - left) };
+  return {left, width: Math.max(0, right - left)};
 }
 
 function rect(left, width, fill, opacity) {
@@ -100,7 +110,7 @@ function rainBands(points, xScale) {
   for (const point of points) {
     const opacity = rainOpacity(point.rate);
     if (opacity > 0) {
-      const { left, width } = bandEdges(point, xScale);
+      const {left, width} = bandEdges(point, xScale);
       svg += rect(left, width, RAIN_COLOR, opacity);
     }
   }
@@ -117,22 +127,27 @@ function buildDayGroups(points, xScale) {
   const groups = [];
   for (const point of points) {
     const key = point.time.toDateString();
-    if (groups.at(-1)?.key !== key) groups.push({ key, points: [] });
+    if (groups.at(-1)?.key !== key) groups.push({key, points: []});
     groups.at(-1).points.push(point);
   }
 
   return groups.map((group) => ({
     label:
       group.points.length >= MIN_LABELLED_HOURS
-        ? group.points[0].time.toLocaleDateString(undefined, { weekday: 'short' })
+        ? group.points[0].time.toLocaleDateString(undefined, {weekday: 'short'})
         : null,
     x0: Math.max(0, xScale(group.points[0].time.getTime() - HOUR_MS / 2)),
-    x1: Math.min(WIDTH, xScale(group.points.at(-1).time.getTime() + HOUR_MS / 2)),
+    x1: Math.min(
+      WIDTH,
+      xScale(group.points.at(-1).time.getTime() + HOUR_MS / 2),
+    ),
   }));
 }
 
 function polylineFor(points, xScale) {
-  return points.map((p) => `${round(xScale(p.time.getTime()))},${round(yFor(p.score))}`).join(' ');
+  return points
+    .map((p) => `${round(xScale(p.time.getTime()))},${round(yFor(p.score))}`)
+    .join(' ');
 }
 
 // The ensemble band, drawn as one closed shape: out along the optimistic edge
@@ -143,7 +158,9 @@ function uncertaintyBand(points, xScale) {
   const banded = points.filter((p) => p.band);
   if (banded.length < 2) return '';
 
-  const high = banded.map((p) => `${round(xScale(p.time.getTime()))},${round(yFor(p.band[1]))}`);
+  const high = banded.map(
+    (p) => `${round(xScale(p.time.getTime()))},${round(yFor(p.band[1]))}`,
+  );
   const low = banded
     .slice()
     .reverse()
@@ -184,7 +201,7 @@ export function renderComfortChart(
   tipEl,
   legendEl,
   points,
-  { now, bestWindow, activity, otherActivity },
+  {now, bestWindow, activity, otherActivity},
 ) {
   const scored = points.filter((p) => Number.isFinite(p.score));
   if (scored.length < 2) {
@@ -209,7 +226,10 @@ export function renderComfortChart(
 
   const boundaries = days
     .slice(1)
-    .map((d) => `<line x1="${round(d.x0)}" y1="${PLOT_TOP}" x2="${round(d.x0)}" y2="${PLOT_BOTTOM}" stroke="var(--border)" stroke-width="1" />`)
+    .map(
+      (d) =>
+        `<line x1="${round(d.x0)}" y1="${PLOT_TOP}" x2="${round(d.x0)}" y2="${PLOT_BOTTOM}" stroke="var(--border)" stroke-width="1" />`,
+    )
     .join('');
 
   const goodY = round(yFor(GOOD_THRESHOLD));
@@ -247,7 +267,7 @@ export function renderComfortChart(
   dayRowEl.innerHTML = days
     .filter((d) => d.label)
     .map((d) => {
-      const midPercent = (((d.x0 + d.x1) / 2) / WIDTH) * 100;
+      const midPercent = ((d.x0 + d.x1) / 2 / WIDTH) * 100;
       return `<div class="day-cell" style="left:${midPercent.toFixed(2)}%"><span class="day-label">${d.label}</span></div>`;
     })
     .join('');
@@ -290,8 +310,10 @@ function legend(activity, otherActivity, points, bestWindow) {
   if (points.some((p) => p.band && p.band[0] !== p.band[1])) {
     entries.push([swatch.block('var(--accent)', 0.16), 'Forecast range']);
   }
-  if (points.some((p) => p.rate > 0)) entries.push([swatch.block(RAIN_COLOR, 0.28), 'Rain']);
-  if (points.some((p) => brightness(p) < 1)) entries.push([swatch.block(NIGHT_FILL, 1), 'Night']);
+  if (points.some((p) => p.rate > 0))
+    entries.push([swatch.block(RAIN_COLOR, 0.28), 'Rain']);
+  if (points.some((p) => brightness(p) < 1))
+    entries.push([swatch.block(NIGHT_FILL, 1), 'Night']);
   if (bestWindow) entries.push([swatch.caret(), 'Best window']);
 
   return entries
@@ -310,7 +332,10 @@ function attachHover(svgEl, tipEl, points, xScale, activity, otherActivity) {
 
     let nearest = points[0];
     for (const point of points) {
-      if (Math.abs(xScale(point.time.getTime()) - x) < Math.abs(xScale(nearest.time.getTime()) - x)) {
+      if (
+        Math.abs(xScale(point.time.getTime()) - x) <
+        Math.abs(xScale(nearest.time.getTime()) - x)
+      ) {
         nearest = point;
       }
     }
@@ -320,7 +345,10 @@ function attachHover(svgEl, tipEl, points, xScale, activity, otherActivity) {
     cursor.setAttribute('x2', round(pointX));
     cursor.setAttribute('visibility', 'visible');
 
-    const when = nearest.time.toLocaleString(undefined, { weekday: 'short', hour: 'numeric' });
+    const when = nearest.time.toLocaleString(undefined, {
+      weekday: 'short',
+      hour: 'numeric',
+    });
     // A collapsed band is the near-term case and says nothing; printing
     // "(86-86)" spends a third of the tooltip asserting there is no spread.
     const spread =
@@ -338,8 +366,13 @@ function attachHover(svgEl, tipEl, points, xScale, activity, otherActivity) {
     tipEl.textContent =
       `${when} · ${activity.key} ${nearest.score}${spread}${other} · ` +
       `${Math.round(nearest.temperature_2m)}°${because}`;
-    tipEl.style.left = `${((pointX / WIDTH) * 100).toFixed(2)}%`;
     tipEl.hidden = false;
+    // Centred on the cursor, but held inside the chart: at either end of the
+    // ten days a centred tip hangs half its width off the card.
+    const half = tipEl.offsetWidth / 2;
+    const cursorPx = (pointX / WIDTH) * box.width;
+    const left = Math.min(box.width - half, Math.max(half, cursorPx));
+    tipEl.style.left = `${left.toFixed(1)}px`;
   };
 
   const hide = () => {
@@ -350,4 +383,6 @@ function attachHover(svgEl, tipEl, points, xScale, activity, otherActivity) {
   svgEl.onpointermove = show;
   svgEl.onpointerdown = show;
   svgEl.onpointerleave = hide;
+  // What a touch gets once the browser decides it was a scroll after all.
+  svgEl.onpointercancel = hide;
 }

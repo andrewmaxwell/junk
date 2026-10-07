@@ -1,7 +1,7 @@
 // Cache version. Bumping it retires every previous cache on the next activate,
 // which is the whole update mechanism: no cache entry ever has to be reasoned
 // about across versions.
-const VERSION = 'walk-comfort-v6';
+const VERSION = 'walk-comfort-v7';
 const SHELL_CACHE = `${VERSION}-shell`;
 const DATA_CACHE = `${VERSION}-data`;
 
@@ -43,7 +43,13 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => !key.startsWith(VERSION)).map((key) => caches.delete(key))))
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => !key.startsWith(VERSION))
+            .map((key) => caches.delete(key)),
+        ),
+      )
       .then(() => self.clients.claim()),
   );
 });
@@ -76,7 +82,7 @@ async function staleWhileRevalidate(request) {
 }
 
 self.addEventListener('fetch', (event) => {
-  const { request } = event;
+  const {request} = event;
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
@@ -88,11 +94,17 @@ self.addEventListener('fetch', (event) => {
   // A navigation that misses the cache and the network still has to render
   // something, and the shell is the only thing it can be.
   if (request.mode === 'navigate') {
-    event.respondWith(staleWhileRevalidate(request).catch(() => caches.match('./index.html')));
+    event.respondWith(
+      staleWhileRevalidate(request).catch(() => caches.match('./index.html')),
+    );
     return;
   }
 
-  if (url.origin === self.location.origin || url.hostname.endsWith('gstatic.com') || url.hostname.endsWith('googleapis.com')) {
+  if (
+    url.origin === self.location.origin ||
+    url.hostname.endsWith('gstatic.com') ||
+    url.hostname.endsWith('googleapis.com')
+  ) {
     event.respondWith(staleWhileRevalidate(request));
   }
 });

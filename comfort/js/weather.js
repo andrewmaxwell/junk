@@ -27,13 +27,21 @@ const THERMAL_FIELDS = [
   'soil_temperature_0cm',
 ];
 
-const COMMON_FIELDS = [...THERMAL_FIELDS, 'uv_index', 'precipitation', 'weather_code', 'is_day'];
+const COMMON_FIELDS = [
+  ...THERMAL_FIELDS,
+  'uv_index',
+  'precipitation',
+  'weather_code',
+  'is_day',
+];
 
 const HOURLY_FIELDS = [...COMMON_FIELDS, 'precipitation_probability'].join(',');
 const CURRENT_FIELDS = COMMON_FIELDS.join(',');
 
 async function fetchJson(url, label) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`${label} request failed (${res.status})`);
   return res.json();
 }
@@ -53,7 +61,7 @@ function wallClockNow(utcOffsetSeconds) {
 // Turns Open-Meteo's parallel arrays into an array of row objects.
 function toRows(block, fields) {
   return block.time.map((time, i) => {
-    const row = { time: new Date(time), key: time };
+    const row = {time: new Date(time), key: time};
     for (const field of fields) row[field] = block[field]?.[i] ?? null;
     return row;
   });
@@ -73,10 +81,12 @@ async function fetchAirQuality(lat, lon, pastDays) {
       'Air quality',
     );
     const byHour = new Map();
-    data.hourly.time.forEach((time, i) => byHour.set(time, data.hourly.us_aqi[i]));
-    return { current: data.current?.us_aqi ?? null, byHour };
+    data.hourly.time.forEach((time, i) =>
+      byHour.set(time, data.hourly.us_aqi[i]),
+    );
+    return {current: data.current?.us_aqi ?? null, byHour};
   } catch {
-    return { current: null, byHour: new Map() };
+    return {current: null, byHour: new Map()};
   }
 }
 
@@ -102,7 +112,11 @@ function fillAirQualityForward(rows) {
 // Three days of history, because the chart draws them: seeing that the last two
 // afternoons were also unwalkable is the context that tells you whether today is
 // a heatwave or a bad Tuesday.
-export async function fetchWeatherBundle(lat, lon, { historyDays = 3, forecastDays = 8 } = {}) {
+export async function fetchWeatherBundle(
+  lat,
+  lon,
+  {historyDays = 3, forecastDays = 8} = {},
+) {
   const forecastUrl =
     `${FORECAST_URL}?latitude=${lat}&longitude=${lon}` +
     `&current=${CURRENT_FIELDS}` +
@@ -132,11 +146,14 @@ export async function fetchWeatherBundle(lat, lon, { historyDays = 3, forecastDa
   const history = rows.filter((row) => row.time.getTime() <= nowMs);
   // Starts at the hour in progress, so "best window" and "rain outlook" can both
   // legitimately answer "right now".
-  const upcoming = rows.filter((row) => row.time.getTime() + 60 * 60 * 1000 > nowMs);
+  const upcoming = rows.filter(
+    (row) => row.time.getTime() + 60 * 60 * 1000 > nowMs,
+  );
 
   const days = data.daily.time;
   const todayIdx = days.indexOf(dateKey(now));
-  const sunAt = (arr, idx) => (idx >= 0 && arr[idx] ? new Date(arr[idx]) : null);
+  const sunAt = (arr, idx) =>
+    idx >= 0 && arr[idx] ? new Date(arr[idx]) : null;
 
   return {
     now,
@@ -168,8 +185,13 @@ const CIVIL_TOWNSHIP = /^(charter )?township of /i;
 // rural Kansas both fields say township, because there is genuinely nothing
 // else out there to call it.
 function municipality(data) {
-  const { city, locality } = data;
-  if (city && CIVIL_TOWNSHIP.test(city) && locality && !CIVIL_TOWNSHIP.test(locality)) {
+  const {city, locality} = data;
+  if (
+    city &&
+    CIVIL_TOWNSHIP.test(city) &&
+    locality &&
+    !CIVIL_TOWNSHIP.test(locality)
+  ) {
     return locality;
   }
   return city || locality;
@@ -188,7 +210,9 @@ export async function fetchLocationName(lat, lon) {
     // The ISO subdivision suffix is only useful when it's an actual
     // abbreviation. Singapore returns "SG-03", which reads as noise beside a city.
     const code = data.principalSubdivisionCode?.split('-')[1];
-    const region = /^[A-Za-z]{2,3}$/.test(code ?? '') ? code : data.principalSubdivision;
+    const region = /^[A-Za-z]{2,3}$/.test(code ?? '')
+      ? code
+      : data.principalSubdivision;
     return region && region !== city ? `${city}, ${region}` : city;
   } catch {
     return coords;
@@ -202,7 +226,7 @@ export async function fetchLocationName(lat, lon) {
 // Open-Meteo's own geocoder rather than the reverse-geocode service above: it
 // takes a name, it is the same provider as the forecast, and it returns the
 // admin hierarchy needed to tell the four Springfields apart.
-export async function searchPlaces(query, { count = 6 } = {}) {
+export async function searchPlaces(query, {count = 6} = {}) {
   const name = query.trim();
   if (name.length < 2) return [];
   const data = await fetchJson(
@@ -220,16 +244,34 @@ export async function searchPlaces(query, { count = 6 } = {}) {
 }
 
 const WEATHER_CODES = {
-  0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
-  45: 'Fog', 48: 'Rime fog',
-  51: 'Light drizzle', 53: 'Drizzle', 55: 'Dense drizzle',
-  56: 'Freezing drizzle', 57: 'Freezing drizzle',
-  61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
-  66: 'Freezing rain', 67: 'Freezing rain',
-  71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
-  80: 'Rain showers', 81: 'Rain showers', 82: 'Violent rain showers',
-  85: 'Snow showers', 86: 'Heavy snow showers',
-  95: 'Thunderstorm', 96: 'Thunderstorm w/ hail', 99: 'Thunderstorm w/ hail',
+  0: 'Clear sky',
+  1: 'Mainly clear',
+  2: 'Partly cloudy',
+  3: 'Overcast',
+  45: 'Fog',
+  48: 'Rime fog',
+  51: 'Light drizzle',
+  53: 'Drizzle',
+  55: 'Dense drizzle',
+  56: 'Freezing drizzle',
+  57: 'Freezing drizzle',
+  61: 'Light rain',
+  63: 'Rain',
+  65: 'Heavy rain',
+  66: 'Freezing rain',
+  67: 'Freezing rain',
+  71: 'Light snow',
+  73: 'Snow',
+  75: 'Heavy snow',
+  77: 'Snow grains',
+  80: 'Rain showers',
+  81: 'Rain showers',
+  82: 'Violent rain showers',
+  85: 'Snow showers',
+  86: 'Heavy snow showers',
+  95: 'Thunderstorm',
+  96: 'Thunderstorm w/ hail',
+  99: 'Thunderstorm w/ hail',
 };
 
 export function describeWeatherCode(code) {
@@ -247,11 +289,15 @@ export function describeUvIndex(uvIndex) {
 
 // Sky icons. Previously the card drew one hardcoded sun-behind-cloud glyph no
 // matter what the sky was doing, so "Clear sky" and "Heavy snow" looked alike.
-const SUN = '<circle cx="12" cy="12" r="4.2"/><path d="M12 3.2v2M12 18.8v2M5.8 5.8l1.4 1.4M16.8 16.8l1.4 1.4M3.2 12h2M18.8 12h2M5.8 18.2l1.4-1.4M16.8 7.2l1.4-1.4"/>';
+const SUN =
+  '<circle cx="12" cy="12" r="4.2"/><path d="M12 3.2v2M12 18.8v2M5.8 5.8l1.4 1.4M16.8 16.8l1.4 1.4M3.2 12h2M18.8 12h2M5.8 18.2l1.4-1.4M16.8 7.2l1.4-1.4"/>';
 const MOON = '<path d="M20 14.5A8.2 8.2 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z"/>';
-const CLOUD = '<path d="M17.5 18.5a4 4 0 0 0-.5-8 5.2 5.2 0 0 0-9.9-1.4A4.2 4.2 0 0 0 6.5 17h11Z"/>';
-const SMALL_CLOUD = '<path d="M17.5 17.5a3.6 3.6 0 0 0-.5-7.2 4.7 4.7 0 0 0-8.9-1.2A3.8 3.8 0 0 0 7.5 16.5h10Z" fill="var(--card)"/>';
-const partly = (orb) => `<g transform="translate(-2.5,-2) scale(0.72)">${orb}</g>${SMALL_CLOUD}`;
+const CLOUD =
+  '<path d="M17.5 18.5a4 4 0 0 0-.5-8 5.2 5.2 0 0 0-9.9-1.4A4.2 4.2 0 0 0 6.5 17h11Z"/>';
+const SMALL_CLOUD =
+  '<path d="M17.5 17.5a3.6 3.6 0 0 0-.5-7.2 4.7 4.7 0 0 0-8.9-1.2A3.8 3.8 0 0 0 7.5 16.5h10Z" fill="var(--card)"/>';
+const partly = (orb) =>
+  `<g transform="translate(-2.5,-2) scale(0.72)">${orb}</g>${SMALL_CLOUD}`;
 const drops = '<path d="M9 19.5 8 22M13 19.5 12 22"/>';
 const flakes = '<path d="M9 20h.01M12.5 21h.01M16 20h.01"/>';
 const bolt = '<path d="M12.5 14 10 19h3l-1.5 4"/>';
@@ -278,7 +324,8 @@ const ENSEMBLE_URL = 'https://ensemble-api.open-meteo.com/v1/ensemble';
 const SPREAD_LOW_PERCENTILE = 0.1;
 const SPREAD_HIGH_PERCENTILE = 0.9;
 
-const percentileAt = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+const percentileAt = (sorted, p) =>
+  sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
 
 // A single forecast line drawn to day seven implies a confidence nobody has.
 // GFS runs 31 ensemble members; the spread between them is the honest width of
@@ -296,11 +343,16 @@ export async function fetchTemperatureSpread(lat, lon) {
       'Ensemble',
     );
 
-    const members = Object.keys(data.hourly).filter((key) => key.includes('_member'));
+    const members = Object.keys(data.hourly).filter((key) =>
+      key.includes('_member'),
+    );
     if (members.length < 5) return offsets;
 
     data.hourly.time.forEach((time, i) => {
-      const values = members.map((key) => data.hourly[key][i]).filter(Number.isFinite).sort((a, b) => a - b);
+      const values = members
+        .map((key) => data.hourly[key][i])
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b);
       if (values.length < 5) return;
       const median = percentileAt(values, 0.5);
       offsets.set(time, {
@@ -374,8 +426,9 @@ export async function fetchClimatology(lat, lon, now) {
       const at = new Date(time);
       // Compare like with like: an August afternoon against other August
       // afternoons, not against the 4 AM lows that would flatter any daytime score.
-      if (Math.abs(at.getHours() - targetHour) > CLIMATOLOGY_HOUR_RADIUS) return;
-      const row = { time: at };
+      if (Math.abs(at.getHours() - targetHour) > CLIMATOLOGY_HOUR_RADIUS)
+        return;
+      const row = {time: at};
       for (const field of fields) row[field] = data.hourly[field]?.[i] ?? null;
       rows.push(row);
     });

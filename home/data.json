@@ -72,6 +72,12 @@
     "desc": "Build a tree and grow fruit."
   },
   {
+    "filePath": "comfort",
+    "title": "Walk Comfort",
+    "year": 2026,
+    "desc": "How nice it is outside for a walk or a sit, right now and over the next week."
+  },
+  {
     "filePath": "slime",
     "title": "WebGPU Slime Mold",
     "year": 2026,

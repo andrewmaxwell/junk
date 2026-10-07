@@ -7,8 +7,8 @@ import {
   feltTemperature,
   thermalStress,
 } from '../js/thermal.js';
-import { neutral } from './helpers.js';
-import { ACTIVITIES } from '../js/comfort.js';
+import {neutral} from './helpers.js';
+import {ACTIVITIES} from '../js/comfort.js';
 
 const close = (actual, expected, tolerance, message) =>
   assert.ok(
@@ -30,7 +30,10 @@ test('vapour pressure matches the published saturation values', () => {
 
 test('vapour pressure rises monotonically', () => {
   for (let t = -40; t < 50; t += 1) {
-    assert.ok(vapourPressure(t + 1) > vapourPressure(t), `not rising at ${t} °C`);
+    assert.ok(
+      vapourPressure(t + 1) > vapourPressure(t),
+      `not rising at ${t} °C`,
+    );
   }
 });
 
@@ -56,11 +59,11 @@ test('UTCI moves the right way for each of its four inputs', () => {
     tmrtC: 30,
     vapourKPa: vapourKPaAt(30, 50),
   };
-  assert.ok(utci({ ...base, airC: 32 }) > utci(base), 'hotter air');
-  assert.ok(utci({ ...base, tmrtC: 45 }) > utci(base), 'sun on you');
-  assert.ok(utci({ ...base, windMs: 6 }) < utci(base), 'wind cools in heat');
+  assert.ok(utci({...base, airC: 32}) > utci(base), 'hotter air');
+  assert.ok(utci({...base, tmrtC: 45}) > utci(base), 'sun on you');
+  assert.ok(utci({...base, windMs: 6}) < utci(base), 'wind cools in heat');
   assert.ok(
-    utci({ ...base, vapourKPa: vapourKPaAt(30, 90) }) > utci(base),
+    utci({...base, vapourKPa: vapourKPaAt(30, 90)}) > utci(base),
     'humid heat is worse than dry heat',
   );
 });
@@ -87,7 +90,8 @@ test('wind below UTCI"s domain is clamped, not extrapolated', () => {
   // The polynomial turns over below 0.5 m/s and starts reporting *less* heat
   // stress in still air, which would make a dead-calm muggy day look better
   // than a breezy one.
-  const at = (windMs) => utci({ airC: 32, windMs, tmrtC: 32, vapourKPa: vapourKPaAt(32, 70) });
+  const at = (windMs) =>
+    utci({airC: 32, windMs, tmrtC: 32, vapourKPa: vapourKPaAt(32, 70)});
   close(at(0), at(0.5), 1e-9, 'still air');
   close(at(-3), at(0.5), 1e-9, 'nonsense wind');
   assert.ok(at(0.5) > at(4), 'a breeze still has to help');
@@ -103,8 +107,8 @@ test('mean radiant temperature separates sun from shade', () => {
     soil_temperature_0cm: 110,
     cloud_cover: 0,
   });
-  const open = meanRadiantTemperature(sunny, { shaded: false });
-  const shade = meanRadiantTemperature(sunny, { shaded: true });
+  const open = meanRadiantTemperature(sunny, {shaded: false});
+  const shade = meanRadiantTemperature(sunny, {shaded: true});
   assert.ok(open - shade > 8, `full sun ${open} °C vs shade ${shade} °C`);
 });
 
@@ -118,15 +122,15 @@ test('a canopy is warmer than a clear sky at night', () => {
     is_day: 0,
   });
   assert.ok(
-    meanRadiantTemperature(night, { shaded: true }) >
-      meanRadiantTemperature(night, { shaded: false }),
+    meanRadiantTemperature(night, {shaded: true}) >
+      meanRadiantTemperature(night, {shaded: false}),
   );
 });
 
 test('an overcast night is warmer than a clear one', () => {
   const at = (cloud_cover) =>
     meanRadiantTemperature(
-      neutral({ temperature_2m: 40, dew_point_2m: 30, cloud_cover, is_day: 0 }),
+      neutral({temperature_2m: 40, dew_point_2m: 30, cloud_cover, is_day: 0}),
     );
   assert.ok(at(100) > at(0));
 });
@@ -134,26 +138,31 @@ test('an overcast night is warmer than a clear one', () => {
 test('missing radiation degrades to a shade estimate rather than failing', () => {
   // Archive rows carry no fluxes at all, and the historical comparison depends
   // on them scoring rather than throwing.
-  const bare = { temperature_2m: 70, dew_point_2m: 55, wind_speed_10m: 5 };
+  const bare = {temperature_2m: 70, dew_point_2m: 55, wind_speed_10m: 5};
   const felt = feltTemperature(bare, ACTIVITIES.walk);
   assert.ok(Number.isFinite(felt));
   close(felt, 70, 12, 'near air temperature');
 });
 
 test('felt temperature is null only when air temperature is missing', () => {
-  assert.equal(feltTemperature({ dew_point_2m: 50 }, ACTIVITIES.walk), null);
+  assert.equal(feltTemperature({dew_point_2m: 50}, ACTIVITIES.walk), null);
   assert.equal(feltTemperature(null, ACTIVITIES.walk), null);
   assert.equal(feltTemperature(undefined, ACTIVITIES.walk), null);
-  assert.ok(Number.isFinite(feltTemperature({ temperature_2m: 70 }, ACTIVITIES.walk)));
+  assert.ok(
+    Number.isFinite(feltTemperature({temperature_2m: 70}, ACTIVITIES.walk)),
+  );
 });
 
 test('a dew point above the air temperature is treated as saturated', () => {
   // Open-Meteo occasionally reports one; without the clamp it makes vapour
   // pressure exceed saturation and the polynomial reports impossible heat.
-  const row = neutral({ temperature_2m: 70, dew_point_2m: 85 });
+  const row = neutral({temperature_2m: 70, dew_point_2m: 85});
   close(
     feltTemperature(row, ACTIVITIES.walk),
-    feltTemperature(neutral({ temperature_2m: 70, dew_point_2m: 70 }), ACTIVITIES.walk),
+    feltTemperature(
+      neutral({temperature_2m: 70, dew_point_2m: 70}),
+      ACTIVITIES.walk,
+    ),
     0.01,
   );
 });
@@ -171,8 +180,16 @@ test('the shaded and open answers are cached apart', () => {
   const open = feltTemperature(row, ACTIVITIES.walk);
   const shade = feltTemperature(row, ACTIVITIES.sit);
   assert.ok(open > shade, `${open} vs ${shade}`);
-  assert.equal(feltTemperature(row, ACTIVITIES.walk), open, 'second read differs');
-  assert.equal(feltTemperature(row, ACTIVITIES.sit), shade, 'second read differs');
+  assert.equal(
+    feltTemperature(row, ACTIVITIES.walk),
+    open,
+    'second read differs',
+  );
+  assert.equal(
+    feltTemperature(row, ACTIVITIES.sit),
+    shade,
+    'second read differs',
+  );
 });
 
 test('thermal stress reports UTCI"s own category names', () => {
@@ -193,7 +210,11 @@ test('thermal stress reports UTCI"s own category names', () => {
   assert.equal(thermalStress(-16.6), 'strong cold stress');
   assert.equal(thermalStress(-16.7), 'very strong cold stress');
   assert.equal(thermalStress(-40), 'very strong cold stress');
-  assert.equal(thermalStress(-41), 'extreme cold stress', 'off the end of the list');
+  assert.equal(
+    thermalStress(-41),
+    'extreme cold stress',
+    'off the end of the list',
+  );
   assert.equal(thermalStress(null), null);
   assert.equal(thermalStress(NaN), null);
 });

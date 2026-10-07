@@ -97,6 +97,7 @@
   .place-option:hover, .place-option:focus-visible { background: var(--surface); }
   .place-option .detail { color: var(--faint); font-size: 12px; }
   .place-note { margin-top: 8px; font-size: 12px; color: var(--faint); }
+  .place-note.error { color: var(--accent); }
 
   /* Main grid */
   .main-grid {
@@ -243,7 +244,9 @@
   .chart-delta { font-size: 12px; font-weight: 600; color: #8FD19E; letter-spacing: 0.02em; }
   .chart-delta.is-down { color: #E8846B; }
   .chart-wrap { position: relative; margin-top: 12px; }
-  #comfort-chart { width: 100%; height: auto; display: block; overflow: visible; touch-action: none; }
+  /* pan-y, not none: a swipe that starts on the chart still scrolls the page,
+     and only a sideways drag scrubs the tooltip. */
+  #comfort-chart { width: 100%; height: auto; display: block; overflow: visible; touch-action: pan-y; }
   .chart-ref-label { fill: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: 0.08em; }
   .chart-tip {
     position: absolute; top: -6px; transform: translateX(-50%);

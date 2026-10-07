@@ -29,11 +29,11 @@
 // at night, both of which land in mean radiant temperature.
 // ---------------------------------------------------------------------------
 
-import { feltTemperature } from './thermal.js';
+import {feltTemperature} from './thermal.js';
 
 // The one thermal number, in °F, re-exported so callers that display a "feels
 // like" figure show the same quantity the score was computed from.
-export { feltTemperature };
+export {feltTemperature};
 
 // Sunburn is a dose — intensity times time — so a shorter outing genuinely
 // does buy tolerance for a given UV index. Thermal strain is not a dose in that
@@ -47,8 +47,8 @@ export { feltTemperature };
 const EXPOSURE_REFERENCE_MINUTES = 60;
 // Sublinear: doubling the time outside does not double the misery, it just
 // moves the threshold where you start noticing.
-const exposureRelief = (minutes) => (EXPOSURE_REFERENCE_MINUTES / minutes) ** 0.2;
-
+const exposureRelief = (minutes) =>
+  (EXPOSURE_REFERENCE_MINUTES / minutes) ** 0.2;
 
 // Wind's cooling is already inside UTCI, so this scores only what UTCI has no
 // opinion about: the mechanical nuisance of walking into it.
@@ -185,7 +185,7 @@ const DRIZZLE_CODES = new Set([51, 53, 55, 56, 57]);
 // the other way round: they will happily read a book at 85°F in shade, and they
 // will be shivering in twenty minutes at 45°F.
 function defineActivity(profile) {
-  return { ...profile, uvRelief: exposureRelief(profile.minutes) };
+  return {...profile, uvRelief: exposureRelief(profile.minutes)};
 }
 
 export const ACTIVITIES = {
@@ -300,7 +300,7 @@ function alongCurve(curve, x) {
 // Open-Meteo reports precipitation as a sum over the preceding `interval`
 // seconds: 3600 for hourly rows, 900 for the current-conditions block. Both
 // are normalized to mm/hr so every downstream curve reads the same units.
-export function precipitationRate({ precipitation, interval = 3600 }) {
+export function precipitationRate({precipitation, interval = 3600}) {
   if (!Number.isFinite(precipitation)) return 0;
   return precipitation * (3600 / interval);
 }
@@ -312,7 +312,8 @@ export function precipitationRate({ precipitation, interval = 3600 }) {
 // millimetre in the last quarter hour was enough to put "Falling now" on screen
 // beside a score that had barely noticed, which reads as the app contradicting
 // itself — and the reader is right, it was.
-export const isRaining = (conditions) => precipitationRate(conditions) > RAIN_TRACE;
+export const isRaining = (conditions) =>
+  precipitationRate(conditions) > RAIN_TRACE;
 
 const PENALTIES = {
   // One continuous curve from the edge of the core to the far end of the scale,
@@ -345,29 +346,35 @@ const PENALTIES = {
   rain(conditions) {
     const rate = precipitationRate(conditions) - RAIN_TRACE;
     if (rate <= 0) return 0;
-    const softening = SNOW_CODES.has(conditions.weather_code) ? SNOW_SOFTENING : 1;
-    return clamp100(softening * 100 * (1 - Math.exp(-rate / RAIN_HALF_PENALTY)));
+    const softening = SNOW_CODES.has(conditions.weather_code)
+      ? SNOW_SOFTENING
+      : 1;
+    return clamp100(
+      softening * 100 * (1 - Math.exp(-rate / RAIN_HALF_PENALTY)),
+    );
   },
 
-  wind({ wind_speed_10m, wind_gusts_10m }) {
+  wind({wind_speed_10m, wind_gusts_10m}) {
     const felt = Math.max(wind_speed_10m, (wind_gusts_10m ?? 0) * GUST_WEIGHT);
     const excess = felt - WIND_FREE;
-    return excess <= 0 ? 0 : clamp100(100 * (excess / (WIND_TOTAL - WIND_FREE)) ** 2);
+    return excess <= 0
+      ? 0
+      : clamp100(100 * (excess / (WIND_TOTAL - WIND_FREE)) ** 2);
   },
 
   // The dose scaling divides the index rather than widening a tolerance: half
   // the time outside is half the dose, and the curve is read at the UV that
   // dose is equivalent to.
-  sun({ uv_index }, activity) {
+  sun({uv_index}, activity) {
     return alongCurve(UV_CURVE, (uv_index ?? 0) / activity.uvRelief);
   },
 
   // Omitted rather than assumed when the air-quality request fails.
-  air({ us_aqi }) {
+  air({us_aqi}) {
     return Number.isFinite(us_aqi) ? alongCurve(AQI_CURVE, us_aqi) : 0;
   },
 
-  dark({ is_day }) {
+  dark({is_day}) {
     return is_day === 0 ? DARKNESS_PENALTY : 0;
   },
 };
@@ -380,14 +387,17 @@ const PENALTIES = {
 // archive carries no UV index and no air quality, so scoring today's weather
 // with those factors and the 2019 record without them would compare two
 // different scales and quietly flatter the past.
-export function scoreComfort(conditions, { activity = DEFAULT_ACTIVITY, exclude = [] } = {}) {
+export function scoreComfort(
+  conditions,
+  {activity = DEFAULT_ACTIVITY, exclude = []} = {},
+) {
   if (!Number.isFinite(conditions?.temperature_2m)) {
-    return { score: null, penalties: {}, limiter: null };
+    return {score: null, penalties: {}, limiter: null};
   }
 
   for (const [key, hazardous] of Object.entries(HAZARDS)) {
     if (!exclude.includes(key) && hazardous(conditions)) {
-      return { score: 0, penalties: { [key]: 100 }, limiter: key };
+      return {score: 0, penalties: {[key]: 100}, limiter: key};
     }
   }
 
@@ -407,7 +417,8 @@ export function scoreComfort(conditions, { activity = DEFAULT_ACTIVITY, exclude 
 }
 
 // Convenience for the many call sites that only want the number.
-export const comfortScore = (conditions, options) => scoreComfort(conditions, options).score;
+export const comfortScore = (conditions, options) =>
+  scoreComfort(conditions, options).score;
 
 // Factors the weather archive cannot supply, so both sides of a historical
 // comparison have to go without them. ERA5 accepts a `uv_index` request and
@@ -417,7 +428,8 @@ export const UNARCHIVED_FACTORS = ['sun', 'air'];
 function limitingFactor(penalties) {
   let worst = null;
   for (const [key, value] of Object.entries(penalties)) {
-    if (value >= NOTABLE_PENALTY && (!worst || value > penalties[worst])) worst = key;
+    if (value >= NOTABLE_PENALTY && (!worst || value > penalties[worst]))
+      worst = key;
   }
   return worst;
 }
@@ -428,11 +440,11 @@ function limitingFactor(penalties) {
 // line is the bottom of Good, and the breakdown panel labels them — four
 // readouts that each used to carry their own thresholds and could drift apart.
 export const SCORE_BANDS = [
-  { min: 85, label: 'Great', color: '#8FD19E' },
-  { min: 70, label: 'Good', color: '#C3D68C' },
-  { min: 50, label: 'Tolerable', color: '#FFC97F' },
-  { min: 30, label: 'Poor', color: '#F0A377' },
-  { min: 0, label: 'Avoid', color: '#E8846B' },
+  {min: 85, label: 'Great', color: '#8FD19E'},
+  {min: 70, label: 'Good', color: '#C3D68C'},
+  {min: 50, label: 'Tolerable', color: '#FFC97F'},
+  {min: 30, label: 'Poor', color: '#F0A377'},
+  {min: 0, label: 'Avoid', color: '#E8846B'},
 ];
 
 export const bandFor = (score) => SCORE_BANDS.find((band) => score >= band.min);
@@ -470,7 +482,8 @@ export const FACTOR_LABELS = {
 // this fixed was two readouts of the same air disagreeing in plain sight.
 const MUGGY_DEW_POINT = 65;
 
-const isMuggy = (conditions) => (conditions.dew_point_2m ?? 0) >= MUGGY_DEW_POINT;
+const isMuggy = (conditions) =>
+  (conditions.dew_point_2m ?? 0) >= MUGGY_DEW_POINT;
 
 export function describeHumidity(dewPoint) {
   if (!Number.isFinite(dewPoint)) return '–';
@@ -499,7 +512,9 @@ function describePrecipitation(conditions) {
     // The codes distinguish drizzle from rain and the rate does not. Calling a
     // 0.4 mm/hr drizzle "Light rain" is how the tile came to sound like weather
     // worth cancelling a walk over.
-    return DRIZZLE_CODES.has(conditions.weather_code) ? 'Drizzle' : 'Light rain';
+    return DRIZZLE_CODES.has(conditions.weather_code)
+      ? 'Drizzle'
+      : 'Light rain';
   }
   if (rate < 10) return snow ? 'Snow' : 'Rain';
   return snow ? 'Heavy snow' : 'Heavy rain';
@@ -554,8 +569,11 @@ const LIMITER_PHRASES = {
   },
   rain: (c) => `${describePrecipitation(c)} falling now`,
   wind: (c, severe) =>
-    severe ? 'Strong wind will fight you the whole way' : 'Breezy enough to notice',
-  air: (c) => `Air quality is ${describeAirQuality(c.us_aqi).toLowerCase()} (AQI ${Math.round(c.us_aqi)})`,
+    severe
+      ? 'Strong wind will fight you the whole way'
+      : 'Breezy enough to notice',
+  air: (c) =>
+    `Air quality is ${describeAirQuality(c.us_aqi).toLowerCase()} (AQI ${Math.round(c.us_aqi)})`,
   // Neither of these tells you what to put on any more. The clothing clause
   // that follows already adds sunscreen above UV 6 — which is precisely when
   // this phrase fires — and it used to say it twice in one breath.
@@ -571,7 +589,12 @@ const LIMITER_PHRASES = {
 const isHazard = (limiter, penalties) =>
   Object.hasOwn(HAZARDS, limiter) && penalties[limiter] === 100;
 
-export function comfortReason(conditions, limiter, penalties = {}, activity = DEFAULT_ACTIVITY) {
+export function comfortReason(
+  conditions,
+  limiter,
+  penalties = {},
+  activity = DEFAULT_ACTIVITY,
+) {
   if (!Number.isFinite(conditions?.temperature_2m)) return '';
   // Rain below the notability floor still leaves no limiter, and the sentence
   // used to answer that with "Just about ideal" while the tile beside it said
@@ -624,21 +647,25 @@ export function comfortReason(conditions, limiter, penalties = {}, activity = DE
 // locale that doesn't use one, and in en-US on browsers whose ICU emits a
 // narrow no-break space. `formatToParts` asks for the pieces directly.
 function hourParts(date) {
-  const parts = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).formatToParts(date);
+  const parts = new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+  }).formatToParts(date);
   return {
-    hour: parts.find((p) => p.type === 'hour')?.value ?? String(date.getHours()),
+    hour:
+      parts.find((p) => p.type === 'hour')?.value ?? String(date.getHours()),
     period: parts.find((p) => p.type === 'dayPeriod')?.value ?? '',
   };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+const startOfDay = (date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 
 function dayQualifier(date, now) {
   const days = Math.round((startOfDay(date) - startOfDay(now)) / DAY_MS);
   if (days <= 0) return '';
   if (days === 1) return 'Tomorrow ';
-  return `${date.toLocaleDateString(undefined, { weekday: 'short' })} `;
+  return `${date.toLocaleDateString(undefined, {weekday: 'short'})} `;
 }
 
 // e.g. "8–10 AM", "Tomorrow 6–8 AM", or "11 AM–1 PM" across the noon boundary.
@@ -662,7 +689,12 @@ const WALKABLE_END_HOUR = 22;
 // a 62 tells you whether waiting is worth it, which the bare time range never did.
 export function findBestWindow(
   rows,
-  { blockHours = 1, horizonHours = 24, now = new Date(), activity = DEFAULT_ACTIVITY } = {},
+  {
+    blockHours = 1,
+    horizonHours = 24,
+    now = new Date(),
+    activity = DEFAULT_ACTIVITY,
+  } = {},
 ) {
   const horizonEnd = now.getTime() + horizonHours * 60 * 60 * 1000;
   const pool = rows.filter((row) => {
@@ -682,7 +714,7 @@ export function findBestWindow(
     const span = (block.at(-1).time - block[0].time) / (60 * 60 * 1000);
     if (span !== blockHours - 1) continue;
 
-    const scores = block.map((row) => comfortScore(row, { activity }));
+    const scores = block.map((row) => comfortScore(row, {activity}));
     if (scores.some((s) => s === null)) continue;
     const average = scores.reduce((sum, s) => sum + s, 0) / scores.length;
 
@@ -727,7 +759,7 @@ function rainLikely(row) {
 // The forecast scan then starts from the next full hour, because an onset in
 // the hour already in progress got announced as "From 5 AM" at 5:45, naming a
 // time that had gone.
-export function rainOutlook(current, rows, { hours = 6, now = new Date() } = {}) {
+export function rainOutlook(current, rows, {hours = 6, now = new Date()} = {}) {
   if (isRaining(current)) return `${describePrecipitation(current)} now`;
 
   const window = rows.filter((row) => row.time > now).slice(0, hours);
@@ -736,14 +768,21 @@ export function rainOutlook(current, rows, { hours = 6, now = new Date() } = {})
   const onset = window.find(rainLikely);
   if (!onset) return `Dry next ${hours}h`;
 
-  const { hour, period } = hourParts(onset.time);
+  const {hour, period} = hourParts(onset.time);
   const at = [hour, period].filter(Boolean).join(' ');
   const chance = onset.precipitation_probability;
-  return Number.isFinite(chance) ? `${at} · ${Math.round(chance)}%` : `From ${at}`;
+  return Number.isFinite(chance)
+    ? `${at} · ${Math.round(chance)}%`
+    : `From ${at}`;
 }
 
 // Current score against the closest reading to 24 hours ago.
-export function comfortDelta(history, currentScore, now = new Date(), activity = DEFAULT_ACTIVITY) {
+export function comfortDelta(
+  history,
+  currentScore,
+  now = new Date(),
+  activity = DEFAULT_ACTIVITY,
+) {
   if (!history.length || currentScore === null) return null;
   const target = now.getTime() - DAY_MS;
   const closest = history.reduce((best, row) =>
@@ -751,7 +790,7 @@ export function comfortDelta(history, currentScore, now = new Date(), activity =
   );
   // Anything much further out than a couple of hours isn't "yesterday".
   if (Math.abs(closest.time - target) > 3 * 60 * 60 * 1000) return null;
-  const past = comfortScore(closest, { activity });
+  const past = comfortScore(closest, {activity});
   return past === null ? null : currentScore - past;
 }
 
@@ -764,7 +803,8 @@ const MIN_CLIMATOLOGY_SAMPLES = 60;
 // historical scores lands in the middle of that pile rather than above or below
 // all of it.
 export function percentileOf(value, samples) {
-  if (!Number.isFinite(value) || samples.length < MIN_CLIMATOLOGY_SAMPLES) return null;
+  if (!Number.isFinite(value) || samples.length < MIN_CLIMATOLOGY_SAMPLES)
+    return null;
   let below = 0;
   let equal = 0;
   for (const sample of samples) {
@@ -790,6 +830,6 @@ function partOfDay(hour) {
 
 // e.g. "mid-August afternoons"
 export function climatologyPhrase(now) {
-  const month = now.toLocaleDateString(undefined, { month: 'long' });
+  const month = now.toLocaleDateString(undefined, {month: 'long'});
   return `${partOfMonth(now.getDate())}-${month} ${partOfDay(now.getHours())}`;
 }
