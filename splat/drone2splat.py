@@ -17,6 +17,9 @@ Pipeline
   5. Web export       : recenter, rotate to Y-up and compress to .sog with splat-transform,
                         plus a .json of the drone's viewpoints for the viewer to fly between.
 
+Progress percentages are printed every few seconds; everything the tools print goes to
+<project>/log.txt. The Mac is kept awake while it runs.
+
 Each stage is skipped if its output already exists, so you can re-run after a failure
 or re-train with different settings without redoing earlier work (use --force to redo).
 
@@ -40,6 +43,9 @@ Usage
 
 import argparse
 import json
+import os
+import pty
+import re
 import shutil
 import subprocess
 import sys
@@ -55,16 +61,94 @@ except ImportError:
 
 # ----------------------------------------------------------------------------- helpers
 
+LOG_FILE = None  # <project>/log.txt once the project folder is known; gets the tools' full output
+
+
 def log(msg: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    line = f"[{time.strftime('%H:%M:%S')}] {msg}"
+    print(line, flush=True)
+    if LOG_FILE:
+        LOG_FILE.write(line + "\n")
+        LOG_FILE.flush()
 
 
-def run(cmd: list[str], fatal: bool = True) -> bool:
+def fmt_time(seconds: float) -> str:
+    m = int(seconds) // 60
+    return f"{m // 60}h{m % 60:02d}m" if m >= 60 else f"{m}m{int(seconds) % 60:02d}s"
+
+
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def run(cmd: list[str], fatal: bool = True, progress=None) -> bool:
+    """Run a command, sending its output to the log file rather than the terminal.
+
+    `progress` maps an output line to (stage, done, total) or None. Every few seconds the
+    latest one is printed as a percentage. The command runs in a pseudo-terminal because
+    Brush only prints its progress bar to a terminal.
+    """
     log("$ " + " ".join(str(c) for c in cmd))
-    result = subprocess.run([str(c) for c in cmd])
-    if result.returncode != 0 and fatal:
-        sys.exit(f"Command failed (exit {result.returncode}): {cmd[0]}")
-    return result.returncode == 0
+    master, slave = pty.openpty()
+    proc = subprocess.Popen([str(c) for c in cmd], stdin=subprocess.DEVNULL,
+                            stdout=slave, stderr=slave)
+    os.close(slave)
+    buf, tail, last_line = "", [], None
+    latest, stage_start, last_print = None, {}, time.time()
+    while True:
+        try:
+            chunk = os.read(master, 65536)
+        except OSError:  # the child closed the terminal
+            break
+        if not chunk:
+            break
+        # Progress bars redraw with \r, so treat it as a line break too.
+        *lines, buf = re.split(r"[\r\n]", buf + ANSI.sub("", chunk.decode("utf8", "replace")))
+        for line in lines:
+            line = line.strip()
+            if not line or line == last_line:
+                continue
+            last_line = line
+            hit = progress(line) if progress else None
+            if hit:
+                latest = hit
+                stage_start.setdefault(hit[0], time.time())
+            else:  # progress redraws would bloat the log; everything else goes in
+                tail = (tail + [line])[-30:]
+                if LOG_FILE:
+                    LOG_FILE.write(line + "\n")
+        if latest and time.time() - last_print >= 5:
+            stage, done, total = latest
+            frac = done / total if total else 0
+            took = time.time() - stage_start[stage]
+            eta = f", ~{fmt_time(took / frac - took)} left" if 0.02 < frac < 1 else ""
+            log(f"{stage} {100 * frac:.0f}% ({done}/{total}){eta}")
+            last_print = time.time()
+    os.close(master)
+    code = proc.wait()
+    if code != 0 and fatal:
+        print("\n".join(tail))
+        sys.exit(f"Command failed (exit {code}): {cmd[0]}. Full output is in the project's log.txt.")
+    return code == 0
+
+
+def colmap_progress(n_images: int):
+    """COLMAP's automatic_reconstructor: feature extraction, matching, then the mapper."""
+    def parse(line: str):
+        if m := re.search(r"Processed file \[(\d+)/(\d+)\]", line):
+            return "COLMAP features", int(m[1]), int(m[2])
+        if m := re.search(r"block \[(\d+)/(\d+), (\d+)/(\d+)\]", line):
+            a, na, b, nb = map(int, m.groups())
+            return "COLMAP matching", (a - 1) * nb + b, na * nb
+        if m := re.search(r"num_reg_(?:frames|images)=(\d+)", line):
+            return "COLMAP poses", int(m[1]), n_images
+        return None
+    return parse
+
+
+def trainer_progress(line: str):
+    if m := re.search(r"(\d+)/(\d+)\s+Steps", line):  # Brush's progress bar
+        return "Training", int(m[1]), int(m[2])
+    return None
 
 
 def require(binary: str, hint: str) -> str:
@@ -246,7 +330,8 @@ def run_colmap(colmap: str, images: Path, work: Path, dataset: Path, quality: st
              "--camera_model", "OPENCV",
              "--sparse", "1",
              "--dense", "0",
-             "--use_gpu", "0"])
+             "--use_gpu", "0"],
+            progress=colmap_progress(sum(1 for _ in images.glob("*.jpg"))))
     else:
         log("COLMAP model exists, skipping reconstruction.")
 
@@ -311,13 +396,15 @@ def train(trainer: str, trainer_bin: str, dataset: Path, out_dir: Path, steps: i
              "--total-steps", str(steps),
              "--max-resolution", str(max_dim),  # Brush caps at 1920 unless told otherwise
              "--export-every", str(every),
-             "--export-path", out_dir])
+             "--export-path", out_dir], progress=trainer_progress)
     else:  # opensplat
         run([trainer_bin, dataset, "-n", str(steps), "-o", out_dir / "splat.ply"])
     plys = sorted(out_dir.glob("*.ply"), key=lambda p: p.stat().st_mtime)
     if not plys:
         log(f"Training finished but no .ply found in {out_dir}; check the trainer output above.")
         return None
+    for old in plys[:-1]:  # earlier checkpoints are only useful if training dies
+        old.unlink()
     log(f"Splat: {plys[-1]}")
     return plys[-1]
 
@@ -479,7 +566,13 @@ def main() -> None:
     if a.force and proj.exists():
         shutil.rmtree(proj)
 
-    log(f"Project folder: {proj}")
+    proj.mkdir(parents=True, exist_ok=True)
+    global LOG_FILE
+    LOG_FILE = open(proj / "log.txt", "a")
+    log(f"Project folder: {proj} (full tool output goes to log.txt)")
+    # Keep the Mac from sleeping until this script exits (closing the lid still sleeps it).
+    if shutil.which("caffeinate"):
+        subprocess.Popen(["caffeinate", "-is", "-w", str(os.getpid())])
     if images.exists() and any(images.glob("*.jpg")):
         log(f"Frames exist ({len(list(images.glob('*.jpg')))}), skipping extraction.")
     else:
