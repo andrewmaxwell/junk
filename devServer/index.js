@@ -1,49 +1,62 @@
+import express from 'express';
+import {WebSocketServer} from 'ws';
+import {watch, existsSync} from 'fs';
 import {readFile} from 'fs/promises';
-import {existsSync} from 'fs';
-import nodePath from 'path';
-import {FileWatcher} from './FileWatcher.js';
-import {makeServer} from './makeServer.js';
-import {SocketServer} from './SocketServer.js';
+import path from 'path';
 
 /*
 
-The HTTP server:
-  - watches for changes on any requested files
-  - injects a script into html files that connects to the websocket and refreshes the page when it receives a message
-  - broadcasts a websocket message whenever a previously requested file is changed
+Serves the repo at http://localhost:3000 and live-reloads:
+  - every requested file is remembered
+  - html pages get a script that connects to a websocket and reloads on message
+  - when a remembered file changes, every page reloads
+  - pages also reload when they reconnect after a server restart
 
 */
 
-const wsPort = 3003;
-const wss = new SocketServer({port: wsPort});
-const fileWatcher = new FileWatcher((filename) => {
-  console.log(filename, 'changed!');
-  wss.broadcast('reload');
+const root = process.cwd();
+const port = process.env.PORT || 3000;
+const requested = new Set();
+
+const reloadScript = `
+<script>
+  (function connect(reconnecting) {
+    const ws = new WebSocket('ws://' + location.host);
+    ws.onopen = () => reconnecting && location.reload();
+    ws.onmessage = () => location.reload();
+    ws.onclose = () => setTimeout(() => connect(true), 1000);
+  })();
+</script>`;
+
+const app = express();
+
+app.use(async (req, res, next) => {
+  const file = path.join(
+    root,
+    decodeURIComponent(req.path),
+    req.path.endsWith('/') ? 'index.html' : '',
+  );
+  if (!file.startsWith(root + path.sep)) return res.status(403).end();
+  requested.add(file);
+  if (!file.endsWith('.html') || !existsSync(file)) return next();
+  res.type('html').send((await readFile(file, 'utf-8')) + reloadScript);
 });
 
-const getFile = async (filePath) =>
-  existsSync(filePath)
-    ? await readFile(filePath, 'utf-8')
-    : 'Your URL is dumb.';
+app.use(express.static(root));
 
-makeServer(async (req, res) => {
-  const filePath =
-    nodePath.join(process.env.PWD, '.', req.path) +
-    (req.path.endsWith('/') ? 'index.html' : '');
+const server = app.listen(port, '127.0.0.1', () =>
+  console.log(`Serving ${root} at http://localhost:${port}`),
+);
 
-  fileWatcher.watchPath(filePath);
+const wss = new WebSocketServer({server});
+wss.on('connection', (ws) => ws.on('error', console.error));
 
-  if (filePath.endsWith('.html')) {
-    res.send(
-      `${await getFile(filePath)}
-<script>
-  new WebSocket('ws://' + location.hostname + ':${wsPort}').onmessage = (e) => {
-    if (e.data === 'reload') location.reload();
-    else console.log('from websocket', e);
-  };
-</script>`
-    );
-  } else {
-    res.sendFile(filePath);
-  }
+let timeout;
+watch(root, {recursive: true}, (event, rel) => {
+  if (!rel || !requested.has(path.join(root, rel))) return;
+  clearTimeout(timeout);
+  timeout = setTimeout(() => {
+    console.log(rel, 'changed, reloading');
+    wss.clients.forEach((ws) => ws.send('reload'));
+  }, 50);
 });

@@ -29,7 +29,7 @@
     "typescript-eslint": "^8.46.1"
   },
   "scripts": {
-    "dev": "npm i && npm run gen && open http://localhost:3000 && node devServer",
+    "dev": "npm run gen && open http://localhost:3000 && node devServer",
     "gen": "node generateHome.js"
   },
   "repository": {
