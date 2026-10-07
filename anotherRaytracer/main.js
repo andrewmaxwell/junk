@@ -1,20 +1,6 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
-import {
-  GLASS,
-  LIGHT,
-  MIRROR,
-  SPHERE,
-  hitDistance,
-  packObjects,
-  scenes,
-} from './scenes.js';
-import {
-  displayShader,
-  lightShader,
-  resolveShader,
-  tileShader,
-  traceShader,
-} from './shaders.js';
+import {LIGHT, hitDistance, packObjects, scenes} from './scenes.js';
+import {displayShader, tileShader, traceShader} from './shaders.js';
 
 /**
  * Everything the controls change. Settings that differ from their defaults
@@ -62,8 +48,6 @@ const defaults = {
   dof: 0,
   /** 'sobol' or 'random'; see rand2 in shaders.js */
   sequence: 'sobol',
-  /** Trace paths from lights too, for caustics; see lightShader in shaders.js */
-  lightTracing: true,
 };
 /** @typedef {typeof defaults} Settings */
 
@@ -74,12 +58,7 @@ for (const [key, value] of Object.entries(defaults)) {
   const param = urlParams.get(key);
   if (param === null) continue;
   Object.assign(settings, {
-    [key]:
-      typeof value === 'number'
-        ? Number(param)
-        : typeof value === 'boolean'
-          ? param === 'true'
-          : param,
+    [key]: typeof value === 'number' ? Number(param) : param,
   });
 }
 if (!(settings.scene in scenes)) settings.scene = defaults.scene;
@@ -134,12 +113,6 @@ const device = await adapter.requestDevice({
   },
 });
 device.lost.then((info) => console.error('WebGPU device lost:', info.message));
-device.addEventListener('uncapturederror', (e) =>
-  console.error(
-    'WebGPU error:',
-    /** @type {GPUUncapturedErrorEvent} */ (e).error.message,
-  ),
-);
 
 const context = /** @type {GPUCanvasContext} */ (canvas.getContext('webgpu'));
 /** Settings that aren't kept in the URL */
@@ -191,14 +164,6 @@ const tilePipeline = device.createComputePipeline({
   layout: 'auto',
   compute: {module: compile(tileShader)},
 });
-const lightPipeline = device.createComputePipeline({
-  layout: 'auto',
-  compute: {module: compile(lightShader)},
-});
-const resolvePipeline = device.createComputePipeline({
-  layout: 'auto',
-  compute: {module: compile(resolveShader)},
-});
 const displayModule = compile(displayShader);
 const displayPipeline = device.createRenderPipeline({
   layout: 'auto',
@@ -206,7 +171,7 @@ const displayPipeline = device.createRenderPipeline({
   fragment: {module: displayModule, targets: [{format: 'rgba16float'}]},
 });
 
-// Params in shaders.js: 4 × (vec3f + u32), then 20 scalars
+// Params in shaders.js: 4 × (vec3f + u32), then 16 scalars
 const paramsData = new ArrayBuffer(144);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
@@ -220,10 +185,6 @@ let scene = scenes[settings.scene]();
 let lightCount = 0;
 /** @type {GPUBuffer} */
 let objectBuffer;
-/** See `pairs` in lightShader */
-/** @type {GPUBuffer} */
-let pairBuffer;
-let pairCount = 0;
 
 // How many tiles adaptive sampling still refines, counted on the GPU and
 // copied back to show and to know when to stop
@@ -246,10 +207,6 @@ let traceBindGroup;
 let tileBindGroup;
 /** @type {GPUBindGroup} */
 let displayBindGroup;
-/** @type {GPUBindGroup} */
-let lightBindGroup;
-/** @type {GPUBindGroup} */
-let resolveBindGroup;
 let width = 0;
 let height = 0;
 let tileCount = 0;
@@ -268,10 +225,7 @@ const resize = () => {
   const sums = storage(width * height * 16);
   const sqSums = storage(width * height * 4);
   const tiles = storage(tileCount * 4);
-  // Light tracing's light this frame, and summed over frames
-  const lightFrame = storage(width * height * 12);
-  const lightSums = storage(width * height * 16);
-  pixelBuffers = [sums, sqSums, tiles, lightFrame, lightSums];
+  pixelBuffers = [sums, sqSums, tiles];
   /** @type {(pipeline: GPUPipelineBase, buffers: GPUBuffer[]) => GPUBindGroup} */
   const bindGroup = (pipeline, buffers) =>
     device.createBindGroup({
@@ -284,7 +238,6 @@ const resize = () => {
   traceBindGroup = bindGroup(tracePipeline, [
     paramsBuffer,
     objectBuffer,
-    pairBuffer,
     sums,
     sqSums,
     tiles,
@@ -295,25 +248,8 @@ const resize = () => {
     sqSums,
     tiles,
     activeTilesBuffer,
-    lightSums,
   ]);
-  lightBindGroup = bindGroup(lightPipeline, [
-    paramsBuffer,
-    objectBuffer,
-    pairBuffer,
-    lightFrame,
-  ]);
-  resolveBindGroup = bindGroup(resolvePipeline, [
-    paramsBuffer,
-    lightFrame,
-    lightSums,
-  ]);
-  displayBindGroup = bindGroup(displayPipeline, [
-    paramsBuffer,
-    sums,
-    tiles,
-    lightSums,
-  ]);
+  displayBindGroup = bindGroup(displayPipeline, [paramsBuffer, sums, tiles]);
   restart();
 };
 
@@ -323,53 +259,6 @@ const resize = () => {
 
 /** Orbits target. `focus` is the distance that depth of field keeps sharp. */
 const camera = {target: [0, 0, 0], yaw: 0, pitch: 0, distance: 1, focus: 1};
-
-/**
- * For light tracing: pairs of a light and a glass or mirror ball to aim at
- * from it, each picked in proportion to roughly how much of the light's
- * power heads into the ball. See `pairs` in shaders.js. Only lights that
- * look small from the ball: big ones, like a sky, make soft caustics that
- * trace finds well enough, and light tracing from them is noisy, since
- * paths from their near side carry far more power than from the far side.
- * @type {(objects: import('./scenes.js').Shape[]) => Float32Array}
- */
-const aimPairs = (objects) => {
-  const balls = objects.flatMap((s, i) =>
-    s.shape === SPHERE &&
-    (s.material === GLASS || (s.material === MIRROR && !s.shininess))
-      ? [i]
-      : [],
-  );
-  /** @type {number[][]} */
-  const pairs = [];
-  objects.forEach((light, i) => {
-    if (light.material !== LIGHT) return;
-    const [r, g, b] = light.color;
-    const brightness = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    for (const j of balls) {
-      const ball = objects[j];
-      const distSq = ball.center.reduce(
-        (sum, c, k) => sum + (c - light.center[k]) ** 2,
-        0,
-      );
-      // Over about 35° across
-      if (light.radius ** 2 > 0.09 * distSq) continue;
-      // The light's power, times about how much of the sky the ball takes
-      // up from it
-      const weight =
-        brightness * light.radius ** 2 * Math.min(1, ball.radius ** 2 / distSq);
-      pairs.push([i, j, weight]);
-    }
-  });
-  const total = pairs.reduce((sum, p) => sum + p[2], 0);
-  let cumulative = 0;
-  return new Float32Array(
-    pairs.flatMap(([i, j, weight]) => {
-      cumulative += weight / total;
-      return [i, j, weight / total, cumulative];
-    }),
-  );
-};
 
 const loadScene = () => {
   scene = scenes[settings.scene]();
@@ -387,15 +276,6 @@ const loadScene = () => {
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
   device.queue.writeBuffer(objectBuffer, 0, objectData);
-  const pairs = aimPairs(scene.objects);
-  pairCount = pairs.length / 4;
-  pairBuffer?.destroy();
-  pairBuffer = device.createBuffer({
-    // Can't be empty, even with no pairs
-    size: Math.max(16, pairs.byteLength),
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(pairBuffer, 0, pairs);
   resize();
   resetCamera();
 };
@@ -508,10 +388,6 @@ const render = (trace = true) => {
   paramsF32[31] = settings.contrast;
   paramsF32[32] = settings.fogForward;
   paramsF32[33] = settings.fogBlue;
-  const lightTracing = settings.lightTracing && pairCount > 0;
-  paramsU32[34] = lightTracing ? pairCount : 0;
-  // Frames of light tracing done, including this one if tracing
-  paramsU32[35] = lightTracing ? frame + +trace : 0;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -525,16 +401,6 @@ const render = (trace = true) => {
     pass.setPipeline(tracePipeline);
     pass.setBindGroup(0, traceBindGroup);
     pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
-    if (lightTracing) {
-      // Trace paths from the lights, then add their light to the totals
-      pass.setPipeline(lightPipeline);
-      pass.setBindGroup(0, lightBindGroup);
-      // One thread per LIGHT_SPACING (2) pixels square
-      pass.dispatchWorkgroups(Math.ceil(width / 16), Math.ceil(height / 16));
-      pass.setPipeline(resolvePipeline);
-      pass.setBindGroup(0, resolveBindGroup);
-      pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
-    }
     pass.end();
   }
   const readActiveTiles = trace && !readingActiveTiles;
@@ -747,10 +613,6 @@ light
 light
   .add(settings, 'clamp', 0, 100, 1)
   .name('indirect clamp (0: none)')
-  .onChange(changed);
-light
-  .add(settings, 'lightTracing')
-  .name('light tracing (caustics)')
   .onChange(changed);
 light
   .add(settings, 'sampling', {
