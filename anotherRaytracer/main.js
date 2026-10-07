@@ -30,7 +30,7 @@ const defaults = {
   noise: 0.02,
   /** How strongly glass splits light into rainbows. See `dispersion` in shaders.js */
   dispersion: 1,
-  /** Fog density; see `fogDensity` in shaders.js. Each scene has its own default. */
+  /** Fog density; see `fogDensity` in shaders.js. Scenes can change this default. */
   fog: 0,
   /** Brightens or darkens the display, in stops (doublings) */
   exposure: 0,
@@ -38,7 +38,8 @@ const defaults = {
   contrast: 1.25,
   /**
    * Depth of field: the camera lens's radius, as a fraction of the distance
-   * in focus. 0 keeps everything sharp. Click the image to focus.
+   * in focus. 0 keeps everything sharp. Click the image to focus. Scenes
+   * can change this default.
    */
   dof: 0,
   /** 'sobol' or 'random'; see rand2 in shaders.js */
@@ -58,18 +59,25 @@ for (const [key, value] of Object.entries(defaults)) {
 }
 if (!(settings.scene in scenes)) settings.scene = defaults.scene;
 
-/** The scene's default fog, which the URL leaves out */
-const sceneFog = () => scenes[settings.scene]().fog ?? 0;
-if (!urlParams.has('fog')) settings.fog = sceneFog();
+/** Settings each scene can pick its own default for; see `Scene` in scenes.js */
+const sceneKeys = ['fog', 'dof'];
+/** The default for a setting in this scene, which the URL leaves out */
+const sceneDefault = (/** @type {string} */ key) =>
+  scenes[settings.scene]().defaults?.[key] ??
+  defaults[/** @type {keyof Settings} */ (key)];
+/** Sets sceneKeys to this scene's defaults, except ones the URL sets if keepUrl */
+const useSceneDefaults = (keepUrl = false) => {
+  for (const key of sceneKeys) {
+    if (keepUrl && urlParams.has(key)) continue;
+    Object.assign(settings, {[key]: sceneDefault(key)});
+  }
+};
+useSceneDefaults(true);
 
 const saveSettings = () => {
   const url = new URL(location.href);
   for (const [key, value] of Object.entries(settings)) {
-    const fallback =
-      key === 'fog'
-        ? sceneFog()
-        : defaults[/** @type {keyof Settings} */ (key)];
-    if (value === fallback) url.searchParams.delete(key);
+    if (value === sceneDefault(key)) url.searchParams.delete(key);
     else url.searchParams.set(key, String(value));
   }
   history.replaceState(null, '', url);
@@ -571,8 +579,8 @@ const saveHdr = () => {
 const gui = new GUI({title: 'Another Raytracer'});
 if (innerWidth < 600) gui.close();
 gui.add(settings, 'scene', Object.keys(scenes)).onChange(() => {
-  // Each scene has its own fog
-  settings.fog = sceneFog();
+  // Each scene has its own fog and depth of field
+  useSceneDefaults();
   saveSettings();
   loadScene();
   gui.controllersRecursive().forEach((c) => c.updateDisplay());

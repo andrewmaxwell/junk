@@ -7,6 +7,10 @@ Scenes:
 - **cornell**: a Cornell-box hallway with a mirror ball, a glass ball, and glossy balls
 - **veach**: the multiple importance sampling test scene from Eric Veach's thesis
 - **shafts**: a foggy room lit through window blinds, with a glass ball and a copper ball in the beams
+- **caustics**: clear and colored glass balls on a pale floor, focusing light into their shadows
+- **mirrors**: two facing mirrors reflecting glowing orbs and balls into the distance
+- **bokeh**: balls on a polished black table, with fairy lights behind blurred into discs by depth of field
+- **sunset**: balls on a plain with long shadows, a low sun, and hazy air that glows around it
 
 How it renders:
 

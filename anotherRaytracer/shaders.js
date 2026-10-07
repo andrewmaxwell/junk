@@ -639,7 +639,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         // Only counts if the light is in front of this surface, and nothing
         // is in the way
         var visible = 0.;
-        if (cosSurface > 0.) { visible = lightVisibility(p, l, light); }
+        if (cosSurface > 0.) { visible = lightVisibility(p + nl * EPSILON, l, light); }
         if (visible > 0.) {
           // radiance * BSDF * cos(theta) / pdf, where the pdf is the chance
           // of picking this light over the cone's solid angle
@@ -709,7 +709,11 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       }
       d = next;
     }
-    o = p;
+    // Start the next ray a hair off the surface, on the side it's leaving
+    // toward. From p itself, rounding can put it just inside a sphere, where
+    // a grazing ray hits the sphere again from the inside and gets trapped,
+    // leaving dark specks along the edges of mirror and glass balls.
+    o = p + nl * select(-EPSILON, EPSILON, dot(d, nl) > 0.);
   }
   return color;
 }

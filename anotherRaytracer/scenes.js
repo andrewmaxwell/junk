@@ -100,11 +100,12 @@ const plate = (
  * @typedef {{
  *   objects: Shape[],
  *   camera: {position: number[], target: number[], zoom: number},
- *   fog?: number,
+ *   defaults?: {fog?: number, dof?: number},
  * }} Scene
- * The camera orbits `target`. `zoom` is the image height at distance 1.
- * `fog` is the fog's density: the chance per unit of distance that light
- * scatters off it.
+ * The camera orbits `target`, and starts focused on it. `zoom` is the image
+ * height at distance 1. `defaults` overrides the panel's defaults for this
+ * scene (see `defaults` in main.js): `fog` is the fog's density, the chance
+ * per unit of distance that light scatters off it, and `dof` the lens size.
  */
 
 /** @type {() => Scene} */
@@ -251,7 +252,138 @@ function shaftsScene() {
   return {
     objects,
     camera: {position: [60, 45, 110], target: [40, 35, -30], zoom: 0.8},
-    fog: 0.004,
+    defaults: {fog: 0.004},
+  };
+}
+
+/**
+ * Glass balls on a pale floor under one small light, casting bright, rainbow-
+ * edged caustics: light focused by the glass.
+ * @type {() => Scene} */
+function causticsScene() {
+  const big = 1000;
+  const floor = [0.75, 0.75, 0.75];
+  return {
+    objects: [
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, floor, {oneSided: true}),
+      plate([0, 50, -40], [0, 0, 1], [1, 0, 0], big, big, floor, {
+        oneSided: true,
+      }), // back wall
+      // Up, back and to the left, so the caustics fall toward the camera
+      sphere(4, [-60, 90, -30], [500, 470, 420], LIGHT),
+      // Faint blue sky for the shadows
+      sphere(150, [0, 600, 400], [0.15, 0.2, 0.3], LIGHT),
+      sphere(12, [-8, 12, 0], [0.97, 0.97, 0.97], GLASS),
+      sphere(7, [20, 7, -8], [0.95, 0.55, 0.45], GLASS), // amber
+      sphere(5, [8, 5, 18], [0.5, 0.75, 0.95], GLASS), // blue
+      sphere(3, [-22, 3, 18], [0.97, 0.97, 0.97], GLASS),
+      sphere(6, [-32, 6, -10], [0.9, 0.9, 0.9], MIRROR),
+    ],
+    camera: {position: [35, 45, 95], target: [0, 4, 10], zoom: 0.65},
+  };
+}
+
+/**
+ * Two mirrors facing each other, reflecting glowing orbs and balls between
+ * them back and forth into the distance.
+ * @type {() => Scene} */
+function mirrorsScene() {
+  const big = 1000;
+  // Slightly green, like real mirror glass, so each reflection is a bit
+  // greener and dimmer than the last
+  const mirror = [0.88, 0.93, 0.9];
+  /** @type {(x: number) => Shape} */
+  const wall = (x) =>
+    plate([x, 40, 0], [-Math.sign(x), 0, 0], [0, 0, 1], 100, 40, mirror, {
+      material: MIRROR,
+    });
+  return {
+    objects: [
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.1, 0.1, 0.12], {
+        oneSided: true,
+        gloss: 0.3,
+        shininess: 300,
+      }), // floor
+      wall(-30),
+      wall(30),
+      sphere(2.5, [-12, 26, -10], [8, 4, 1.2], LIGHT), // orange orb
+      sphere(2, [14, 18, 8], [1.5, 3.5, 8], LIGHT), // blue orb
+      sphere(1.8, [2, 32, 22], [7, 2, 5], LIGHT), // pink orb
+      // Soft white light high above
+      sphere(30, [0, 200, 40], [3, 3, 3], LIGHT),
+      sphere(6, [-8, 6, 0], [0.9, 0.2, 0.15], DIFFUSE, 0.3, 500), // red
+      sphere(5, [10, 5, -12], [0.95, 0.8, 0.45], MIRROR), // gold
+      sphere(7, [6, 7, 22], [0.97, 0.97, 0.97], GLASS),
+      sphere(3, [-16, 3, 26], [0.2, 0.6, 0.3], DIFFUSE, 0.3, 500), // green
+    ],
+    camera: {position: [20, 20, 55], target: [-30, 12, 0], zoom: 0.8},
+  };
+}
+
+/**
+ * A few balls on a polished black table, in front of a string of fairy lights
+ * that the lens blurs into discs (bokeh).
+ * @type {() => Scene} */
+function bokehScene() {
+  const big = 1000;
+  /** @type {Shape[]} */
+  const objects = [
+    plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.02, 0.02, 0.02], {
+      oneSided: true,
+      gloss: 0.6,
+      shininess: 3000,
+    }), // table
+    // A big soft light up and to the left, like a window
+    sphere(20, [-60, 70, 40], [10, 9.6, 9], LIGHT),
+    sphere(5, [0, 5, 0], [0.97, 0.97, 0.97], GLASS),
+    sphere(4, [-11, 4, -4], [0.95, 0.75, 0.4], MIRROR), // gold
+    sphere(3.5, [10, 3.5, -3], [0.7, 0.08, 0.1], DIFFUSE, 0.4, 2000), // red
+  ];
+  // Fairy lights far behind, sagging between posts
+  const colors = [
+    [1, 0.65, 0.3],
+    [1, 0.8, 0.5],
+    [1, 0.55, 0.25],
+  ];
+  for (let i = 0; i < 28; i++) {
+    const x = -140 + i * 10;
+    const sag = Math.cos((((x + 140) % 70) / 70 - 0.5) * Math.PI);
+    const y = 32 - 14 * sag;
+    const color = colors[i % 3].map((c) => c * 6);
+    objects.push(sphere(0.8, [x, y, -150 - i * 2], color, LIGHT));
+  }
+  return {
+    objects,
+    camera: {position: [3, 9, 38], target: [0, 5, 0], zoom: 0.55},
+    defaults: {dof: 0.02},
+  };
+}
+
+/**
+ * Balls on a plain at sunset. The air is thin fog, so it glows around the
+ * low sun, and the sky fades from orange to blue overhead.
+ * @type {() => Scene} */
+function sunsetScene() {
+  const big = 100000;
+  return {
+    objects: [
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.5, 0.42, 0.35], {
+        oneSided: true,
+      }),
+      // The sun, low and far, to the left of the balls
+      sphere(40, [-2800, 250, -1200], [6000, 3000, 1200], LIGHT),
+      // Blue sky: so big and high that it reaches down to 7° above the
+      // horizon, where the haze hides its edge. It lights the shadows and the air.
+      sphere(59500, [0, 60000, 0], [0.08, 0.17, 0.4], LIGHT),
+      sphere(20, [0, 20, 0], [0.8, 0.8, 0.8], DIFFUSE, 0.2, 50),
+      sphere(10, [35, 10, 20], [0.95, 0.95, 0.95], GLASS),
+      sphere(12, [-40, 12, 30], [0.9, 0.9, 0.9], MIRROR),
+      sphere(6, [10, 6, 45], [0.15, 0.3, 0.6], DIFFUSE, 0.5, 500),
+      sphere(40, [-150, 40, -250], [0.45, 0.35, 0.3], DIFFUSE),
+      sphere(25, [120, 25, -180], [0.45, 0.35, 0.3], DIFFUSE),
+    ],
+    camera: {position: [60, 18, 160], target: [-45, 25, 0], zoom: 0.75},
+    defaults: {fog: 0.0002},
   };
 }
 
@@ -260,6 +392,10 @@ export const scenes = {
   cornell: cornellScene,
   veach: veachScene,
   shafts: shaftsScene,
+  caustics: causticsScene,
+  mirrors: mirrorsScene,
+  bokeh: bokehScene,
+  sunset: sunsetScene,
 };
 
 /**
