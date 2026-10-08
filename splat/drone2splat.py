@@ -15,7 +15,8 @@ Pipeline
   3. Undistort        : convert to a PINHOLE dataset that any splat trainer accepts.
   4. Train splat      : Brush (default, Metal/WebGPU) or OpenSplat (Metal/MPS).
   5. Web export       : recenter, rotate to Y-up and compress to .sog with splat-transform,
-                        plus a .json of the drone's viewpoints for the viewer to fly between.
+                        plus a small <name>-preview.sog the viewer shows while the full one loads,
+                        and a .json of the drone's viewpoints for the viewer to fly between.
 
 Progress percentages are printed every few seconds; everything the tools print goes to
 <project>/log.txt. The Mac is kept awake while it runs.
@@ -476,8 +477,18 @@ def export_web(colmap: str, ply: Path, dataset: Path, out: Path, aligned: bool) 
          *[a for i in range(3) for a in ("-V", f"scale_{i},lt,2")],
          out])
 
+    # A small version the viewer shows within seconds while the full one downloads: the
+    # 400k splats that matter most, without the view-dependent color (SH) bands.
+    preview = out.with_name(out.stem + "-preview.sog")
+    tmp = out.with_name(out.stem + "-preview.ply")
+    run([npx, "-y", "@playcanvas/splat-transform@3", "-w", out,
+         "-H", "0", "--decimate-adaptive", "400000", tmp])
+    run([npx, "-y", "@playcanvas/splat-transform@3", "-w", tmp, preview])
+    tmp.unlink()
+
     meta = {
         "aligned": aligned,
+        "preview": preview.name,
         "fov": round(float(np.degrees(2 * np.arctan(height / 2 / fy))), 2),  # vertical
         "aspect": round(width / height, 4),
         "radius": round(float(reach), 2),

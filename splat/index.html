@@ -122,6 +122,33 @@
         padding-right: 12px;
         white-space: nowrap;
       }
+      #hint {
+        left: 50%;
+        bottom: calc(80px + env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        white-space: nowrap;
+        transition: opacity 0.6s;
+      }
+      #hint.gone {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #detail,
+      #toast {
+        top: calc(16px + env(safe-area-inset-top));
+        left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      #toast {
+        color: var(--text);
+        z-index: 2;
+      }
+      .touch #status {
+        display: none;
+      }
       .touch .mouse,
       body:not(.touch) .touch-only {
         display: none;
@@ -160,9 +187,14 @@
       <button id="prev" title="Previous drone photo spot ([)">◀</button>
       <button id="tour" title="Replay the drone's flight (T)">Tour</button>
       <button id="next" title="Next drone photo spot (])">▶</button>
+      <button id="reset" title="Back to the overview (R)">⌂</button>
+      <button id="share" title="Copy a link to this view">Share</button>
       <button id="helpButton" title="Controls (H)">?</button>
       <span id="status"></span>
     </div>
+    <div id="hint" class="panel" hidden></div>
+    <div id="detail" class="panel" hidden>Loading full detail…</div>
+    <div id="toast" class="panel" hidden></div>
     <canvas id="canvas"></canvas>
     <script type="module" src="main.js"></script>
   </body>

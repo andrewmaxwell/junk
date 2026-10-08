@@ -9,8 +9,11 @@ const tourViewsPerSecond = 0.8; // photos were taken 2s apart, so this replays a
 const flyToSeconds = 1.2;
 const focusSeconds = 0.6;
 const orbitDegreesPerPixel = 0.3;
+const spinDegreesPerSecond = 4; // the slow turntable spin before anyone touches it
+const glideDamping = 6; // per second; how fast a flicked orbit or pan slows down
 
 const title = `${sceneName[0].toUpperCase()}${sceneName.slice(1)} splat`;
+
 document.title = title;
 document.querySelector('#help h1').textContent = title;
 
@@ -18,6 +21,9 @@ const $ = (id) => document.getElementById(id);
 const canvas = $('canvas');
 const isTouch = matchMedia('(pointer: coarse)').matches;
 document.body.classList.toggle('touch', isTouch);
+$('hint').textContent = isTouch
+  ? 'Drag to spin · Pinch to zoom · Double-tap to fly in'
+  : 'Drag to spin · Scroll to zoom · Double-click to fly in';
 
 const fail = (message) => {
   $('loadingText').textContent = message;
@@ -50,34 +56,128 @@ window.addEventListener('resize', () => app.resizeCanvas());
 
 const camera = new pc.Entity('camera');
 camera.addComponent('camera', {
-  clearColor: new pc.Color(0.72, 0.79, 0.86), // hazy sky; splats don't draw on a transparent canvas
+  clearColor: new pc.Color(0.85, 0.89, 0.92), // under the sky dome's horizon haze
   fov: meta.fov, // the drone camera's own field of view, so photo spots frame like the photos
   nearClip: 0.05,
   farClip: meta.radius * 30,
 });
 app.root.addChild(camera);
 
-const asset = new pc.Asset(sceneName, 'gsplat', {url: `${sceneName}.sog`});
-asset.on('progress', (received, total) => {
-  const mb = (n) => (n / 1e6).toFixed(1);
-  $('bar').firstElementChild.style.width = total
-    ? `${(100 * received) / total}%`
-    : '50%';
-  $('loadingText').textContent = total
-    ? `Loading splat… ${mb(received)} / ${mb(total)} MB`
-    : `Loading splat… ${mb(received)} MB`;
-});
-asset.on('error', (err) => fail(`Couldn't load ${sceneName}.sog (${err})`));
-asset.ready(() => {
-  const splat = new pc.Entity('splat');
-  splat.addComponent('gsplat', {asset});
-  app.root.addChild(splat);
+// Sky: a big sphere that follows the camera, blue overhead fading to haze at the horizon.
+// (Splats don't draw on a transparent canvas, so a CSS background can't do this.)
+const sky = (() => {
+  const c = document.createElement('canvas');
+  [c.width, c.height] = [1, 256];
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#5b8fd0');
+  grad.addColorStop(0.42, '#b9d0e6');
+  grad.addColorStop(0.5, '#dfe6ea');
+  grad.addColorStop(1, '#d4d8d2');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 1, 256);
+  const texture = new pc.Texture(device, {
+    width: 1,
+    height: 256,
+    format: pc.PIXELFORMAT_SRGBA8,
+    mipmaps: false,
+    addressU: pc.ADDRESS_CLAMP_TO_EDGE,
+    addressV: pc.ADDRESS_CLAMP_TO_EDGE,
+  });
+  texture.setSource(c);
+  const material = new pc.StandardMaterial();
+  material.useLighting = false;
+  material.useSkybox = false;
+  material.useFog = false;
+  material.diffuse = pc.Color.BLACK;
+  material.emissive = pc.Color.WHITE;
+  material.emissiveMap = texture;
+  material.cull = pc.CULLFACE_FRONT; // seen from inside
+  material.depthWrite = false;
+  material.update();
+  const entity = new pc.Entity('sky');
+  entity.addComponent('render', {type: 'sphere', material, castShadows: false});
+  entity.setLocalScale(meta.radius * 40, meta.radius * 40, meta.radius * 40);
+  app.root.addChild(entity);
+  return entity;
+})();
+
+// Fade splats out toward the edge of the drone's coverage, where they turn to smears.
+const fadeFrom = meta.radius * 1.1;
+const fadeTo = meta.radius * 2.2;
+const fadeChunks = {
+  glsl: `
+void modifySplatCenter(inout vec3 center) {}
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {}
+void modifySplatColor(vec3 center, inout vec4 color) {
+  color.a *= 1.0 - smoothstep(${fadeFrom.toFixed(1)}, ${fadeTo.toFixed(1)}, length(center.xz));
+}`,
+  wgsl: `
+fn modifySplatCenter(center: ptr<function, vec3f>) {}
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {}
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
+  (*color).a *= 1.0 - smoothstep(${fadeFrom.toFixed(1)}, ${fadeTo.toFixed(1)}, length(center.xz));
+}`,
+};
+if (meta.aligned) {
+  const material = app.scene.gsplat.material;
+  material.getShaderChunks('glsl').set('gsplatModifyVS', fadeChunks.glsl);
+  material.getShaderChunks('wgsl').set('gsplatModifyVS', fadeChunks.wgsl);
+  material.update();
+}
+
+const loadSplat = (file, onProgress) =>
+  new Promise((resolve, reject) => {
+    const asset = new pc.Asset(file, 'gsplat', {url: file});
+    asset.on('progress', onProgress);
+    asset.on('error', (err) =>
+      reject(new Error(`Couldn't load ${file} (${err})`)),
+    );
+    asset.ready(resolve);
+    app.assets.add(asset);
+    app.assets.load(asset);
+  });
+const addSplat = (asset) => {
+  const entity = new pc.Entity('splat');
+  entity.addComponent('gsplat', {asset});
+  app.root.addChild(entity);
+  return entity;
+};
+const mb = (n) => (n / 1e6).toFixed(1);
+
+// The preview (a few MB) shows up fast; the full splat replaces it when it arrives.
+const loadScene = async () => {
+  const full = `${sceneName}.sog`;
+  const first = await loadSplat(meta.preview ?? full, (received, total) => {
+    $('bar').firstElementChild.style.width = total
+      ? `${(100 * received) / total}%`
+      : '50%';
+    $('loadingText').textContent = total
+      ? `Loading… ${mb(received)} / ${mb(total)} MB`
+      : `Loading… ${mb(received)} MB`;
+  });
+  const shown = addSplat(first);
   $('loading').hidden = true;
   $('hud').hidden = false;
-  $('help').hidden = false;
-});
-app.assets.add(asset);
-app.assets.load(asset);
+  $('hint').hidden = false;
+  if (!sharedView) spinning = true;
+  if (!meta.preview) return;
+
+  $('detail').hidden = false;
+  const asset = await loadSplat(full, (received, total) => {
+    $('detail').textContent = total
+      ? `Loading full detail… ${Math.round((100 * received) / total)}%`
+      : `Loading full detail… ${mb(received)} MB`;
+  });
+  addSplat(asset);
+  $('detail').hidden = true;
+  // Give the full splat a moment to sort before the preview disappears.
+  setTimeout(() => {
+    shown.destroy();
+    first.unload();
+  }, 500);
+};
+
 app.start();
 
 // ----------------------------------------------------------------------------- camera state
@@ -119,12 +219,47 @@ const cam = {
   dist: overview.dist,
 };
 let pivotStale = false;
+
+// A shared link carries its view in the hash: #v=x,y,z,yaw,pitch,dist
+const sharedView = (() => {
+  const v = location.hash
+    .match(/v=([-\d.,]+)/)?.[1]
+    .split(',')
+    .map(Number);
+  if (v?.length !== 6 || v.some(isNaN)) return false;
+  Object.assign(cam, {pos: v.slice(0, 3), yaw: v[3], pitch: v[4], dist: v[5]});
+  return true;
+})();
+let spinning = false; // turns on once the splat shows, off at the first touch
+let spinTime = 0;
+const glide = {orbit: [0, 0], pan: [0, 0]}; // pixels/second left over from a flick
+let pendingZoom = 0; // log-distance the wheel asked for that hasn't been applied yet
+
+// Aligned scenes keep the camera above the ground and over the area the drone covered.
+const floor = 1;
+const ceiling = Math.max(...views.map((v) => v.pos[1])) * 1.5;
+const maxRange = Math.max(
+  meta.radius * 1.5,
+  ...views.map((v) => Math.hypot(v.pos[0], v.pos[2]) * 1.1),
+);
+const maxDist = meta.radius * 2.5;
+
 const velocity = [0, 0, 0];
 let current = null; // index of the photo spot we're parked at, or null
 let flight = null; // {from, to, t, seconds, onDone}: an animated hop
 let tour = null; // {u}: fractional index along the drone's path
 
 const baseSpeed = meta.radius * 0.35; // m/s
+// The drone's field of view is vertical, which on a phone held upright shows a sliver of the
+// scene. Widen it on tall screens so at least ~45 degrees fit across.
+const fitFov = () => {
+  const aspect = canvas.clientWidth / canvas.clientHeight;
+  const tall = (2 * Math.atan(Math.tan(22.5 * RAD) / aspect)) / RAD;
+  camera.camera.fov = clamp(tall, meta.fov, 80);
+};
+fitFov();
+window.addEventListener('resize', fitFov);
+
 const qYaw = new pc.Quat();
 const qPitch = new pc.Quat();
 
@@ -148,6 +283,11 @@ const up = () => {
 const pivot = () => cam.pos.map((x, k) => x + forward()[k] * cam.dist);
 const addScaled = (v, d, s) => {
   for (let i = 0; i < 3; i++) v[i] += d[i] * s;
+};
+
+const interacted = () => {
+  spinning = false;
+  $('hint').classList.add('gone');
 };
 
 const stopAnimations = () => {
@@ -238,6 +378,7 @@ const moveKeys = [
 
 window.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey) return;
+  interacted();
   keys.add(e.code);
   if (moveKeys.includes(e.code)) {
     stopAnimations();
@@ -252,10 +393,36 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
 
-$('prev').onclick = () => step(-1);
-$('next').onclick = () => step(1);
-$('tour').onclick = toggleTour;
-$('helpButton').onclick = () => ($('help').hidden = !$('help').hidden);
+const button = (id, action) =>
+  ($(id).onclick = () => {
+    interacted();
+    action();
+  });
+button('prev', () => step(-1));
+button('next', () => step(1));
+button('tour', toggleTour);
+button('reset', () => flyTo(-1));
+button('helpButton', () => ($('help').hidden = !$('help').hidden));
+
+const toast = (text) => {
+  $('toast').textContent = text;
+  $('toast').hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => ($('toast').hidden = true), 2000);
+};
+// Shares <scene>.html, a small page with a link preview that opens this view.
+button('share', async () => {
+  const v = [...cam.pos, cam.yaw, cam.pitch, cam.dist].map(
+    (x) => +x.toFixed(2),
+  );
+  const url = new URL(`${sceneName}.html#v=${v}`, location.href).href;
+  if (isTouch && navigator.share) {
+    await navigator.share({title, url}).catch(() => {});
+  } else {
+    await navigator.clipboard.writeText(url);
+    toast('Link to this view copied');
+  }
+});
 
 // Depth picking: renders the splat's depth under a pixel and turns it into a world point.
 const picker = new pc.Picker(app, 1, 1, true);
@@ -302,18 +469,25 @@ const orbit = (dx, dy) => {
   const center = pivot();
   cam.yaw = wrapAngle(cam.yaw - dx * orbitDegreesPerPixel);
   cam.pitch = clamp(cam.pitch - dy * orbitDegreesPerPixel, -89, 89);
+  if (meta.aligned) {
+    // Tilt no further than keeps the camera above the floor (it's center - forward * dist).
+    const room = (center[1] - floor) / cam.dist;
+    if (room < 1)
+      cam.pitch = Math.min(cam.pitch, Math.asin(Math.max(room, -1)) / RAD);
+  }
   placeAroundPivot(center);
 };
 // Panning tracks the cursor 1:1 at the pivot's distance.
 const metersPerPixel = () =>
-  (2 * cam.dist * Math.tan((meta.fov / 2) * RAD)) / canvas.clientHeight;
+  (2 * cam.dist * Math.tan((camera.camera.fov / 2) * RAD)) /
+  canvas.clientHeight;
 const pan = (dx, dy) => {
   addScaled(cam.pos, right(), -dx * metersPerPixel());
   addScaled(cam.pos, up(), dy * metersPerPixel());
 };
 const zoom = (factor) => {
   const center = pivot();
-  cam.dist = clamp(cam.dist * factor, 0.2, meta.radius * 20);
+  cam.dist = clamp(cam.dist * factor, 0.2, maxDist);
   placeAroundPivot(center);
 };
 
@@ -342,7 +516,10 @@ canvas.addEventListener('pointerdown', (e) => {
     gesture.multi = true;
     return;
   }
-  if (isTouch) $('help').hidden = true; // it covers too much of a phone screen
+  interacted();
+  glide.orbit = [0, 0];
+  glide.pan = [0, 0];
+  pendingZoom = 0;
   gesture = {
     time: e.timeStamp,
     x: e.clientX,
@@ -370,6 +547,13 @@ canvas.addEventListener('pointermove', (e) => {
   if (!p) return;
   const [dx, dy] = [e.clientX - p.x, e.clientY - p.y];
   [p.x, p.y] = [e.clientX, e.clientY];
+  // Remember how fast it was moving, so letting go mid-flick keeps it gliding.
+  const ms = Math.max(e.timeStamp - (gesture.lastMove ?? gesture.time), 1);
+  gesture.lastMove = e.timeStamp;
+  const track = (v) => {
+    v[0] = lerp(v[0], (dx * 1000) / ms, 0.5);
+    v[1] = lerp(v[1], (dy * 1000) / ms, 0.5);
+  };
   gesture.moved = Math.max(
     gesture.moved,
     Math.hypot(e.clientX - gesture.x, e.clientY - gesture.y),
@@ -384,8 +568,10 @@ canvas.addEventListener('pointermove', (e) => {
     // The finger left over after a pinch would jerk the view into an orbit.
   } else if (p.button === 2 || e.shiftKey) {
     pan(dx, dy);
+    track(glide.pan);
   } else {
     orbit(dx, dy);
+    track(glide.orbit);
   }
 });
 const release = (e) => {
@@ -393,6 +579,11 @@ const release = (e) => {
   lastPinch = pointers.size >= 2 ? pinch() : null;
   if (pointers.size) return;
   canvas.classList.remove('dragging');
+  // Held still before letting go: no glide.
+  if (gesture.multi || e.timeStamp - (gesture.lastMove ?? 0) > 80) {
+    glide.orbit = [0, 0];
+    glide.pan = [0, 0];
+  }
   const tapped =
     !gesture.multi && gesture.moved < 10 && e.timeStamp - gesture.time < 300;
   lastTap = tapped ? {time: e.timeStamp, x: gesture.x, y: gesture.y} : null;
@@ -403,10 +594,11 @@ canvas.addEventListener(
   'wheel',
   (e) => {
     e.preventDefault();
+    interacted();
     stopAnimations();
     refreshPivot();
     const pixels = e.deltaY * (e.deltaMode === 1 ? 16 : 1);
-    zoom(Math.exp(pixels * 0.002));
+    pendingZoom += pixels * 0.002; // applied smoothly over the next few frames
   },
   {passive: false},
 );
@@ -438,6 +630,25 @@ app.on('update', (dt) => {
     Object.assign(cam, tourPose(tour.u));
     pivotStale = true;
     current = Math.round(tour.u);
+  } else if (spinning) {
+    spinTime += dt;
+    const speed = spinDegreesPerSecond * Math.min(1, spinTime / 2); // ease in
+    orbit((speed * dt) / orbitDegreesPerPixel, 0);
+  } else if (!pointers.size) {
+    const fade = Math.exp(-glideDamping * dt);
+    if (Math.hypot(...glide.orbit) > 1) {
+      orbit(glide.orbit[0] * dt, glide.orbit[1] * dt);
+      glide.orbit = glide.orbit.map((v) => v * fade);
+    }
+    if (Math.hypot(...glide.pan) > 1) {
+      pan(glide.pan[0] * dt, glide.pan[1] * dt);
+      glide.pan = glide.pan.map((v) => v * fade);
+    }
+    if (Math.abs(pendingZoom) > 1e-4) {
+      const take = pendingZoom * (1 - Math.exp(-12 * dt));
+      zoom(Math.exp(take));
+      pendingZoom -= take;
+    }
   }
 
   // Keyboard flying: W/S follow the look direction, A/D strafe, Q/E go straight down/up.
@@ -455,6 +666,17 @@ app.on('update', (dt) => {
   for (let k = 0; k < 3; k++) velocity[k] = lerp(velocity[k], target[k], blend);
   addScaled(cam.pos, velocity, dt);
 
+  if (meta.aligned) {
+    const r = Math.hypot(cam.pos[0], cam.pos[2]);
+    if (r > maxRange)
+      [cam.pos[0], cam.pos[2]] = [
+        cam.pos[0] * (maxRange / r),
+        cam.pos[2] * (maxRange / r),
+      ];
+    cam.pos[1] = clamp(cam.pos[1], floor, ceiling);
+  }
+  sky.setPosition(cam.pos[0], cam.pos[1], cam.pos[2]);
+
   camera.setPosition(cam.pos[0], cam.pos[1], cam.pos[2]);
   qYaw.setFromAxisAngle(pc.Vec3.UP, cam.yaw);
   qPitch.setFromAxisAngle(pc.Vec3.RIGHT, cam.pitch);
@@ -464,3 +686,5 @@ app.on('update', (dt) => {
   const height = meta.aligned ? `${cam.pos[1].toFixed(1)} m up` : '';
   $('status').textContent = spot + height;
 });
+
+loadScene().catch((e) => fail(e.message));
