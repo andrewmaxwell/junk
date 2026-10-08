@@ -24,6 +24,12 @@
     "desc": "Watch the inner workings of a tiny GPT doing inference"
   },
   {
+    "filePath": "lenia3d",
+    "title": "Lenia 3D",
+    "year": 2026,
+    "desc": "Smooth 3D cellular automata on WebGPU: blobby creatures that grow, breathe, and split"
+  },
+  {
     "filePath": "mowFast",
     "title": "MowFast",
     "year": 2026,

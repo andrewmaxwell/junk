@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lenia 3D</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #020204;
+        overflow: hidden;
+        font:
+          13px system-ui,
+          sans-serif;
+        color: #ccd;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        cursor: grab;
+      }
+      #hint {
+        position: absolute;
+        left: 12px;
+        bottom: 12px;
+        color: #889;
+        font-size: 12px;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas></canvas>
+    <div id="hint">
+      Drag to orbit, scroll to zoom. Space pauses, R reseeds. Orange is growing,
+      violet is dying back.
+    </div>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
