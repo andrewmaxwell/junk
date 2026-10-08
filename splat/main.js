@@ -7,6 +7,12 @@ const sceneName = new URLSearchParams(location.search).get('scene') ?? 'house';
 const lookSmoothing = 12; // per second; higher = snappier movement
 const tourViewsPerSecond = 0.8; // photos were taken 2s apart, so this replays at ~1.6x speed
 const flyToSeconds = 1.2;
+const focusSeconds = 0.6;
+const orbitDegreesPerPixel = 0.3;
+
+const title = `${sceneName[0].toUpperCase()}${sceneName.slice(1)} splat`;
+document.title = title;
+document.querySelector('#help h1').textContent = title;
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('canvas');
@@ -90,20 +96,28 @@ const views = meta.views.map((v) => ({
   ...anglesOf(v.fwd),
 }));
 // Start with an overview from the edge of the drone's coverage (splats get smeary beyond it),
-// as high as it flew, on the side of its first photo, looking at a point ~3 m up the house.
+// as high as it flew, on the side of its first photo, looking at a point ~3 m up the middle.
 const overview = (() => {
   const [x, , z] = views[0].pos;
   const out = (meta.radius * 0.9) / (Math.hypot(x, z) || 1);
   const pos = [x * out, Math.max(...views.map((v) => v.pos[1])), z * out];
   const to = [-pos[0], 3 - pos[1], -pos[2]];
   const len = Math.hypot(...to);
-  return {pos, ...anglesOf(to.map((v) => v / len))};
+  return {pos, ...anglesOf(to.map((v) => v / len)), dist: len};
 })();
 
-const cam = {pos: [...overview.pos], yaw: overview.yaw, pitch: overview.pitch};
+// The camera orbits a pivot `dist` meters straight ahead. After flying around without one
+// (photo spots, the tour, W A S D) the pivot is stale, and the next drag finds a new one.
+const cam = {
+  pos: [...overview.pos],
+  yaw: overview.yaw,
+  pitch: overview.pitch,
+  dist: overview.dist,
+};
+let pivotStale = false;
 const velocity = [0, 0, 0];
 let current = null; // index of the photo spot we're parked at, or null
-let flight = null; // {from, to, t, onDone}: an animated hop to a photo spot
+let flight = null; // {from, to, t, seconds, onDone}: an animated hop
 let tour = null; // {u}: fractional index along the drone's path
 
 const baseSpeed = meta.radius * 0.35; // m/s
@@ -119,11 +133,21 @@ const forward = () => {
   ];
 };
 const right = () => [Math.cos(cam.yaw * RAD), 0, -Math.sin(cam.yaw * RAD)];
+const up = () => {
+  const [f, r] = [forward(), right()];
+  return [
+    r[1] * f[2] - r[2] * f[1],
+    r[2] * f[0] - r[0] * f[2],
+    r[0] * f[1] - r[1] * f[0],
+  ];
+};
+const pivot = () => cam.pos.map((x, k) => x + forward()[k] * cam.dist);
 const addScaled = (v, d, s) => {
   for (let i = 0; i < 3; i++) v[i] += d[i] * s;
 };
 
 const stopAnimations = () => {
+  if (flight && !flight.to.dist) pivotStale = true; // stopped partway to a photo spot
   flight = null;
   tour = null;
   current = null;
@@ -146,6 +170,7 @@ const flyTo = (index, onDone) => {
     from: {...cam, pos: [...cam.pos]},
     to: views[index] ?? overview,
     t: 0,
+    seconds: flyToSeconds,
     onDone,
   };
   current = views[index] ? index : null;
@@ -210,7 +235,10 @@ const moveKeys = [
 window.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey) return;
   keys.add(e.code);
-  if (moveKeys.includes(e.code)) stopAnimations();
+  if (moveKeys.includes(e.code)) {
+    stopAnimations();
+    pivotStale = true;
+  }
   if (e.code === 'BracketLeft') step(-1);
   if (e.code === 'BracketRight') step(1);
   if (e.code === 'KeyT') toggleTour();
@@ -225,21 +253,65 @@ $('next').onclick = () => step(1);
 $('tour').onclick = toggleTour;
 $('helpButton').onclick = () => ($('help').hidden = !$('help').hidden);
 
-// Dragging grabs the world, like Street View: one pixel of drag is one pixel of view.
-const degreesPerPixel = () => meta.fov / canvas.clientHeight;
-// Sliding tracks the finger 1:1 for things half a scene radius away.
-const metersPerPixel = () =>
-  (meta.radius * Math.tan((meta.fov / 2) * RAD)) / canvas.clientHeight;
+// Depth picking: renders the splat's depth under a pixel and turns it into a world point.
+const picker = new pc.Picker(app, 1, 1, true);
+const pickPoint = async (x, y) => {
+  const [w, h] = [canvas.clientWidth, canvas.clientHeight];
+  picker.resize(w, h);
+  picker.prepare(camera.camera, app.scene, [
+    app.scene.layers.getLayerByName('World'),
+  ]);
+  const p = await picker.getWorldPointAsync(x, y);
+  return p && [p.x, p.y, p.z];
+};
 
-const look = (dx, dy) => {
-  cam.yaw = wrapAngle(cam.yaw + dx * degreesPerPixel());
-  cam.pitch = clamp(cam.pitch + dy * degreesPerPixel(), -89, 89);
+// Like Sketchfab: double-click a spot to fly toward it and orbit around it from then on.
+const focusOn = async (x, y) => {
+  const hit = await pickPoint(x, y);
+  if (!hit) return;
+  stopAnimations();
+  const to = hit.map((v, k) => v - cam.pos[k]);
+  const len = Math.hypot(...to);
+  const dist = Math.max(len * 0.6, 0.5);
+  const dir = to.map((v) => v / len);
+  flight = {
+    from: {...cam, pos: [...cam.pos]},
+    to: {pos: hit.map((v, k) => v - dir[k] * dist), ...anglesOf(dir), dist},
+    t: 0,
+    seconds: focusSeconds,
+  };
 };
-const slide = (dx, dy) => {
+
+// After a photo spot or the tour, orbit around whatever is in the middle of the screen.
+const refreshPivot = async () => {
+  if (!pivotStale) return;
+  pivotStale = false;
+  const hit = await pickPoint(canvas.clientWidth / 2, canvas.clientHeight / 2);
+  if (!hit) return;
+  const d = hit.reduce((sum, v, k) => sum + (v - cam.pos[k]) * forward()[k], 0);
+  if (d > 0.1) cam.dist = d;
+};
+
+const placeAroundPivot = (center) =>
+  (cam.pos = center.map((x, k) => x - forward()[k] * cam.dist));
+const orbit = (dx, dy) => {
+  const center = pivot();
+  cam.yaw = wrapAngle(cam.yaw - dx * orbitDegreesPerPixel);
+  cam.pitch = clamp(cam.pitch - dy * orbitDegreesPerPixel, -89, 89);
+  placeAroundPivot(center);
+};
+// Panning tracks the cursor 1:1 at the pivot's distance.
+const metersPerPixel = () =>
+  (2 * cam.dist * Math.tan((meta.fov / 2) * RAD)) / canvas.clientHeight;
+const pan = (dx, dy) => {
   addScaled(cam.pos, right(), -dx * metersPerPixel());
-  cam.pos[1] += dy * metersPerPixel();
+  addScaled(cam.pos, up(), dy * metersPerPixel());
 };
-const dolly = (meters) => addScaled(cam.pos, forward(), meters);
+const zoom = (factor) => {
+  const center = pivot();
+  cam.dist = clamp(cam.dist * factor, 0.2, meta.radius * 20);
+  placeAroundPivot(center);
+};
 
 const pointers = new Map();
 const pinch = () => {
@@ -251,29 +323,45 @@ const pinch = () => {
   };
 };
 let lastPinch = null;
+let lastTap = null; // {time, x, y}, to spot double taps (dblclick doesn't fire for touch)
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, {x: e.clientX, y: e.clientY, button: e.button});
   canvas.classList.add('dragging');
-  stopAnimations();
   lastPinch = pointers.size === 2 ? pinch() : null;
+  const tap = {time: e.timeStamp, x: e.clientX, y: e.clientY};
+  if (
+    pointers.size === 1 &&
+    e.button === 0 &&
+    lastTap &&
+    tap.time - lastTap.time < 350 &&
+    Math.hypot(tap.x - lastTap.x, tap.y - lastTap.y) < 20
+  ) {
+    lastTap = null;
+    focusOn(e.clientX, e.clientY);
+    return;
+  }
+  lastTap = tap;
+  stopAnimations();
+  refreshPivot();
 });
 canvas.addEventListener('pointermove', (e) => {
   const p = pointers.get(e.pointerId);
   if (!p) return;
   const [dx, dy] = [e.clientX - p.x, e.clientY - p.y];
   [p.x, p.y] = [e.clientX, e.clientY];
+  if (flight) return; // a double-click focus is flying
   if (pointers.size === 2) {
     const now = pinch();
-    slide(now.x - lastPinch.x, now.y - lastPinch.y);
-    dolly((now.d - lastPinch.d) * metersPerPixel() * 2);
+    pan(now.x - lastPinch.x, now.y - lastPinch.y);
+    zoom(lastPinch.d / now.d);
     lastPinch = now;
   } else if (p.button === 2 || e.shiftKey) {
-    slide(dx, dy);
+    pan(dx, dy);
   } else {
-    look(dx, dy);
+    orbit(dx, dy);
   }
 });
 const release = (e) => {
@@ -288,8 +376,9 @@ canvas.addEventListener(
   (e) => {
     e.preventDefault();
     stopAnimations();
+    refreshPivot();
     const pixels = e.deltaY * (e.deltaMode === 1 ? 16 : 1);
-    dolly(-pixels * metersPerPixel() * 0.5);
+    zoom(Math.exp(pixels * 0.002));
   },
   {passive: false},
 );
@@ -302,13 +391,15 @@ app.on('update', (dt) => {
   dt = Math.min(dt, 0.1);
 
   if (flight) {
-    flight.t = Math.min(1, flight.t + dt / flyToSeconds);
+    flight.t = Math.min(1, flight.t + dt / flight.seconds);
     const t = ease(flight.t);
     const {from, to} = flight;
     cam.pos = from.pos.map((x, k) => lerp(x, to.pos[k], t));
     cam.yaw = from.yaw + wrapAngle(to.yaw - from.yaw) * t;
     cam.pitch = lerp(from.pitch, to.pitch, t);
     if (flight.t === 1) {
+      if (to.dist) cam.dist = to.dist;
+      else pivotStale = true;
       const done = flight.onDone;
       flight = null;
       done?.();
@@ -317,6 +408,7 @@ app.on('update', (dt) => {
     tour.u += dt * tourViewsPerSecond;
     if (tour.u >= views.length - 1) tour.u = 0;
     Object.assign(cam, tourPose(tour.u));
+    pivotStale = true;
     current = Math.round(tour.u);
   }
 
