@@ -18,6 +18,8 @@ A collection of standalone browser experiments. Each top-level directory is its 
 
 ## Style
 
+- Use lil-gui for settings panels and controls (`import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm'`) rather than hand-built HTML inputs.
+
 - Lint and format with `npx eslint --fix <project>/*.js`. Prettier options live in `.prettierrc.json`, which ESLint reads, so `npx prettier --write` gives the same result.
 
 ## Git
