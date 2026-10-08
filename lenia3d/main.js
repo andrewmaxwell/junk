@@ -1,48 +1,44 @@
 import {makeSim} from './sim.js';
 import {makeRenderer} from './render.js';
 import {makeSeed} from './seed.js';
+import {decodeRle, place} from './pattern.js';
+import {species} from './species.js';
 import {makeGallery} from './gallery.js';
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 
-// Found by a random search for rules that neither die out nor fill the world,
-// then rerun at 128³ with different seeds. Bubbles and Pebbles always settled
-// down; Pearls erupts and fills the world about one time in four.
-const presets = {
-  Bubbles: {R: 10, peaks: [0.59, 0.74, 0.4], mu: 0.084, sigma: 0.0165, dt: 0.1},
-  Pebbles: {R: 10, peaks: [0.16, 0.11], mu: 0.2547, sigma: 0.0402, dt: 0.1},
-  Pearls: {
-    R: 10,
-    peaks: [0.56, 0.23, 0.21],
-    mu: 0.3303,
-    sigma: 0.0767,
-    dt: 0.1,
-  },
-  Foam: {R: 16, peaks: [1], mu: 0.15, sigma: 0.04, dt: 0.1},
-};
+// Chan's creatures, each a rule plus the shape it starts from
+const creatures = species.map(({name, cells, ...rule}) => ({
+  rule: {species: name, ...rule},
+  pattern: decodeRle(cells),
+}));
+const byName = Object.fromEntries(creatures.map((c) => [c.rule.species, c]));
 
 const defaults = {
-  ...presets.Bubbles,
+  ...byName['Triguttome labens'].rule,
   N: 128,
   speed: 2, // steps per frame
   threshold: 0.3,
 };
 
-// settings live in the URL hash so a link brings back the same rule
+// Settings live in the URL hash so a link brings back the same rule, started
+// from the named creature's shape. (A searched creature's own shape is too
+// big for a link, but its ancestor's usually grows into it.)
 const readHash = () => {
   const params = new URLSearchParams(location.hash.slice(1));
   const s = {...defaults};
   for (const [key, value] of params) {
     if (key === 'peaks') s.peaks = value.split(',').map(Number);
+    else if (key === 'species') s.species = value;
     else if (key in s) s[key] = Number(value);
   }
   return s;
 };
 const writeHash = () => {
-  const {N, R, peaks, mu, sigma, dt} = settings;
+  const {N, species, R, peaks, mu, sigma, dt} = settings;
   history.replaceState(
     null,
     '',
-    '#' + new URLSearchParams({N, R, peaks, mu, sigma, dt}),
+    '#' + new URLSearchParams({N, species, R, peaks, mu, sigma, dt}),
   );
 };
 
@@ -69,13 +65,22 @@ context.configure({device, format});
 const sim = makeSim(device, settings.N);
 const render = makeRenderer(device, context, format, sim);
 
+// Rules are written for a 64³ world. Bigger worlds show the same thing in
+// more detail: the kernel and starting shape are scaled up to match.
+const zoom = settings.N / 64;
+let pattern = byName[settings.species]?.pattern;
+
 const seed = () => {
-  sim.setState(makeSeed(settings.N, settings.R));
+  sim.setState(
+    pattern
+      ? place(pattern, settings.N, zoom)
+      : makeSeed(settings.N, settings.R * zoom),
+  );
   needsStep = true; // so the new state shows up even while paused
 };
 let needsStep = false;
 
-const applyKernel = () => sim.setKernel(settings.R, settings.peaks);
+const applyKernel = () => sim.setKernel(settings.R * zoom, settings.peaks);
 const applyParams = () => sim.setParams(settings);
 
 applyKernel();
@@ -94,14 +99,15 @@ const kernelChanged = () => {
 };
 
 const actions = {
-  preset: '',
+  creature: byName[settings.species] ? settings.species : '',
   rings: settings.peaks.join(', '),
   paused: false,
   reseed: seed,
 };
 
-const loadRule = (rule) => {
+const loadRule = (rule, shape) => {
   Object.assign(settings, rule);
+  pattern = shape;
   actions.rings = settings.peaks.join(', ');
   gui.controllersRecursive().forEach((c) => c.updateDisplay());
   applyKernel();
@@ -112,9 +118,11 @@ const loadRule = (rule) => {
 
 const gui = new GUI({title: 'Lenia 3D'});
 gui
-  .add(actions, 'preset', ['', ...Object.keys(presets)])
-  .name('preset')
-  .onChange((name) => name && loadRule(presets[name]));
+  .add(actions, 'creature', ['', ...Object.keys(byName)])
+  .name('creature')
+  .onChange(
+    (name) => name && loadRule(byName[name].rule, byName[name].pattern),
+  );
 gui
   .add(settings, 'mu', 0.02, 0.5, 0.001)
   .name('growth μ')
@@ -146,7 +154,7 @@ gui.add(settings, 'speed', 0, 8, 1).name('steps per frame');
 gui.add(settings, 'threshold', 0.05, 0.9, 0.01).name('surface');
 gui
   .add(settings, 'N', {'64³': 64, '128³': 128, '256³ (slow)': 256})
-  .name('world size')
+  .name('detail')
   .onChange(() => {
     writeHash();
     location.reload();
@@ -154,9 +162,9 @@ gui
 const pausedController = gui.add(actions, 'paused').name('paused');
 gui.add(actions, 'reseed').name('reseed');
 
-const gallery = makeGallery(device, (rule) => {
-  actions.preset = '';
-  loadRule(rule);
+const gallery = makeGallery(device, creatures, (rule, shape) => {
+  actions.creature = '';
+  loadRule(rule, shape);
 });
 const search = {
   searching: false,
@@ -186,7 +194,7 @@ addEventListener('keydown', (e) => {
 
 // ---- camera
 
-const camera = {yaw: 0.6, pitch: 0.35, distance: 3};
+const camera = {yaw: 0.6, pitch: 0.35, distance: 2};
 let lastInteraction = -Infinity;
 const pointers = new Map();
 canvas.addEventListener('pointerdown', (e) => {

@@ -60,9 +60,11 @@ const N = ${N}u;
 
 fn cell(id: vec3u) -> u32 { return id.x + id.y * N + id.z * N * N; }
 
+// a bump of growth around mu, decay elsewhere (Chan's polynomial bump)
 fn growth(u: f32) -> f32 {
-  let d = (u - params.mu) / params.sigma;
-  return 2.0 * exp(-0.5 * d * d) - 1.0;
+  let d = (u - params.mu) / (3.0 * params.sigma);
+  let q = max(0.0, 1.0 - d * d);
+  return 2.0 * q * q * q * q - 1.0;
 }
 
 @compute @workgroup_size(4, 4, 4)
@@ -104,8 +106,8 @@ fn display(@builtin(global_invocation_id) id: vec3u) {
   textureStore(tex, id, vec4f(a / 64.0, growth(u), u, 1.0));
 }`;
 
-// A smooth shell of radius R, with one bump per entry in peaks (inner to outer),
-// stored with its center at cell 0 so the convolution wraps around the edges.
+// A smooth shell of radius R, with one bump per entry in peaks (inner to
+// outer, each Chan's polynomial bump), stored with its center at cell 0 so the convolution wraps around the edges.
 export const makeKernel = (N, R, peaks) => {
   const k = new Float32Array(N * N * N * 2);
   let sum = 0;
@@ -119,7 +121,7 @@ export const makeKernel = (N, R, peaks) => {
         if (r <= 0 || r >= peaks.length) continue;
         const ring = Math.floor(r);
         const f = r - ring;
-        const v = peaks[ring] * Math.exp(4 - 1 / (f * (1 - f)));
+        const v = peaks[ring] * (4 * f * (1 - f)) ** 4;
         k[2 * (x + y * N + z * N * N)] = v;
         sum += v;
       }

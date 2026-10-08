@@ -1,11 +1,15 @@
 import {makeSim} from './sim.js';
-import {makeSeed} from './seed.js';
+import {capture, centerOf, place} from './pattern.js';
 
-// Rules are judged in a small world without drawing them. A rule is kept if,
-// from two different seeds, it neither dies out nor grows to fill more than an
-// eighth of the world (past that it's foam, not creatures).
-// Its activity is how much the state changes between snapshots: zero for
-// things that sit still, higher for pulsing, gliding, or churning.
+// The search follows Chan's way of finding creatures: start from one that
+// already lives, nudge its rule a little, and see if the creature adapts.
+// Random rules from random noise almost always give either still lumps or
+// churning foam, because creatures live in narrow niches of rule space and only
+// form from the right starting shapes.
+//
+// A trial runs one creature in a small world without drawing it. It's thrown
+// out if it dies, grows, or comes apart. Of the rest, it's kept only
+// if it does something: glides (its center moves) or pulses (its mass swings).
 
 const sumOf = (state) => {
   let sum = 0;
@@ -13,96 +17,94 @@ const sumOf = (state) => {
   return sum;
 };
 
-const difference = (a, b) => {
+const wrappedDistance = (a, b, N) =>
+  Math.hypot(
+    ...a.map((v, i) => {
+      const d = Math.abs(v - b[i]) % N;
+      return Math.min(d, N - d);
+    }),
+  );
+
+// how far the mass sits from its center, on average (radius of gyration).
+// Creatures are often several pieces, nested shells and satellite drops, so
+// this rather than counting lumps is what tells one that's coming apart.
+const spreadOf = (state, N, center) => {
   let sum = 0;
-  for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]);
-  return sum;
+  let mass = 0;
+  for (let z = 0, i = 0; z < N; z++) {
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++, i++) {
+        const v = state[i];
+        if (!v) continue;
+        const d = wrappedDistance([x, y, z], center, N);
+        sum += v * d * d;
+        mass += v;
+      }
+    }
+  }
+  return Math.sqrt(sum / mass);
 };
 
 export const makeEvaluator = (device, N) => {
   const sim = makeSim(device, N);
 
-  const trial = async (rule, {steps, every}) => {
-    sim.setState(makeSeed(N, rule.R, 2));
-    let previous = null;
-    const fills = [];
-    const changes = [];
-    for (let t = 0; t < steps; t += every) {
+  // Resolves to {pattern, speed, pulse}, or null if the creature didn't make
+  // it. speed is how far its center moved per 1000 steps over the second half,
+  // and pulse how much its mass swung then (max - min over mean).
+  const evaluate = async (rule, start, {steps = 2000, every = 100} = {}) => {
+    sim.setKernel(rule.R, rule.peaks);
+    sim.setParams(rule);
+    sim.setState(place(start, N));
+    let first = null; // {mass, spread} once it has settled into shape
+    const masses = [];
+    const centers = [];
+    let state;
+    for (let t = every; t <= steps; t += every) {
       const encoder = device.createCommandEncoder();
       sim.step(encoder, every);
       device.queue.submit([encoder.finish()]);
-      const state = await sim.readState();
-      const sum = sumOf(state);
-      const fill = sum / state.length;
-      if (fill === 0) return {died: true};
-      if (fill > 0.12) return {erupted: true};
-      fills.push(fill);
-      if (previous) changes.push(difference(state, previous) / sum);
-      previous = state;
+      state = await sim.readState();
+      const mass = sumOf(state);
+      if (!mass) return null;
+      const center = centerOf(state, N);
+      const spread = spreadOf(state, N, center);
+      first ??= {mass, spread};
+      if (mass < first.mass * 0.2 || mass > first.mass * 3) return null;
+      if (spread > first.spread * 1.5) return null; // came apart or foamed
+      if (t > steps / 2) {
+        masses.push(mass);
+        centers.push(center);
+      }
     }
-    const late = (values) => values.slice(Math.floor(values.length / 2));
-    const mean = (values) => values.reduce((a, b) => a + b) / values.length;
-    return {fill: mean(late(fills)), activity: mean(late(changes))};
-  };
-
-  // resolves to {fill, activity}, or null if the rule died or erupted
-  const evaluate = async (
-    rule,
-    {steps = 3000, every = 250, trials = 2} = {},
-  ) => {
-    sim.setKernel(rule.R, rule.peaks);
-    sim.setParams(rule);
-    const results = [];
-    for (let i = 0; i < trials; i++) {
-      const result = await trial(rule, {steps, every});
-      if (result.died || result.erupted) return null;
-      results.push(result);
-    }
+    const mean = masses.reduce((a, b) => a + b) / masses.length;
+    const travelled = wrappedDistance(centers[0], centers.at(-1), N);
     return {
-      fill: Math.max(...results.map((r) => r.fill)),
-      activity: Math.min(...results.map((r) => r.activity)),
+      pattern: capture(state, N),
+      speed: (travelled / (steps / 2 - every)) * 1000,
+      pulse: (Math.max(...masses) - Math.min(...masses)) / mean,
     };
   };
 
   return {sim, evaluate};
 };
 
+// what counts as doing something
+export const isLively = ({speed, pulse}) => speed > 2 || pulse > 0.04;
+
 const round = (v) => +v.toFixed(4);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-export const randomRule = () => {
-  const mu = 0.08 + Math.random() * 0.27;
-  const rings = 1 + Math.floor(Math.random() * 3);
-  return {
-    R: 10,
-    dt: 0.1,
-    mu: round(mu),
-    sigma: round(mu * (0.08 + Math.random() * 0.2)),
-    peaks:
-      rings === 1
-        ? [1]
-        : Array.from(
-            {length: rings},
-            () => +(0.05 + Math.random() * 0.95).toFixed(2),
-          ),
-  };
-};
-
-// a nearby rule: small nudges to everything, and now and then a ring more or less
+// A nearby rule: small nudges, so the creature has a chance to adapt. The
+// radius and number of rings stay put, since changing those is a different
+// creature altogether.
 export const mutate = (rule) => {
   const nudge = (v, amount) => v * (1 + (Math.random() * 2 - 1) * amount);
-  let peaks = rule.peaks.map(
-    (p) => +clamp(p + (Math.random() - 0.5) * 0.2, 0.02, 1).toFixed(2),
-  );
-  if (Math.random() < 0.1 && peaks.length < 4) {
-    peaks = [...peaks, +Math.random().toFixed(2)];
-  } else if (Math.random() < 0.1 && peaks.length > 1) {
-    peaks = peaks.slice(0, -1);
-  }
   return {
     ...rule,
-    mu: round(nudge(rule.mu, 0.06)),
-    sigma: round(nudge(rule.sigma, 0.1)),
-    peaks,
+    mu: round(nudge(rule.mu, 0.04)),
+    sigma: round(nudge(rule.sigma, 0.08)),
+    peaks: rule.peaks.map((p) =>
+      round(clamp(p + (Math.random() - 0.5) * 0.1, 0, 1)),
+    ),
   };
 };
