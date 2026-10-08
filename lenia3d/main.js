@@ -1,6 +1,7 @@
 import {makeSim} from './sim.js';
 import {makeRenderer} from './render.js';
 import {makeSeed} from './seed.js';
+import {makeGallery} from './gallery.js';
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 
 // Found by a random search for rules that neither die out nor fill the world,
@@ -99,20 +100,21 @@ const actions = {
   reseed: seed,
 };
 
+const loadRule = (rule) => {
+  Object.assign(settings, rule);
+  actions.rings = settings.peaks.join(', ');
+  gui.controllersRecursive().forEach((c) => c.updateDisplay());
+  applyKernel();
+  applyParams();
+  writeHash();
+  seed();
+};
+
 const gui = new GUI({title: 'Lenia 3D'});
 gui
   .add(actions, 'preset', ['', ...Object.keys(presets)])
   .name('preset')
-  .onChange((name) => {
-    if (!name) return;
-    Object.assign(settings, presets[name]);
-    actions.rings = settings.peaks.join(', ');
-    gui.controllersRecursive().forEach((c) => c.updateDisplay());
-    applyKernel();
-    applyParams();
-    writeHash();
-    seed();
-  });
+  .onChange((name) => name && loadRule(presets[name]));
 gui
   .add(settings, 'mu', 0.02, 0.5, 0.001)
   .name('growth μ')
@@ -151,6 +153,30 @@ gui
   });
 const pausedController = gui.add(actions, 'paused').name('paused');
 gui.add(actions, 'reseed').name('reseed');
+
+const gallery = makeGallery(device, (rule) => {
+  actions.preset = '';
+  loadRule(rule);
+});
+const search = {
+  searching: false,
+  gallery: gallery.hasFavorites,
+  clear: gallery.clear,
+};
+gallery.element.hidden = !search.gallery;
+const searchFolder = gui.addFolder('Search');
+searchFolder
+  .add(search, 'searching')
+  .name('searching')
+  .onChange((value) => {
+    gallery.setRunning(value);
+    if (value) galleryController.setValue(true);
+  });
+const galleryController = searchFolder
+  .add(search, 'gallery')
+  .name('show gallery')
+  .onChange((value) => (gallery.element.hidden = !value));
+searchFolder.add(search, 'clear').name('clear results');
 
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;

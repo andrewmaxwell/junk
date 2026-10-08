@@ -5,7 +5,8 @@ Lenia 3D - 2026 - Smooth 3D cellular automata on WebGPU: blobby creatures that g
 - `sim.js` runs the rule on the GPU. The neighborhood average is a convolution done with 3D FFTs, so big kernels cost nothing extra.
 - `render.js` raymarches the result: a lit surface where the state crosses `surface`, with soft shadows, ambient occlusion, and a faint glow from thinner material. Orange is growing, teal is steady, violet is dying back.
 - `seed.js` starts things off with a few soft balls of smooth noise. White noise would never wash out of the surfaces, because the rule only adds smooth amounts to each cell.
-- `search.js` runs rules without drawing them and measures how full the world is and how its center of mass moves. That's how the presets were found, and it's the start of a search UI.
+- `search.js` judges a rule without drawing it: it runs a 64³ world from two different seeds and rejects the rule if it dies out or fills more than an eighth of the world. Survivors get an activity score, how much the state changes between snapshots: near zero for blobs that sit still, higher for pulsing, moving, or churning.
+- `gallery.js` runs that search in the background (Search → searching) and shows survivors as thumbnails. Click one to load it. Star the ones you like: they're saved in the browser, and the search then spends most of its time on small variations of them.
 
 The world wraps around at the edges, so a creature crossing one shows up cut in half on two sides.
 
