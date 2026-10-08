@@ -199,9 +199,14 @@ const views = meta.views.map((v) => ({
   fwd: v.fwd,
   ...anglesOf(v.fwd),
 }));
-// Start with an overview from the edge of the drone's coverage (splats get smeary beyond it),
-// as high as it flew, on the side of its first photo, looking at a point ~3 m up the middle.
+// Start where the scene's json says (`start`, in the same x,y,z,yaw,pitch,dist form as a shared
+// link), or else with an overview from the edge of the drone's coverage (splats get smeary
+// beyond it), as high as it flew, on the side of its first photo, looking ~3 m up the middle.
 const overview = (() => {
+  if (meta.start) {
+    const [x, y, z, yaw, pitch, dist] = meta.start;
+    return {pos: [x, y, z], yaw, pitch, dist};
+  }
   const [x, , z] = views[0].pos;
   const out = (meta.radius * 0.9) / (Math.hypot(x, z) || 1);
   const pos = [x * out, Math.max(...views.map((v) => v.pos[1])), z * out];

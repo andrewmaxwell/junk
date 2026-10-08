@@ -496,6 +496,10 @@ def export_web(colmap: str, ply: Path, dataset: Path, out: Path, aligned: bool) 
                    "pos": [round(float(x), 3) for x in to_view @ (c - origin)],
                    "fwd": [round(float(x), 4) for x in to_view @ d]} for n, c, d in views],
     }
+    # Keep a hand-picked starting view (copied from a Share link) across re-exports.
+    old = out.with_suffix(".json")
+    if old.exists() and "start" in (prev := json.loads(old.read_text())):
+        meta["start"] = prev["start"]
     out.with_suffix(".json").write_text(json.dumps(meta))
     log(f"Done! Web splat: {out} ({out.stat().st_size / 1e6:.1f} MB) + {out.with_suffix('.json').name}")
 

@@ -4,7 +4,7 @@ House Splat - 2026 - A Gaussian splat of a house, built from drone photos
 
 `drone2splat.py` also writes `<name>-preview.sog`, a few-MB version the viewer shows first while the full splat downloads.
 
-`index.html` is the viewer. It loads `house` by default; `?scene=<name>` loads another export (`camping` is the other one). It starts with a slow spin; drag orbits, double-click or double-tap flies in, and the Share button copies a link to the current view.
+`index.html` is the viewer. It loads `house` by default; `?scene=<name>` loads another export (`camping` is the other one). It starts with a slow spin, from the `start` view in the scene's json if it has one (paste the numbers from a Share link's `#v=`); drag orbits, double-click or double-tap flies in, and the Share button copies a link to the current view.
 
 Share `<name>.html` rather than the viewer URL: it carries the link-preview tags and `<name>-og.jpg` (a 1200×630 screenshot) for messaging apps, then redirects to the viewer. A new scene needs its own copy of `camping.html` and an `-og.jpg`.
 
