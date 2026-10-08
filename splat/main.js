@@ -38,7 +38,11 @@ const device = await pc.createGraphicsDevice(canvas, {
   deviceTypes: [pc.DEVICETYPE_WEBGPU, pc.DEVICETYPE_WEBGL2],
   antialias: false,
 });
-device.maxPixelRatio = Math.min(devicePixelRatio, device.isWebGPU ? 2 : 1);
+// Phones have 3x screens and weaker GPUs; 1.5x still looks sharp there.
+device.maxPixelRatio = Math.min(
+  devicePixelRatio,
+  device.isWebGPU ? (isTouch ? 1.5 : 2) : 1,
+);
 const app = new pc.Application(canvas, {graphicsDevice: device});
 app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW);
 app.setCanvasResolution(pc.RESOLUTION_AUTO);
@@ -323,27 +327,41 @@ const pinch = () => {
   };
 };
 let lastPinch = null;
-let lastTap = null; // {time, x, y}, to spot double taps (dblclick doesn't fire for touch)
+// One gesture lasts from the first finger down to the last one up. A gesture that never moved
+// is a tap, and two taps close together are a double tap (dblclick doesn't fire for touch).
+let gesture = null; // {time, x, y, moved, multi}
+let lastTap = null; // {time, x, y}
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, {x: e.clientX, y: e.clientY, button: e.button});
   canvas.classList.add('dragging');
-  lastPinch = pointers.size === 2 ? pinch() : null;
-  const tap = {time: e.timeStamp, x: e.clientX, y: e.clientY};
+  lastPinch = pointers.size >= 2 ? pinch() : null;
+  if (pointers.size > 1) {
+    gesture.multi = true;
+    return;
+  }
+  if (isTouch) $('help').hidden = true; // it covers too much of a phone screen
+  gesture = {
+    time: e.timeStamp,
+    x: e.clientX,
+    y: e.clientY,
+    moved: 0,
+    multi: false,
+  };
+  const near = isTouch ? 40 : 10;
   if (
-    pointers.size === 1 &&
     e.button === 0 &&
     lastTap &&
-    tap.time - lastTap.time < 350 &&
-    Math.hypot(tap.x - lastTap.x, tap.y - lastTap.y) < 20
+    e.timeStamp - lastTap.time < 400 &&
+    Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < near
   ) {
     lastTap = null;
+    gesture.multi = true; // so this second tap isn't the start of another double tap
     focusOn(e.clientX, e.clientY);
     return;
   }
-  lastTap = tap;
   stopAnimations();
   refreshPivot();
 });
@@ -352,12 +370,18 @@ canvas.addEventListener('pointermove', (e) => {
   if (!p) return;
   const [dx, dy] = [e.clientX - p.x, e.clientY - p.y];
   [p.x, p.y] = [e.clientX, e.clientY];
-  if (flight) return; // a double-click focus is flying
-  if (pointers.size === 2) {
+  gesture.moved = Math.max(
+    gesture.moved,
+    Math.hypot(e.clientX - gesture.x, e.clientY - gesture.y),
+  );
+  if (flight) return; // a double-tap focus is flying
+  if (pointers.size >= 2) {
     const now = pinch();
     pan(now.x - lastPinch.x, now.y - lastPinch.y);
     zoom(lastPinch.d / now.d);
     lastPinch = now;
+  } else if (gesture.multi) {
+    // The finger left over after a pinch would jerk the view into an orbit.
   } else if (p.button === 2 || e.shiftKey) {
     pan(dx, dy);
   } else {
@@ -365,9 +389,13 @@ canvas.addEventListener('pointermove', (e) => {
   }
 });
 const release = (e) => {
-  pointers.delete(e.pointerId);
-  lastPinch = pointers.size === 2 ? pinch() : null;
-  if (!pointers.size) canvas.classList.remove('dragging');
+  if (!pointers.delete(e.pointerId)) return;
+  lastPinch = pointers.size >= 2 ? pinch() : null;
+  if (pointers.size) return;
+  canvas.classList.remove('dragging');
+  const tapped =
+    !gesture.multi && gesture.moved < 10 && e.timeStamp - gesture.time < 300;
+  lastTap = tapped ? {time: e.timeStamp, x: gesture.x, y: gesture.y} : null;
 };
 canvas.addEventListener('pointerup', release);
 canvas.addEventListener('pointercancel', release);

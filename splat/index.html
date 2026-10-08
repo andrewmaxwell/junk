@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <title>Splat</title>
     <script type="importmap">
       {
@@ -26,6 +26,10 @@
         font: 14px/1.4 system-ui, sans-serif;
         color: var(--text);
         background: #b8c9db;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
       }
       canvas {
         position: fixed;
@@ -67,8 +71,8 @@
         background: var(--accent);
       }
       #hud {
-        left: 16px;
-        bottom: 16px;
+        left: calc(16px + env(safe-area-inset-left));
+        bottom: calc(16px + env(safe-area-inset-bottom));
         display: flex;
         gap: 6px;
         align-items: center;
@@ -95,9 +99,15 @@
         white-space: nowrap;
       }
       #help {
-        top: 16px;
-        left: 16px;
+        top: calc(16px + env(safe-area-inset-top));
+        left: calc(16px + env(safe-area-inset-left));
         max-width: calc(100vw - 56px);
+      }
+      /* Finger-sized buttons */
+      .touch #hud button {
+        min-width: 44px;
+        min-height: 40px;
+        font-size: 16px;
       }
       #help h1 {
         font-size: 15px;
@@ -142,7 +152,8 @@
         <tr class="touch-only"><td>Double-tap</td><td>fly to that spot and orbit it</td></tr>
         <tr class="touch-only"><td>Pinch</td><td>zoom</td></tr>
         <tr class="touch-only"><td>Two fingers</td><td>pan</td></tr>
-        <tr><td>H</td><td>hide this help</td></tr>
+        <tr class="mouse"><td>H</td><td>hide this help</td></tr>
+        <tr class="touch-only"><td>?</td><td>show or hide this help</td></tr>
       </table>
     </div>
     <div id="hud" class="panel" hidden>
