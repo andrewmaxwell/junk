@@ -61,19 +61,23 @@ const wrappedDistance = (a, b, N) =>
     }),
   );
 
-// Every cell's genome (GENES numbers): a weight for each kernel, then a
-// lineage color. With one lineage, every cell has the rule's own weights.
-// With more, the world is split into that many regions (around random
-// centers), and each lineage but the first has its weights scattered around
-// the rule's, so each region starts out as a different species.
+// Every cell's genome (GENES numbers): a weight for each kernel, then each
+// one's growth center, then each one's growth width, then a lineage color.
+// With one lineage, every cell has the rule's own. With more, the world is
+// split into that many regions (around random centers), and each lineage but
+// the first has its genes scattered around the rule's, so each region starts
+// out as a different species.
 export const makeGenomes = (N, rule, lineages = 1) => {
+  const K = MAX_KERNELS;
   const kinds = Array.from({length: lineages}, (_, l) => {
     const genome = new Float32Array(GENES);
-    rule.kernels.forEach(({h}, k) => {
-      const scatter = l ? Math.exp((Math.random() * 2 - 1) * 1.2) : 1;
-      genome[k] = Math.min(1, h * scatter);
+    const spread = (amount) => (l ? Math.random() * 2 - 1 : 0) * amount;
+    rule.kernels.forEach(({h, m, s}, k) => {
+      genome[k] = Math.min(1, h * Math.exp(spread(1.2)));
+      genome[K + k] = Math.max(0.01, m + spread(0.5) * s);
+      genome[2 * K + k] = s * Math.exp(spread(0.35));
     });
-    genome.set(palette[l % palette.length], MAX_KERNELS);
+    genome.set(palette[l % palette.length], 3 * K);
     return genome;
   });
   const centers = kinds.map(() => [0, 1, 2].map(() => Math.random() * N));

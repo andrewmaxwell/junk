@@ -17,7 +17,9 @@ import {fftLines, fftShader} from './fft.js';
 const DD = 2; // how far matter can come from, in cells
 export const MAX_CHANNELS = 3;
 export const MAX_KERNELS = 12;
-export const GENES = 16; // kernel weights, then a lineage color, then spare
+// a genome: each kernel's weight, then each one's growth center, then each
+// one's growth width, then a lineage color, then spare
+export const GENES = 3 * MAX_KERNELS + 4;
 
 const flowShaders = (N) => /* wgsl */ `
 struct Flow {
@@ -35,13 +37,14 @@ struct Flow {
 @group(0) @binding(4) var<storage, read> kernelHat: array<vec2f>;
 @group(0) @binding(5) var<storage, read_write> growthField: array<f32>;
 @group(0) @binding(6) var<storage, read_write> disp: array<vec4f>;
-@group(0) @binding(7) var<storage, read> kernels: array<vec4f>; // m, s, unused, target channel
+@group(0) @binding(7) var<storage, read> kernels: array<vec4f>; // target channel (w)
 @group(0) @binding(8) var<uniform> flow: Flow;
 // a pair of kernels (index, source channel of each), or a channel (x)
 @group(0) @binding(9) var<uniform> which: vec4u;
 @group(0) @binding(10) var tex: texture_storage_3d<rgba16float, write>;
-// Each cell's genome: how strongly each kernel counts there (up to 12), then
-// a lineage color. It travels with the matter.
+// Each cell's genome: for each kernel (up to 12), how strongly it counts
+// there, then for each, its growth center (m), then for each, its growth
+// width (s), then a lineage color. It travels with the matter.
 @group(0) @binding(11) var<storage, read_write> genome: array<f32>;
 @group(0) @binding(12) var<storage, read_write> nextGenome: array<f32>;
 struct Mutation { center: vec3f, radius: f32, color: vec3f, seed: u32 }
@@ -62,14 +65,19 @@ const N = ${N}u;
 const CELLS = ${N * N * N}u;
 const DD = ${DD};
 const GENES = ${GENES}u;
-const COLOR = ${MAX_KERNELS}u; // where the lineage color starts in a genome
+const K = ${MAX_KERNELS}u;
+const CENTER = K; // where the growth centers start in a genome
+const WIDTH = 2u * K; // where the growth widths start
+const COLOR = 3u * K; // where the lineage color starts
 
 fn cell(id: vec3u) -> u32 { return id.x + id.y * N + id.z * N * N; }
 fn wrapped(p: vec3i) -> u32 { return cell(vec3u((p + i32(N)) % i32(N))); }
 
-fn growth(u: f32, k: vec4f) -> f32 {
-  let d = (u - k.x) / k.y;
-  return 2.0 * exp(-0.5 * d * d) - 1.0;
+// kernel k's growth for neighborhood u in a cell's genome g: a bump of
+// height h centered on m with width s, from -h far away up to h at m
+fn growth(u: f32, g: u32, k: u32) -> f32 {
+  let d = (u - genome[g + CENTER + k]) / max(genome[g + WIDTH + k], 1e-3);
+  return genome[g + k] * (2.0 * exp(-0.5 * d * d) - 1.0);
 }
 
 fn hash(x: u32) -> u32 {
@@ -109,13 +117,10 @@ fn multiply(@builtin(global_invocation_id) id: vec3u) {
 fn accumulate(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
   let u = work[i];
-  let k1 = kernels[2u * which.x];
-  let k2 = kernels[2u * which.x + 1u];
-  // each kernel's weight here comes from this cell's genome
-  let h1 = genome[i * GENES + 2u * which.x];
-  let h2 = genome[i * GENES + 2u * which.x + 1u];
-  growthField[u32(k1.w) * CELLS + i] += h1 * growth(u.x, k1);
-  growthField[u32(k2.w) * CELLS + i] += h2 * growth(u.y, k2);
+  let k = 2u * which.x;
+  // each kernel's growth curve here comes from this cell's genome
+  growthField[u32(kernels[k].w) * CELLS + i] += growth(u.x, i * GENES, k);
+  growthField[u32(kernels[k + 1u].w) * CELLS + i] += growth(u.y, i * GENES, k + 1u);
 }
 
 // Smoothed gradients of a channel's growth and of all the matter. Matter flows
@@ -197,17 +202,26 @@ fn inherit(@builtin(global_invocation_id) id: vec3u) {
 }
 
 // A mutation: every cell within a small ball gets the same new lineage color
-// and the same random change to each kernel's weight (up to about double or
-// half), so the mutant starts out as a little group that may take over or die
-// out.
+// and the same random change to each kernel: its weight up to about double or
+// half, its growth center shifted by up to half its width, and its width up
+// to about 1.4 times wider or narrower. So the mutant starts out as a little
+// group that may take over or die out.
 @compute @workgroup_size(4, 4, 4)
 fn mutate(@builtin(global_invocation_id) id: vec3u) {
   let d = abs(vec3f(id) - mutation.center);
   if (length(min(d, f32(N) - d)) > mutation.radius) { return; }
   let i = cell(id);
-  for (var k = 0u; k < COLOR; k++) {
-    let r = f32(hash(mutation.seed + k * 7919u) >> 8u) / 16777216.0;
-    genome[i * GENES + k] = clamp(genome[i * GENES + k] * exp((r * 2.0 - 1.0) * 0.7), 0.0, 1.0);
+  let g = i * GENES;
+  for (var k = 0u; k < K; k++) {
+    let r = vec3f(
+      f32(hash(mutation.seed + k * 7919u) >> 8u),
+      f32(hash(mutation.seed + k * 7919u + 1u) >> 8u),
+      f32(hash(mutation.seed + k * 7919u + 2u) >> 8u),
+    ) / 16777216.0 * 2.0 - 1.0;
+    let s = genome[g + WIDTH + k];
+    genome[g + k] = clamp(genome[g + k] * exp(r.x * 0.7), 0.0, 1.0);
+    genome[g + CENTER + k] = clamp(genome[g + CENTER + k] + r.y * 0.5 * s, 0.01, 1.0);
+    genome[g + WIDTH + k] = clamp(s * exp(r.z * 0.35), 0.001, 0.5);
   }
   genome[i * GENES + COLOR] = mutation.color.x;
   genome[i * GENES + COLOR + 1u] = mutation.color.y;
@@ -463,9 +477,7 @@ export const makeSim = (device, N) => {
     device.queue.writeBuffer(
       kernelParams,
       0,
-      new Float32Array(
-        padded.flatMap((k) => (k ? [k.m, k.s, 0, k.to ?? 0] : [0, 1, 0, 0])),
-      ),
+      new Float32Array(padded.flatMap((k) => [0, 0, 0, k?.to ?? 0])),
     );
     padded.forEach((k, i) => {
       if (!k) return;
