@@ -119,6 +119,7 @@ loadRule(rule);
 const actions = {
   kinds: rule.channels,
   drag: 'orbit',
+  view: 'ball', // or 'cube': the whole wrapped world, sliced at its faces
   paused: false,
   reseed: seed,
   random: () => loadRule(randomRule(actions.kinds)),
@@ -177,6 +178,11 @@ gui
   });
 gui.add(settings, 'speed', 0, 6, 1).name('steps per frame');
 gui.add(settings, 'threshold', 0.05, 1.5, 0.01).name('surface');
+gui
+  .add(actions, 'view', ['ball', 'cube'])
+  .name('show as')
+  // the cube's corners stick out much farther than the ball, so back off
+  .onChange((view) => (camera.distance *= view === 'cube' ? 1.5 : 1 / 1.5));
 const worlds = {
   '64³': '64 1',
   '128³, finer (slow)': '128 2',
@@ -316,6 +322,7 @@ const loop = (time) => {
   render(encoder, {
     ...camera,
     threshold: settings.threshold,
+    cube: actions.view === 'cube',
     colorMode: colorMode(),
   });
   device.queue.submit([encoder.finish()]);

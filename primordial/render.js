@@ -4,9 +4,9 @@
 // flowing (graying out where it's still), which kind it is, or which lineage
 // it belongs to.
 //
-// The world wraps around, so instead of the cube (which would slice through
-// anything crossing its faces) this shows a ball of it, fading out at the rim.
-// Everything inside the ball is in one piece.
+// The world wraps around, so it can be shown two ways: the whole cube, which
+// slices through anything crossing a face (the cut shows flat), or a ball of
+// it, fading out at the rim, where everything is in one piece.
 
 const shader = /* wgsl */ `
 struct View {
@@ -14,6 +14,7 @@ struct View {
   right: vec3f, aspect: f32,
   up: vec3f, voxel: f32,
   forward: vec3f, colorMode: f32,
+  cube: f32, // 1 to show the whole cube, 0 for a ball
 }
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var vol: texture_3d<f32>;
@@ -29,7 +30,14 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
 
 // the world is the cube [-1, 1]^3, wrapping around at the edges like the sim
 fn vox(p: vec3f) -> vec4f { return textureSampleLevel(vol, samp, p * 0.5 + 0.5, 0.0); }
-fn fade(p: vec3f) -> f32 { return 1.0 - smoothstep(0.82, 1.0, length(p)); }
+fn fade(p: vec3f) -> f32 {
+  if (view.cube > 0.5) { return 1.0; }
+  return 1.0 - smoothstep(0.82, 1.0, length(p));
+}
+fn inside(p: vec3f) -> bool {
+  if (view.cube > 0.5) { return all(abs(p) <= vec3f(1.0)); }
+  return dot(p, p) <= 1.0;
+}
 fn density(p: vec3f) -> f32 { return vox(p).r * fade(p); }
 fn eaten(p: vec3f) -> f32 {
   return textureSampleLevel(eatenVol, samp, p * 0.5 + 0.5, 0.0).r * fade(p);
@@ -43,6 +51,24 @@ fn ballHit(ro: vec3f, rd: vec3f) -> vec2f {
   if (h < 0.0) { return vec2f(1.0, 0.0); }
   let r = sqrt(h);
   return vec2f(max(-b - r, 0.0), -b + r);
+}
+
+// where a ray is inside the cube [-1, 1]^3
+fn boxHit(ro: vec3f, rd: vec3f) -> vec2f {
+  let inv = 1.0 / rd;
+  let a = (-1.0 - ro) * inv;
+  let b = (1.0 - ro) * inv;
+  let lo = min(a, b);
+  let hi = max(a, b);
+  return vec2f(max(max(lo.x, lo.y), max(lo.z, 0.0)), min(min(hi.x, hi.y), hi.z));
+}
+
+// a faint line along the cube's edges, where a point on its surface is close
+// to two faces at once
+fn edgeLine(p: vec3f) -> f32 {
+  let q = abs(p);
+  let middle = max(min(q.x, q.y), min(max(q.x, q.y), q.z));
+  return smoothstep(1.0 - view.voxel * 1.5, 1.0, middle);
 }
 
 const LIGHT = vec3f(0.45, 0.8, 0.35);
@@ -81,7 +107,7 @@ fn shadow(p: vec3f) -> f32 {
   var t = view.voxel * 2.0;
   for (var i = 0; i < 40; i++) {
     let q = p + LIGHT * t;
-    if (dot(q, q) > 1.0) { break; }
+    if (!inside(q)) { break; }
     dens += density(q) * t * 0.12;
     t *= 1.12;
   }
@@ -106,7 +132,11 @@ fn main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let ro = view.eye;
 
   var color = background(rd);
-  let span = ballHit(ro, rd);
+  let span = select(ballHit(ro, rd), boxHit(ro, rd), view.cube > 0.5);
+  if (view.cube > 0.5 && span.x < span.y) {
+    let edges = edgeLine(ro + rd * span.x) + edgeLine(ro + rd * span.y);
+    color += edges * vec3f(0.05, 0.06, 0.09);
+  }
   if (span.x < span.y) {
     let stepSize = view.voxel * 0.6;
     // jitter the start so banding becomes fine noise
@@ -143,13 +173,23 @@ fn main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
         let m = (a + b) * 0.5;
         if (density(ro + rd * m) > view.threshold) { b = m; } else { a = m; }
       }
-      let p = ro + rd * b;
+      var p = ro + rd * b;
       let e = view.voxel;
-      let n = -normalize(vec3f(
+      var n = -normalize(vec3f(
         density(p + vec3f(e, 0, 0)) - density(p - vec3f(e, 0, 0)),
         density(p + vec3f(0, e, 0)) - density(p - vec3f(0, e, 0)),
         density(p + vec3f(0, 0, e)) - density(p - vec3f(0, 0, e)),
       ) + vec3f(1e-6));
+      // matter cut open by a face of the cube: show the cut flat
+      if (view.cube > 0.5 && first && density(ro + rd * span.x) > view.threshold) {
+        p = ro + rd * span.x;
+        let q = abs(p);
+        n = sign(p) * vec3f(
+          select(0.0, 1.0, q.x >= max(q.y, q.z)),
+          select(0.0, 1.0, q.y > q.x && q.y >= q.z),
+          select(0.0, 1.0, q.z > max(q.x, q.y)),
+        );
+      }
       let albedo = matterColor(vox(p).yzw);
       let diffuse = max(dot(n, LIGHT), 0.0) * shadow(p + n * e);
       let ao = occlusion(p, n);
@@ -205,7 +245,7 @@ export const makeRenderer = (device, context, format, sim) => {
     fragment: {module, entryPoint: 'main', targets: [{format}]},
   });
   const viewBuffer = device.createBuffer({
-    size: 64,
+    size: 80,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
   const screenBuffer = device.createBuffer({
@@ -230,7 +270,10 @@ export const makeRenderer = (device, context, format, sim) => {
     ],
   });
 
-  return (encoder, {yaw, pitch, distance, threshold, colorMode = 0}) => {
+  return (
+    encoder,
+    {yaw, pitch, distance, threshold, colorMode = 0, cube = false},
+  ) => {
     const {width, height} = context.canvas;
     const {eye, right, up, forward} = cameraFrame({yaw, pitch, distance});
     device.queue.writeBuffer(
@@ -245,6 +288,10 @@ export const makeRenderer = (device, context, format, sim) => {
         2 / sim.N,
         ...forward,
         colorMode,
+        cube ? 1 : 0,
+        0,
+        0,
+        0,
       ]),
     );
     device.queue.writeBuffer(
