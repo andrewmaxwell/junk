@@ -54,7 +54,7 @@ export const makeEvaluator = (device, N) => {
     {density = 0.08, steps = 3000, every = 500} = {},
   ) => {
     sim.setRule(rule);
-    sim.setState(makeSeed(N, density));
+    sim.setState(makeSeed(N, density, rule.channels));
     let previous = null;
     const motions = [];
     let state;

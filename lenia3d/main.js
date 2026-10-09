@@ -34,7 +34,7 @@ const writeHash = () => {
 
 const hash = readHash();
 const settings = hash.settings;
-let rule = hash.rule ?? randomRule();
+let rule = hash.rule ?? randomRule(3);
 
 if (!navigator.gpu) {
   document.body.textContent =
@@ -59,7 +59,7 @@ const render = makeRenderer(device, context, format, sim);
 
 let needsStep = false;
 const seed = () => {
-  sim.setState(makeSeed(settings.N, settings.density));
+  sim.setState(makeSeed(settings.N, settings.density, rule.channels));
   needsStep = true; // so the new state shows up even while paused
 };
 const loadRule = (newRule) => {
@@ -74,13 +74,18 @@ loadRule(rule);
 // ---- controls
 
 const actions = {
+  kinds: rule.channels,
   paused: false,
   reseed: seed,
-  random: () => loadRule(randomRule()),
+  random: () => loadRule(randomRule(actions.kinds)),
   nudge: () => loadRule(mutate(rule)),
 };
 
 const gui = new GUI({title: 'Lenia 3D'});
+gui
+  .add(actions, 'kinds', {one: 1, two: 2, three: 3})
+  .name('kinds of matter')
+  .onChange(actions.random);
 gui.add(actions, 'random').name('new random rule');
 gui.add(actions, 'nudge').name('nudge this rule');
 gui
@@ -109,7 +114,15 @@ gui
 const pausedController = gui.add(actions, 'paused').name('paused');
 gui.add(actions, 'reseed').name('reseed');
 
-const gallery = makeGallery(device, () => settings.density, loadRule);
+const gallery = makeGallery(
+  device,
+  () => ({density: settings.density, channels: actions.kinds}),
+  (picked) => {
+    actions.kinds = picked.channels;
+    gui.controllersRecursive().forEach((c) => c.updateDisplay());
+    loadRule(picked);
+  },
+);
 const search = {
   searching: false,
   gallery: gallery.hasFavorites,
@@ -195,7 +208,11 @@ const loop = (time) => {
   const steps = actions.paused ? 0 : settings.speed;
   sim.step(encoder, needsStep ? Math.max(1, steps) : steps);
   needsStep = false;
-  render(encoder, {...camera, threshold: settings.threshold, time});
+  render(encoder, {
+    ...camera,
+    threshold: settings.threshold,
+    channels: rule.channels,
+  });
   device.queue.submit([encoder.finish()]);
   requestAnimationFrame(loop);
 };

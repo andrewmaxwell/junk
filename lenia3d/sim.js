@@ -5,15 +5,20 @@ import {fftShader} from './fft.js';
 // flows up the growth gradient (and away from crowding), so the total amount
 // never changes: nothing can die out or explode into foam.
 //
-// Each step: the state's FFT, then for each pair of kernels one inverse FFT
-// (two real results fit in one complex one), summed into the growth field;
-// then every cell works out where its matter goes, and every cell gathers what
-// lands on it from its neighbors (reintegration tracking).
+// There can be up to three kinds of matter (channels). Each kernel looks at
+// one kind and pushes another (or the same) kind around, so they can chase,
+// wrap around, or avoid each other.
+//
+// Each step: each channel's FFT, then for each pair of kernels one inverse FFT
+// (two real results fit in one complex one), summed into each channel's growth
+// field; then every cell works out where its matter goes, and every cell
+// gathers what lands on it from its neighbors (reintegration tracking).
 
 const DD = 2; // how far matter can come from, in cells
+export const MAX_CHANNELS = 3;
 
 const flowShaders = (N) => /* wgsl */ `
-struct Flow { dt: f32, sigma: f32 }
+struct Flow { dt: f32, sigma: f32, channels: u32 }
 @group(0) @binding(0) var<storage, read_write> state: array<f32>;
 @group(0) @binding(1) var<storage, read_write> next: array<f32>;
 @group(0) @binding(2) var<storage, read_write> stateHat: array<vec2f>;
@@ -21,9 +26,10 @@ struct Flow { dt: f32, sigma: f32 }
 @group(0) @binding(4) var<storage, read> kernelHat: array<vec2f>;
 @group(0) @binding(5) var<storage, read_write> growthField: array<f32>;
 @group(0) @binding(6) var<storage, read_write> disp: array<vec4f>;
-@group(0) @binding(7) var<storage, read> kernels: array<vec4f>; // m, s, h
+@group(0) @binding(7) var<storage, read> kernels: array<vec4f>; // m, s, h, target channel
 @group(0) @binding(8) var<uniform> flow: Flow;
-@group(0) @binding(9) var<uniform> pair: u32;
+// a pair of kernels (index, source channel of each), or a channel (x)
+@group(0) @binding(9) var<uniform> which: vec4u;
 @group(0) @binding(10) var tex: texture_storage_3d<rgba16float, write>;
 
 const N = ${N}u;
@@ -38,10 +44,19 @@ fn growth(u: f32, k: vec4f) -> f32 {
   return k.z * (2.0 * exp(-0.5 * d * d) - 1.0);
 }
 
+fn total(i: u32) -> f32 {
+  var a = 0.0;
+  for (var c = 0u; c < flow.channels; c++) { a += state[c * CELLS + i]; }
+  return a;
+}
+
 @compute @workgroup_size(4, 4, 4)
 fn pack(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
-  stateHat[i] = vec2f(state[i], 0.0);
+  for (var c = 0u; c < flow.channels; c++) {
+    stateHat[c * CELLS + i] = vec2f(state[c * CELLS + i], 0.0);
+    growthField[c * CELLS + i] = 0.0;
+  }
 }
 
 fn cmul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
@@ -50,9 +65,8 @@ fn cmul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x *
 @compute @workgroup_size(4, 4, 4)
 fn multiply(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
-  let a = stateHat[i];
-  let p = cmul(a, kernelHat[2u * pair * CELLS + i]);
-  let q = cmul(a, kernelHat[(2u * pair + 1u) * CELLS + i]);
+  let p = cmul(stateHat[which.y * CELLS + i], kernelHat[2u * which.x * CELLS + i]);
+  let q = cmul(stateHat[which.z * CELLS + i], kernelHat[(2u * which.x + 1u) * CELLS + i]);
   work[i] = vec2f(p.x - q.y, p.y + q.x);
 }
 
@@ -60,15 +74,18 @@ fn multiply(@builtin(global_invocation_id) id: vec3u) {
 fn accumulate(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
   let u = work[i];
-  let g = growth(u.x, kernels[2u * pair]) + growth(u.y, kernels[2u * pair + 1u]);
-  growthField[i] = select(growthField[i], 0.0, pair == 0u) + g;
+  let k1 = kernels[2u * which.x];
+  let k2 = kernels[2u * which.x + 1u];
+  growthField[u32(k1.w) * CELLS + i] += growth(u.x, k1);
+  growthField[u32(k2.w) * CELLS + i] += growth(u.y, k2);
 }
 
-// Smoothed gradients of the growth and of the matter itself. Matter flows up
-// the growth gradient, but where it's crowded (near 1 or more) it mostly
-// spreads out instead.
+// Smoothed gradients of a channel's growth and of all the matter. Matter flows
+// up its growth gradient, but where it's crowded (near 1 or more, counting
+// every kind) it mostly spreads out instead.
 @compute @workgroup_size(4, 4, 4)
 fn displace(@builtin(global_invocation_id) id: vec3u) {
+  let c = which.x;
   var gradG = vec3f(0.0);
   var gradA = vec3f(0.0);
   for (var dz = -1; dz <= 1; dz++) {
@@ -78,58 +95,64 @@ fn displace(@builtin(global_invocation_id) id: vec3u) {
         let w = 2.0 - abs(o);
         let weight = o * vec3f(w.y * w.z, w.x * w.z, w.x * w.y) / 4.0;
         let j = wrapped(vec3i(id) + vec3i(dx, dy, dz));
-        gradG += growthField[j] * weight;
-        gradA += state[j] * weight;
+        gradG += growthField[c * CELLS + j] * weight;
+        gradA += total(j) * weight;
       }
     }
   }
-  let a = state[cell(id)];
+  let a = total(cell(id));
   let alpha = clamp(a * a, 0.0, 1.0);
   let f = gradG * (1.0 - alpha) - gradA * alpha;
   let reach = f32(DD) - flow.sigma;
-  disp[cell(id)] = vec4f(clamp(flow.dt * f, vec3f(-reach), vec3f(reach)), 0.0);
+  disp[c * CELLS + cell(id)] = vec4f(clamp(flow.dt * f, vec3f(-reach), vec3f(reach)), 0.0);
 }
 
 // Each cell's matter lands as a little box (2 sigma wide) centered where it
 // moved to. Every cell sums the parts of its neighbors' boxes that overlap it.
 @compute @workgroup_size(4, 4, 4)
 fn gather(@builtin(global_invocation_id) id: vec3u) {
+  let c = which.x;
   let s = flow.sigma;
-  var total = 0.0;
+  var sum = 0.0;
   for (var dz = -DD; dz <= DD; dz++) {
     for (var dy = -DD; dy <= DD; dy++) {
       for (var dx = -DD; dx <= DD; dx++) {
-        let j = wrapped(vec3i(id) + vec3i(dx, dy, dz));
+        let j = c * CELLS + wrapped(vec3i(id) + vec3i(dx, dy, dz));
         let a = state[j];
         if (a == 0.0) { continue; }
         let mu = vec3f(f32(dx), f32(dy), f32(dz)) + disp[j].xyz;
         let overlap = clamp(min(vec3f(0.5), mu + s) - max(vec3f(-0.5), mu - s), vec3f(0.0), vec3f(1.0));
-        total += a * overlap.x * overlap.y * overlap.z;
+        sum += a * overlap.x * overlap.y * overlap.z;
       }
     }
   }
-  next[cell(id)] = total / (8.0 * s * s * s);
+  next[c * CELLS + cell(id)] = sum / (8.0 * s * s * s);
 }
 
 @compute @workgroup_size(4, 4, 4)
 fn copy(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
-  state[i] = next[i];
+  for (var c = 0u; c < flow.channels; c++) { state[c * CELLS + i] = next[c * CELLS + i]; }
 }
 
+// What gets drawn: all the matter, slightly blurred so the surface doesn't
+// show the grid. With one kind of matter, also which way it's flowing; with
+// more, how much there is of each.
 @compute @workgroup_size(4, 4, 4)
 fn display(@builtin(global_invocation_id) id: vec3u) {
-  var a = 0.0;
+  var each = vec3f(0.0);
   for (var dz = -1; dz <= 1; dz++) {
     for (var dy = -1; dy <= 1; dy++) {
       for (var dx = -1; dx <= 1; dx++) {
-        let w = f32((2 - abs(dx)) * (2 - abs(dy)) * (2 - abs(dz)));
-        a += state[wrapped(vec3i(id) + vec3i(dx, dy, dz))] * w;
+        let w = f32((2 - abs(dx)) * (2 - abs(dy)) * (2 - abs(dz))) / 64.0;
+        let j = wrapped(vec3i(id) + vec3i(dx, dy, dz));
+        for (var c = 0u; c < flow.channels; c++) { each[c] += state[c * CELLS + j] * w; }
       }
     }
   }
-  // which way and how fast its matter is flowing, for coloring
-  textureStore(tex, id, vec4f(a / 64.0, disp[cell(id)].xyz / flow.dt));
+  let a = each.x + each.y + each.z;
+  let extra = select(each, disp[cell(id)].xyz / flow.dt, flow.channels == 1u);
+  textureStore(tex, id, vec4f(a, extra));
 }`;
 
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
@@ -164,16 +187,19 @@ export const makeKernel = (N, R, {r, a, b, w}) => {
 
 export const makeSim = (device, N) => {
   const cells = N * N * N;
+  const C = MAX_CHANNELS;
   const storage =
     GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
   const buffer = (size, usage = storage) => device.createBuffer({size, usage});
-  const state = buffer(cells * 4);
-  const next = buffer(cells * 4);
-  const stateHat = buffer(cells * 8);
+  const uniform = (size) =>
+    buffer(size, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+  const state = buffer(C * cells * 4);
+  const next = buffer(C * cells * 4);
+  const stateHat = buffer(C * cells * 8);
   const work = buffer(cells * 8);
-  const growthField = buffer(cells * 4);
-  const disp = buffer(cells * 16);
-  const flow = buffer(16, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+  const growthField = buffer(C * cells * 4);
+  const disp = buffer(C * cells * 16);
+  const flow = uniform(16);
   const texture = device.createTexture({
     dimension: '3d',
     size: [N, N, N],
@@ -188,8 +214,8 @@ export const makeSim = (device, N) => {
       entryPoint: 'main',
     },
   });
-  // forward x, y, z then inverse z, y, x
-  const fftPasses = (data) =>
+  // forward x, y, z then inverse z, y, x, on one N³ block of a buffer
+  const fftPasses = (data, offset = 0) =>
     [
       [0, 0],
       [1, 0],
@@ -198,20 +224,19 @@ export const makeSim = (device, N) => {
       [1, 1],
       [0, 1],
     ].map(([axis, inverse]) => {
-      const uniform = buffer(
-        8,
-        GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      );
-      device.queue.writeBuffer(uniform, 0, new Uint32Array([axis, inverse]));
+      const u = uniform(8);
+      device.queue.writeBuffer(u, 0, new Uint32Array([axis, inverse]));
       return device.createBindGroup({
         layout: fftPipeline.getBindGroupLayout(0),
         entries: [
-          {binding: 0, resource: {buffer: data}},
-          {binding: 1, resource: {buffer: uniform}},
+          {binding: 0, resource: {buffer: data, offset, size: cells * 8}},
+          {binding: 1, resource: {buffer: u}},
         ],
       });
     });
-  const stateFft = fftPasses(stateHat).slice(0, 3);
+  const stateFft = Array.from({length: C}, (_, c) =>
+    fftPasses(stateHat, c * cells * 8).slice(0, 3),
+  );
   const workFft = fftPasses(work);
   const runFft = (pass, bindGroup) => {
     pass.setPipeline(fftPipeline);
@@ -221,12 +246,12 @@ export const makeSim = (device, N) => {
 
   const module = device.createShaderModule({code: flowShaders(N)});
   const uses = {
-    pack: [0, 2],
+    pack: [0, 2, 5, 8],
     multiply: [2, 3, 4, 9],
     accumulate: [3, 5, 7, 9],
-    displace: [0, 5, 6, 8],
-    gather: [0, 1, 6, 8],
-    copy: [0, 1],
+    displace: [0, 5, 6, 8, 9],
+    gather: [0, 1, 6, 8, 9],
+    copy: [0, 1, 8],
     display: [0, 6, 8, 10],
   };
   const pipelines = Object.fromEntries(
@@ -239,11 +264,18 @@ export const makeSim = (device, N) => {
     ]),
   );
 
-  // these depend on the number of kernels, so they're made by setRule
+  const channelUniforms = Array.from({length: C}, (_, c) => {
+    const u = uniform(16);
+    device.queue.writeBuffer(u, 0, new Uint32Array([c, 0, 0, 0]));
+    return u;
+  });
+
+  // these depend on the rule, so they're made by setRule
   let kernelHat = null;
   let kernelParams = null;
   let pairUniforms = [];
   let bindGroups = null;
+  let channels = 1;
   const makeBindGroups = () => {
     const resources = {
       0: {buffer: state},
@@ -257,26 +289,39 @@ export const makeSim = (device, N) => {
       8: {buffer: flow},
       10: texture.createView(),
     };
-    const make = (name, pairUniform) =>
+    const make = (name, which) =>
       device.createBindGroup({
         layout: pipelines[name].getBindGroupLayout(0),
         entries: uses[name].map((binding) => ({
           binding,
-          resource: binding === 9 ? {buffer: pairUniform} : resources[binding],
+          resource: binding === 9 ? {buffer: which} : resources[binding],
         })),
       });
+    const perPair = ['multiply', 'accumulate'];
     bindGroups = Object.fromEntries(
       Object.keys(uses).map((name) => [
         name,
-        uses[name].includes(9)
+        perPair.includes(name)
           ? pairUniforms.map((u) => make(name, u))
-          : make(name),
+          : uses[name].includes(9)
+            ? channelUniforms.map((u) => make(name, u))
+            : make(name),
       ]),
     );
   };
 
-  // rule: {R, kernels: [{r, a, b, w, m, s, h}]} (see rule.js)
-  const setRule = ({R, kernels}) => {
+  let dt = 0.2;
+  const writeFlow = () => {
+    const data = new ArrayBuffer(16);
+    new Float32Array(data, 0, 2).set([dt, 0.65]);
+    new Uint32Array(data, 8, 1).set([channels]);
+    device.queue.writeBuffer(flow, 0, data);
+  };
+
+  // rule: {R, channels, kernels: [{r, a, b, w, m, s, h, from, to}]} (see rule.js)
+  const setRule = (rule) => {
+    const {R, kernels} = rule;
+    channels = rule.channels ?? 1;
     const pairs = Math.ceil(kernels.length / 2);
     // an odd one out is paired with a kernel that does nothing
     const padded = [...kernels];
@@ -289,7 +334,7 @@ export const makeSim = (device, N) => {
       kernelParams,
       0,
       new Float32Array(
-        padded.flatMap((k) => (k ? [k.m, k.s, k.h, 0] : [0, 1, 0, 0])),
+        padded.flatMap((k) => (k ? [k.m, k.s, k.h, k.to ?? 0] : [0, 1, 0, 0])),
       ),
     );
     padded.forEach((k, i) => {
@@ -302,20 +347,27 @@ export const makeSim = (device, N) => {
       encoder.copyBufferToBuffer(work, 0, kernelHat, i * cells * 8, cells * 8);
       device.queue.submit([encoder.finish()]);
     });
-    while (pairUniforms.length < pairs) {
-      const u = buffer(4, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
-      device.queue.writeBuffer(u, 0, new Uint32Array([pairUniforms.length]));
-      pairUniforms.push(u);
-    }
+    pairUniforms.forEach((u) => u.destroy());
+    pairUniforms = Array.from({length: pairs}, (_, p) => {
+      const u = uniform(16);
+      const from = (k) => k?.from ?? 0;
+      device.queue.writeBuffer(
+        u,
+        0,
+        new Uint32Array([p, from(padded[2 * p]), from(padded[2 * p + 1]), 0]),
+      );
+      return u;
+    });
     makeBindGroups();
-    activePairs = pairs;
+    writeFlow();
   };
-  let activePairs = 0;
 
-  const setTimeStep = (dt) =>
-    device.queue.writeBuffer(flow, 0, new Float32Array([dt, 0.65, 0, 0]));
-  setTimeStep(0.2);
+  const setTimeStep = (value) => {
+    dt = value;
+    writeFlow();
+  };
 
+  // values: each channel's N³ cells, one after another
   const setState = (values) => device.queue.writeBuffer(state, 0, values);
 
   const run = (pass, name, bindGroup = bindGroups[name]) => {
@@ -328,33 +380,53 @@ export const makeSim = (device, N) => {
     const pass = encoder.beginComputePass();
     for (let s = 0; s < count; s++) {
       run(pass, 'pack');
-      for (const bindGroup of stateFft) runFft(pass, bindGroup);
-      for (let p = 0; p < activePairs; p++) {
-        run(pass, 'multiply', bindGroups.multiply[p]);
+      for (let c = 0; c < channels; c++) {
+        for (const bindGroup of stateFft[c]) runFft(pass, bindGroup);
+      }
+      bindGroups.multiply.forEach((multiply, p) => {
+        run(pass, 'multiply', multiply);
         for (const bindGroup of workFft.slice(3)) runFft(pass, bindGroup);
         run(pass, 'accumulate', bindGroups.accumulate[p]);
+      });
+      for (let c = 0; c < channels; c++) {
+        run(pass, 'displace', bindGroups.displace[c]);
+        run(pass, 'gather', bindGroups.gather[c]);
       }
-      run(pass, 'displace');
-      run(pass, 'gather');
       run(pass, 'copy');
     }
     run(pass, 'display');
     pass.end();
   };
 
+  // all the matter in each cell, every kind together
   const readback = buffer(
-    cells * 4,
+    C * cells * 4,
     GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   );
   const readState = async () => {
     const encoder = device.createCommandEncoder();
-    encoder.copyBufferToBuffer(state, 0, readback, 0, cells * 4);
+    encoder.copyBufferToBuffer(state, 0, readback, 0, channels * cells * 4);
     device.queue.submit([encoder.finish()]);
-    await readback.mapAsync(GPUMapMode.READ);
-    const values = new Float32Array(readback.getMappedRange()).slice();
+    await readback.mapAsync(GPUMapMode.READ, 0, channels * cells * 4);
+    const all = new Float32Array(
+      readback.getMappedRange(0, channels * cells * 4),
+    );
+    const values = all.slice(0, cells);
+    for (let c = 1; c < channels; c++) {
+      for (let i = 0; i < cells; i++) values[i] += all[c * cells + i];
+    }
     readback.unmap();
     return values;
   };
 
-  return {N, texture, setRule, setTimeStep, setState, step, readState};
+  return {
+    N,
+    texture,
+    setRule,
+    setTimeStep,
+    setState,
+    step,
+    readState,
+    channels: () => channels,
+  };
 };

@@ -7,7 +7,13 @@ const maxResults = 48; // not counting favorites
 
 const loadFavorites = () => {
   try {
-    return JSON.parse(localStorage.getItem(storageKey)) ?? [];
+    const favorites = JSON.parse(localStorage.getItem(storageKey)) ?? [];
+    // ones saved before there were several kinds of matter have just one
+    for (const {rule} of favorites) {
+      rule.channels ??= 1;
+      for (const k of rule.kernels) Object.assign(k, {from: 0, to: 0, ...k});
+    }
+    return favorites;
   } catch {
     return [];
   }
@@ -23,7 +29,9 @@ const saveFavorites = (favorites) => {
 // Searches for rules in the background and shows what it keeps as
 // thumbnails. Clicking one calls onPick with its rule. Starred ones are saved,
 // and new tries are often small variations on them or on earlier finds.
-export const makeGallery = (device, getDensity, onPick) => {
+// getOptions gives the starting density and how many kinds of matter fresh
+// rules should have.
+export const makeGallery = (device, getOptions, onPick) => {
   const N = 64;
   const {sim, evaluate} = makeEvaluator(device, N);
 
@@ -34,14 +42,14 @@ export const makeGallery = (device, getDensity, onPick) => {
   const format = navigator.gpu.getPreferredCanvasFormat();
   thumbContext.configure({device, format});
   const renderThumb = makeRenderer(device, thumbContext, format, sim);
-  const snapshot = () => {
+  const snapshot = (rule) => {
     const encoder = device.createCommandEncoder();
     renderThumb(encoder, {
       yaw: 0.6,
       pitch: 0.35,
       distance: 2.6,
       threshold: 0.4,
-      time: 0,
+      channels: rule.channels,
     });
     device.queue.submit([encoder.finish()]);
     return thumbCanvas.toDataURL('image/jpeg', 0.85);
@@ -108,16 +116,16 @@ export const makeGallery = (device, getDensity, onPick) => {
     const r = Math.random();
     if (favorites.length && r < 0.4) return mutate(pick(favorites).rule);
     if (results.length && r < 0.6) return mutate(pick(results).rule);
-    return randomRule();
+    return randomRule(getOptions().channels);
   };
 
   const searchLoop = async () => {
     while (running) {
       const rule = nextRule();
-      const score = await evaluate(rule, {density: getDensity()});
+      const score = await evaluate(rule, {density: getOptions().density});
       tried++;
       if (score) {
-        results.unshift({rule, ...score, image: snapshot()});
+        results.unshift({rule, ...score, image: snapshot(rule)});
         results = results.slice(0, maxResults);
         show();
       } else {

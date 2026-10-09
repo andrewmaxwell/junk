@@ -19,15 +19,20 @@ const smoothNoise = (N, spacing) => {
   };
 };
 
-// A thin haze of matter over the whole world, averaging `density` per cell,
-// in lumps a couple of cells across. The rule gathers it into bodies.
-export const makeSeed = (N, density) => {
-  const noise = smoothNoise(N, 2);
-  const state = new Float32Array(N * N * N);
-  for (let z = 0, i = 0; z < N; z++) {
-    for (let y = 0; y < N; y++) {
-      for (let x = 0; x < N; x++, i++) {
-        state[i] = noise(x, y, z) * 2 * density;
+// A thin haze of matter over the whole world, averaging `density` per cell
+// in all, in lumps a couple of cells across, with each kind of matter mixed in
+// its own pattern. The rule gathers it into bodies. Each channel's cells come
+// one after another.
+export const makeSeed = (N, density, channels = 1) => {
+  const cells = N * N * N;
+  const state = new Float32Array(channels * cells);
+  for (let c = 0; c < channels; c++) {
+    const noise = smoothNoise(N, 2);
+    for (let z = 0, i = c * cells; z < N; z++) {
+      for (let y = 0; y < N; y++) {
+        for (let x = 0; x < N; x++, i++) {
+          state[i] = (noise(x, y, z) * 2 * density) / channels;
+        }
       }
     }
   }

@@ -1,7 +1,8 @@
 // Raymarches the simulation's 3D texture: a lit surface where the matter
 // crosses a threshold, with soft shadows, ambient occlusion, and a faint glow
 // from the thinner material around it. Color shows which way matter is
-// flowing, and grays out where it's still.
+// flowing (graying out where it's still), or with several kinds of matter,
+// which kind it is.
 //
 // The world wraps around, so instead of the cube (which would slice through
 // anything crossing its faces) this shows a ball of it, fading out at the rim.
@@ -12,7 +13,7 @@ struct View {
   eye: vec3f, threshold: f32,
   right: vec3f, aspect: f32,
   up: vec3f, voxel: f32,
-  forward: vec3f, time: f32,
+  forward: vec3f, channels: f32,
 }
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var vol: texture_3d<f32>;
@@ -46,14 +47,22 @@ fn background(rd: vec3f) -> vec3f {
   return mix(vec3f(0.002, 0.002, 0.004), vec3f(0.012, 0.015, 0.028), t);
 }
 
-// Hue from the direction matter is flowing, so a body moving as one has one
-// color and currents inside it show up as bands; pale and dim where it's
-// still. Strength is on a log scale, since some rules flow a hundred times
-// faster than others.
-fn flowColor(flow: vec3f) -> vec3f {
-  let speed = length(flow);
+// With one kind of matter: hue from the direction it's flowing, so a body
+// moving as one has one color and currents inside it show up as bands; pale
+// and dim where it's still. Strength is on a log scale, since some rules flow
+// a hundred times faster than others.
+// With more kinds: each has its own color, mixed by how much of each is there.
+fn matterColor(extra: vec3f) -> vec3f {
+  if (view.channels > 1.5) {
+    let amounts = max(extra, vec3f(0.0));
+    let total = max(amounts.x + amounts.y + amounts.z, 1e-6);
+    return (amounts.x * vec3f(1.0, 0.36, 0.3)
+      + amounts.y * vec3f(0.2, 0.7, 1.0)
+      + amounts.z * vec3f(1.0, 0.82, 0.3)) / total;
+  }
+  let speed = length(extra);
   let t = clamp(log(speed * 10.0) / 4.6, 0.0, 1.0);
-  let hue = 0.5 + 0.5 * flow / max(speed, 1e-6);
+  let hue = 0.5 + 0.5 * extra / max(speed, 1e-6);
   let vivid = hue * hue * vec3f(1.0, 0.85, 1.1);
   return mix(vec3f(0.3, 0.33, 0.4), vivid, t);
 }
@@ -107,7 +116,7 @@ fn main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       if (s.r > view.threshold) { hit = true; break; }
       // thin material glows faintly and also hides what's behind it, like fog
       let thin = smoothstep(0.0, view.threshold, s.r) * stepSize;
-      glow += flowColor(s.yzw) * thin * transmittance;
+      glow += matterColor(s.yzw) * thin * transmittance;
       transmittance *= exp(-thin * 3.0);
       prevT = t;
       first = false;
@@ -129,7 +138,7 @@ fn main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
         density(p + vec3f(0, e, 0)) - density(p - vec3f(0, e, 0)),
         density(p + vec3f(0, 0, e)) - density(p - vec3f(0, 0, e)),
       ) + vec3f(1e-6));
-      let albedo = flowColor(vox(p).yzw);
+      let albedo = matterColor(vox(p).yzw);
       let diffuse = max(dot(n, LIGHT), 0.0) * shadow(p + n * e);
       let ao = occlusion(p, n);
       let sky = (0.5 + 0.5 * n.y) * vec3f(0.12, 0.15, 0.24);
@@ -182,7 +191,7 @@ export const makeRenderer = (device, context, format, sim) => {
   });
 
   // camera: yaw and pitch around the origin at a distance
-  return (encoder, {yaw, pitch, distance, threshold, time}) => {
+  return (encoder, {yaw, pitch, distance, threshold, channels = 1}) => {
     const {width, height} = context.canvas;
     const eye = [
       Math.cos(pitch) * Math.sin(yaw) * distance,
@@ -207,7 +216,7 @@ export const makeRenderer = (device, context, format, sim) => {
         ...up,
         2 / sim.N,
         ...forward,
-        time,
+        channels,
       ]),
     );
     device.queue.writeBuffer(
