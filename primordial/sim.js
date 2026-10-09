@@ -18,7 +18,7 @@ const DD = 2; // how far matter can come from, in cells
 export const MAX_CHANNELS = 3;
 export const MAX_KERNELS = 12;
 // a genome: each kernel's weight, then each one's growth center, then each
-// one's growth width, then a lineage color, then spare
+// one's growth width, then a lineage color, then hunger
 export const GENES = 3 * MAX_KERNELS + 4;
 
 const flowShaders = (N) => /* wgsl */ `
@@ -44,7 +44,8 @@ struct Flow {
 @group(0) @binding(10) var tex: texture_storage_3d<rgba16float, write>;
 // Each cell's genome: for each kernel (up to 12), how strongly it counts
 // there, then for each, its growth center (m), then for each, its growth
-// width (s), then a lineage color. It travels with the matter.
+// width (s), then a lineage color, then hunger (how hard this matter is
+// drawn to food, times the world's setting). It travels with the matter.
 @group(0) @binding(11) var<storage, read_write> genome: array<f32>;
 @group(0) @binding(12) var<storage, read_write> nextGenome: array<f32>;
 struct Mutation { center: vec3f, radius: f32, color: vec3f, seed: u32 }
@@ -69,6 +70,7 @@ const K = ${MAX_KERNELS}u;
 const CENTER = K; // where the growth centers start in a genome
 const WIDTH = 2u * K; // where the growth widths start
 const COLOR = 3u * K; // where the lineage color starts
+const HUNGER = 3u * K + 3u;
 
 fn cell(id: vec3u) -> u32 { return id.x + id.y * N + id.z * N * N; }
 fn wrapped(p: vec3i) -> u32 { return cell(vec3u((p + i32(N)) % i32(N))); }
@@ -147,7 +149,8 @@ fn displace(@builtin(global_invocation_id) id: vec3u) {
   }
   let a = totalMatter[cell(id)];
   let alpha = clamp(a * a, 0.0, 1.0);
-  let f = (gradG + flow.pull * gradF) * (1.0 - alpha) - gradA * alpha;
+  let pull = flow.pull * genome[cell(id) * GENES + HUNGER];
+  let f = (gradG + pull * gradF) * (1.0 - alpha) - gradA * alpha;
   let v = (vec3f(id) + 0.5) / f32(N) * 2.0 - 1.0 - stir.origin;
   let off = v - stir.dir * dot(v, stir.dir);
   let stirred = stir.push * exp(-dot(off, off) / (stir.radius * stir.radius));
@@ -204,8 +207,9 @@ fn inherit(@builtin(global_invocation_id) id: vec3u) {
 // A mutation: every cell within a small ball gets the same new lineage color
 // and the same random change to each kernel: its weight up to about double or
 // half, its growth center shifted by up to half its width, and its width up
-// to about 1.4 times wider or narrower. So the mutant starts out as a little
-// group that may take over or die out.
+// to about 1.4 times wider or narrower. Its hunger also changes, up to about
+// double or half. So the mutant starts out as a little group that may take
+// over or die out.
 @compute @workgroup_size(4, 4, 4)
 fn mutate(@builtin(global_invocation_id) id: vec3u) {
   let d = abs(vec3f(id) - mutation.center);
@@ -223,6 +227,8 @@ fn mutate(@builtin(global_invocation_id) id: vec3u) {
     genome[g + CENTER + k] = clamp(genome[g + CENTER + k] + r.y * 0.5 * s, 0.01, 1.0);
     genome[g + WIDTH + k] = clamp(s * exp(r.z * 0.35), 0.001, 0.5);
   }
+  let r = f32(hash(mutation.seed ^ 0x9e3779b9u) >> 8u) / 16777216.0 * 2.0 - 1.0;
+  genome[g + HUNGER] = clamp(genome[g + HUNGER] * exp(r * 0.7), 0.0, 10.0);
   genome[i * GENES + COLOR] = mutation.color.x;
   genome[i * GENES + COLOR + 1u] = mutation.color.y;
   genome[i * GENES + COLOR + 2u] = mutation.color.z;
@@ -370,7 +376,7 @@ export const makeSim = (device, N) => {
     pack: [0, 2, 5, 8, 17],
     multiply: [2, 3, 4, 9],
     accumulate: [3, 5, 7, 9, 11],
-    displace: [5, 6, 8, 9, 14, 16, 17],
+    displace: [5, 6, 8, 9, 11, 14, 16, 17],
     gather: [0, 1, 6, 8, 9],
     inherit: [0, 6, 8, 11, 12],
     mutate: [11, 13],

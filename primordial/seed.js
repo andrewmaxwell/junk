@@ -62,7 +62,8 @@ const wrappedDistance = (a, b, N) =>
   );
 
 // Every cell's genome (GENES numbers): a weight for each kernel, then each
-// one's growth center, then each one's growth width, then a lineage color.
+// one's growth center, then each one's growth width, then a lineage color,
+// then hunger.
 // With one lineage, every cell has the rule's own. With more, the world is
 // split into that many regions (around random centers), and each lineage but
 // the first has its genes scattered around the rule's, so each region starts
@@ -78,6 +79,7 @@ export const makeGenomes = (N, rule, lineages = 1) => {
       genome[2 * K + k] = s * Math.exp(spread(0.35));
     });
     genome.set(palette[l % palette.length], 3 * K);
+    genome[3 * K + 3] = Math.exp(spread(1)); // hunger, times the world's
     return genome;
   });
   const centers = kinds.map(() => [0, 1, 2].map(() => Math.random() * N));
