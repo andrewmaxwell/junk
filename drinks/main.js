@@ -50,9 +50,22 @@ function render() {
 /** @param {Path} path */
 const urlFor = (path) => (path.length ? toHash(path) : location.pathname);
 
-/** @param {Path} newPath */
-function go(newPath) {
-  history.pushState({n: (history.state?.n ?? 0) + 1}, '', urlFor(newPath));
+/**
+ * @param {Path} newPath
+ * @param {boolean} [surprise] whether Surprise Me picked it, so it can be re-rolled
+ */
+function go(newPath, surprise = false) {
+  history.pushState(
+    {n: (history.state?.n ?? 0) + 1, surprise},
+    '',
+    urlFor(newPath),
+  );
+  render();
+}
+
+/** Swaps the surprise for another, so Back still goes to the start. */
+function reroll() {
+  history.replaceState(history.state, '', urlFor(randomPath()));
   render();
 }
 
@@ -182,7 +195,10 @@ const drinkHtml = (drink, mods) => `
     ${extras(mods).length ? `<p class="drink-extras animate-in">${extras(mods).join(' · ')}</p>` : ''}
     <p class="tagline animate-in">${recipe(drink, mods)}</p>
   </div>
-  <div class="dock"><button type="button" class="btn" data-action="send">Send it 🚀</button></div>`;
+  <div class="dock">
+    <button type="button" class="btn" data-action="send">Send it 🚀</button>
+    ${history.state?.surprise ? `<button type="button" class="btn btn-secondary" data-action="reroll">🎲 Roll again</button>` : ''}
+  </div>`;
 
 function installHint() {
   const installed =
@@ -245,7 +261,8 @@ app.addEventListener('click', (e) => {
 
   if (pick !== undefined) {
     const option = menu[/** @type {string} */ (current.nodeId)].options[pick];
-    go(option.surprise ? randomPath() : [...path, [Number(pick)]]);
+    if (option.surprise) go(randomPath(), true);
+    else go([...path, [Number(pick)]]);
   } else if (toggle !== undefined) {
     const i = Number(toggle);
     if (!selections.delete(i)) selections.add(i);
@@ -262,6 +279,8 @@ app.addEventListener('click', (e) => {
     back();
   } else if (action === 'restart') {
     go([]);
+  } else if (action === 'reroll') {
+    reroll();
   } else if (action === 'send') {
     send();
   } else if (action === 'confirm') {
