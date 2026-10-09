@@ -16,9 +16,11 @@ import {fftShader} from './fft.js';
 
 const DD = 2; // how far matter can come from, in cells
 export const MAX_CHANNELS = 3;
+export const MAX_KERNELS = 12;
+export const GENES = 16; // kernel weights, then a lineage color, then spare
 
 const flowShaders = (N) => /* wgsl */ `
-struct Flow { dt: f32, sigma: f32, channels: u32 }
+struct Flow { dt: f32, sigma: f32, channels: u32, colorMode: u32 }
 @group(0) @binding(0) var<storage, read_write> state: array<f32>;
 @group(0) @binding(1) var<storage, read_write> next: array<f32>;
 @group(0) @binding(2) var<storage, read_write> stateHat: array<vec2f>;
@@ -26,22 +28,36 @@ struct Flow { dt: f32, sigma: f32, channels: u32 }
 @group(0) @binding(4) var<storage, read> kernelHat: array<vec2f>;
 @group(0) @binding(5) var<storage, read_write> growthField: array<f32>;
 @group(0) @binding(6) var<storage, read_write> disp: array<vec4f>;
-@group(0) @binding(7) var<storage, read> kernels: array<vec4f>; // m, s, h, target channel
+@group(0) @binding(7) var<storage, read> kernels: array<vec4f>; // m, s, unused, target channel
 @group(0) @binding(8) var<uniform> flow: Flow;
 // a pair of kernels (index, source channel of each), or a channel (x)
 @group(0) @binding(9) var<uniform> which: vec4u;
 @group(0) @binding(10) var tex: texture_storage_3d<rgba16float, write>;
+// Each cell's genome: how strongly each kernel counts there (up to 12), then
+// a lineage color. It travels with the matter.
+@group(0) @binding(11) var<storage, read_write> genome: array<f32>;
+@group(0) @binding(12) var<storage, read_write> nextGenome: array<f32>;
+struct Mutation { center: vec3f, radius: f32, color: vec3f, seed: u32 }
+@group(0) @binding(13) var<uniform> mutation: Mutation;
 
 const N = ${N}u;
 const CELLS = ${N * N * N}u;
 const DD = ${DD};
+const GENES = ${GENES}u;
+const COLOR = ${MAX_KERNELS}u; // where the lineage color starts in a genome
 
 fn cell(id: vec3u) -> u32 { return id.x + id.y * N + id.z * N * N; }
 fn wrapped(p: vec3i) -> u32 { return cell(vec3u((p + i32(N)) % i32(N))); }
 
 fn growth(u: f32, k: vec4f) -> f32 {
   let d = (u - k.x) / k.y;
-  return k.z * (2.0 * exp(-0.5 * d * d) - 1.0);
+  return 2.0 * exp(-0.5 * d * d) - 1.0;
+}
+
+fn hash(x: u32) -> u32 {
+  var h = x * 747796405u + 2891336453u;
+  h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+  return (h >> 22u) ^ h;
 }
 
 fn total(i: u32) -> f32 {
@@ -76,8 +92,11 @@ fn accumulate(@builtin(global_invocation_id) id: vec3u) {
   let u = work[i];
   let k1 = kernels[2u * which.x];
   let k2 = kernels[2u * which.x + 1u];
-  growthField[u32(k1.w) * CELLS + i] += growth(u.x, k1);
-  growthField[u32(k2.w) * CELLS + i] += growth(u.y, k2);
+  // each kernel's weight here comes from this cell's genome
+  let h1 = genome[i * GENES + 2u * which.x];
+  let h2 = genome[i * GENES + 2u * which.x + 1u];
+  growthField[u32(k1.w) * CELLS + i] += h1 * growth(u.x, k1);
+  growthField[u32(k2.w) * CELLS + i] += h2 * growth(u.y, k2);
 }
 
 // Smoothed gradients of a channel's growth and of all the matter. Matter flows
@@ -129,29 +148,89 @@ fn gather(@builtin(global_invocation_id) id: vec3u) {
   next[c * CELLS + cell(id)] = sum / (8.0 * s * s * s);
 }
 
+// A cell's new genome is the genome of one of the cells whose matter landed
+// on it, picked at random in proportion to how much each brought (of every
+// kind). Where bodies with different genomes meet, they mix cell by cell.
+@compute @workgroup_size(4, 4, 4)
+fn inherit(@builtin(global_invocation_id) id: vec3u) {
+  let i = cell(id);
+  let s = flow.sigma;
+  var seen = 0.0;
+  var chosen = i;
+  var random = hash(i ^ bitcast<u32>(state[i] + disp[i].x));
+  for (var dz = -DD; dz <= DD; dz++) {
+    for (var dy = -DD; dy <= DD; dy++) {
+      for (var dx = -DD; dx <= DD; dx++) {
+        let j = wrapped(vec3i(id) + vec3i(dx, dy, dz));
+        var brought = 0.0;
+        for (var c = 0u; c < flow.channels; c++) {
+          let a = state[c * CELLS + j];
+          if (a == 0.0) { continue; }
+          let mu = vec3f(f32(dx), f32(dy), f32(dz)) + disp[c * CELLS + j].xyz;
+          let overlap = clamp(min(vec3f(0.5), mu + s) - max(vec3f(-0.5), mu - s), vec3f(0.0), vec3f(1.0));
+          brought += a * overlap.x * overlap.y * overlap.z;
+        }
+        if (brought <= 0.0) { continue; }
+        // keep each candidate with chance brought / everything seen so far
+        seen += brought;
+        random = hash(random);
+        if (f32(random >> 8u) / 16777216.0 * seen < brought) { chosen = j; }
+      }
+    }
+  }
+  for (var g = 0u; g < GENES; g++) { nextGenome[i * GENES + g] = genome[chosen * GENES + g]; }
+}
+
+// A mutation: every cell within a small ball gets the same new lineage color
+// and the same random change to each kernel's weight (up to about double or
+// half), so the mutant starts out as a little group that may take over or die
+// out.
+@compute @workgroup_size(4, 4, 4)
+fn mutate(@builtin(global_invocation_id) id: vec3u) {
+  let d = abs(vec3f(id) - mutation.center);
+  if (length(min(d, f32(N) - d)) > mutation.radius) { return; }
+  let i = cell(id);
+  for (var k = 0u; k < COLOR; k++) {
+    let r = f32(hash(mutation.seed + k * 7919u) >> 8u) / 16777216.0;
+    genome[i * GENES + k] = clamp(genome[i * GENES + k] * exp((r * 2.0 - 1.0) * 0.7), 0.0, 1.0);
+  }
+  genome[i * GENES + COLOR] = mutation.color.x;
+  genome[i * GENES + COLOR + 1u] = mutation.color.y;
+  genome[i * GENES + COLOR + 2u] = mutation.color.z;
+}
+
 @compute @workgroup_size(4, 4, 4)
 fn copy(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
   for (var c = 0u; c < flow.channels; c++) { state[c * CELLS + i] = next[c * CELLS + i]; }
+  for (var g = 0u; g < GENES; g++) { genome[i * GENES + g] = nextGenome[i * GENES + g]; }
 }
 
 // What gets drawn: all the matter, slightly blurred so the surface doesn't
-// show the grid. With one kind of matter, also which way it's flowing; with
-// more, how much there is of each.
+// show the grid, and for coloring (colorMode): which way it's flowing (0), how
+// much there is of each kind (1), or its lineage color (2).
 @compute @workgroup_size(4, 4, 4)
 fn display(@builtin(global_invocation_id) id: vec3u) {
   var each = vec3f(0.0);
+  var lineage = vec3f(0.0);
   for (var dz = -1; dz <= 1; dz++) {
     for (var dy = -1; dy <= 1; dy++) {
       for (var dx = -1; dx <= 1; dx++) {
         let w = f32((2 - abs(dx)) * (2 - abs(dy)) * (2 - abs(dz))) / 64.0;
         let j = wrapped(vec3i(id) + vec3i(dx, dy, dz));
-        for (var c = 0u; c < flow.channels; c++) { each[c] += state[c * CELLS + j] * w; }
+        var here = 0.0;
+        for (var c = 0u; c < flow.channels; c++) {
+          each[c] += state[c * CELLS + j] * w;
+          here += state[c * CELLS + j] * w;
+        }
+        lineage += here * vec3f(genome[j * GENES + COLOR], genome[j * GENES + COLOR + 1u], genome[j * GENES + COLOR + 2u]);
       }
     }
   }
   let a = each.x + each.y + each.z;
-  let extra = select(each, disp[cell(id)].xyz / flow.dt, flow.channels == 1u);
+  var extra = each;
+  if (flow.colorMode == 0u) { extra = disp[cell(id)].xyz / flow.dt; }
+  if (flow.colorMode == 2u) { extra = lineage / max(a, 1e-6); }
   textureStore(tex, id, vec4f(a, extra));
 }`;
 
@@ -199,6 +278,9 @@ export const makeSim = (device, N) => {
   const work = buffer(cells * 8);
   const growthField = buffer(C * cells * 4);
   const disp = buffer(C * cells * 16);
+  const genome = buffer(cells * GENES * 4);
+  const mutation = uniform(32);
+  const nextGenome = buffer(cells * GENES * 4);
   const flow = uniform(16);
   const texture = device.createTexture({
     dimension: '3d',
@@ -248,11 +330,13 @@ export const makeSim = (device, N) => {
   const uses = {
     pack: [0, 2, 5, 8],
     multiply: [2, 3, 4, 9],
-    accumulate: [3, 5, 7, 9],
+    accumulate: [3, 5, 7, 9, 11],
     displace: [0, 5, 6, 8, 9],
     gather: [0, 1, 6, 8, 9],
-    copy: [0, 1, 8],
-    display: [0, 6, 8, 10],
+    inherit: [0, 6, 8, 11, 12],
+    mutate: [11, 13],
+    copy: [0, 1, 8, 11, 12],
+    display: [0, 6, 8, 10, 11],
   };
   const pipelines = Object.fromEntries(
     Object.keys(uses).map((entryPoint) => [
@@ -288,6 +372,9 @@ export const makeSim = (device, N) => {
       7: {buffer: kernelParams},
       8: {buffer: flow},
       10: texture.createView(),
+      11: {buffer: genome},
+      12: {buffer: nextGenome},
+      13: {buffer: mutation},
     };
     const make = (name, which) =>
       device.createBindGroup({
@@ -311,10 +398,11 @@ export const makeSim = (device, N) => {
   };
 
   let dt = 0.2;
+  let colorMode = 0;
   const writeFlow = () => {
     const data = new ArrayBuffer(16);
     new Float32Array(data, 0, 2).set([dt, 0.65]);
-    new Uint32Array(data, 8, 1).set([channels]);
+    new Uint32Array(data, 8, 2).set([channels, colorMode]);
     device.queue.writeBuffer(flow, 0, data);
   };
 
@@ -334,7 +422,7 @@ export const makeSim = (device, N) => {
       kernelParams,
       0,
       new Float32Array(
-        padded.flatMap((k) => (k ? [k.m, k.s, k.h, k.to ?? 0] : [0, 1, 0, 0])),
+        padded.flatMap((k) => (k ? [k.m, k.s, 0, k.to ?? 0] : [0, 1, 0, 0])),
       ),
     );
     padded.forEach((k, i) => {
@@ -367,8 +455,38 @@ export const makeSim = (device, N) => {
     writeFlow();
   };
 
+  // what the display pass puts beside the density: 0 flow, 1 kinds, 2 lineage
+  const setColorMode = (value) => {
+    colorMode = value;
+    writeFlow();
+  };
+
+  // a new lineage in a ball of the given radius at a random place, with a
+  // random color
+  const mutate = (radius) => {
+    const data = new ArrayBuffer(32);
+    const hue = Math.random() * Math.PI * 2;
+    const color = [0, 2, 4].map(
+      (o) => 0.6 + 0.4 * Math.cos(hue - (o * Math.PI) / 3),
+    );
+    new Float32Array(data, 0, 7).set([
+      ...[0, 1, 2].map(() => Math.random() * N),
+      radius,
+      ...color,
+    ]);
+    new Uint32Array(data, 28, 1).set([(Math.random() * 2 ** 32) >>> 0]);
+    device.queue.writeBuffer(mutation, 0, data);
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    run(pass, 'mutate');
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+  };
+
   // values: each channel's N³ cells, one after another
   const setState = (values) => device.queue.writeBuffer(state, 0, values);
+  // values: GENES numbers per cell (see seed.js)
+  const setGenomes = (values) => device.queue.writeBuffer(genome, 0, values);
 
   const run = (pass, name, bindGroup = bindGroups[name]) => {
     pass.setPipeline(pipelines[name]);
@@ -392,6 +510,7 @@ export const makeSim = (device, N) => {
         run(pass, 'displace', bindGroups.displace[c]);
         run(pass, 'gather', bindGroups.gather[c]);
       }
+      run(pass, 'inherit');
       run(pass, 'copy');
     }
     run(pass, 'display');
@@ -424,7 +543,10 @@ export const makeSim = (device, N) => {
     texture,
     setRule,
     setTimeStep,
+    setColorMode,
     setState,
+    setGenomes,
+    mutate,
     step,
     readState,
     channels: () => channels,

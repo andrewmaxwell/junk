@@ -49,7 +49,7 @@ export const makeGallery = (device, getOptions, onPick) => {
       pitch: 0.35,
       distance: 2.6,
       threshold: 0.4,
-      channels: rule.channels,
+      colorMode: rule.channels > 1 ? 1 : 0,
     });
     device.queue.submit([encoder.finish()]);
     return thumbCanvas.toDataURL('image/jpeg', 0.85);

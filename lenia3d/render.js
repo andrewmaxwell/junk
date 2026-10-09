@@ -1,8 +1,8 @@
 // Raymarches the simulation's 3D texture: a lit surface where the matter
 // crosses a threshold, with soft shadows, ambient occlusion, and a faint glow
 // from the thinner material around it. Color shows which way matter is
-// flowing (graying out where it's still), or with several kinds of matter,
-// which kind it is.
+// flowing (graying out where it's still), which kind it is, or which lineage
+// it belongs to.
 //
 // The world wraps around, so instead of the cube (which would slice through
 // anything crossing its faces) this shows a ball of it, fading out at the rim.
@@ -13,7 +13,7 @@ struct View {
   eye: vec3f, threshold: f32,
   right: vec3f, aspect: f32,
   up: vec3f, voxel: f32,
-  forward: vec3f, channels: f32,
+  forward: vec3f, colorMode: f32,
 }
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var vol: texture_3d<f32>;
@@ -47,13 +47,16 @@ fn background(rd: vec3f) -> vec3f {
   return mix(vec3f(0.002, 0.002, 0.004), vec3f(0.012, 0.015, 0.028), t);
 }
 
-// With one kind of matter: hue from the direction it's flowing, so a body
-// moving as one has one color and currents inside it show up as bands; pale
-// and dim where it's still. Strength is on a log scale, since some rules flow
-// a hundred times faster than others.
-// With more kinds: each has its own color, mixed by how much of each is there.
+// colorMode 0, one kind of matter: hue from the direction it's flowing, so a
+// body moving as one has one color and currents inside it show up as bands;
+// pale and dim where it's still. Strength is on a log scale, since some rules
+// flow a hundred times faster than others.
+// colorMode 1, several kinds: each has its own color, mixed by how much of
+// each is there.
+// colorMode 2, lineages: the lineage color carried by the matter.
 fn matterColor(extra: vec3f) -> vec3f {
-  if (view.channels > 1.5) {
+  if (view.colorMode > 1.5) { return extra; }
+  if (view.colorMode > 0.5) {
     let amounts = max(extra, vec3f(0.0));
     let total = max(amounts.x + amounts.y + amounts.z, 1e-6);
     return (amounts.x * vec3f(1.0, 0.36, 0.3)
@@ -191,7 +194,7 @@ export const makeRenderer = (device, context, format, sim) => {
   });
 
   // camera: yaw and pitch around the origin at a distance
-  return (encoder, {yaw, pitch, distance, threshold, channels = 1}) => {
+  return (encoder, {yaw, pitch, distance, threshold, colorMode = 0}) => {
     const {width, height} = context.canvas;
     const eye = [
       Math.cos(pitch) * Math.sin(yaw) * distance,
@@ -216,7 +219,7 @@ export const makeRenderer = (device, context, format, sim) => {
         ...up,
         2 / sim.N,
         ...forward,
-        channels,
+        colorMode,
       ]),
     );
     device.queue.writeBuffer(

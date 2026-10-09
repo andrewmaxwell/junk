@@ -1,5 +1,5 @@
 import {makeSim} from './sim.js';
-import {makeSeed} from './seed.js';
+import {makeGenomes, makeSeed} from './seed.js';
 
 // Judges a rule without drawing it: a small world starts as an even haze, and
 // after a while the rule is kept only if the matter has gathered into
@@ -55,6 +55,8 @@ export const makeEvaluator = (device, N) => {
   ) => {
     sim.setRule(rule);
     sim.setState(makeSeed(N, density, rule.channels));
+    sim.setGenomes(makeGenomes(N, rule));
+    sim.setColorMode(rule.channels > 1 ? 1 : 0); // for the thumbnail
     let previous = null;
     const motions = [];
     let state;

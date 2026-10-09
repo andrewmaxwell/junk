@@ -1,6 +1,6 @@
 import {makeSim} from './sim.js';
 import {makeRenderer} from './render.js';
-import {makeSeed} from './seed.js';
+import {makeGenomes, makeSeed} from './seed.js';
 import {makeGallery} from './gallery.js';
 import {decodeRule, encodeRule, mutate, randomRule} from './rule.js';
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
@@ -8,6 +8,8 @@ import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 const defaults = {
   N: 64,
   density: 0.08, // average matter per cell to start with
+  lineages: 1, // regions starting with different genomes
+  mutations: 0, // new lineages per 1000 steps
   dt: 0.2,
   speed: 3, // steps per frame
   threshold: 0.4,
@@ -24,11 +26,19 @@ const readHash = () => {
   return {settings: s, rule: decodeRule(params.get('rule') ?? '')};
 };
 const writeHash = () => {
-  const {N, density, dt} = settings;
+  const {N, density, lineages, mutations, dt} = settings;
   history.replaceState(
     null,
     '',
-    '#' + new URLSearchParams({N, density, dt, rule: encodeRule(rule)}),
+    '#' +
+      new URLSearchParams({
+        N,
+        density,
+        lineages,
+        mutations,
+        dt,
+        rule: encodeRule(rule),
+      }),
   );
 };
 
@@ -58,8 +68,14 @@ const sim = makeSim(device, settings.N);
 const render = makeRenderer(device, context, format, sim);
 
 let needsStep = false;
+const colorMode = () => {
+  if (settings.lineages > 1 || settings.mutations > 0) return 2;
+  return rule.channels > 1 ? 1 : 0;
+};
 const seed = () => {
   sim.setState(makeSeed(settings.N, settings.density, rule.channels));
+  sim.setGenomes(makeGenomes(settings.N, rule, settings.lineages));
+  sim.setColorMode(colorMode());
   needsStep = true; // so the new state shows up even while paused
 };
 const loadRule = (newRule) => {
@@ -94,6 +110,20 @@ gui
   .onFinishChange(() => {
     writeHash();
     seed();
+  });
+gui
+  .add(settings, 'lineages', 1, 8, 1)
+  .name('lineages')
+  .onFinishChange(() => {
+    writeHash();
+    seed();
+  });
+gui
+  .add(settings, 'mutations', 0, 10, 0.5)
+  .name('mutations')
+  .onChange(() => {
+    writeHash();
+    sim.setColorMode(colorMode());
   });
 gui
   .add(settings, 'dt', 0.05, 0.5, 0.01)
@@ -206,12 +236,13 @@ const loop = (time) => {
 
   const encoder = device.createCommandEncoder();
   const steps = actions.paused ? 0 : settings.speed;
+  if (Math.random() < (steps * settings.mutations) / 1000) sim.mutate(5);
   sim.step(encoder, needsStep ? Math.max(1, steps) : steps);
   needsStep = false;
   render(encoder, {
     ...camera,
     threshold: settings.threshold,
-    channels: rule.channels,
+    colorMode: colorMode(),
   });
   device.queue.submit([encoder.finish()]);
   requestAnimationFrame(loop);
