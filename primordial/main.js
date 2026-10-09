@@ -53,18 +53,34 @@ const settings = hash.settings;
 if (settings.N > 64) settings.speed = 1; // big worlds are slow enough already
 let rule = hash.rule ?? randomRule(3);
 
-if (!navigator.gpu) {
-  document.body.textContent =
-    'This needs WebGPU, which this browser does not support.';
-  throw new Error('WebGPU is not available');
-}
+// Without WebGPU there's nothing to show, so say why and how to get it.
+const fail = (problem) => {
+  document.body.innerHTML = `<div id="unsupported">
+    <h1>Primordial needs WebGPU</h1>
+    <p>${problem}</p>
+    <p>It works in recent Chrome, Edge, and Safari on Mac and Windows. Things
+    to try: update the browser, turn on hardware acceleration in its
+    settings, or on Linux, Chrome with
+    <code>chrome://flags/#enable-unsafe-webgpu</code> enabled.</p>
+  </div>`;
+  throw new Error(problem);
+};
+if (!navigator.gpu) fail('This browser doesn’t support WebGPU.');
 const adapter = await navigator.gpu.requestAdapter();
-const device = await adapter.requestDevice({
-  requiredLimits: {
-    maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
-    maxBufferSize: adapter.limits.maxBufferSize,
-  },
-});
+if (!adapter) {
+  fail(
+    'This browser supports WebGPU, but couldn’t find a graphics card it ' +
+      'can use (it may be turned off, or not supported on this computer).',
+  );
+}
+const device = await adapter
+  .requestDevice({
+    requiredLimits: {
+      maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+      maxBufferSize: adapter.limits.maxBufferSize,
+    },
+  })
+  .catch((error) => fail(`The graphics card wouldn’t start: ${error.message}`));
 // The GPU can drop the device (a driver reset, or work running too long).
 // Nothing can be recovered from that but a reload.
 device.lost.then(({message}) => {
