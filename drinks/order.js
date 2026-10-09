@@ -1,44 +1,74 @@
-import { transition, unleashConfetti } from './ui.js';
+// Modifiers that are already part of the drink's name, or not worth mentioning.
+const SILENT_MODS = ['Hot', 'Iced', 'Blended'];
 
 /**
- * Handle formatting and sending the SMS order, alongside showing the
- * success feedback in the UI.
- *
- * @param {string} drinkName
- * @param {string} recipe
- * @param {HTMLElement | null} appContainer
+ * @param {any} drink
+ * @param {string[]} mods
  */
-export function sendOrder(drinkName, recipe, appContainer) {
-  const bodyText = `New Order! ☕\nDrink: ${drinkName}\nRecipe: ${recipe}\n`;
-  const body = encodeURIComponent(bodyText);
+export function drinkName(drink, mods) {
+  if (drink.cold) return drink.name;
+  if (mods.includes('Blended')) return `Blended ${drink.name}`;
+  if (mods.includes('Iced')) return `Iced ${drink.name}`;
+  return drink.name;
+}
+
+/** @param {string[]} mods */
+export const extras = (mods) => mods.filter((m) => !SILENT_MODS.includes(m));
+
+/**
+ * @param {any} drink
+ * @param {string[]} mods
+ */
+export const recipe = (drink, mods) =>
+  (mods.includes('Iced') && drink.iced) || drink.recipe;
+
+/**
+ * Opens a text to Andrew with the order filled in. The guest still has to
+ * hit send, and on a computer this may do nothing at all.
+ *
+ * @param {any} drink
+ * @param {string[]} mods
+ */
+export function textOrder(drink, mods) {
+  const lines = [`☕ New order: ${drinkName(drink, mods)}`];
+  if (extras(mods).length) lines.push(extras(mods).join(' · '));
+  const body = encodeURIComponent(lines.join('\n'));
 
   const phone = atob('MzE0MzQxODA4MA==');
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  const separator = isIOS ? '&' : '?';
-
-  setTimeout(() => {
-    window.location.href = `sms:${phone}${separator}body=${body}`;
-  }, 1000);
-
-  const isTea =
-    drinkName.toLowerCase().includes('tea') ||
-    drinkName.toLowerCase().includes('matcha');
-  const isCocoa =
-    drinkName.toLowerCase().includes('chocolate') ||
-    drinkName.toLowerCase().includes('cocoa');
-
-  let actionText = 'Andrew is violently assaulting the espresso grinder.';
-  if (isTea) actionText = 'Andrew is gently coaxing the kettle to life.';
-  if (isCocoa) actionText = 'Andrew is warming up the choccy milk.';
-
-  transition(appContainer, () => {
-    if (!appContainer) return;
-    appContainer.innerHTML = `
-      <div class="animate-in" style="font-size: 3.5rem; margin-bottom: 16px;">🎉</div>
-      <h2 class="highlight animate-in" style="animation-delay: 0.05s;">Order Sent!</h2>
-      <p class="animate-in" style="animation-delay: 0.1s; color: var(--text-muted); font-size: 1.1rem;">${actionText}<br><br>He has been alerted and is legally obligated to make this.</p>
-      <button type="button" class="btn btn-secondary animate-in" style="animation-delay: 0.15s; margin-top: 32px;" id="restart-btn">I panicked, start over 😰</button>
-    `;
-    setTimeout(() => unleashConfetti(appContainer), 50);
-  });
+  const separator = /iPad|iPhone|iPod/.test(navigator.userAgent) ? '&' : '?';
+  location.href = `sms:${phone}${separator}body=${body}`;
 }
+
+const sassyQuotes = [
+  'A truly terrible choice.',
+  "I'm judging you silently.",
+  'Bold of you to assume this will fix you.',
+  'Your therapist would disagree.',
+  "I'll make it, but I won't respect you for it.",
+  'Is this a cry for help?',
+  'Blink twice if you need water instead.',
+  "Well, nobody's perfect.",
+  "Don't say I didn't warn you.",
+  "I guess we're doing this.",
+  "I've seen better life choices made at 3 AM.",
+  "This won't fill the void, but okay.",
+  'My condolences to your nervous system.',
+  'Processing your order and my disappointment.',
+  'Just remember, you did this to yourself.',
+  'I question your decision-making skills.',
+  'Enjoy your artificially flavored coping mechanism.',
+  'Are we absolutely sure about this?',
+  'Adding extra judgment at no additional cost.',
+  "That's certainly one way to ruin water.",
+  "This'll just be our little secret.",
+  "I'm going to make this exactly how you asked, which is your true punishment.",
+  'If mediocrity had a flavor profile, you just nailed it.',
+  'This is the beverage equivalent of replying "k" to a heartfelt text.',
+  'Proof that free will was a mistake.',
+  'This order is legally considered a crime in three countries.',
+  'You could have just asked for a cup of disappointment.',
+  'Your order has been received and deeply judged.',
+];
+
+export const sassyQuote = () =>
+  sassyQuotes[Math.floor(Math.random() * sassyQuotes.length)];

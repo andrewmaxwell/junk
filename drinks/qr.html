@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Coffee Bar QR Code</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;700&display=swap">
+  <style>
+    /* A card to print and leave by the espresso machine. */
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #E5E7EB;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .card {
+      width: 4in;
+      padding: 0.4in;
+      background: #0B0F19;
+      color: #F8FAFC;
+      border-radius: 0.25in;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 0.05in;
+      font-size: 30pt;
+      line-height: 1.1;
+      background: linear-gradient(135deg, #FDE047, #F59E0B);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .emoji {
+      font-size: 36pt;
+      line-height: 1;
+      margin-bottom: 0.1in;
+    }
+
+    p {
+      margin: 0;
+      color: #94A3B8;
+      font-size: 13pt;
+    }
+
+    #qr {
+      margin: 0.25in auto;
+      padding: 0.15in;
+      width: 2.6in;
+      background: #FFF;
+      border-radius: 0.15in;
+    }
+
+    #qr svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    @media print {
+      body {
+        background: none;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <div class="emoji">☕</div>
+    <h1>Andrew's Coffee Bar</h1>
+    <p>Scan to order a drink</p>
+    <div id="qr"></div>
+    <p>Andrew is legally obligated to make it.</p>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script>
+    const qr = qrcode(0, 'M');
+    qr.addData(new URL('./', location.href).href);
+    qr.make();
+    document.getElementById('qr').innerHTML = qr.createSvgTag({ cellSize: 8, margin: 0 });
+  </script>
+</body>
+
+</html>

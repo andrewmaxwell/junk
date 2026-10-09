@@ -1,37 +1,26 @@
-let isTransitioning = false;
-
-export function getIsTransitioning() {
-  return isTransitioning;
-}
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 /**
- * Wraps a DOM modification block in a fade out/in sequence
- * @param {HTMLElement | null} appContainer
- * @param {Function} renderFn
+ * Swaps the screen's contents, crossfading where the browser supports it.
+ * @param {HTMLElement} container
+ * @param {string} html
  */
-export async function transition(appContainer, renderFn) {
-  if (!appContainer || isTransitioning) return;
-  isTransitioning = true;
-  appContainer.classList.add('fade-out', 'is-transitioning');
-  await new Promise((resolve) => setTimeout(resolve, 150));
-
-  renderFn();
-
-  appContainer.classList.remove('fade-out');
-  appContainer.classList.add('fade-in');
-
-  setTimeout(() => {
-    if (appContainer) appContainer.classList.remove('fade-in', 'is-transitioning');
-    isTransitioning = false;
-  }, 150);
+export function show(container, html) {
+  const update = () => {
+    container.innerHTML = html;
+    window.scrollTo(0, 0);
+  };
+  if (document.startViewTransition && !reduceMotion.matches) {
+    document.startViewTransition(update);
+  } else {
+    update();
+  }
 }
 
-/**
- * @param {HTMLElement | null} appContainer
- */
-export function unleashConfetti(appContainer) {
-  const container = document.createElement('div');
-  container.className = 'confetti-container';
+/** @param {HTMLElement} container */
+export function unleashConfetti(container) {
+  const burst = document.createElement('div');
+  burst.className = 'confetti-container';
   const emojis = ['☕', '✨', '🚀', '🎉', '🍼', '🥵'];
 
   for (let i = 0; i < 35; i++) {
@@ -41,67 +30,49 @@ export function unleashConfetti(appContainer) {
 
     const angle = Math.random() * Math.PI * 2;
     const distance = 100 + Math.random() * 250;
-    const tx = Math.cos(angle) * distance;
-    const ty = Math.sin(angle) * distance;
-    const tr = (Math.random() - 0.5) * 360;
-
-    el.style.setProperty('--tx', `${tx}px`);
-    el.style.setProperty('--ty', `${ty}px`);
-    el.style.setProperty('--tr', `${tr}deg`);
+    el.style.setProperty('--tx', `${Math.cos(angle) * distance}px`);
+    el.style.setProperty('--ty', `${Math.sin(angle) * distance}px`);
+    el.style.setProperty('--tr', `${(Math.random() - 0.5) * 360}deg`);
     el.style.animationDelay = `${Math.random() * 0.2}s`;
 
-    container.appendChild(el);
+    burst.appendChild(el);
   }
 
-  if (appContainer) appContainer.appendChild(container);
-  setTimeout(() => container.remove(), 2000);
-
-  if (typeof navigator.vibrate === 'function') {
-    navigator.vibrate([30, 50, 50, 50, 70, 50, 100]);
-  }
+  container.appendChild(burst);
+  setTimeout(() => burst.remove(), 2000);
+  navigator.vibrate?.([30, 50, 50, 50, 70, 50, 100]);
 }
 
 export function bindMouseTracking() {
-  const updateMouseVars = (
-    /** @type {number} */ x,
-    /** @type {number} */ y,
-  ) => {
-    const normX = x / window.innerWidth - 0.5;
-    const normY = y / window.innerHeight - 0.5;
-    // Scale drastically from 80px up to 250px so they visibly swing!
-    document.body.style.setProperty('--mouse-x', `${normX * 250}px`);
-    document.body.style.setProperty('--mouse-y', `${normY * 250}px`);
+  /**
+   * @param {number} x -1 to 1
+   * @param {number} y -1 to 1
+   */
+  const moveBlobs = (x, y) => {
+    document.body.style.setProperty('--mouse-x', `${x * 125}px`);
+    document.body.style.setProperty('--mouse-y', `${y * 125}px`);
   };
 
-  window.addEventListener('mousemove', (e) =>
-    updateMouseVars(e.clientX, e.clientY),
+  window.addEventListener('pointermove', (e) =>
+    moveBlobs(
+      (e.clientX / window.innerWidth) * 2 - 1,
+      (e.clientY / window.innerHeight) * 2 - 1,
+    ),
   );
-  window.addEventListener('touchmove', (e) => {
-    if (e.touches && e.touches.length > 0) {
-      updateMouseVars(e.touches[0].clientX, e.touches[0].clientY);
-    }
-  });
 
-  // Tap into phone gyroscope so the blobs drift when the user tilts their mobile device!
+  // Phones (that allow it) drift the blobs as you tilt them.
   window.addEventListener('deviceorientation', (e) => {
-    // gamma is left-to-right tilt in degrees, beta is front-to-back tilt
-    if (e.gamma !== null && e.beta !== null) {
-      // clamp to roughly +/- 45 degrees
-      const normX = Math.max(-1, Math.min(1, e.gamma / 45));
-      const normY = Math.max(-1, Math.min(1, (e.beta - 45) / 45)); // Offset 45deg backwards as people hold phones at an angle
-      document.body.style.setProperty('--mouse-x', `${normX * 150}px`);
-      document.body.style.setProperty('--mouse-y', `${normY * 150}px`);
-    }
+    if (e.gamma === null || e.beta === null) return;
+    const clamp = (/** @type {number} */ v) => Math.max(-1, Math.min(1, v));
+    // People hold phones tilted back about 45 degrees.
+    moveBlobs(clamp(e.gamma / 45), clamp((e.beta - 45) / 45));
   });
 }
 
 export function bindGlobalHaptics() {
   document.addEventListener('click', (e) => {
-    const target = /** @type {HTMLElement} */ (e.target);
-    if (target && target.closest('.btn')) {
-      if (typeof navigator.vibrate === 'function') {
-        navigator.vibrate(40);
-      }
+    if (/** @type {HTMLElement} */ (e.target).closest('button')) {
+      navigator.vibrate?.(30);
     }
   });
 }

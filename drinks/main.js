@@ -1,407 +1,288 @@
-import {
-  formatDrinkName,
-  formatRecipe,
-  getRandomSassyQuote,
-} from './formatter.js';
-import { menuData } from './menu.js';
-import { sendOrder } from './order.js';
-import { parseStateFromUrl, pushStateToUrl } from './router.js';
+import {menu} from './menu.js';
+import {drinkName, extras, recipe, sassyQuote, textOrder} from './order.js';
+import {fromHash, randomPath, toHash, walk} from './path.js';
 import {
   bindGlobalHaptics,
   bindMouseTracking,
-  getIsTransitioning,
-  transition,
+  show,
+  unleashConfetti,
 } from './ui.js';
 
-/**
- * @typedef {Object} OrderState
- * @property {string[]} modifiers
- * @property {string|null} pendingEndpoint
- */
+/** @typedef {import('./path.js').Path} Path */
 
-// --- State ---
-/** @type {HTMLElement | null} */
-let appContainer = null;
-/** @type {OrderState | null} */
-let currentOrderState = null;
-/** @type {any} */
-let currentNodeData = null;
-/** @type {Set<number>} */
-let currentMultiSelections = new Set();
-/** @type {string} */
-let currentEndpointName = '';
-/** @type {string} */
-let currentEndpointRecipe = '';
+const app = /** @type {HTMLElement} */ (
+  document.getElementById('app-container')
+);
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
-let secretClicks = 0;
-/** @type {ReturnType<typeof setTimeout> | null} */
-let secretTimer = null;
+// The URL hash holds the order so far, so reloading and the browser's back
+// button just work. history.state.n counts how many screens deep we are, and
+// history.state.sent marks the screen after "Send it".
 
-// --- Initialization ---
-function initApp() {
-  appContainer = document.getElementById('app-container');
-  validateMenu();
-  bindEvents();
-  bindMouseTracking();
-  bindGlobalHaptics();
+/** @type {Path} */
+let path = [];
+let current = walk([]);
+/** Options picked so far on a multi-select question. */
+const selections = new Set();
+/** Ignore taps that land on the next screen while it fades in. */
+let renderedAt = 0;
+/** True once the guest has left for Messages and not come back yet. */
+let inMessages = false;
+let titleTaps = 0;
+let titleTimer = 0;
 
-  window.addEventListener('popstate', (event) => {
-    if (event.state && event.state.nodeId) {
-      transition(appContainer, () => {
-        currentOrderState = event.state.orderState;
-        currentNodeData = /** @type {any} */ (menuData)[event.state.nodeId];
-        const node = currentNodeData;
-        if (node && node.isEndpoint) {
-          renderEndpoint(node, event.state.orderState, true);
-        } else {
-          renderNode(event.state.nodeId, event.state.orderState, true);
-        }
-      });
-    } else {
-      loadStateFromUrl();
-    }
-  });
+function render() {
+  const hashPath = fromHash();
+  current = walk(hashPath);
+  path = hashPath.slice(0, current.steps.length);
+  if (path.length < hashPath.length) {
+    history.replaceState(history.state, '', urlFor(path));
+  }
+  selections.clear();
+  renderedAt = performance.now();
 
-  loadStateFromUrl();
+  const {nodeId, drink, mods} = current;
+  if (nodeId) show(app, questionHtml(nodeId));
+  else if (history.state?.sent) show(app, sentHtml(drink, mods));
+  else show(app, drinkHtml(drink, mods));
 }
 
-function loadStateFromUrl() {
-  const {nodeId, state} = parseStateFromUrl();
-  const node = /** @type {any} */ (menuData)[nodeId];
+/** @param {Path} path */
+const urlFor = (path) => (path.length ? toHash(path) : location.pathname);
 
-  if (nodeId === 'surprise_handler') {
-    handleSurprise();
-    return;
-  }
-
-  transition(appContainer, () => {
-    if (node && node.isEndpoint) {
-      renderEndpoint(node, state, true);
-    } else if (node) {
-      renderNode(nodeId, state, true);
-    } else {
-      renderNode('start', {modifiers: [], pendingEndpoint: null}, true);
-    }
-  });
+/** @param {Path} newPath */
+function go(newPath) {
+  history.pushState({n: (history.state?.n ?? 0) + 1}, '', urlFor(newPath));
+  render();
 }
 
-function validateMenu() {
-  const keys = Object.keys(menuData);
-  keys.forEach((key) => {
-    const node = /** @type {any} */ (menuData)[key];
-    if (node.options) {
-      node.options.forEach(
-        (/** @type {any} */ opt, /** @type {number} */ idx) => {
-          if (
-            opt.next &&
-            opt.next !== 'surprise_handler' &&
-            !(/** @type {any} */ (menuData)[opt.next])
-          ) {
-            console.error(
-              `VALIDATION ERROR: Node '${key}' option ${idx} points to non-existent next node '${opt.next}'.`,
-            );
-          }
-          if (
-            opt.pendingEndpoint &&
-            !(/** @type {any} */ (menuData)[opt.pendingEndpoint])
-          ) {
-            console.error(
-              `VALIDATION ERROR: Node '${key}' option ${idx} points to non-existent pendingEndpoint '${opt.pendingEndpoint}'.`,
-            );
-          }
-        },
-      );
-    }
-  });
-}
-
-// --- Event Handlers ---
-function bindEvents() {
-  if (!appContainer) return;
-
-  appContainer.addEventListener('click', (/** @type {Event} */ e) => {
-    if (getIsTransitioning()) return;
-    const target = /** @type {HTMLElement} */ (e.target);
-    if (!target) return;
-
-    if (target.matches('h1')) {
-      secretClicks++;
-      if (secretTimer) clearTimeout(secretTimer);
-      secretTimer = setTimeout(() => (secretClicks = 0), 1000);
-
-      if (secretClicks === 7) {
-        secretClicks = 0;
-        transition(appContainer, () => {
-          const state = {modifiers: [], pendingEndpoint: null};
-          renderEndpoint(
-            /** @type {any} */ (menuData).endpoint_secret_menu,
-            state,
-          );
-        });
-      }
-    } else {
-      secretClicks = 0;
-    }
-
-    const optionBtn = target.closest('.option-btn');
-    const toggleBtn = target.closest('.toggle-btn');
-
-    if (optionBtn) {
-      handleOptionClick(/** @type {HTMLElement} */ (optionBtn));
-    } else if (toggleBtn) {
-      handleToggleClick(/** @type {HTMLElement} */ (toggleBtn));
-    } else if (target.closest('#multi-submit-btn')) {
-      handleMultiSubmit();
-    } else if (target.closest('#back-btn')) {
-      handleBack();
-    } else if (target.closest('#restart-btn')) {
-      handleRestart();
-    } else if (target.closest('#order-btn')) {
-      if (appContainer)
-        sendOrder(currentEndpointName, currentEndpointRecipe, appContainer);
-    }
-  });
-}
-
-/**
- * @param {HTMLElement} btn
- */
-function handleOptionClick(btn) {
-  const optionIndex = parseInt(btn.getAttribute('data-index') || '0', 10);
-  const selectedOption = currentNodeData.options[optionIndex];
-
-  /** @type {OrderState} */
-  const nextOrderState = currentOrderState
-    ? JSON.parse(JSON.stringify(currentOrderState))
-    : {modifiers: [], pendingEndpoint: null};
-
-  if (selectedOption.inlineEndpoint) {
-    transition(appContainer, () =>
-      renderEndpoint(selectedOption.inlineEndpoint, nextOrderState),
-    );
-    return;
-  }
-
-  if (currentNodeData.isModifier && selectedOption.modifierValue) {
-    nextOrderState.modifiers.push(selectedOption.modifierValue);
-  }
-
-  if (selectedOption.pendingEndpoint) {
-    nextOrderState.pendingEndpoint = selectedOption.pendingEndpoint;
-  }
-
-  if (selectedOption.next) {
-    const nextNode = /** @type {any} */ (menuData)[selectedOption.next];
-    if (nextNode && nextNode.isEndpoint) {
-      transition(appContainer, () => renderEndpoint(nextNode, nextOrderState));
-    } else {
-      transition(appContainer, () =>
-        renderNode(selectedOption.next, nextOrderState),
-      );
-    }
+function back() {
+  if (history.state?.n) {
+    history.back();
   } else {
-    if (nextOrderState.pendingEndpoint) {
-      const endpointNode = /** @type {any} */ (menuData)[
-        nextOrderState.pendingEndpoint
-      ];
-      transition(appContainer, () =>
-        renderEndpoint(endpointNode, nextOrderState),
-      );
-    } else {
-      console.error(
-        'Path dead end: No next question or pending endpoint defined!',
-      );
-    }
+    // Opened straight onto this screen, so there's nothing in history to go back to.
+    history.replaceState(null, '', urlFor(path.slice(0, -1)));
+    render();
   }
 }
 
-/**
- * @param {HTMLElement} btn
- */
-function handleToggleClick(btn) {
-  const indexStr = btn.getAttribute('data-index');
-  if (!indexStr) return;
-  const index = parseInt(indexStr, 10);
-
-  if (currentMultiSelections.has(index)) {
-    currentMultiSelections.delete(index);
-    btn.classList.add('btn-secondary');
-    btn.innerText = btn.innerText.replace(' ✅', '');
+function send() {
+  if (history.state?.sent) {
+    history.replaceState({...history.state, confirmed: false}, '');
   } else {
-    currentMultiSelections.add(index);
-    btn.classList.remove('btn-secondary');
-    if (!btn.innerText.includes('✅')) btn.innerText = btn.innerText + ' ✅';
+    history.pushState({n: (history.state?.n ?? 0) + 1, sent: true}, '');
   }
+  render();
+  inMessages = true;
+  textOrder(current.drink, current.mods);
+}
 
-  const submitBtn = document.getElementById('multi-submit-btn');
-  if (submitBtn) {
-    submitBtn.innerText =
-      currentMultiSelections.size === 0 ? 'Skip ➔' : 'Continue 🚀';
+function confirmSent() {
+  inMessages = false;
+  history.replaceState({...history.state, confirmed: true}, '');
+  render();
+  setTimeout(() => unleashConfetti(app), 300);
+}
+
+// Coming back from Messages almost always means they sent it.
+document.addEventListener('visibilitychange', () => {
+  if (
+    document.visibilityState === 'visible' &&
+    inMessages &&
+    history.state?.sent
+  ) {
+    confirmSent();
   }
-}
+});
 
-function handleMultiSubmit() {
-  if (!currentOrderState || !currentNodeData) return;
+// --- Screens ---
 
-  const nextOrderState = JSON.parse(JSON.stringify(currentOrderState));
+const topBar = () => `
+  <header class="top-bar">
+    <button type="button" class="top-btn" data-action="back">‹ Back</button>
+    <button type="button" class="top-btn" data-action="restart">Start over</button>
+  </header>`;
 
-  currentMultiSelections.forEach((index) => {
-    const option = currentNodeData.options[index];
-    if (option.modifierValue) {
-      nextOrderState.modifiers.push(option.modifierValue);
-    }
-  });
-
-  if (currentNodeData.multiSelectNext) {
-    const nextNodeId = currentNodeData.multiSelectNext;
-    const nextNode = /** @type {any} */ (menuData)[nextNodeId];
-    if (nextNode && nextNode.isEndpoint) {
-      transition(appContainer, () => renderEndpoint(nextNode, nextOrderState));
-    } else {
-      transition(appContainer, () => renderNode(nextNodeId, nextOrderState));
-    }
-  } else if (nextOrderState.pendingEndpoint) {
-    const endpointNode = /** @type {any} */ (menuData)[
-      nextOrderState.pendingEndpoint
-    ];
-    transition(appContainer, () =>
-      renderEndpoint(endpointNode, nextOrderState),
-    );
-  } else {
-    console.error('MultiSelect node missing pendingEndpoint!');
-  }
-}
-
-function handleBack() {
-  history.back();
-}
-
-function handleRestart() {
-  transition(appContainer, () => {
-    history.pushState(null, '', '#start');
-    renderNode('start', {modifiers: [], pendingEndpoint: null}, true);
-  });
-}
-
-function handleSurprise() {
-  const endpoints = Object.keys(menuData).filter(
-    (key) => /** @type {any} */ (menuData)[key].isEndpoint,
+/** What's been picked so far. Tapping one goes back to that question. */
+function chipsHtml() {
+  const chips = current.steps.flatMap((step, i) =>
+    step.options
+      .map((o) => o.chip ?? o.mod ?? o.drink?.name)
+      .filter(Boolean)
+      .map(
+        (text) =>
+          `<button type="button" class="chip" data-step="${i}" aria-label="Change ${text}">${text}</button>`,
+      ),
   );
-  const randomKey = endpoints[Math.floor(Math.random() * endpoints.length)];
-  const randomDrink = /** @type {any} */ (menuData)[randomKey];
-  renderEndpoint(randomDrink, {modifiers: [], pendingEndpoint: null});
+  return chips.length ? `<nav class="chips">${chips.join('')}</nav>` : '';
 }
 
-// --- Core Rendering Engine ---
+/** @param {string} nodeId */
+function questionHtml(nodeId) {
+  const node = menu[nodeId];
+  let html =
+    nodeId === 'start'
+      ? `
+        <div class="hero-emoji animate-in">✨</div>
+        <div class="eyebrow animate-in">You've regretfully arrived at</div>
+        <h1 class="title highlight animate-in" data-action="title">Andrew's<br>Coffee Bar</h1>
+        <p class="lede animate-in">${node.question}</p>`
+      : `${topBar()}${chipsHtml()}<h2 class="question animate-in">${node.question}</h2>`;
 
-/**
- * @param {string} nodeId
- * @param {OrderState} orderState
- * @param {boolean} [isGoingBack=false]
- */
-function renderNode(nodeId, orderState, isGoingBack = false) {
-  const node = /** @type {any} */ (menuData)[nodeId];
-
-  if (nodeId === 'surprise_handler') {
-    handleSurprise();
-    return;
-  }
-
-  if (node.isEndpoint) {
-    renderEndpoint(node, orderState, isGoingBack);
-    return;
-  }
-
-  if (!isGoingBack) {
-    pushStateToUrl(nodeId, orderState);
-  }
-
-  currentOrderState = orderState;
-  currentNodeData = node;
-  currentMultiSelections.clear();
-
-  let html = '';
-
-  if (nodeId === 'start') {
-    html += `
-      <div class="animate-in" style="font-size: 3.5rem; margin-bottom: 8px;">✨</div>
-      <div class="animate-in" style="animation-delay: 0.05s; color: var(--text-muted); font-size: 1rem; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 4px;">You've regretfully arrived at</div>
-      <h1 class="highlight animate-in" style="animation-delay: 0.1s; font-size: 2.8rem; margin-bottom: 12px; line-height: 1.1; cursor: pointer;">Andrew's<br>Coffee Bar</h1>
-      <p class="animate-in" style="animation-delay: 0.15s; margin-bottom: 32px; font-size: 1.1rem;">${node.question}</p>
-    `;
-  } else {
-    html += `<h2>${node.question}</h2>`;
-  }
-
-  if (node.multiSelect) {
-    node.options.forEach(
-      (/** @type {any} */ option, /** @type {number} */ index) => {
-        html += `<button type="button" class="btn btn-secondary toggle-btn animate-in" style="animation-delay: ${index * 0.05}s" data-index="${index}">${option.label}</button>`;
-      },
-    );
-    html += `<button type="button" class="btn animate-in" style="margin-top: 32px; animation-delay: ${node.options.length * 0.05}s" id="multi-submit-btn">Skip ➔</button>`;
-  } else {
-    node.options.forEach(
-      (/** @type {any} */ option, /** @type {number} */ index) => {
-        html += `<button type="button" class="btn option-btn animate-in" style="animation-delay: ${index * 0.05}s" data-index="${index}">${option.label}</button>`;
-      },
-    );
-  }
-
-  let actionBarHtml = '';
-  if (nodeId !== 'start') {
-    actionBarHtml += `<button type="button" class="btn btn-secondary animate-in" style="animation-delay: ${node.options ? node.options.length * 0.05 : 0}s" id="back-btn">Undo 🙂‍↔️</button>`;
-    actionBarHtml += `<button type="button" class="btn btn-danger animate-in" style="animation-delay: ${node.options ? (node.options.length + 1) * 0.05 : 0.05}s" id="restart-btn">Start over</button>`;
-  }
-
-  if (actionBarHtml) {
-    html += `<div class="action-bar">${actionBarHtml}</div>`;
-  }
-
-  if (appContainer) appContainer.innerHTML = html;
-}
-
-/**
- * @param {any} nodeData
- * @param {OrderState} orderState
- * @param {boolean} [isGoingBack=false]
- */
-function renderEndpoint(nodeData, orderState, isGoingBack = false) {
-  if (!isGoingBack) {
-    const keys = Object.keys(menuData);
-    const nodeId = keys.find(
-      (k) => /** @type {any} */ (menuData)[k] === nodeData,
-    );
-    if (nodeId) {
-      pushStateToUrl(nodeId, orderState);
+  /** @type {{title?: string, buttons: string[]}[]} */
+  const groups = [];
+  node.options.forEach((/** @type {any} */ option, /** @type {number} */ i) => {
+    if (option.secret) return;
+    let group = groups.at(-1);
+    if (!group || group.title !== option.group) {
+      groups.push((group = {title: option.group, buttons: []}));
     }
+    const delay = `style="--i: ${Math.min(i, 12)}"`;
+    group.buttons.push(
+      node.multi
+        ? `<button type="button" class="tile animate-in" ${delay} data-toggle="${i}" aria-pressed="false">${option.label}</button>`
+        : node.grid
+          ? `<button type="button" class="tile animate-in" ${delay} data-pick="${i}">${option.label}</button>`
+          : `<button type="button" class="btn animate-in" ${delay} data-pick="${i}">${option.label}</button>`,
+    );
+  });
+  const layout = node.multi || node.grid ? 'grid' : 'list';
+  for (const {title, buttons} of groups) {
+    if (title) html += `<h3 class="group-title animate-in">${title}</h3>`;
+    html += `<div class="options ${layout}">${buttons.join('')}</div>`;
   }
 
-  currentEndpointName = formatDrinkName(
-    nodeData.drinkName,
-    orderState?.modifiers,
-  );
-  currentEndpointRecipe = formatRecipe(nodeData.recipe, orderState?.modifiers);
+  if (nodeId === 'start') return `<div class="center">${html}</div>`;
+  if (node.multi) {
+    html += `<div class="dock"><button type="button" class="btn" data-action="continue">Skip ➔</button></div>`;
+  }
+  return html;
+}
 
-  if (!appContainer) return;
+/**
+ * @param {any} drink
+ * @param {string[]} mods
+ */
+const orderCard = (drink, mods) => `
+  <div class="order-card animate-in">
+    <div class="order-name">${drinkName(drink, mods)}</div>
+    ${extras(mods).length ? `<div class="order-extras">${extras(mods).join(' · ')}</div>` : ''}
+  </div>`;
 
-  const quote = getRandomSassyQuote();
+/**
+ * @param {any} drink
+ * @param {string[]} mods
+ */
+const drinkHtml = (drink, mods) => `
+  ${topBar()}
+  ${chipsHtml()}
+  <div class="drink">
+    <p class="quote animate-in">“${sassyQuote()}”</p>
+    <h1 class="drink-name highlight animate-in">${drinkName(drink, mods)}</h1>
+    ${extras(mods).length ? `<p class="drink-extras animate-in">${extras(mods).join(' · ')}</p>` : ''}
+    <p class="tagline animate-in">${recipe(drink, mods)}</p>
+  </div>
+  <div class="dock"><button type="button" class="btn" data-action="send">Send it 🚀</button></div>`;
 
-  appContainer.innerHTML = `
-    <div class="animate-in" style="font-size: 3.5rem; margin-bottom: 8px;">✨</div>
-    <h2>${quote}</h2>
-    <h1 class="highlight animate-in" style="margin-bottom: 16px;">${currentEndpointName}</h1>
-    <p class="animate-in" style="animation-delay: 0.1s"><em>(${currentEndpointRecipe})</em></p>
+function installHint() {
+  const installed =
+    matchMedia('(display-mode: standalone)').matches ||
+    /** @type {any} */ (navigator).standalone;
+  if (installed) return '';
+  if (isIOS) {
+    return `<p class="hint animate-in">Tip: tap Share, then “Add to Home Screen” and next time it's one tap away.</p>`;
+  }
+  if (/Android/.test(navigator.userAgent)) {
+    return `<p class="hint animate-in">Tip: tap ⋮, then “Add to Home screen” and next time it's one tap away.</p>`;
+  }
+  return '';
+}
 
-    <div class="action-bar animate-in" style="animation-delay: 0.2s;">
-      <button type="button" class="btn btn-secondary" id="back-btn">Undo 🙂‍↔️</button>
-      <button type="button" class="btn" id="order-btn">Send it 🚀</button>
+/**
+ * @param {any} drink
+ * @param {string[]} mods
+ */
+function sentHtml(drink, mods) {
+  if (!history.state?.confirmed) {
+    return `
+      <div class="center">
+        <div class="hero-emoji animate-in">📲</div>
+        <h2 class="animate-in">Now hit send in Messages</h2>
+        <p class="animate-in">Your order is waiting in a text to Andrew.</p>
+        ${orderCard(drink, mods)}
+        <p class="hint animate-in">Messages didn't open? Just show Andrew this screen.</p>
+      </div>
+      <div class="dock">
+        <button type="button" class="btn" data-action="confirm">I sent it ✓</button>
+        <button type="button" class="btn btn-secondary" data-action="send">Open Messages again</button>
+      </div>`;
+  }
+  return `
+    <div class="center">
+      <div class="hero-emoji animate-in">🎉</div>
+      <h1 class="highlight animate-in">Order in!</h1>
+      <p class="animate-in">${drink.making}<br>He is legally obligated to make this.</p>
+      ${orderCard(drink, mods)}
+      ${installHint()}
     </div>
-  `;
+    <div class="dock">
+      <button type="button" class="btn btn-secondary" data-action="restart">I panicked, start over 😰</button>
+      <button type="button" class="link-btn" data-action="send">Didn't send? Try again</button>
+    </div>`;
 }
 
-// Start the app!
-initApp();
+// --- Taps ---
+
+app.addEventListener('click', (e) => {
+  const el = /** @type {HTMLElement | null} */ (
+    /** @type {HTMLElement} */ (e.target).closest(
+      'button, [data-action="title"]',
+    )
+  );
+  if (!el || performance.now() - renderedAt < 250) return;
+  const {pick, toggle, step, action} = el.dataset;
+
+  if (pick !== undefined) {
+    const option = menu[/** @type {string} */ (current.nodeId)].options[pick];
+    go(option.surprise ? randomPath() : [...path, [Number(pick)]]);
+  } else if (toggle !== undefined) {
+    const i = Number(toggle);
+    if (!selections.delete(i)) selections.add(i);
+    el.setAttribute('aria-pressed', String(selections.has(i)));
+    const continueBtn = app.querySelector('[data-action="continue"]');
+    if (continueBtn) {
+      continueBtn.textContent = selections.size ? 'Continue ➔' : 'Skip ➔';
+    }
+  } else if (step !== undefined) {
+    go(path.slice(0, Number(step)));
+  } else if (action === 'continue') {
+    go([...path, [...selections].sort((a, b) => a - b)]);
+  } else if (action === 'back') {
+    back();
+  } else if (action === 'restart') {
+    go([]);
+  } else if (action === 'send') {
+    send();
+  } else if (action === 'confirm') {
+    confirmSent();
+  } else if (action === 'title') {
+    clearTimeout(titleTimer);
+    titleTimer = setTimeout(() => (titleTaps = 0), 1000);
+    if (++titleTaps === 7) {
+      titleTaps = 0;
+      go([[menu.start.options.findIndex((/** @type {any} */ o) => o.secret)]]);
+    }
+  }
+});
+
+window.addEventListener('popstate', () => {
+  inMessages = false;
+  render();
+});
+
+bindMouseTracking();
+bindGlobalHaptics();
+render();
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js');
