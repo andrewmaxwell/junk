@@ -1,115 +1,144 @@
-// 3D Lenia on the GPU. Each step convolves the state with a shell-shaped
-// kernel (via FFT, so big kernels cost nothing extra), then nudges every cell
-// toward growth or decay a little, so things change smoothly instead of
-// flipping whole cells.
+import {fftShader} from './fft.js';
 
-const fftShader = (N) => /* wgsl */ `
-struct FftParams { axis: u32, inverse: u32 }
-@group(0) @binding(0) var<storage, read_write> data: array<vec2f>;
-@group(0) @binding(1) var<uniform> fp: FftParams;
+// Flow-Lenia (Plantec et al. 2023) in 3D. Like Lenia, each kernel turns the
+// neighborhood into growth, but instead of cells growing or dying, matter
+// flows up the growth gradient (and away from crowding), so the total amount
+// never changes: nothing can die out or explode into foam.
+//
+// Each step: the state's FFT, then for each pair of kernels one inverse FFT
+// (two real results fit in one complex one), summed into the growth field;
+// then every cell works out where its matter goes, and every cell gathers what
+// lands on it from its neighbors (reintegration tracking).
 
-const N = ${N}u;
-const LOG_N = ${Math.log2(N)}u;
-var<workgroup> buf: array<vec2f, N>;
+const DD = 2; // how far matter can come from, in cells
 
-fn cellIndex(a: u32, b: u32, i: u32) -> u32 {
-  if (fp.axis == 0u) { return i + a * N + b * N * N; }
-  if (fp.axis == 1u) { return a + i * N + b * N * N; }
-  return a + b * N + i * N * N;
-}
-
-// One workgroup does a whole line of N values along one axis, in shared memory.
-@compute @workgroup_size(${N / 2})
-fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u32) {
-  for (var j = 0u; j < 2u; j++) {
-    let i = t + j * N / 2u;
-    buf[reverseBits(i) >> (32u - LOG_N)] = data[cellIndex(wg.x, wg.y, i)];
-  }
-  workgroupBarrier();
-
-  let sign = select(-1.0, 1.0, fp.inverse == 1u);
-  for (var h = 1u; h < N; h *= 2u) {
-    let k = t % h;
-    let i0 = (t / h) * 2u * h + k;
-    let angle = sign * 3.14159265358979 * f32(k) / f32(h);
-    let w = vec2f(cos(angle), sin(angle));
-    let u = buf[i0];
-    let v = buf[i0 + h];
-    let vw = vec2f(v.x * w.x - v.y * w.y, v.x * w.y + v.y * w.x);
-    buf[i0] = u + vw;
-    buf[i0 + h] = u - vw;
-    workgroupBarrier();
-  }
-
-  let scale = select(1.0, 1.0 / f32(N), fp.inverse == 1u);
-  for (var j = 0u; j < 2u; j++) {
-    let i = t + j * N / 2u;
-    data[cellIndex(wg.x, wg.y, i)] = buf[i] * scale;
-  }
-}`;
-
-const cellShaders = (N) => /* wgsl */ `
-struct Params { mu: f32, sigma: f32, dt: f32 }
+const flowShaders = (N) => /* wgsl */ `
+struct Flow { dt: f32, sigma: f32 }
 @group(0) @binding(0) var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) var<storage, read_write> field: array<vec2f>;
-@group(0) @binding(2) var<storage, read> kernelHat: array<vec2f>;
-@group(0) @binding(3) var<uniform> params: Params;
-@group(0) @binding(4) var tex: texture_storage_3d<rgba16float, write>;
+@group(0) @binding(1) var<storage, read_write> next: array<f32>;
+@group(0) @binding(2) var<storage, read_write> stateHat: array<vec2f>;
+@group(0) @binding(3) var<storage, read_write> work: array<vec2f>;
+@group(0) @binding(4) var<storage, read> kernelHat: array<vec2f>;
+@group(0) @binding(5) var<storage, read_write> growthField: array<f32>;
+@group(0) @binding(6) var<storage, read_write> disp: array<vec4f>;
+@group(0) @binding(7) var<storage, read> kernels: array<vec4f>; // m, s, h
+@group(0) @binding(8) var<uniform> flow: Flow;
+@group(0) @binding(9) var<uniform> pair: u32;
+@group(0) @binding(10) var tex: texture_storage_3d<rgba16float, write>;
 
 const N = ${N}u;
+const CELLS = ${N * N * N}u;
+const DD = ${DD};
 
 fn cell(id: vec3u) -> u32 { return id.x + id.y * N + id.z * N * N; }
+fn wrapped(p: vec3i) -> u32 { return cell(vec3u((p + i32(N)) % i32(N))); }
 
-// a bump of growth around mu, decay elsewhere (Chan's polynomial bump)
-fn growth(u: f32) -> f32 {
-  let d = (u - params.mu) / (3.0 * params.sigma);
-  let q = max(0.0, 1.0 - d * d);
-  return 2.0 * q * q * q * q - 1.0;
+fn growth(u: f32, k: vec4f) -> f32 {
+  let d = (u - k.x) / k.y;
+  return k.z * (2.0 * exp(-0.5 * d * d) - 1.0);
 }
 
 @compute @workgroup_size(4, 4, 4)
 fn pack(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
-  field[i] = vec2f(state[i], 0.0);
+  stateHat[i] = vec2f(state[i], 0.0);
 }
 
+fn cmul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+
+// two kernels at once: the first's result comes out real, the second's imaginary
 @compute @workgroup_size(4, 4, 4)
 fn multiply(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
-  let a = field[i];
-  let b = kernelHat[i];
-  field[i] = vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+  let a = stateHat[i];
+  let p = cmul(a, kernelHat[2u * pair * CELLS + i]);
+  let q = cmul(a, kernelHat[(2u * pair + 1u) * CELLS + i]);
+  work[i] = vec2f(p.x - q.y, p.y + q.x);
 }
 
 @compute @workgroup_size(4, 4, 4)
-fn update(@builtin(global_invocation_id) id: vec3u) {
+fn accumulate(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
-  let u = field[i].x; // the neighborhood: kernel-weighted average around this cell
-  state[i] = clamp(state[i] + params.dt * growth(u), 0.0, 1.0);
+  let u = work[i];
+  let g = growth(u.x, kernels[2u * pair]) + growth(u.y, kernels[2u * pair + 1u]);
+  growthField[i] = select(growthField[i], 0.0, pair == 0u) + g;
 }
 
-// What gets drawn: the state, slightly blurred (1-2-1 along each axis) so the
-// surface doesn't show the grid, plus the growth rate for coloring.
+// Smoothed gradients of the growth and of the matter itself. Matter flows up
+// the growth gradient, but where it's crowded (near 1 or more) it mostly
+// spreads out instead.
+@compute @workgroup_size(4, 4, 4)
+fn displace(@builtin(global_invocation_id) id: vec3u) {
+  var gradG = vec3f(0.0);
+  var gradA = vec3f(0.0);
+  for (var dz = -1; dz <= 1; dz++) {
+    for (var dy = -1; dy <= 1; dy++) {
+      for (var dx = -1; dx <= 1; dx++) {
+        let o = vec3f(f32(dx), f32(dy), f32(dz));
+        let w = 2.0 - abs(o);
+        let weight = o * vec3f(w.y * w.z, w.x * w.z, w.x * w.y) / 4.0;
+        let j = wrapped(vec3i(id) + vec3i(dx, dy, dz));
+        gradG += growthField[j] * weight;
+        gradA += state[j] * weight;
+      }
+    }
+  }
+  let a = state[cell(id)];
+  let alpha = clamp(a * a, 0.0, 1.0);
+  let f = gradG * (1.0 - alpha) - gradA * alpha;
+  let reach = f32(DD) - flow.sigma;
+  disp[cell(id)] = vec4f(clamp(flow.dt * f, vec3f(-reach), vec3f(reach)), 0.0);
+}
+
+// Each cell's matter lands as a little box (2 sigma wide) centered where it
+// moved to. Every cell sums the parts of its neighbors' boxes that overlap it.
+@compute @workgroup_size(4, 4, 4)
+fn gather(@builtin(global_invocation_id) id: vec3u) {
+  let s = flow.sigma;
+  var total = 0.0;
+  for (var dz = -DD; dz <= DD; dz++) {
+    for (var dy = -DD; dy <= DD; dy++) {
+      for (var dx = -DD; dx <= DD; dx++) {
+        let j = wrapped(vec3i(id) + vec3i(dx, dy, dz));
+        let a = state[j];
+        if (a == 0.0) { continue; }
+        let mu = vec3f(f32(dx), f32(dy), f32(dz)) + disp[j].xyz;
+        let overlap = clamp(min(vec3f(0.5), mu + s) - max(vec3f(-0.5), mu - s), vec3f(0.0), vec3f(1.0));
+        total += a * overlap.x * overlap.y * overlap.z;
+      }
+    }
+  }
+  next[cell(id)] = total / (8.0 * s * s * s);
+}
+
+@compute @workgroup_size(4, 4, 4)
+fn copy(@builtin(global_invocation_id) id: vec3u) {
+  let i = cell(id);
+  state[i] = next[i];
+}
+
 @compute @workgroup_size(4, 4, 4)
 fn display(@builtin(global_invocation_id) id: vec3u) {
   var a = 0.0;
   for (var dz = -1; dz <= 1; dz++) {
     for (var dy = -1; dy <= 1; dy++) {
       for (var dx = -1; dx <= 1; dx++) {
-        let p = (vec3i(id) + vec3i(dx, dy, dz) + i32(N)) % i32(N);
         let w = f32((2 - abs(dx)) * (2 - abs(dy)) * (2 - abs(dz)));
-        a += state[cell(vec3u(p))] * w;
+        a += state[wrapped(vec3i(id) + vec3i(dx, dy, dz))] * w;
       }
     }
   }
-  let u = field[cell(id)].x;
-  textureStore(tex, id, vec4f(a / 64.0, growth(u), u, 1.0));
+  // which way and how fast its matter is flowing, for coloring
+  textureStore(tex, id, vec4f(a / 64.0, disp[cell(id)].xyz / flow.dt));
 }`;
 
-// A smooth shell of radius R, with one bump per entry in peaks (inner to
-// outer, each Chan's polynomial bump), stored with its center at cell 0 so the convolution wraps around the edges.
-export const makeKernel = (N, R, peaks) => {
+const sigmoid = (x) => 1 / (1 + Math.exp(-x));
+
+// One kernel: up to three soft rings (a: where, w: how wide, b: how strong),
+// out to radius R * r, with a soft edge. Center at cell 0, so it wraps.
+export const makeKernel = (N, R, {r, a, b, w}) => {
   const k = new Float32Array(N * N * N * 2);
+  const radius = R * r;
   let sum = 0;
   for (let z = 0; z < N; z++) {
     const dz = z < N / 2 ? z : z - N;
@@ -117,11 +146,13 @@ export const makeKernel = (N, R, peaks) => {
       const dy = y < N / 2 ? y : y - N;
       for (let x = 0; x < N; x++) {
         const dx = x < N / 2 ? x : x - N;
-        const r = (Math.hypot(dx, dy, dz) / R) * peaks.length;
-        if (r <= 0 || r >= peaks.length) continue;
-        const ring = Math.floor(r);
-        const f = r - ring;
-        const v = peaks[ring] * (4 * f * (1 - f)) ** 4;
+        const D = Math.hypot(dx, dy, dz) / radius;
+        if (D > 1.5) continue; // the soft edge is all but gone by here
+        let v = 0;
+        for (let i = 0; i < a.length; i++) {
+          v += b[i] * Math.exp(-((D - a[i]) ** 2) / w[i]);
+        }
+        v *= sigmoid(-(D - 1) * 10);
         k[2 * (x + y * N + z * N * N)] = v;
         sum += v;
       }
@@ -135,13 +166,14 @@ export const makeSim = (device, N) => {
   const cells = N * N * N;
   const storage =
     GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
-  const state = device.createBuffer({size: cells * 4, usage: storage});
-  const field = device.createBuffer({size: cells * 8, usage: storage});
-  const kernelHat = device.createBuffer({size: cells * 8, usage: storage});
-  const params = device.createBuffer({
-    size: 16,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
+  const buffer = (size, usage = storage) => device.createBuffer({size, usage});
+  const state = buffer(cells * 4);
+  const next = buffer(cells * 4);
+  const stateHat = buffer(cells * 8);
+  const work = buffer(cells * 8);
+  const growthField = buffer(cells * 4);
+  const disp = buffer(cells * 16);
+  const flow = buffer(16, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
   const texture = device.createTexture({
     dimension: '3d',
     size: [N, N, N],
@@ -149,13 +181,15 @@ export const makeSim = (device, N) => {
     usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
   });
 
-  const fftModule = device.createShaderModule({code: fftShader(N)});
   const fftPipeline = device.createComputePipeline({
     layout: 'auto',
-    compute: {module: fftModule, entryPoint: 'main'},
+    compute: {
+      module: device.createShaderModule({code: fftShader(N)}),
+      entryPoint: 'main',
+    },
   });
   // forward x, y, z then inverse z, y, x
-  const fftPasses = (buffer) =>
+  const fftPasses = (data) =>
     [
       [0, 0],
       [1, 0],
@@ -164,101 +198,154 @@ export const makeSim = (device, N) => {
       [1, 1],
       [0, 1],
     ].map(([axis, inverse]) => {
-      const uniform = device.createBuffer({
-        size: 8,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      });
+      const uniform = buffer(
+        8,
+        GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      );
       device.queue.writeBuffer(uniform, 0, new Uint32Array([axis, inverse]));
       return device.createBindGroup({
         layout: fftPipeline.getBindGroupLayout(0),
         entries: [
-          {binding: 0, resource: {buffer}},
+          {binding: 0, resource: {buffer: data}},
           {binding: 1, resource: {buffer: uniform}},
         ],
       });
     });
-  const fieldFft = fftPasses(field);
-  const kernelFft = fftPasses(kernelHat);
-
-  const cellModule = device.createShaderModule({code: cellShaders(N)});
-  const cellPipelines = Object.fromEntries(
-    ['pack', 'multiply', 'update', 'display'].map((entryPoint) => [
-      entryPoint,
-      device.createComputePipeline({
-        layout: 'auto',
-        compute: {module: cellModule, entryPoint},
-      }),
-    ]),
-  );
-  // 'auto' layouts only include the bindings each entry point uses
-  const cellBindGroup = (name) => {
-    const all = [
-      {binding: 0, resource: {buffer: state}},
-      {binding: 1, resource: {buffer: field}},
-      {binding: 2, resource: {buffer: kernelHat}},
-      {binding: 3, resource: {buffer: params}},
-      {binding: 4, resource: texture.createView()},
-    ];
-    const used = {
-      pack: [0, 1],
-      multiply: [1, 2],
-      update: [0, 1, 3],
-      display: [0, 1, 3, 4],
-    }[name];
-    return device.createBindGroup({
-      layout: cellPipelines[name].getBindGroupLayout(0),
-      entries: all.filter((e) => used.includes(e.binding)),
-    });
-  };
-  const cellBindGroups = {
-    pack: cellBindGroup('pack'),
-    multiply: cellBindGroup('multiply'),
-    update: cellBindGroup('update'),
-    display: cellBindGroup('display'),
-  };
-
-  const runCells = (pass, name) => {
-    pass.setPipeline(cellPipelines[name]);
-    pass.setBindGroup(0, cellBindGroups[name]);
-    pass.dispatchWorkgroups(N / 4, N / 4, N / 4);
-  };
+  const stateFft = fftPasses(stateHat).slice(0, 3);
+  const workFft = fftPasses(work);
   const runFft = (pass, bindGroup) => {
     pass.setPipeline(fftPipeline);
     pass.setBindGroup(0, bindGroup);
     pass.dispatchWorkgroups(N, N);
   };
 
-  const setKernel = (R, peaks) => {
-    device.queue.writeBuffer(kernelHat, 0, makeKernel(N, R, peaks));
-    const encoder = device.createCommandEncoder();
-    const pass = encoder.beginComputePass();
-    for (const bindGroup of kernelFft.slice(0, 3)) runFft(pass, bindGroup);
-    pass.end();
-    device.queue.submit([encoder.finish()]);
+  const module = device.createShaderModule({code: flowShaders(N)});
+  const uses = {
+    pack: [0, 2],
+    multiply: [2, 3, 4, 9],
+    accumulate: [3, 5, 7, 9],
+    displace: [0, 5, 6, 8],
+    gather: [0, 1, 6, 8],
+    copy: [0, 1],
+    display: [0, 6, 8, 10],
+  };
+  const pipelines = Object.fromEntries(
+    Object.keys(uses).map((entryPoint) => [
+      entryPoint,
+      device.createComputePipeline({
+        layout: 'auto',
+        compute: {module, entryPoint},
+      }),
+    ]),
+  );
+
+  // these depend on the number of kernels, so they're made by setRule
+  let kernelHat = null;
+  let kernelParams = null;
+  let pairUniforms = [];
+  let bindGroups = null;
+  const makeBindGroups = () => {
+    const resources = {
+      0: {buffer: state},
+      1: {buffer: next},
+      2: {buffer: stateHat},
+      3: {buffer: work},
+      4: {buffer: kernelHat},
+      5: {buffer: growthField},
+      6: {buffer: disp},
+      7: {buffer: kernelParams},
+      8: {buffer: flow},
+      10: texture.createView(),
+    };
+    const make = (name, pairUniform) =>
+      device.createBindGroup({
+        layout: pipelines[name].getBindGroupLayout(0),
+        entries: uses[name].map((binding) => ({
+          binding,
+          resource: binding === 9 ? {buffer: pairUniform} : resources[binding],
+        })),
+      });
+    bindGroups = Object.fromEntries(
+      Object.keys(uses).map((name) => [
+        name,
+        uses[name].includes(9)
+          ? pairUniforms.map((u) => make(name, u))
+          : make(name),
+      ]),
+    );
   };
 
-  const setParams = ({mu, sigma, dt}) =>
-    device.queue.writeBuffer(params, 0, new Float32Array([mu, sigma, dt, 0]));
+  // rule: {R, kernels: [{r, a, b, w, m, s, h}]} (see rule.js)
+  const setRule = ({R, kernels}) => {
+    const pairs = Math.ceil(kernels.length / 2);
+    // an odd one out is paired with a kernel that does nothing
+    const padded = [...kernels];
+    if (padded.length % 2) padded.push(null);
+    kernelHat?.destroy();
+    kernelParams?.destroy();
+    kernelHat = buffer(pairs * 2 * cells * 8);
+    kernelParams = buffer(pairs * 2 * 16);
+    device.queue.writeBuffer(
+      kernelParams,
+      0,
+      new Float32Array(
+        padded.flatMap((k) => (k ? [k.m, k.s, k.h, 0] : [0, 1, 0, 0])),
+      ),
+    );
+    padded.forEach((k, i) => {
+      if (!k) return;
+      device.queue.writeBuffer(work, 0, makeKernel(N, R, k));
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      for (const bindGroup of workFft.slice(0, 3)) runFft(pass, bindGroup);
+      pass.end();
+      encoder.copyBufferToBuffer(work, 0, kernelHat, i * cells * 8, cells * 8);
+      device.queue.submit([encoder.finish()]);
+    });
+    while (pairUniforms.length < pairs) {
+      const u = buffer(4, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+      device.queue.writeBuffer(u, 0, new Uint32Array([pairUniforms.length]));
+      pairUniforms.push(u);
+    }
+    makeBindGroups();
+    activePairs = pairs;
+  };
+  let activePairs = 0;
+
+  const setTimeStep = (dt) =>
+    device.queue.writeBuffer(flow, 0, new Float32Array([dt, 0.65, 0, 0]));
+  setTimeStep(0.2);
 
   const setState = (values) => device.queue.writeBuffer(state, 0, values);
+
+  const run = (pass, name, bindGroup = bindGroups[name]) => {
+    pass.setPipeline(pipelines[name]);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(N / 4, N / 4, N / 4);
+  };
 
   const step = (encoder, count) => {
     const pass = encoder.beginComputePass();
     for (let s = 0; s < count; s++) {
-      runCells(pass, 'pack');
-      for (const bindGroup of fieldFft.slice(0, 3)) runFft(pass, bindGroup);
-      runCells(pass, 'multiply');
-      for (const bindGroup of fieldFft.slice(3)) runFft(pass, bindGroup);
-      runCells(pass, 'update');
+      run(pass, 'pack');
+      for (const bindGroup of stateFft) runFft(pass, bindGroup);
+      for (let p = 0; p < activePairs; p++) {
+        run(pass, 'multiply', bindGroups.multiply[p]);
+        for (const bindGroup of workFft.slice(3)) runFft(pass, bindGroup);
+        run(pass, 'accumulate', bindGroups.accumulate[p]);
+      }
+      run(pass, 'displace');
+      run(pass, 'gather');
+      run(pass, 'copy');
     }
-    runCells(pass, 'display');
+    run(pass, 'display');
     pass.end();
   };
 
-  const readback = device.createBuffer({
-    size: cells * 4,
-    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-  });
+  const readback = buffer(
+    cells * 4,
+    GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+  );
   const readState = async () => {
     const encoder = device.createCommandEncoder();
     encoder.copyBufferToBuffer(state, 0, readback, 0, cells * 4);
@@ -269,5 +356,5 @@ export const makeSim = (device, N) => {
     return values;
   };
 
-  return {N, texture, setKernel, setParams, setState, step, readState};
+  return {N, texture, setRule, setTimeStep, setState, step, readState};
 };

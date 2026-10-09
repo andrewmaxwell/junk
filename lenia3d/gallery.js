@@ -1,38 +1,29 @@
-import {makeEvaluator, isLively, mutate} from './search.js';
+import {makeEvaluator} from './search.js';
 import {makeRenderer} from './render.js';
-import {packPattern, place, unpackPattern} from './pattern.js';
+import {mutate, randomRule} from './rule.js';
 
-const storageKey = 'lenia3d-creatures';
+const storageKey = 'lenia3d-flow-favorites';
 const maxResults = 48; // not counting favorites
 
 const loadFavorites = () => {
   try {
-    return (JSON.parse(localStorage.getItem(storageKey)) ?? []).map((f) => ({
-      ...f,
-      pattern: unpackPattern(f.pattern),
-    }));
+    return JSON.parse(localStorage.getItem(storageKey)) ?? [];
   } catch {
     return [];
   }
 };
 const saveFavorites = (favorites) => {
   try {
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify(
-        favorites.map((f) => ({...f, pattern: packPattern(f.pattern)})),
-      ),
-    );
+    localStorage.setItem(storageKey, JSON.stringify(favorites));
   } catch {
     // private window or full storage: favorites just won't outlast the page
   }
 };
 
-// Searches in the background and shows what it keeps as thumbnails. Each try
-// takes a creature (one of Chan's, a starred one, or an earlier find), nudges
-// its rule, and runs it from that creature's own shape. Clicking a card calls
-// onPick with its rule and shape.
-export const makeGallery = (device, species, onPick) => {
+// Searches for rules in the background and shows what it keeps as
+// thumbnails. Clicking one calls onPick with its rule. Starred ones are saved,
+// and new tries are often small variations on them or on earlier finds.
+export const makeGallery = (device, getDensity, onPick) => {
   const N = 64;
   const {sim, evaluate} = makeEvaluator(device, N);
 
@@ -43,15 +34,13 @@ export const makeGallery = (device, species, onPick) => {
   const format = navigator.gpu.getPreferredCanvasFormat();
   thumbContext.configure({device, format});
   const renderThumb = makeRenderer(device, thumbContext, format, sim);
-  const snapshot = (pattern) => {
-    sim.setState(place(pattern, N)); // centered, rather than wherever it got to
+  const snapshot = () => {
     const encoder = device.createCommandEncoder();
-    sim.step(encoder, 1);
     renderThumb(encoder, {
       yaw: 0.6,
       pitch: 0.35,
-      distance: 1.1,
-      threshold: 0.3,
+      distance: 2.6,
+      threshold: 0.4,
       time: 0,
     });
     device.queue.submit([encoder.finish()]);
@@ -70,13 +59,8 @@ export const makeGallery = (device, species, onPick) => {
   const [status, grid] = element.children;
   document.body.append(element);
 
-  const describe = ({speed, pulse}) =>
-    [
-      speed > 2 && `glides ${speed.toFixed(0)}`,
-      pulse > 0.04 && `pulses ${(pulse * 100).toFixed(0)}%`,
-    ]
-      .filter(Boolean)
-      .join(' · ');
+  const describe = ({motion, bodies}) =>
+    `moving ${motion.toFixed(2)} · ${bodies} ${bodies === 1 ? 'body' : 'bodies'}`;
 
   const showStatus = () => {
     status.textContent = running
@@ -87,13 +71,12 @@ export const makeGallery = (device, species, onPick) => {
   const card = (item, starred) => {
     const div = document.createElement('div');
     div.className = 'card';
-    div.title = JSON.stringify(item.rule);
     div.innerHTML = `<img><button class="star"></button><div class="caption"></div>`;
     const [img, star, caption] = div.children;
     img.src = item.image;
     star.textContent = starred ? '★' : '☆';
-    caption.textContent = `${item.rule.species} · ${describe(item)}`;
-    div.addEventListener('click', () => onPick(item.rule, item.pattern));
+    caption.textContent = describe(item);
+    div.addEventListener('click', () => onPick(item.rule));
     star.addEventListener('click', (e) => {
       e.stopPropagation();
       if (starred) {
@@ -118,48 +101,24 @@ export const makeGallery = (device, species, onPick) => {
   };
 
   const pick = (items) => items[Math.floor(Math.random() * items.length)];
-  const lineage = (item) => item.rule.species;
-  // a random lineage first, then one of its members, so the one that's
-  // easiest to vary doesn't crowd out the rest
-  const pickBalanced = (items) => {
-    const name = pick([...new Set(items.map(lineage))]);
-    return pick(items.filter((item) => lineage(item) === name));
-  };
 
-  // Mostly carry on from things that already do something (depth first, as
-  // Chan did), sometimes go back to one of his creatures.
-  const pickParent = () => {
+  // Random rules already do well here, so the search mixes fresh ones with
+  // variations on starred ones and earlier finds.
+  const nextRule = () => {
     const r = Math.random();
-    if (favorites.length && r < 0.4) return pickBalanced(favorites);
-    if (results.length && r < 0.75) return pickBalanced(results);
-    return pick(species);
-  };
-
-  // when full, drop the oldest of the most common lineage
-  const trim = () => {
-    while (results.length > maxResults) {
-      const counts = {};
-      for (const r of results)
-        counts[lineage(r)] = (counts[lineage(r)] ?? 0) + 1;
-      const most = Object.keys(counts).reduce((a, b) =>
-        counts[a] >= counts[b] ? a : b,
-      );
-      results.splice(
-        results.findLastIndex((r) => lineage(r) === most),
-        1,
-      );
-    }
+    if (favorites.length && r < 0.4) return mutate(pick(favorites).rule);
+    if (results.length && r < 0.6) return mutate(pick(results).rule);
+    return randomRule();
   };
 
   const searchLoop = async () => {
     while (running) {
-      const parent = pickParent();
-      const rule = mutate(parent.rule);
-      const result = await evaluate(rule, parent.pattern);
+      const rule = nextRule();
+      const score = await evaluate(rule, {density: getDensity()});
       tried++;
-      if (result && isLively(result)) {
-        results.unshift({rule, ...result, image: snapshot(result.pattern)});
-        trim();
+      if (score) {
+        results.unshift({rule, ...score, image: snapshot()});
+        results = results.slice(0, maxResults);
         show();
       } else {
         showStatus();

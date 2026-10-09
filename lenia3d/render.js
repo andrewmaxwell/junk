@@ -1,7 +1,11 @@
-// Raymarches the simulation's 3D texture: a lit surface where the state crosses
-// a threshold, with soft shadows, ambient occlusion, and a faint glow from the
-// thinner material around it. Color shows growth: warm where it's growing,
-// cool where it's dying back.
+// Raymarches the simulation's 3D texture: a lit surface where the matter
+// crosses a threshold, with soft shadows, ambient occlusion, and a faint glow
+// from the thinner material around it. Color shows which way matter is
+// flowing, and grays out where it's still.
+//
+// The world wraps around, so instead of the cube (which would slice through
+// anything crossing its faces) this shows a ball of it, fading out at the rim.
+// Everything inside the ball is in one piece.
 
 const shader = /* wgsl */ `
 struct View {
@@ -22,15 +26,17 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
 
 // the world is the cube [-1, 1]^3, wrapping around at the edges like the sim
 fn vox(p: vec3f) -> vec4f { return textureSampleLevel(vol, samp, p * 0.5 + 0.5, 0.0); }
-fn density(p: vec3f) -> f32 { return vox(p).r; }
+fn fade(p: vec3f) -> f32 { return 1.0 - smoothstep(0.82, 1.0, length(p)); }
+fn density(p: vec3f) -> f32 { return vox(p).r * fade(p); }
 
-fn boxHit(ro: vec3f, rd: vec3f) -> vec2f {
-  let inv = 1.0 / rd;
-  let a = (-1.0 - ro) * inv;
-  let b = (1.0 - ro) * inv;
-  let lo = min(a, b);
-  let hi = max(a, b);
-  return vec2f(max(max(lo.x, lo.y), max(lo.z, 0.0)), min(min(hi.x, hi.y), hi.z));
+// where a ray is inside the unit ball
+fn ballHit(ro: vec3f, rd: vec3f) -> vec2f {
+  let b = dot(ro, rd);
+  let c = dot(ro, ro) - 1.0;
+  let h = b * b - c;
+  if (h < 0.0) { return vec2f(1.0, 0.0); }
+  let r = sqrt(h);
+  return vec2f(max(-b - r, 0.0), -b + r);
 }
 
 const LIGHT = vec3f(0.45, 0.8, 0.35);
@@ -40,12 +46,16 @@ fn background(rd: vec3f) -> vec3f {
   return mix(vec3f(0.002, 0.002, 0.004), vec3f(0.012, 0.015, 0.028), t);
 }
 
-fn growthColor(g: f32) -> vec3f {
-  let growing = vec3f(1.0, 0.42, 0.12);
-  let steady = vec3f(0.16, 0.5, 0.55);
-  let dying = vec3f(0.42, 0.22, 0.95);
-  let t = sqrt(abs(g));
-  return select(mix(steady, dying, t), mix(steady, growing, t), g > 0.0);
+// Hue from the direction matter is flowing, so a body moving as one has one
+// color and currents inside it show up as bands; pale and dim where it's
+// still. Strength is on a log scale, since some rules flow a hundred times
+// faster than others.
+fn flowColor(flow: vec3f) -> vec3f {
+  let speed = length(flow);
+  let t = clamp(log(speed * 10.0) / 4.6, 0.0, 1.0);
+  let hue = 0.5 + 0.5 * flow / max(speed, 1e-6);
+  let vivid = hue * hue * vec3f(1.0, 0.85, 1.1);
+  return mix(vec3f(0.3, 0.33, 0.4), vivid, t);
 }
 
 fn shadow(p: vec3f) -> f32 {
@@ -53,7 +63,7 @@ fn shadow(p: vec3f) -> f32 {
   var t = view.voxel * 2.0;
   for (var i = 0; i < 40; i++) {
     let q = p + LIGHT * t;
-    if (any(abs(q) > vec3f(1.0))) { break; }
+    if (dot(q, q) > 1.0) { break; }
     dens += density(q) * t * 0.12;
     t *= 1.12;
   }
@@ -78,7 +88,7 @@ fn main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let ro = view.eye;
 
   var color = background(rd);
-  let span = boxHit(ro, rd);
+  let span = ballHit(ro, rd);
   if (span.x < span.y) {
     let stepSize = view.voxel * 0.6;
     // jitter the start so banding becomes fine noise
@@ -91,11 +101,13 @@ fn main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     var first = true;
     loop {
       if (t > span.y) { break; }
-      let s = vox(ro + rd * t);
+      let q = ro + rd * t;
+      let v = vox(q);
+      let s = vec4f(density(q), v.yzw);
       if (s.r > view.threshold) { hit = true; break; }
       // thin material glows faintly and also hides what's behind it, like fog
       let thin = smoothstep(0.0, view.threshold, s.r) * stepSize;
-      glow += growthColor(s.g) * thin * transmittance;
+      glow += flowColor(s.yzw) * thin * transmittance;
       transmittance *= exp(-thin * 3.0);
       prevT = t;
       first = false;
@@ -110,24 +122,14 @@ fn main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
         let m = (a + b) * 0.5;
         if (density(ro + rd * m) > view.threshold) { b = m; } else { a = m; }
       }
-      var p = ro + rd * b;
+      let p = ro + rd * b;
       let e = view.voxel;
-      var n = -normalize(vec3f(
+      let n = -normalize(vec3f(
         density(p + vec3f(e, 0, 0)) - density(p - vec3f(e, 0, 0)),
         density(p + vec3f(0, e, 0)) - density(p - vec3f(0, e, 0)),
         density(p + vec3f(0, 0, e)) - density(p - vec3f(0, 0, e)),
       ) + vec3f(1e-6));
-      // material cut open by the edge of the world: show the cut face flat
-      if (first && density(ro + rd * span.x) > view.threshold) {
-        p = ro + rd * span.x;
-        let q = abs(p);
-        n = sign(p) * vec3f(
-          select(0.0, 1.0, q.x >= max(q.y, q.z)),
-          select(0.0, 1.0, q.y > q.x && q.y >= q.z),
-          select(0.0, 1.0, q.z > max(q.x, q.y)),
-        );
-      }
-      let albedo = growthColor(vox(p).g);
+      let albedo = flowColor(vox(p).yzw);
       let diffuse = max(dot(n, LIGHT), 0.0) * shadow(p + n * e);
       let ao = occlusion(p, n);
       let sky = (0.5 + 0.5 * n.y) * vec3f(0.12, 0.15, 0.24);
