@@ -105,7 +105,7 @@ gui
 gui.add(settings, 'speed', 0, 6, 1).name('steps per frame');
 gui.add(settings, 'threshold', 0.05, 1.5, 0.01).name('surface');
 gui
-  .add(settings, 'N', {'64³': 64, '128³ (8 times the room)': 128})
+  .add(settings, 'N', {'64³': 64, '128³ (slow)': 128})
   .name('world size')
   .onChange(() => {
     writeHash();
