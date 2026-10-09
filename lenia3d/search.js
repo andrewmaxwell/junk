@@ -51,9 +51,11 @@ export const makeEvaluator = (device, N) => {
   // place over the last stretch (as a fraction of all of it, per 500 steps).
   const evaluate = async (
     rule,
-    {density = 0.08, steps = 3000, every = 500} = {},
+    {density = 0.08, food = {}, steps = 3000, every = 500, batch = 25} = {},
   ) => {
     sim.setRule(rule);
+    sim.setFood(food);
+    sim.resetFood();
     sim.setState(makeSeed(N, density, rule.channels));
     sim.setGenomes(makeGenomes(N, rule));
     sim.setColorMode(rule.channels > 1 ? 1 : 0); // for the thumbnail
@@ -61,9 +63,15 @@ export const makeEvaluator = (device, N) => {
     const motions = [];
     let state;
     for (let t = every; t <= steps; t += every) {
-      const encoder = device.createCommandEncoder();
-      sim.step(encoder, every);
-      device.queue.submit([encoder.finish()]);
+      // In small batches, waiting for each: one long batch can run past the
+      // GPU's time limit (which loses the device), and it would stall the
+      // main view's frames behind it.
+      for (let done = 0; done < every; done += batch) {
+        const encoder = device.createCommandEncoder();
+        sim.step(encoder, Math.min(batch, every - done));
+        device.queue.submit([encoder.finish()]);
+        await device.queue.onSubmittedWorkDone();
+      }
       state = await sim.readState();
       if (previous && t > steps / 2) {
         let change = 0;

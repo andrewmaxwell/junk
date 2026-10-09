@@ -1,4 +1,4 @@
-import {fftShader} from './fft.js';
+import {fftLines, fftShader} from './fft.js';
 
 // Flow-Lenia (Plantec et al. 2023) in 3D. Like Lenia, each kernel turns the
 // neighborhood into growth, but instead of cells growing or dying, matter
@@ -20,7 +20,14 @@ export const MAX_KERNELS = 12;
 export const GENES = 16; // kernel weights, then a lineage color, then spare
 
 const flowShaders = (N) => /* wgsl */ `
-struct Flow { dt: f32, sigma: f32, channels: u32, colorMode: u32 }
+struct Flow {
+  dt: f32, sigma: f32, channels: u32, colorMode: u32,
+  // food: how hard matter is drawn to it, how fast matter eats it, how fast
+  // it grows back
+  pull: f32, eat: f32, regrow: f32,
+  // whether genomes can differ from cell to cell (if not, they're left alone)
+  evolving: u32,
+}
 @group(0) @binding(0) var<storage, read_write> state: array<f32>;
 @group(0) @binding(1) var<storage, read_write> next: array<f32>;
 @group(0) @binding(2) var<storage, read_write> stateHat: array<vec2f>;
@@ -39,6 +46,17 @@ struct Flow { dt: f32, sigma: f32, channels: u32, colorMode: u32 }
 @group(0) @binding(12) var<storage, read_write> nextGenome: array<f32>;
 struct Mutation { center: vec3f, radius: f32, color: vec3f, seed: u32 }
 @group(0) @binding(13) var<uniform> mutation: Mutation;
+// Food covers the world. Matter eats it where it sits and is drawn toward
+// where there's more, and it slowly grows back.
+@group(0) @binding(14) var<storage, read_write> food: array<f32>;
+// what's been eaten, for drawing
+// Stirring: matter near a line (the ray under the pointer, in the view's
+// coordinates, where the world spans -1 to 1) gets pushed along.
+struct Stir { origin: vec3f, radius: f32, dir: vec3f, unused: f32, push: vec3f, unused2: f32 }
+@group(0) @binding(16) var<uniform> stir: Stir;
+// all the matter in each cell, every kind together, worked out once a step
+@group(0) @binding(17) var<storage, read_write> totalMatter: array<f32>;
+@group(0) @binding(15) var eatenTex: texture_storage_3d<rgba16float, write>;
 
 const N = ${N}u;
 const CELLS = ${N * N * N}u;
@@ -73,6 +91,7 @@ fn pack(@builtin(global_invocation_id) id: vec3u) {
     stateHat[c * CELLS + i] = vec2f(state[c * CELLS + i], 0.0);
     growthField[c * CELLS + i] = 0.0;
   }
+  totalMatter[i] = total(i);
 }
 
 fn cmul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
@@ -107,6 +126,7 @@ fn displace(@builtin(global_invocation_id) id: vec3u) {
   let c = which.x;
   var gradG = vec3f(0.0);
   var gradA = vec3f(0.0);
+  var gradF = vec3f(0.0);
   for (var dz = -1; dz <= 1; dz++) {
     for (var dy = -1; dy <= 1; dy++) {
       for (var dx = -1; dx <= 1; dx++) {
@@ -115,15 +135,19 @@ fn displace(@builtin(global_invocation_id) id: vec3u) {
         let weight = o * vec3f(w.y * w.z, w.x * w.z, w.x * w.y) / 4.0;
         let j = wrapped(vec3i(id) + vec3i(dx, dy, dz));
         gradG += growthField[c * CELLS + j] * weight;
-        gradA += total(j) * weight;
+        gradA += totalMatter[j] * weight;
+        gradF += food[j] * weight;
       }
     }
   }
-  let a = total(cell(id));
+  let a = totalMatter[cell(id)];
   let alpha = clamp(a * a, 0.0, 1.0);
-  let f = gradG * (1.0 - alpha) - gradA * alpha;
+  let f = (gradG + flow.pull * gradF) * (1.0 - alpha) - gradA * alpha;
+  let v = (vec3f(id) + 0.5) / f32(N) * 2.0 - 1.0 - stir.origin;
+  let off = v - stir.dir * dot(v, stir.dir);
+  let stirred = stir.push * exp(-dot(off, off) / (stir.radius * stir.radius));
   let reach = f32(DD) - flow.sigma;
-  disp[c * CELLS + cell(id)] = vec4f(clamp(flow.dt * f, vec3f(-reach), vec3f(reach)), 0.0);
+  disp[c * CELLS + cell(id)] = vec4f(clamp(flow.dt * (f + stirred), vec3f(-reach), vec3f(reach)), 0.0);
 }
 
 // Each cell's matter lands as a little box (2 sigma wide) centered where it
@@ -148,37 +172,28 @@ fn gather(@builtin(global_invocation_id) id: vec3u) {
   next[c * CELLS + cell(id)] = sum / (8.0 * s * s * s);
 }
 
-// A cell's new genome is the genome of one of the cells whose matter landed
-// on it, picked at random in proportion to how much each brought (of every
-// kind). Where bodies with different genomes meet, they mix cell by cell.
+// A cell's new genome comes from where its matter came from: trace back along
+// the flow here (each kind's, weighted by how much of it there is), jittered
+// by up to the width of the box matter lands as, and copy the genome there.
+// Where bodies with different genomes meet, they mix cell by cell.
 @compute @workgroup_size(4, 4, 4)
 fn inherit(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
-  let s = flow.sigma;
-  var seen = 0.0;
-  var chosen = i;
-  var random = hash(i ^ bitcast<u32>(state[i] + disp[i].x));
-  for (var dz = -DD; dz <= DD; dz++) {
-    for (var dy = -DD; dy <= DD; dy++) {
-      for (var dx = -DD; dx <= DD; dx++) {
-        let j = wrapped(vec3i(id) + vec3i(dx, dy, dz));
-        var brought = 0.0;
-        for (var c = 0u; c < flow.channels; c++) {
-          let a = state[c * CELLS + j];
-          if (a == 0.0) { continue; }
-          let mu = vec3f(f32(dx), f32(dy), f32(dz)) + disp[c * CELLS + j].xyz;
-          let overlap = clamp(min(vec3f(0.5), mu + s) - max(vec3f(-0.5), mu - s), vec3f(0.0), vec3f(1.0));
-          brought += a * overlap.x * overlap.y * overlap.z;
-        }
-        if (brought <= 0.0) { continue; }
-        // keep each candidate with chance brought / everything seen so far
-        seen += brought;
-        random = hash(random);
-        if (f32(random >> 8u) / 16777216.0 * seen < brought) { chosen = j; }
-      }
-    }
+  var flowHere = vec3f(0.0);
+  var amount = 0.0;
+  for (var c = 0u; c < flow.channels; c++) {
+    let a = state[c * CELLS + i];
+    flowHere += a * disp[c * CELLS + i].xyz;
+    amount += a;
   }
-  for (var g = 0u; g < GENES; g++) { nextGenome[i * GENES + g] = genome[chosen * GENES + g]; }
+  flowHere /= max(amount, 1e-6);
+  let r1 = hash(i ^ bitcast<u32>(amount + flowHere.x));
+  let r2 = hash(r1);
+  let r3 = hash(r2);
+  let jitter = (vec3f(f32(r1 >> 8u), f32(r2 >> 8u), f32(r3 >> 8u)) / 16777216.0 * 2.0 - 1.0) * flow.sigma;
+  let source = vec3i(round(vec3f(id) - flowHere + jitter));
+  let j = wrapped(source);
+  for (var g = 0u; g < GENES; g++) { nextGenome[i * GENES + g] = genome[j * GENES + g]; }
 }
 
 // A mutation: every cell within a small ball gets the same new lineage color
@@ -203,7 +218,13 @@ fn mutate(@builtin(global_invocation_id) id: vec3u) {
 fn copy(@builtin(global_invocation_id) id: vec3u) {
   let i = cell(id);
   for (var c = 0u; c < flow.channels; c++) { state[c * CELLS + i] = next[c * CELLS + i]; }
-  for (var g = 0u; g < GENES; g++) { genome[i * GENES + g] = nextGenome[i * GENES + g]; }
+  if (flow.evolving == 1u) {
+    for (var g = 0u; g < GENES; g++) { genome[i * GENES + g] = nextGenome[i * GENES + g]; }
+  }
+  // dense matter eats much faster than thin haze, so bodies leave trails
+  let f = food[i];
+  let a = total(i);
+  food[i] = clamp(f + flow.dt * (flow.regrow * (1.0 - f) - flow.eat * a * a * f), 0.0, 1.0);
 }
 
 // What gets drawn: all the matter, slightly blurred so the surface doesn't
@@ -232,6 +253,7 @@ fn display(@builtin(global_invocation_id) id: vec3u) {
   if (flow.colorMode == 0u) { extra = disp[cell(id)].xyz / flow.dt; }
   if (flow.colorMode == 2u) { extra = lineage / max(a, 1e-6); }
   textureStore(tex, id, vec4f(a, extra));
+  textureStore(eatenTex, id, vec4f(1.0 - food[cell(id)], 0.0, 0.0, 0.0));
 }`;
 
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
@@ -281,7 +303,10 @@ export const makeSim = (device, N) => {
   const genome = buffer(cells * GENES * 4);
   const mutation = uniform(32);
   const nextGenome = buffer(cells * GENES * 4);
-  const flow = uniform(16);
+  const food = buffer(cells * 4);
+  const totalMatter = buffer(cells * 4);
+  const flow = uniform(32);
+  const stir = uniform(48);
   const texture = device.createTexture({
     dimension: '3d',
     size: [N, N, N],
@@ -323,21 +348,28 @@ export const makeSim = (device, N) => {
   const runFft = (pass, bindGroup) => {
     pass.setPipeline(fftPipeline);
     pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(N, N);
+    pass.dispatchWorkgroups(N / fftLines(N), N);
   };
 
   const module = device.createShaderModule({code: flowShaders(N)});
   const uses = {
-    pack: [0, 2, 5, 8],
+    pack: [0, 2, 5, 8, 17],
     multiply: [2, 3, 4, 9],
     accumulate: [3, 5, 7, 9, 11],
-    displace: [0, 5, 6, 8, 9],
+    displace: [5, 6, 8, 9, 14, 16, 17],
     gather: [0, 1, 6, 8, 9],
     inherit: [0, 6, 8, 11, 12],
     mutate: [11, 13],
-    copy: [0, 1, 8, 11, 12],
-    display: [0, 6, 8, 10, 11],
+    copy: [0, 1, 8, 11, 12, 14],
+    display: [0, 6, 8, 10, 11, 14, 15],
   };
+  const eatenTexture = device.createTexture({
+    dimension: '3d',
+    size: [N, N, N],
+    format: 'rgba16float',
+    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+  });
+
   const pipelines = Object.fromEntries(
     Object.keys(uses).map((entryPoint) => [
       entryPoint,
@@ -375,6 +407,10 @@ export const makeSim = (device, N) => {
       11: {buffer: genome},
       12: {buffer: nextGenome},
       13: {buffer: mutation},
+      14: {buffer: food},
+      15: eatenTexture.createView(),
+      16: {buffer: stir},
+      17: {buffer: totalMatter},
     };
     const make = (name, which) =>
       device.createBindGroup({
@@ -399,10 +435,16 @@ export const makeSim = (device, N) => {
 
   let dt = 0.2;
   let colorMode = 0;
+  let evolving = false;
+  let sigma = 0.65;
+  let foodParams = {pull: 0, eat: 0, regrow: 0};
   const writeFlow = () => {
-    const data = new ArrayBuffer(16);
-    new Float32Array(data, 0, 2).set([dt, 0.65]);
+    const data = new ArrayBuffer(32);
+    new Float32Array(data, 0, 2).set([dt, sigma]);
     new Uint32Array(data, 8, 2).set([channels, colorMode]);
+    const {pull, eat, regrow} = foodParams;
+    new Float32Array(data, 16, 3).set([pull, eat, regrow]);
+    new Uint32Array(data, 28, 1).set([evolving ? 1 : 0]);
     device.queue.writeBuffer(flow, 0, data);
   };
 
@@ -450,8 +492,33 @@ export const makeSim = (device, N) => {
     writeFlow();
   };
 
-  const setTimeStep = (value) => {
+  // {pull, eat, regrow} (see the Flow struct)
+  const setFood = (params) => {
+    foodParams = {...foodParams, ...params};
+    writeFlow();
+  };
+  // food everywhere, as if nothing had eaten yet
+  const resetFood = () =>
+    device.queue.writeBuffer(food, 0, new Float32Array(cells).fill(1));
+
+  // push matter near a line (origin, unit dir, in view coordinates) by push
+  // (cells per unit of time); push [0, 0, 0] to stop
+  const setStir = (origin, dir, push, radius = 0.12) => {
+    const data = new Float32Array(12);
+    data.set([...origin, radius, ...dir, 0, ...push, 0]);
+    device.queue.writeBuffer(stir, 0, data);
+  };
+
+  const setTimeStep = (value, sigmaValue = 0.65) => {
     dt = value;
+    sigma = sigmaValue;
+    writeFlow();
+  };
+
+  // Genomes only need to travel with matter when they differ from place to
+  // place (several lineages, or mutations); otherwise that work is skipped.
+  const setEvolving = (value) => {
+    evolving = value;
     writeFlow();
   };
 
@@ -510,7 +577,7 @@ export const makeSim = (device, N) => {
         run(pass, 'displace', bindGroups.displace[c]);
         run(pass, 'gather', bindGroups.gather[c]);
       }
-      run(pass, 'inherit');
+      if (evolving) run(pass, 'inherit');
       run(pass, 'copy');
     }
     run(pass, 'display');
@@ -538,11 +605,18 @@ export const makeSim = (device, N) => {
     return values;
   };
 
+  setStir([0, 0, 0], [0, 0, 1], [0, 0, 0]);
+
   return {
     N,
     texture,
+    eatenTexture,
     setRule,
     setTimeStep,
+    setEvolving,
+    setFood,
+    resetFood,
+    setStir,
     setColorMode,
     setState,
     setGenomes,

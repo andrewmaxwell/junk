@@ -29,8 +29,8 @@ const saveFavorites = (favorites) => {
 // Searches for rules in the background and shows what it keeps as
 // thumbnails. Clicking one calls onPick with its rule. Starred ones are saved,
 // and new tries are often small variations on them or on earlier finds.
-// getOptions gives the starting density and how many kinds of matter fresh
-// rules should have.
+// getOptions gives the starting density, the food settings ({pull, eat,
+// regrow}), and how many kinds of matter fresh rules should have.
 export const makeGallery = (device, getOptions, onPick) => {
   const N = 64;
   const {sim, evaluate} = makeEvaluator(device, N);
@@ -122,7 +122,8 @@ export const makeGallery = (device, getOptions, onPick) => {
   const searchLoop = async () => {
     while (running) {
       const rule = nextRule();
-      const score = await evaluate(rule, {density: getOptions().density});
+      const {density, food} = getOptions();
+      const score = await evaluate(rule, {density, food});
       tried++;
       if (score) {
         results.unshift({rule, ...score, image: snapshot(rule)});

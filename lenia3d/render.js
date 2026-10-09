@@ -18,6 +18,8 @@ struct View {
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var vol: texture_3d<f32>;
 @group(0) @binding(2) var samp: sampler;
+// how much food has been eaten, 0 to 1
+@group(0) @binding(4) var eatenVol: texture_3d<f32>;
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
@@ -29,6 +31,9 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
 fn vox(p: vec3f) -> vec4f { return textureSampleLevel(vol, samp, p * 0.5 + 0.5, 0.0); }
 fn fade(p: vec3f) -> f32 { return 1.0 - smoothstep(0.82, 1.0, length(p)); }
 fn density(p: vec3f) -> f32 { return vox(p).r * fade(p); }
+fn eaten(p: vec3f) -> f32 {
+  return textureSampleLevel(eatenVol, samp, p * 0.5 + 0.5, 0.0).r * fade(p);
+}
 
 // where a ray is inside the unit ball
 fn ballHit(ro: vec3f, rd: vec3f) -> vec2f {
@@ -41,6 +46,7 @@ fn ballHit(ro: vec3f, rd: vec3f) -> vec2f {
 }
 
 const LIGHT = vec3f(0.45, 0.8, 0.35);
+const TRAIL = vec3f(0.03, 0.05, 0.12);
 
 fn background(rd: vec3f) -> vec3f {
   let t = rd.y * 0.5 + 0.5;
@@ -120,6 +126,9 @@ fn main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       // thin material glows faintly and also hides what's behind it, like fog
       let thin = smoothstep(0.0, view.threshold, s.r) * stepSize;
       glow += matterColor(s.yzw) * thin * transmittance;
+      // trails: where food has been eaten and not grown back yet
+      let e = eaten(q);
+      glow += TRAIL * e * e * stepSize * transmittance;
       transmittance *= exp(-thin * 3.0);
       prevT = t;
       first = false;
@@ -161,6 +170,33 @@ fn main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
 }
 `;
 
+// camera: yaw and pitch around the origin at a distance
+export const cameraFrame = ({yaw, pitch, distance}) => {
+  const eye = [
+    Math.cos(pitch) * Math.sin(yaw) * distance,
+    Math.sin(pitch) * distance,
+    Math.cos(pitch) * Math.cos(yaw) * distance,
+  ];
+  const forward = eye.map((v) => -v / distance);
+  const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
+  const up = [
+    right[1] * forward[2] - right[2] * forward[1],
+    right[2] * forward[0] - right[0] * forward[2],
+    right[0] * forward[1] - right[1] * forward[0],
+  ];
+  return {eye, right, up, forward};
+};
+
+// the direction through a point on screen (ndc: -1 to 1, y up), matching the
+// shader
+export const rayThrough = ({right, up, forward}, [x, y], aspect) => {
+  const d = [0, 1, 2].map(
+    (i) => forward[i] * 1.8 + right[i] * x * aspect + up[i] * y,
+  );
+  const length = Math.hypot(...d);
+  return d.map((v) => v / length);
+};
+
 export const makeRenderer = (device, context, format, sim) => {
   const module = device.createShaderModule({code: shader});
   const pipeline = device.createRenderPipeline({
@@ -190,24 +226,13 @@ export const makeRenderer = (device, context, format, sim) => {
       {binding: 1, resource: sim.texture.createView()},
       {binding: 2, resource: sampler},
       {binding: 3, resource: {buffer: screenBuffer}},
+      {binding: 4, resource: sim.eatenTexture.createView()},
     ],
   });
 
-  // camera: yaw and pitch around the origin at a distance
   return (encoder, {yaw, pitch, distance, threshold, colorMode = 0}) => {
     const {width, height} = context.canvas;
-    const eye = [
-      Math.cos(pitch) * Math.sin(yaw) * distance,
-      Math.sin(pitch) * distance,
-      Math.cos(pitch) * Math.cos(yaw) * distance,
-    ];
-    const forward = eye.map((v) => -v / distance);
-    const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
-    const up = [
-      right[1] * forward[2] - right[2] * forward[1],
-      right[2] * forward[0] - right[0] * forward[2],
-      right[0] * forward[1] - right[1] * forward[0],
-    ];
+    const {eye, right, up, forward} = cameraFrame({yaw, pitch, distance});
     device.queue.writeBuffer(
       viewBuffer,
       0,
