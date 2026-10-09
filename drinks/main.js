@@ -205,6 +205,7 @@ function installHint() {
 function sentHtml(drink, mods) {
   if (!history.state?.confirmed) {
     return `
+      ${topBar()}
       <div class="center">
         <div class="hero-emoji animate-in">📲</div>
         <h2 class="animate-in">Now hit send in Messages</h2>
