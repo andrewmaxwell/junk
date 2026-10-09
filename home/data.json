@@ -24,12 +24,6 @@
     "desc": "Watch the inner workings of a tiny GPT doing inference"
   },
   {
-    "filePath": "lenia3d",
-    "title": "Lenia 3D",
-    "year": 2026,
-    "desc": "Matter that gathers into bodies, forages for food, carries its own rules, and evolves: 3D Flow-Lenia on WebGPU"
-  },
-  {
     "filePath": "mowFast",
     "title": "MowFast",
     "year": 2026,
@@ -58,6 +52,12 @@
     "title": "Packing Explorer",
     "year": 2026,
     "desc": "How efficiently can copies of a shape be packed into a container?"
+  },
+  {
+    "filePath": "primordial",
+    "title": "Primordial",
+    "year": 2026,
+    "desc": "Matter that gathers into bodies, forages for food, carries its own rules, and evolves: 3D Flow-Lenia on WebGPU"
   },
   {
     "filePath": "soundViz",

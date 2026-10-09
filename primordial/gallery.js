@@ -2,6 +2,7 @@ import {makeEvaluator} from './search.js';
 import {makeRenderer} from './render.js';
 import {mutate, randomRule} from './rule.js';
 
+// (named from when this project was lenia3d; kept so starred rules survive)
 const storageKey = 'lenia3d-flow-favorites';
 const maxResults = 48; // not counting favorites
 

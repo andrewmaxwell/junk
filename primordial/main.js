@@ -125,7 +125,7 @@ const actions = {
   nudge: () => loadRule(mutate(rule)),
 };
 
-const gui = new GUI({title: 'Lenia 3D'});
+const gui = new GUI({title: 'Primordial'});
 gui
   .add(actions, 'kinds', {one: 1, two: 2, three: 3})
   .name('kinds of matter')

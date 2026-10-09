@@ -1,4 +1,4 @@
-Lenia 3D - 2026 - Matter that gathers into bodies, forages for food, carries its own rules, and evolves: 3D Flow-Lenia on WebGPU
+Primordial - 2026 - Matter that gathers into bodies, forages for food, carries its own rules, and evolves: 3D Flow-Lenia on WebGPU
 
 A world of matter that only ever moves around, never appears or disappears. Every step, each of about ten kernels looks at the neighborhood of every cell (a few soft rings, out to some radius) and turns what it sees into "growth": a bump that's high when the neighborhood is just right. Matter then flows uphill on the summed growth, and away from crowding. That's the whole rule. Starting from an even haze, it gathers into bodies that wriggle, merge, split, stripe, and drift.
 
