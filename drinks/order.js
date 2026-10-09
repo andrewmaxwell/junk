@@ -38,37 +38,3 @@ export function textOrder(drink, mods) {
   const separator = /iPad|iPhone|iPod/.test(navigator.userAgent) ? '&' : '?';
   location.href = `sms:${phone}${separator}body=${body}`;
 }
-
-const sassyQuotes = [
-  'A truly terrible choice.',
-  "I'm judging you silently.",
-  'Bold of you to assume this will fix you.',
-  'Your therapist would disagree.',
-  "I'll make it, but I won't respect you for it.",
-  'Is this a cry for help?',
-  'Blink twice if you need water instead.',
-  "Well, nobody's perfect.",
-  "Don't say I didn't warn you.",
-  "I guess we're doing this.",
-  "I've seen better life choices made at 3 AM.",
-  "This won't fill the void, but okay.",
-  'My condolences to your nervous system.',
-  'Processing your order and my disappointment.',
-  'Just remember, you did this to yourself.',
-  'I question your decision-making skills.',
-  'Enjoy your artificially flavored coping mechanism.',
-  'Are we absolutely sure about this?',
-  'Adding extra judgment at no additional cost.',
-  "That's certainly one way to ruin water.",
-  "This'll just be our little secret.",
-  "I'm going to make this exactly how you asked, which is your true punishment.",
-  'If mediocrity had a flavor profile, you just nailed it.',
-  'This is the beverage equivalent of replying "k" to a heartfelt text.',
-  'Proof that free will was a mistake.',
-  'This order is legally considered a crime in three countries.',
-  'You could have just asked for a cup of disappointment.',
-  'Your order has been received and deeply judged.',
-];
-
-export const sassyQuote = () =>
-  sassyQuotes[Math.floor(Math.random() * sassyQuotes.length)];

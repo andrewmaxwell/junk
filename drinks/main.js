@@ -1,6 +1,7 @@
 import {menu} from './menu.js';
-import {drinkName, extras, recipe, sassyQuote, textOrder} from './order.js';
+import {drinkName, extras, recipe, textOrder} from './order.js';
 import {fromHash, randomPath, toHash, walk} from './path.js';
+import {roast} from './roasts.js';
 import {
   bindGlobalHaptics,
   bindMouseTracking,
@@ -65,7 +66,8 @@ function go(newPath, surprise = false) {
 
 /** Swaps the surprise for another, so Back still goes to the start. */
 function reroll() {
-  history.replaceState(history.state, '', urlFor(randomPath()));
+  const rolls = (history.state?.rolls ?? 0) + 1;
+  history.replaceState({...history.state, rolls}, '', urlFor(randomPath()));
   render();
 }
 
@@ -109,6 +111,28 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // --- Screens ---
+
+const rerollLabels = [
+  'Roll again',
+  'Again?',
+  'Commitment issues?',
+  'You know you can just pick one',
+  'The dice are getting tired',
+  'Fine.',
+];
+
+/**
+ * @param {number} picked
+ * @param {number} total
+ */
+function continueLabel(picked, total) {
+  if (!picked) return 'Skip (no joy, thanks)';
+  if (picked === total && total > 3)
+    return 'Continue (all of it, apparently) ➔';
+  if (picked >= 5) return 'Continue (diabetes speedrun) ➔';
+  if (picked >= 3) return 'Continue (living dangerously) ➔';
+  return 'Continue ➔';
+}
 
 const topBar = () => `
   <header class="top-bar">
@@ -167,7 +191,7 @@ function questionHtml(nodeId) {
 
   if (nodeId === 'start') return `<div class="center">${html}</div>`;
   if (node.multi) {
-    html += `<div class="dock"><button type="button" class="btn" data-action="continue">Skip ➔</button></div>`;
+    html += `<div class="dock"><button type="button" class="btn" data-action="continue">${continueLabel(0, node.options.length)}</button></div>`;
   }
   return html;
 }
@@ -190,14 +214,14 @@ const drinkHtml = (drink, mods) => `
   ${topBar()}
   ${chipsHtml()}
   <div class="drink">
-    <p class="quote animate-in">“${sassyQuote()}”</p>
+    <p class="quote animate-in">“${roast(drink, mods)}”</p>
     <h1 class="drink-name highlight animate-in">${drinkName(drink, mods)}</h1>
     ${extras(mods).length ? `<p class="drink-extras animate-in">${extras(mods).join(' · ')}</p>` : ''}
     <p class="tagline animate-in">${recipe(drink, mods)}</p>
   </div>
   <div class="dock">
     <button type="button" class="btn" data-action="send">Send it 🚀</button>
-    ${history.state?.surprise ? `<button type="button" class="btn btn-secondary" data-action="reroll">🎲 Roll again</button>` : ''}
+    ${history.state?.surprise ? `<button type="button" class="btn btn-secondary" data-action="reroll">🎲 ${rerollLabels[Math.min(history.state.rolls ?? 0, rerollLabels.length - 1)]}</button>` : ''}
   </div>`;
 
 function installHint() {
@@ -269,7 +293,10 @@ app.addEventListener('click', (e) => {
     el.setAttribute('aria-pressed', String(selections.has(i)));
     const continueBtn = app.querySelector('[data-action="continue"]');
     if (continueBtn) {
-      continueBtn.textContent = selections.size ? 'Continue ➔' : 'Skip ➔';
+      continueBtn.textContent = continueLabel(
+        selections.size,
+        menu[/** @type {string} */ (current.nodeId)].options.length,
+      );
     }
   } else if (step !== undefined) {
     go(path.slice(0, Number(step)));
