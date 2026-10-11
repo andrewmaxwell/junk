@@ -7,7 +7,7 @@
   "startedAt": "2026-10-11T20:18:44.024Z",
   "chargedAt": "2026-10-11T20:43:01.995Z",
   "weightIn": 155,
-  "weightOut": null,
+  "weightOut": 131.2,
   "procedure": {
     "version": 2,
     "charge": {
