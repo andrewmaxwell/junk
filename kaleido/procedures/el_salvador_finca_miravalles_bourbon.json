@@ -1,0 +1,56 @@
+{
+  "bean": "el_salvador_finca_miravalles_bourbon",
+  "batchGrams": 155,
+  "charge": {
+    "burner": 55,
+    "sv": 230
+  },
+  "steps": [
+    {
+      "bt": 150,
+      "burner": 45
+    },
+    {
+      "bt": 175,
+      "burner": 40,
+      "air": 40
+    },
+    {
+      "bt": 178,
+      "burner": 35
+    },
+    {
+      "bt": 190,
+      "burner": 30
+    },
+    {
+      "bt": 194,
+      "burner": 25
+    },
+    {
+      "bt": 198,
+      "burner": 15
+    }
+  ],
+  "notes": "Mark FC when multiple pops occur close together; hold settings. Don't increase heat to chase a brief FC dip.",
+  "variants": {
+    "espresso": {
+      "drop": {
+        "bt": 205.7
+      },
+      "reference": {
+        "roast": 36,
+        "fc": "6:26",
+        "drop": "10:19"
+      }
+    }
+  },
+  "history": [
+    {
+      "date": "2026-10-11",
+      "afterRoast": 38,
+      "change": "Initial procedure, transcribed from roast #36 (the only roast of this bean): charge burner 55 / SV 230; burner 45 at 150, 40 + air 40 at 175, 35 at 178, 30 at 190, 25 at 194, 15 at 198; espresso drop at 205.7. #36 is the reference.",
+      "why": "#36 made a REALLY GOOD half-caf latte (12 g + 6 g decaf Honduran #34, rested 8 days), so the first procedure copies it rather than adjusting anything. Its controls are the Colombian Supremo recipe except the first burner cut, which #36 made at 150 rather than 154. The drop is 205.7 because a trigger needs 3 readings at or above it and lands 0.2-0.5 past, so it should drop near #36's 206. Bean: Sweet Maria's, Apaneca, Ahuachapan (Santa Ana volcano), Duarte family farm; washed Bourbon; cupping notes cocoa, burnt sugar, walnut, roasted almond; recommended City+ to Full City+, good for espresso. #36 developed 3:53 after FC (37.6%), longer than recent Supremo roasts (~31%); keep that until a tasting says otherwise. Espresso variant only: there is no pour-over roast of this bean to copy."
+    }
+  ]
+}
