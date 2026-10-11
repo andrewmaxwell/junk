@@ -40,5 +40,15 @@
   "el_salvador_finca_miravalles_bourbon": {
     "name": "El Salvador Finca Miravalles Bourbon",
     "aliases": ["el_salvador_finca_miravalles_bourbon"]
+  },
+  "guatemala_finca_santa_ines_bourbon": {
+    "name": "Guatemala Finca Santa Ines Bourbon",
+    "supplier": "Sweet Maria's",
+    "aliases": ["guatemala_finca_santa_ines_bourbon"]
+  },
+  "colombia_productores_de_buesaco": {
+    "name": "Colombia Productores de Buesaco",
+    "supplier": "Sweet Maria's",
+    "aliases": ["colombia_productores_de_buesaco"]
   }
 }

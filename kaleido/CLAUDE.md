@@ -40,6 +40,7 @@ ui/pops.js            mic pop detector (AudioWorklet); hints only
 preheat.json          preheat settings + stability rule, shared by every bean
 procedures/<bean>.json
 beans.json            canonical bean slugs → name, supplier, old filename aliases
+inventory.json        green beans on hand, in batches, keyed by bean slug (Claude keeps it current)
 logs/                 .alog + .json sidecar per roast
 logs-sim/             what --sim runs write (gitignored)
 selftests/            self-test reports from the real roaster
@@ -222,6 +223,14 @@ The user tells Claude about drinks in passing ("a latte with 11 g of the Colombi
 - **Write the note as a dated entry**: what the drink was, grams of each bean, any blend partners with their roast numbers, days since roasting, and the user's own words about taste and grind. Put a blend's note on every roast in it.
 - **Use `Recorder.addNote(number, text, date)`** from `server/recorder.js`, in a one-off script with a stub session (`new EventEmitter()`) and `dir` set to `logs/`. Weight out goes through `setWeightOut()` the same way. Each call updates the sidecar and mirrors into the `.alog`'s `cuppingnotes` and `weight`. An older Artisan roast gets a small sidecar on its first note, so later notes add up; any cupping notes already typed into Artisan become its first note. Don't edit the files by hand.
 - **Check that no other field changed**: parse the old and new `.alog` and compare. Commit the log files.
+
+## Green bean inventory
+
+`inventory.json` holds how many batches of each green bean the user has left, keyed by the slug in `beans.json`. It's kept by hand in Claude Code; the app doesn't read it. A batch is about 155 g, so 1 lb is 3 batches.
+
+- **After every real roast**, subtract one batch from that bean, set `updated`, and commit it along with the roast's logs. Check `logs/` for real roasts newer than `updated` that haven't been counted yet. `--sim` and self-test runs don't count.
+- **When the user mentions buying, running out of, or recounting beans**, update the count. Add a new bean to `beans.json` first. Remove a bean when it reaches 0, but say so, because it may be one worth reordering.
+- **When asked what to roast**, read this file, the tasting notes in `logs/`, and which beans have a procedure.
 
 ## Drafting a procedure for a new bean
 
