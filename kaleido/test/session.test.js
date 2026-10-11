@@ -121,6 +121,35 @@ test('after the drop it preheats again with the cooling fan on', async () => {
   await finish(ctx);
 });
 
+test('the cooling fan comes on 1 °C before the drop, while still roasting', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session, log} = ctx;
+  session.start();
+  autopilot(session, sim, clock, {batches: [ESPRESSO], coolingMs: HOUR});
+  let last = null;
+  session.on('sample', (s) => (last = s));
+  await clock.until(() => session.phase === 'ROASTING', 2 * HOUR, 1000);
+  const dropBT = session.batch.proc.drop.bt;
+  let fanOn = null;
+  await clock.until(
+    () => {
+      if (!fanOn && sim.m.CS === 1)
+        fanOn = {BT: last.BT, phase: session.phase, t: clock.now()};
+      return log.some((x) => x.e === 'drop');
+    },
+    HOUR,
+    500,
+  );
+  const drop = log.find((x) => x.e === 'drop');
+  assert.equal(fanOn.phase, 'ROASTING');
+  assert.ok(
+    fanOn.BT >= dropBT - 1.5 && fanOn.BT < dropBT,
+    `fan on at ${fanOn.BT}`,
+  );
+  assert.ok(drop.t - fanOn.t >= 3000, 'fan on a few seconds before the drop');
+  await finish(ctx);
+});
+
 test("won't call for or detect a charge until the beans are chosen", async () => {
   const ctx = setup({dropRate: 0});
   const {clock, sim, session, log} = ctx;

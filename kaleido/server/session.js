@@ -7,8 +7,8 @@
 // roaster matches. So after a phase change, a reconnect, or a restart from a
 // saved state, the same call puts the roaster where it should be.
 //
-// The cooling fan (CS) is independent of the phase: it turns on at drop and
-// stays on until the user turns it off.
+// The cooling fan (CS) is independent of the phase: it turns on 1 °C before
+// the drop and stays on until the user turns it off.
 //
 // Events:
 //   'phase' (phase)           'sample' (reading + ror, phase, roastMs)
@@ -30,6 +30,7 @@ const DROP_REPEAT_MS = 5_000; // repeat "drop now" until the beans are out
 const BEANS_OUT_FALL = 10; // °C below the drop temp = the drum is empty
 const RECORD_AFTER_DROP_MS = 60_000; // after the drop, once the beans are out
 const DROP_WARNING_S = 30;
+const COOL_BEFORE_DROP_C = 1; // cooling fan on this far below the drop temp
 const STALL = {windowMs: 60_000, belowCPerMin: 1, repeatMs: 120_000};
 const LONG_ROAST_MS = 16 * 60_000;
 // A roast resumes after a restart only if the app was down less than this.
@@ -441,6 +442,13 @@ export class Session extends EventEmitter {
         this.alarms.dropWarned = true;
         this.say('About thirty seconds to drop.');
       }
+    }
+    // Cooling fan on just before the drop, so it's already running when the
+    // beans come out.
+    if (!this.cooling && b.tp && s.BT >= b.proc.drop.bt - COOL_BEFORE_DROP_C) {
+      this.cooling = true;
+      this.apply();
+      this.emit('persist');
     }
     // A stall gets flagged but never "fixed": the procedure decides heat.
     if (b.tp && now - b.tp.t > STALL.windowMs) {
