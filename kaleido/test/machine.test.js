@@ -4,6 +4,7 @@ import {createClock} from '../server/clock.js';
 import {encode, parse} from '../server/protocol.js';
 import {Machine} from '../server/machine.js';
 import {SimKaleido} from '../server/sim.js';
+import {emergencyStop} from '../server/stop.js';
 
 const PREHEAT = {TS: 185, HS: 1, AH: 1, FC: 30, RC: 90};
 
@@ -186,9 +187,11 @@ test('a heat command still queued when the heater is locked off never goes out',
   await machine.stop();
 });
 
-test('replies without BT count as the roaster not answering', async () => {
-  const {clock, sim, machine, errors} = await setup();
-  machine.set(PREHEAT);
+test('with no BT readings, the heater is held off until they come back', async () => {
+  const {clock, sim, machine} = await setup();
+  const blind = [];
+  machine.on('blind', (b) => blind.push(b));
+  machine.set({TS: 230, HS: 1, AH: 0, HP: 45, FC: 30, RC: 90});
   await until(clock, () => machine.settled(), 10_000);
   const readings = sim.readings.bind(sim);
   sim.readings = () => {
@@ -196,7 +199,41 @@ test('replies without BT count as the roaster not answering', async () => {
     delete r.BT;
     return r;
   };
-  await until(clock, () => !machine.connected, 10_000);
-  assert.ok(errors.includes('Roaster stopped answering'));
+  await until(clock, () => sim.m.HS === 0 && sim.m.HP === 0, 15_000);
+  assert.ok(machine.connected, 'still talking to the roaster');
+  assert.deepEqual(blind, [true]);
+  sim.readings = readings;
+  await until(clock, () => sim.m.HS === 1 && sim.m.HP === 45, 15_000);
+  assert.deepEqual(blind, [true, false]);
   await machine.stop();
+});
+
+test('percentages are sent and matched as integers', async () => {
+  const {clock, sim, machine} = await setup();
+  machine.set({FC: 45.5, RC: 90});
+  await until(clock, () => machine.settled(), 10_000);
+  assert.equal(sim.m.FC, 46);
+  await machine.stop();
+});
+
+test('the emergency stop turns the heater off even with no BT readings', async () => {
+  const clock = createClock(200);
+  const sim = new SimKaleido({clock, dropRate: 0});
+  Object.assign(sim.m, {TS: 230, HS: 1, AH: 0, HP: 60});
+  const readings = sim.readings.bind(sim);
+  sim.readings = () => {
+    const r = readings();
+    delete r.BT;
+    return r;
+  };
+  const {ok, message} = await emergencyStop({
+    openTransport: () => sim.open(),
+    clock,
+  });
+  assert.ok(ok, message);
+  assert.deepEqual(
+    {HS: sim.m.HS, HP: sim.m.HP, FC: sim.m.FC},
+    {HS: 0, HP: 0, FC: 100},
+  );
+  assert.match(message, /BT unknown/);
 });

@@ -8,8 +8,14 @@
 //   TS first (the setpoint caps the burner even in manual mode),
 //   then AH 0, and only then HP (in auto mode HP is the PID's, not ours).
 //
+// With no BT for silenceMs while the roaster still answers, the heater is
+// held off (whatever is desired) until readings come back: heat with
+// nothing watching the temperature is never safe.
+//
 // Events: 'connected', 'disconnected', 'sample' (every RD reply, with all the
-// current readings), 'stuck' (a control hasn't matched for stuckMs), 'error'.
+// current readings), 'stuck' (a control hasn't matched for stuckMs),
+// 'blind' (true: no readings, heater held off; false: readings are back),
+// 'error'.
 
 import {EventEmitter} from 'events';
 import {encode, parse} from './protocol.js';
@@ -52,12 +58,15 @@ export class Machine extends EventEmitter {
     this.queue = new Map(); // tag -> value; one pending write per tag
     this.sent = {}; // commands written per tag (resends included)
     this.stopped = false;
+    this.blind = false; // no BT readings: heater held off (see target)
   }
 
   // Merge into the desired state and push the changes out right away.
   set(values) {
     for (let [k, v] of Object.entries(values)) {
       if (!CONTROLS.includes(k)) throw new Error(`unknown control ${k}`);
+      // The protocol sends integers; 45.5 would go out as 46 and never match.
+      if (v != null) v = Math.round(v);
       if (k === 'TS') v = Math.min(v, MAX_TS);
       if (this.heatLocked && k in HEAT_OFF) v = HEAT_OFF[k];
       if (this.desired[k] !== v) {
@@ -66,7 +75,7 @@ export class Machine extends EventEmitter {
         delete this.mismatchSince[k];
         // A write still waiting in the queue carries the old value; without
         // this, an HS 1 queued before heaterOff() went out after it.
-        if (this.queue.has(k)) this.queue.set(k, v);
+        if (this.queue.has(k)) this.queue.set(k, this.target(k));
       }
     }
     this.reconcile();
@@ -99,8 +108,14 @@ export class Machine extends EventEmitter {
     this.enqueue('EV', code);
   }
 
+  // What we actually drive a control to: the desired value, or off for the
+  // heat controls while there are no readings.
+  target(k) {
+    return this.blind && k in HEAT_OFF ? HEAT_OFF[k] : this.desired[k];
+  }
+
   matches(k) {
-    const want = this.desired[k];
+    const want = this.target(k);
     const got = this.state[k];
     if (got == null) return false;
     return k === 'TS' ? Math.abs(got - want) < 0.6 : got === want;
@@ -110,39 +125,39 @@ export class Machine extends EventEmitter {
   // or just the given ones.
   settled(keys = CONTROLS) {
     return keys.every(
-      (k) => this.desired[k] == null || !this.owns(k) || this.matches(k),
+      (k) => this.target(k) == null || !this.owns(k) || this.matches(k),
     );
   }
 
   // HP belongs to the machine's PID unless we're in manual mode.
   owns(k) {
-    return k !== 'HP' || this.desired.AH === 0;
+    return k !== 'HP' || this.target('AH') === 0;
   }
 
   reconcile() {
     if (!this.connected) return;
     const now = this.clock.now();
     for (const k of CONTROLS) {
-      if (this.desired[k] == null || !this.owns(k)) continue;
+      if (this.target(k) == null || !this.owns(k)) continue;
       if (this.matches(k)) {
         delete this.mismatchSince[k];
         continue;
       }
-      if (k === 'AH' && this.desired.TS != null && !this.matches('TS'))
+      if (k === 'AH' && this.target('TS') != null && !this.matches('TS'))
         continue;
       if (k === 'HP' && this.state.AH !== 0) continue;
       this.mismatchSince[k] ??= now;
       if (now - this.mismatchSince[k] > this.stuckMs) {
         this.emit('stuck', {
           control: k,
-          want: this.desired[k],
+          want: this.target(k),
           got: this.state[k],
         });
         this.mismatchSince[k] = now; // report again after another stuckMs
       }
       if (this.lastSent[k] == null || now - this.lastSent[k] >= this.pollMs) {
         this.lastSent[k] = now;
-        this.enqueue(k, this.desired[k]);
+        this.enqueue(k, this.target(k));
       }
     }
   }
@@ -175,15 +190,24 @@ export class Machine extends EventEmitter {
   onLine(line) {
     const msg = parse(line);
     if (!msg) return;
+    this.lastRx = this.clock.now();
     Object.assign(this.state, {sid: msg.sid}, msg.vars);
-    // Only a reading counts as the roaster answering: command echoes alone
-    // would keep a connection "alive" that has stopped reporting BT, and the
-    // roast would heat on with nothing watching it.
     if ('BT' in msg.vars) {
-      this.lastRx = this.clock.now();
+      this.lastReading = this.lastRx;
+      this.setBlind(false);
       this.emit('sample', {t: this.lastRx, ...this.state});
     }
     this.reconcile();
+  }
+
+  setBlind(blind) {
+    if (this.blind === blind) return;
+    this.blind = blind;
+    for (const k in HEAT_OFF) {
+      delete this.lastSent[k];
+      if (this.queue.has(k)) this.queue.set(k, this.target(k));
+    }
+    this.emit('blind', blind);
   }
 
   // Ping until the machine answers, then set Celsius and the start guard
@@ -213,7 +237,7 @@ export class Machine extends EventEmitter {
         closed.then(() => (isClosed = true));
         this.transport.on('line', (l) => this.onLine(l));
         this.transport.on('error', (e) => this.emit('error', e));
-        this.lastRx = this.clock.now();
+        this.lastRx = this.lastReading = this.clock.now();
         await this.handshake();
         this.connected = true;
         this.emit('connected');
@@ -221,6 +245,10 @@ export class Machine extends EventEmitter {
         while (!this.stopped && !isClosed) {
           if (this.clock.now() - this.lastRx > this.silenceMs)
             throw new Error('Roaster stopped answering');
+          if (this.clock.now() - this.lastReading > this.silenceMs) {
+            this.setBlind(true);
+            this.reconcile();
+          }
           this.enqueue('RD', 'A0');
           await this.clock.sleep(this.pollMs);
         }

@@ -27,7 +27,13 @@ export const SHUTDOWN = {air: 100, coolBelowC: 60};
 const KEEP_RECENT_MS = 10 * 60_000; // samples kept for stability/RoR checks
 const READY_REPEAT_MS = 60_000; // repeat "ready for charge" this often
 const DROP_REPEAT_MS = 5_000; // repeat "drop now" until the beans are out
-const BEANS_OUT_FALL = 10; // °C below the drop temp = the drum is empty
+// BT falling this much within BEANS_OUT_MS (since the drop) = the drum is
+// empty. On the real logs that comes 12-24 s after the drop, the same or
+// earlier than "10 °C under the drop temp". It has to be fast: a drum left
+// closed cools 10 °C too, slowly (#1, dropped early: ~7 °C/min), and calling
+// that "out" would turn the heat on with the beans inside.
+const BEANS_OUT_FALL = 10;
+const BEANS_OUT_MS = 30_000;
 const RECORD_AFTER_DROP_MS = 60_000; // after the drop, once the beans are out
 const DROP_WARNING_S = 30;
 const COOL_BEFORE_DROP_C = 1; // cooling fan on this far below the drop temp
@@ -80,6 +86,7 @@ export class Session extends EventEmitter {
     this.onSample = this.onSample.bind(this);
     this.onStuck = this.onStuck.bind(this);
     this.onDisconnected = this.onDisconnected.bind(this);
+    this.onBlind = this.onBlind.bind(this);
   }
 
   // ---- lifecycle
@@ -90,6 +97,7 @@ export class Session extends EventEmitter {
     this.machine.on('sample', this.onSample);
     this.machine.on('stuck', this.onStuck);
     this.machine.on('disconnected', this.onDisconnected);
+    this.machine.on('blind', this.onBlind);
     if (this.phase === 'NEW') {
       this.setPhase('PREHEAT');
       this.say('Preheating.');
@@ -102,6 +110,7 @@ export class Session extends EventEmitter {
     this.machine.off('sample', this.onSample);
     this.machine.off('stuck', this.onStuck);
     this.machine.off('disconnected', this.onDisconnected);
+    this.machine.off('blind', this.onBlind);
   }
 
   setPhase(phase) {
@@ -327,6 +336,21 @@ export class Session extends EventEmitter {
       urgent ? 'urgent' : 'warn',
       'Roaster disconnected. Reconnecting.',
     );
+    // Nobody knows what the drum did while we were gone (a power cut cools
+    // it), so "ready" has to be proven again from fresh readings.
+    if (this.phase === 'PREHEAT' || this.phase === 'READY') {
+      this.recent = [];
+      if (this.phase === 'READY') this.setPhase('PREHEAT');
+    }
+  }
+
+  onBlind(blind) {
+    if (blind)
+      this.alert(
+        'urgent',
+        'No temperature readings from the roaster. Heater off until they come back.',
+      );
+    else this.alert('warn', 'Temperature readings are back.');
   }
 
   // ---- phase logic
@@ -522,19 +546,22 @@ export class Session extends EventEmitter {
 
   // Closes a roast the app was down for too long (see RESUME_ROAST_WITHIN_MS)
   // where its record stops, then preheats (or shuts down, if asked to). The
-  // record closes on the next reading.
+  // record closes once the beans are out, like any drop.
   endInterruptedRoast(downMs) {
     const b = this.batch;
     const last = this.log.at(-1) ?? b.charge;
     const at = {t: last.t, BT: last.BT};
     b.drop = {...at, reason: 'interrupted'};
-    b.beansOut = at;
+    // Not beansOut: they may still be in the drum, and preheat's heater
+    // stays off until the button says otherwise (or a discharge is seen).
     this.tracker.dropped = true;
     this.overrides = {};
+    this.cooling = true;
+    this.alarms.drop = this.clock.now();
     const mins = Math.max(1, Math.round(downMs / 60_000));
     this.alert(
       'urgent',
-      `The app was off for ${mins} minutes mid-roast, so roast #${b.number ?? ''} has ended. Take the beans out if they're still in.`,
+      `The app was off for ${mins} minutes mid-roast, so roast #${b.number ?? ''} has ended. Take the beans out if they're still in, then press "Beans are out".`,
     );
     if (this.doneRequested) this.shutdown();
     else this.setPhase('PREHEAT');
@@ -546,7 +573,11 @@ export class Session extends EventEmitter {
   checkAfterDrop(s) {
     const b = this.batch;
     if (!b.beansOut) {
-      if (s.BT != null && s.BT <= b.drop.BT - BEANS_OUT_FALL) this.beansOut();
+      const since = this.recent.filter(
+        (x) => x.t >= b.drop.t && s.t - x.t <= BEANS_OUT_MS && x.BT != null,
+      );
+      const peak = Math.max(...since.map((x) => x.BT));
+      if (s.BT != null && s.BT <= peak - BEANS_OUT_FALL) this.beansOut();
       else if (s.t - this.alarms.drop >= DROP_REPEAT_MS) {
         this.alarms.drop = s.t;
         this.say('Drop now!', {urgent: true});

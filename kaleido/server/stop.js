@@ -28,21 +28,25 @@ export async function emergencyStop({
   machine.on('error', (err) => (lastError = err.message));
   machine.run();
   const deadline = clock.now() + timeoutMs;
-  const until = async (cond) => {
-    while (!cond() && clock.now() < deadline) await clock.sleep(200);
+  const until = async (cond, ms = Infinity) => {
+    const end = Math.min(deadline, clock.now() + ms);
+    while (!cond() && clock.now() < end) await clock.sleep(200);
     return cond();
   };
   try {
-    if (!(await until(() => machine.connected && machine.state.BT != null)))
+    if (!(await until(() => machine.connected)))
       return {
         ok: false,
         message: `Couldn't connect to the roaster: ${lastError ?? 'no answer'}`,
       };
-    const hot = machine.state.BT >= 60;
-    const fans = all ? {FC: 0, RC: 0, CS: 0} : hot ? {FC: 100, RC: 90} : {};
-    machine.set({HS: 0, AH: 0, HP: 0, ...fans});
-    const ok = await until(() => machine.settled());
+    // Heater off first, without waiting for a temperature; BT only decides
+    // the fans. With no reading, cool as if it's hot.
+    machine.set({HS: 0, AH: 0, HP: 0});
+    await until(() => machine.state.BT != null, 5000);
     const BT = machine.state.BT;
+    const hot = !(BT < 60);
+    machine.set(all ? {FC: 0, RC: 0, CS: 0} : hot ? {FC: 100, RC: 90} : {});
+    const ok = await until(() => machine.settled() && machine.state.HS === 0);
     if (!ok)
       return {
         ok,
@@ -55,7 +59,7 @@ export async function emergencyStop({
         : 'heater off';
     return {
       ok,
-      message: `${what[0].toUpperCase()}${what.slice(1)}. BT ${BT}.`,
+      message: `${what[0].toUpperCase()}${what.slice(1)}. BT ${BT ?? 'unknown'}.`,
       BT,
     };
   } finally {
@@ -70,7 +74,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!ok) {
     console.log('If the app is running, use its STOP button or quit it first.');
     console.log('Last resort: unplug the roaster.');
-  } else if (!all && BT >= 60)
+  } else if (!all && !(BT < 60))
     console.log(
       'Once BT is under 60, run with --all to turn the air and drum off.',
     );

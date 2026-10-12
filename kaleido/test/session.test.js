@@ -347,7 +347,14 @@ test('a restart long after the app died mid-roast ends that roast instead of reh
     b.log.find((x) => x.e === 'alert').a.text,
     /off for 5 minutes mid-roast/,
   );
+  // The beans may still be in: no heat, and the drop alarm, until they're out.
+  await clock.advance(60_000);
+  assert.equal(sim.m.HS, 0);
+  assert.ok(b.session.batch, 'record open until the beans are out');
+  assert.ok(b.log.some((x) => x.e === 'say' && /drop now/i.test(x.a)));
+  b.session.beansOut();
   await clock.advance(5000);
+  assert.equal(sim.m.HS, 1);
   assert.ok(
     b.log.some((x) => x.e === 'batchComplete'),
     'record closed',
@@ -492,5 +499,34 @@ test('turning everything off with the record still open finishes it', async () =
   session.offNow();
   assert.equal(log.filter((x) => x.e === 'batchComplete').length, 1);
   assert.equal(session.batch, null);
+  await finish(ctx);
+});
+
+test('a closed drum cooling slowly after a drop is not "beans out"', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session, log} = ctx;
+  session.start();
+  session.selectBatch(ESPRESSO);
+  await clock.until(() => session.phase === 'READY', HOUR, 5000);
+  sim.chargeBeans(155);
+  await clock.until(() => session.batch?.tp, HOUR, 1500);
+  session.dropNow();
+  const dropBT = session.batch.drop.BT;
+  await clock.until(() => sim.s.BT < dropBT - 15, HOUR, 1500);
+  assert.ok(!log.some((x) => x.e === 'beansOut'));
+  assert.equal(sim.m.HS, 0);
+  await finish(ctx);
+});
+
+test('losing the roaster while ready means proving the preheat again', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session} = ctx;
+  session.start();
+  session.selectBatch(ESPRESSO);
+  await clock.until(() => session.phase === 'READY', HOUR, 5000);
+  sim.close();
+  await clock.advance(10_000);
+  assert.equal(session.phase, 'PREHEAT');
+  await clock.until(() => session.phase === 'READY', HOUR, 5000);
   await finish(ctx);
 });

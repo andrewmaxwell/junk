@@ -15,6 +15,8 @@
 
 export const GREEN_TEMP = 22; // °C, beans going in
 const EXO_ONSET = 188; // °C bean temp
+const DISCHARGE_TAU_S = 9; // probe settling after the beans come out
+const DISCHARGE_SETTLE_S = 30;
 
 export function step(s, u, params, dt) {
   const beans = s.Tb != null;
@@ -42,6 +44,13 @@ export function step(s, u, params, dt) {
       p.probeAir * (s.ET - s.BT) +
       p.probeDrum * (s.D - s.BT) -
       p.probeLoss * (s.BT - u.AT);
+    // Just after a discharge the probe, no longer in the bean pile, drops
+    // to the air temperature fast: on the real logs (#30, #37-39) the
+    // BT - ET gap halves about every 6 s, a 10 °C fall in 12-24 s.
+    if (s.settleS > 0) {
+      dBT -= (s.BT - s.ET) / DISCHARGE_TAU_S;
+      s.settleS -= dt;
+    }
   } else {
     // Beans: heated by drum contact and hot air, plus their own exothermic
     // heat from first crack on (onset fixed near FC temps; only its strength
@@ -87,6 +96,7 @@ export function discharge(s, params, u) {
   s.Tb = null;
   s.grams = 0;
   s.D = initialState(s.ET, s.BT, params, {...u, duty: 25}).D;
+  s.settleS = DISCHARGE_SETTLE_S;
 }
 
 // What the burner actually does: off without HS; the machine's PID in auto
