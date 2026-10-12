@@ -40,6 +40,8 @@ test('bad procedures are rejected', () => {
   );
   assert.throws(bad({steps: [{bt: 150, burner: 140}]}), /bad step/);
   assert.throws(bad({steps: [{bt: 208, burner: 10}]}), /past the drop/);
+  // Without one, the roast would start on whatever HP the PID left.
+  assert.throws(bad({charge: {sv: 230}}), /charge needs a burner/);
 });
 
 test('the real procedures load', () => {

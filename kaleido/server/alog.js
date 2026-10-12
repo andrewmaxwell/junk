@@ -19,6 +19,7 @@ export function parseAlog(text) {
     const q = text[i++];
     let out = '';
     while (text[i] !== q) {
+      if (i >= text.length) throw new Error('alog: unterminated string');
       if (text[i] === '\\') {
         const c = text[i + 1];
         if (c === 'x' || c === 'u' || c === 'U') {

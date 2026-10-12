@@ -108,8 +108,11 @@ test('after the drop it preheats again with the cooling fan on', async () => {
     coolingMs: HOUR,
   });
   await clock.until(() => log.some((x) => x.e === 'drop'), 2 * HOUR, 5000);
-  await clock.advance(10_000);
+  await clock.advance(3000);
   assert.equal(session.phase, 'PREHEAT');
+  assert.equal(sim.m.HS, 0, 'no heat until the beans are out');
+  await clock.until(() => log.some((x) => x.e === 'beansOut'), HOUR, 1000);
+  await clock.advance(5000);
   assert.deepEqual(
     {TS: sim.m.TS, AH: sim.m.AH, HS: sim.m.HS, FC: sim.m.FC, RC: sim.m.RC},
     {TS: 185, AH: 1, HS: 1, FC: 30, RC: 90},
@@ -452,5 +455,42 @@ test('STOP mid-roast cuts the heat, calls for the drop, and shuts down', async (
   assert.equal(sim.m.HP, 0);
   assert.ok(sim.m.FC > 0 && sim.m.RC > 0, 'air and drum keep running');
   assert.ok(log.some((x) => x.e === 'say' && /drop now/i.test(x.a)));
+  await finish(ctx);
+});
+
+test('an early drop keeps the heat off until the beans are out', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session, log} = ctx;
+  session.start();
+  autopilot(session, sim, clock, {
+    batches: [ESPRESSO, ESPRESSO],
+    reactMs: 30_000,
+  });
+  await clock.until(() => session.batch?.tp, 2 * HOUR, 1000);
+  assert.ok(sim.s.BT < preheat.sv);
+  session.dropNow();
+  await clock.advance(20_000);
+  assert.equal(session.phase, 'PREHEAT');
+  assert.equal(sim.m.HS, 0);
+  // An empty drum doesn't read 10 °C under an early drop, so it's the button.
+  await clock.advance(20_000);
+  assert.ok(!log.some((x) => x.e === 'beansOut'));
+  session.beansOut();
+  await clock.advance(5000);
+  assert.equal(sim.m.HS, 1);
+  await finish(ctx);
+});
+
+test('turning everything off with the record still open finishes it', async () => {
+  const ctx = setup({dropRate: 0});
+  const {clock, sim, session, log} = ctx;
+  session.start();
+  autopilot(session, sim, clock, {batches: [ESPRESSO]});
+  await clock.until(() => session.batch?.tp, 2 * HOUR, 1000);
+  session.emergencyStop();
+  await clock.advance(5000);
+  session.offNow();
+  assert.equal(log.filter((x) => x.e === 'batchComplete').length, 1);
+  assert.equal(session.batch, null);
   await finish(ctx);
 });

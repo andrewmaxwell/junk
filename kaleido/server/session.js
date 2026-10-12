@@ -117,8 +117,12 @@ export class Session extends EventEmitter {
     const CS = this.cooling ? 1 : 0;
     switch (this.phase) {
       case 'PREHEAT':
-      case 'READY':
-        return {TS: p.sv, HS: 1, AH: 1, FC: p.air, RC: p.drum, CS};
+      case 'READY': {
+        // Heater off until the dropped beans are out: an early drop (BT
+        // under the preheat SV) would otherwise have the PID heat them.
+        const HS = this.batch?.drop && !this.batch.beansOut ? 0 : 1;
+        return {TS: p.sv, HS, AH: 1, FC: p.air, RC: p.drum, CS};
+      }
       case 'ROASTING':
         return {
           TS: this.batch.proc.charge.sv,
@@ -193,6 +197,7 @@ export class Session extends EventEmitter {
     const b = this.batch;
     if (!b?.drop || b.beansOut) return;
     b.beansOut = this.mark();
+    this.apply(); // preheat may heat now
     this.emit('beansOut', b, b.beansOut);
     this.emit('persist');
   }
@@ -244,7 +249,7 @@ export class Session extends EventEmitter {
   offNow() {
     if (this.phase !== 'SHUTDOWN') throw new Error('not shutting down');
     if (this.batch?.drop && !this.batch.beansOut) this.beansOut();
-    this.batch = null;
+    if (this.batch) this.finishBatch();
     this.cooling = false;
     this.setPhase('OFF');
   }
@@ -502,8 +507,8 @@ export class Session extends EventEmitter {
     if (b.drop) return;
     b.drop = {...this.mark(), reason};
     this.tracker.dropped = true;
-    // Burner to 0 while still in manual mode, then back to preheating. (The
-    // preheat setpoint, now below BT, keeps the burner off either way.)
+    // Burner to 0 while still in manual mode, then back to preheating, with
+    // the heater off until the beans are out (see desiredState).
     this.machine.set({HP: 0});
     this.machine.event(8);
     this.cooling = true;
@@ -549,13 +554,17 @@ export class Session extends EventEmitter {
     }
     // The record (and with it the drop alarm) stays open until the beans are
     // actually out, however long that takes.
-    if (b.beansOut && s.t - b.drop.t >= RECORD_AFTER_DROP_MS) {
-      this.batch = null;
-      this.tracker = null;
-      this.log = [];
-      this.emit('batchComplete', b);
-      this.emit('persist');
-    }
+    if (b.beansOut && s.t - b.drop.t >= RECORD_AFTER_DROP_MS)
+      this.finishBatch();
+  }
+
+  finishBatch() {
+    const b = this.batch;
+    this.batch = null;
+    this.tracker = null;
+    this.log = [];
+    this.emit('batchComplete', b);
+    this.emit('persist');
   }
 
   shutdown() {

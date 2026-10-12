@@ -64,6 +64,9 @@ export class Machine extends EventEmitter {
         this.desired[k] = v;
         delete this.lastSent[k];
         delete this.mismatchSince[k];
+        // A write still waiting in the queue carries the old value; without
+        // this, an HS 1 queued before heaterOff() went out after it.
+        if (this.queue.has(k)) this.queue.set(k, v);
       }
     }
     this.reconcile();
@@ -76,13 +79,19 @@ export class Machine extends EventEmitter {
   // "confirmed" that.
   heaterOff(others = {}) {
     this.heatLocked = true;
+    this.heatLockedAt ??= this.clock.now();
     this.set({...HEAT_OFF, ...others});
   }
 
   // The roaster itself reports the heater off, and every desired control
-  // matches.
+  // matches, in a reading polled after the lock (an older one could predate
+  // a heat command that was already on its way).
   heaterConfirmedOff() {
-    return this.state.HS === 0 && this.settled();
+    return (
+      this.lastRx >= this.heatLockedAt + this.pollMs &&
+      this.state.HS === 0 &&
+      this.settled()
+    );
   }
 
   // Event markers shown on the machine's display. Best effort, not reconciled.
@@ -166,9 +175,14 @@ export class Machine extends EventEmitter {
   onLine(line) {
     const msg = parse(line);
     if (!msg) return;
-    this.lastRx = this.clock.now();
     Object.assign(this.state, {sid: msg.sid}, msg.vars);
-    if ('BT' in msg.vars) this.emit('sample', {t: this.lastRx, ...this.state});
+    // Only a reading counts as the roaster answering: command echoes alone
+    // would keep a connection "alive" that has stopped reporting BT, and the
+    // roast would heat on with nothing watching it.
+    if ('BT' in msg.vars) {
+      this.lastRx = this.clock.now();
+      this.emit('sample', {t: this.lastRx, ...this.state});
+    }
     this.reconcile();
   }
 

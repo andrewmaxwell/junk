@@ -66,6 +66,8 @@ async function finish({clock, machine, dir}) {
 test('Python literals round-trip', () => {
   const v = {a: [1, 2.5, -1], b: "it's \\ ok\nyes", c: true, d: null, e: {}};
   assert.deepEqual(parseAlog(toPython(v)), v);
+  // A truncated file fails instead of growing a string forever.
+  assert.throws(() => parseAlog("{'title': 'cut off"), /unterminated/);
 });
 
 test('a roast is written as it happens, then finalized', async () => {

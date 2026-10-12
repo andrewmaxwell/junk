@@ -171,3 +171,32 @@ test('once the heater is locked off, nothing turns it back on', async () => {
   );
   await machine.stop();
 });
+
+test('a heat command still queued when the heater is locked off never goes out', async () => {
+  const {clock, sim, machine} = await setup();
+  machine.set({...PREHEAT, HS: 0});
+  await until(clock, () => machine.settled(), 10_000);
+  machine.event(1); // occupies the writer, so the next command waits
+  machine.set({HS: 1});
+  machine.heaterOff();
+  await until(clock, () => machine.heaterConfirmedOff(), 10_000);
+  await clock.sleep(3000);
+  assert.equal(sim.m.HS, 0);
+  assert.ok(!sim.accepted.some((a) => a.tag === 'HS' && a.value === 1));
+  await machine.stop();
+});
+
+test('replies without BT count as the roaster not answering', async () => {
+  const {clock, sim, machine, errors} = await setup();
+  machine.set(PREHEAT);
+  await until(clock, () => machine.settled(), 10_000);
+  const readings = sim.readings.bind(sim);
+  sim.readings = () => {
+    const r = readings();
+    delete r.BT;
+    return r;
+  };
+  await until(clock, () => !machine.connected, 10_000);
+  assert.ok(errors.includes('Roaster stopped answering'));
+  await machine.stop();
+});

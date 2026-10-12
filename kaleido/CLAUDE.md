@@ -54,7 +54,7 @@ selftests/            self-test reports from the real roaster
 - **Turning point** is the first reading 2 °C above the lowest BT so far. Steps arm only after it.
 - **Triggers** (steps and drop) need 3 consecutive readings at or above their temperature. At ~5 °C/min near the drop, that lands about 0.2–0.5 °C past the target.
 - **The cooling fan** comes on during the roast once BT is within 1 °C of the drop temperature (`COOL_BEFORE_DROP_C`), so it's running when the beans come out. On the real logs that's a median 7.5 s before the drop (3–18 s; longer when BT creeps up to it).
-- **At drop**, the app sends `HP 0` while still in manual mode, then switches to the preheat settings with the cooling fan on. It repeats "Drop now!" every 5 s until the beans are out: you press the button, or BT falls 10 °C below the drop temperature (about 12 s on the real machine). The batch record closes a minute after the drop, and `batchComplete` fires.
+- **At drop**, the app sends `HP 0` while still in manual mode, then switches to the preheat settings with the cooling fan on and `HS 0` until the beans are out (an early drop, below the preheat SV, would otherwise have the PID heat the beans). It repeats "Drop now!" every 5 s until the beans are out: you press the button, or BT falls 10 °C below the drop temperature (about 12 s on the real machine). The batch record closes a minute after the drop, and `batchComplete` fires.
 - **Alerts never change the heat.** A stall alert fires when RoR has been under 1 °C/min for a minute after the turning point. A long-roast alert fires at 16 minutes. A stuck-control alert fires after 8 s.
 - **Shutdown** turns the heater off and runs air at 100% with the drum at 90% until BT is under 60 °C. Then everything goes off, and `off` fires only after the machine confirms it.
 - **Saving state.** `toJSON()` and `start(saved)` let a restarted server resume mid-roast without firing any step twice. `app.js` saves it to `logs/.session.json`. A session saved in READY resumes as PREHEAT, because the heater was off while the app was down and a cooled drum must not be called ready. A session saved in ROASTING resumes only if the app was down less than 2 minutes (`RESUME_ROAST_WITHIN_MS`). After longer than that, `endInterruptedRoast()` closes the record where it stopped (drop reason `interrupted`), alerts, and preheats (or shuts down, if that was asked for).
@@ -82,11 +82,12 @@ When debugging the model, compare closed-loop runs to real logs, not open-loop r
 
 The old `roast/` project was never trusted on real beans. These rules are the fix:
 
+- **Only readings count as the roaster answering.** The connection is declared dead after 5 s without a reply carrying BT; command echoes alone don't keep it alive, or a machine that stopped reporting BT would look connected while the roast heated on unwatched.
 - **Desired state, not fire-and-forget.** `machine.js` holds the desired value of every control (`TS, AH, HS, HP, FC, RC, CS`). Each poll compares it to the echoed state and resends anything that doesn't match. A dropped command is retried automatically. No caller ever "sends a command"; callers set desired state.
 - **The order of a mode switch matters.** At charge, raise `TS` to the procedure's charge SV first, confirm the echo, then send `AH 0`, then `HP`. If `TS` is not raised, the old preheat SV caps the burner even in manual mode.
 - **Steps arm after the turning point.** The turning point is the BT minimum after charge, followed by N rising samples. The drop is **never** gated on the turning point.
 - **Debounce triggers.** Steps and drop require consecutive samples at or above the threshold (polls run about every 1.5 s), so one thermocouple spike can't fire them.
-- **Drop = preheat.** The drop applies the `preheat.json` settings (AH 1, SV 185, air 30, drum 90) plus `CS 1`. The PID keeps the burner off because BT is above SV. Never send `RC 0` at drop; the drum must keep turning to discharge.
+- **Drop = preheat.** The drop applies the `preheat.json` settings (AH 1, SV 185, air 30, drum 90) plus `CS 1`, with the heater off (`HS 0`) until the beans are out. On a normal drop that changes nothing, since beans out (BT 10 °C under the drop) comes before BT falls under SV. Never send `RC 0` at drop; the drum must keep turning to discharge.
 - **Every phase is restart-safe.** If the server crashes or the cable is pulled, then on reconnect the session re-applies the desired state for the current phase. The session state is persisted to disk so a restart mid-roast resumes it.
 - **Test in the simulator first.** Every behavior gets a sim test before it touches hardware.
 
@@ -147,7 +148,7 @@ The M1 LITE can only be controlled over USB, so if our process dies with the bur
 - uncaught exceptions (`heaterOffAndExit` in `main.js`)
 - `server/stop.js` for when the app is gone
 
-`heaterOffAndExit` uses `machine.heaterOff()`, which locks HS/AH/HP at 0 for the rest of the process. The session keeps running while it waits for the roaster to confirm, and before the lock, a step firing in that wait turned the heat back on, and the wait then "confirmed" it. It also waits for the roaster to report `HS 0` (`heaterConfirmedOff()`), not just for everything to match.
+`heaterOffAndExit` uses `machine.heaterOff()`, which locks HS/AH/HP at 0 for the rest of the process. The session keeps running while it waits for the roaster to confirm, and before the lock, a step firing in that wait turned the heat back on, and the wait then "confirmed" it. It also waits for the roaster to report `HS 0` (`heaterConfirmedOff()`), not just for everything to match, in a reading polled at least one poll after the lock. A desired-state change also rewrites any write still waiting in the queue, or an `HS 1` queued just before the lock went out after it.
 
 **The roaster keeps heating with no computer.** The self-test's watchdog check (2026-10-04) went silent for 45 s at 60% manual burner: BT went 195 → 205 °C and HP still read 60 afterward. So there's one more layer, `guardian.js`. It's a detached process that `main.js` starts in app mode (not `--sim`). It watches the app's pid and `logs/.heartbeat`, which the app touches every 2 s.
 - If the app dies (crash or kill -9), the guardian grabs the freed port and runs `emergencyStop()` from `stop.js`, then says so with macOS `say`.
