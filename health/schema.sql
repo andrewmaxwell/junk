@@ -54,21 +54,24 @@ FROM (
       try_strptime("Timestamp", '%m/%d/%Y %H:%M:%S'),
       strptime("Timestamp", '%m/%d/%Y') + INTERVAL 20 HOUR
     ) AS ts
-  FROM read_csv('Energy Tracker (Responses) - Form Responses 1.csv', all_varchar = true)
+  FROM read_csv('journal.csv', all_varchar = true)
 )
 QUALIFY row_number() OVER (PARTITION BY journal_day(ts) ORDER BY ts DESC) = 1;
 --
 
--- Aranet4 in the bedroom, one reading per minute.
+-- Aranet4 in the bedroom, one reading per minute. Exports overlap, so each
+-- minute is kept once.
 CREATE TABLE air AS
+SELECT DISTINCT * FROM (
 SELECT
   trip_local(strptime(column0, '%m/%d/%Y %I:%M:%S %p')) AS ts,
   column1::INT AS co2_ppm,
   round((column2::DOUBLE - 32) * 5 / 9, 2) AS temp_c,
   column3::INT AS humidity_pct,
   column4::DOUBLE AS pressure_hpa
-FROM read_csv('Aranet4*.csv', header = true, all_varchar = true,
-  names = ['column0', 'column1', 'column2', 'column3', 'column4']);
+FROM read_csv('aranet/*.csv', header = true, all_varchar = true,
+  names = ['column0', 'column1', 'column2', 'column3', 'column4'])
+);
 --
 
 -- Open-Meteo hourly weather and air quality, fetched in UTC: for home, and
@@ -114,14 +117,27 @@ CREATE MACRO km_between(a, b) AS 12742 * asin(sqrt(
   sin(radians(b.lat - a.lat) / 2) ^ 2
   + cos(radians(a.lat)) * cos(radians(b.lat)) * sin(radians(b.lon - a.lon) / 2) ^ 2));
 --
-CREATE TABLE timeline_segments AS
-SELECT unnest(semanticSegments, recursive := false) AS s
+CREATE TABLE timeline_raw AS
 FROM read_json('Timeline.json', maximum_object_size = 500000000, columns = {
   semanticSegments: 'STRUCT(
     startTime VARCHAR, endTime VARCHAR, startTimeTimezoneUtcOffsetMinutes INT,
-    visit STRUCT(topCandidate STRUCT(placeId VARCHAR, semanticType VARCHAR, placeLocation STRUCT(latLng VARCHAR))),
-    activity STRUCT(distanceMeters DOUBLE, topCandidate STRUCT(type VARCHAR))
+    visit STRUCT(hierarchyLevel INT, probability DOUBLE, topCandidate STRUCT(placeId VARCHAR, semanticType VARCHAR, probability DOUBLE, placeLocation STRUCT(latLng VARCHAR))),
+    activity STRUCT("start" STRUCT(latLng VARCHAR), "end" STRUCT(latLng VARCHAR), distanceMeters DOUBLE, probability DOUBLE, topCandidate STRUCT(type VARCHAR, probability DOUBLE)),
+    timelinePath STRUCT(point VARCHAR, "time" VARCHAR)[],
+    timelineMemory STRUCT(trip STRUCT(distanceFromOriginKms INT, destinations STRUCT(identifier STRUCT(placeId VARCHAR))[]))
+  )[]',
+  rawSignals: 'STRUCT(
+    position STRUCT(LatLng VARCHAR, accuracyMeters INT, altitudeMeters DOUBLE, source VARCHAR, "timestamp" VARCHAR, speedMetersPerSecond DOUBLE),
+    activityRecord STRUCT(probableActivities STRUCT(type VARCHAR, confidence DOUBLE)[], "timestamp" VARCHAR)
   )[]'});
+--
+CREATE TABLE timeline_segments AS
+SELECT unnest(semanticSegments, recursive := false) AS s FROM timeline_raw;
+--
+CREATE TABLE timeline_signals AS
+SELECT unnest(rawSignals, recursive := false) AS r FROM timeline_raw;
+--
+DROP TABLE timeline_raw;
 --
 -- Places Andrew stayed. Google labels home; other kinds (work, aliased) are
 -- guesses and not reliable.
@@ -131,6 +147,8 @@ WITH v AS (
     s.startTimeTimezoneUtcOffsetMinutes AS utc_offset_min,
     s.visit.topCandidate.placeId AS place_id,
     lower(s.visit.topCandidate.semanticType) AS kind,
+    s.visit.hierarchyLevel AS hierarchy_level,
+    round(s.visit.topCandidate.probability, 2) AS probability,
     latlng(s.visit.topCandidate.placeLocation.latLng) AS loc
   FROM timeline_segments WHERE s.visit IS NOT NULL
 ),
@@ -142,10 +160,56 @@ FROM v, home;
 CREATE TABLE travel AS
 SELECT left(s.startTime, 19)::TIMESTAMP AS start, left(s.endTime, 19)::TIMESTAMP AS "end",
   lower(s.activity.topCandidate.type) AS mode,
-  round(s.activity.distanceMeters / 1000, 1) AS km
+  round(s.activity.topCandidate.probability, 2) AS mode_probability,
+  round(s.activity.distanceMeters / 1000, 1) AS km,
+  latlng(s.activity.start.latLng).lat AS from_lat, latlng(s.activity.start.latLng).lon AS from_lon,
+  latlng(s.activity."end".latLng).lat AS to_lat, latlng(s.activity."end".latLng).lon AS to_lon
 FROM timeline_segments WHERE s.activity IS NOT NULL;
 --
+-- Every location fix: Timeline's path points (about one per few minutes
+-- while moving, back to 2024-08) and the phone's raw positions (only the last
+-- few weeks, with accuracy and speed).
+CREATE TABLE location_points AS
+WITH points AS (
+  SELECT left(p.time, 19)::TIMESTAMP AS ts, latlng(p.point) AS loc, 'path' AS source,
+    NULL::INT AS accuracy_m, NULL::DOUBLE AS speed_mps, NULL::DOUBLE AS altitude_m
+  FROM timeline_segments, unnest(s.timelinePath) t(p)
+  WHERE s.timelinePath IS NOT NULL
+  UNION ALL
+  SELECT left(r.position.timestamp, 19)::TIMESTAMP, latlng(r.position.LatLng),
+    lower(r.position.source), r.position.accuracyMeters,
+    r.position.speedMetersPerSecond, r.position.altitudeMeters
+  FROM timeline_signals WHERE r.position IS NOT NULL
+),
+home AS (SELECT {lat: avg(lat), lon: avg(lon)} AS loc FROM places WHERE kind = 'home')
+SELECT ts, points.loc.lat AS lat, points.loc.lon AS lon, source, accuracy_m, speed_mps, altitude_m,
+  round(km_between(points.loc, home.loc), 1) AS km_from_home
+FROM points, home ORDER BY ts;
+--
+-- The phone's activity guesses (still, walking, in vehicle, ...), last few
+-- weeks only. A category and its subtype often tie, like "on_foot/walking".
+CREATE TABLE phone_activity AS
+WITH a AS (
+  SELECT left(r.activityRecord.timestamp, 19)::TIMESTAMP AS ts,
+    r.activityRecord.probableActivities AS guesses,
+    list_max([g.confidence FOR g IN guesses]) AS top
+  FROM timeline_signals WHERE r.activityRecord IS NOT NULL
+)
+SELECT ts,
+  lower(array_to_string([g.type FOR g IN guesses IF g.confidence = top], '/')) AS activity,
+  lower(array_to_string([g.type || ' ' || round(g.confidence, 2) FOR g IN guesses], ', ')) AS all_guesses
+FROM a;
+--
+-- Trips Timeline recognized (multi-day stays away from home).
+CREATE TABLE timeline_trips AS
+SELECT left(s.startTime, 19)::TIMESTAMP AS start, left(s.endTime, 19)::TIMESTAMP AS "end",
+  s.timelineMemory.trip.distanceFromOriginKms AS km_from_home,
+  [d.identifier.placeId FOR d IN s.timelineMemory.trip.destinations] AS destination_place_ids
+FROM timeline_segments WHERE s.timelineMemory IS NOT NULL;
+--
 DROP TABLE timeline_segments;
+--
+DROP TABLE timeline_signals;
 --
 
 -- CPAP (ResMed AirSense 11). cpap_nights.date is the evening the night
@@ -273,20 +337,40 @@ FULL JOIN (
 ) temp USING (day);
 --
 
--- Google Calendar headache log, 2021 onward. Titles like "Headache
--- (<medication>)" carry the medication and suspected cause. Times are
--- converted to wherever Andrew was.
-CREATE TABLE headaches AS
+-- Every event on Andrew's own Google Calendar, 2010 onward. Timed events are
+-- converted to wherever Andrew was; all-day events have all_day and run
+-- midnight to midnight. Recurring events appear once per occurrence.
+CREATE TABLE calendar_events AS
 SELECT
   coalesce(trip_local(start.dateTime::TIMESTAMPTZ AT TIME ZONE 'America/Chicago'), start.date::TIMESTAMP) AS start,
   coalesce(trip_local("end".dateTime::TIMESTAMPTZ AT TIME ZONE 'America/Chicago'), "end".date::TIMESTAMP) AS "end",
-  summary AS title
+  start.date IS NOT NULL AS all_day,
+  summary AS title,
+  nullif(trim(description), '') AS description,
+  location,
+  eventType AS event_type,
+  recurringEventId IS NOT NULL AS recurring,
+  transparency = 'transparent' AS free,
+  len(attendees) AS attendees
 FROM read_json('calendar/primary.json', format = 'array', columns = {
   summary: 'VARCHAR',
+  description: 'VARCHAR',
+  location: 'VARCHAR',
+  eventType: 'VARCHAR',
+  recurringEventId: 'VARCHAR',
+  transparency: 'VARCHAR',
+  attendees: 'JSON[]',
   start: 'STRUCT(dateTime TIMESTAMPTZ, date DATE)',
   "end": 'STRUCT(dateTime TIMESTAMPTZ, date DATE)'
-})
-WHERE summary ILIKE '%headache%' OR summary ILIKE '%triptan%' OR summary ILIKE '%migraine%';
+});
+--
+
+-- The headache log. Titles like "Headache
+-- (<medication>)" carry the medication and suspected cause.
+CREATE TABLE headaches AS
+SELECT start, "end", title
+FROM calendar_events
+WHERE title ILIKE '%headache%' OR title ILIKE '%triptan%' OR title ILIKE '%migraine%';
 --
 
 -- Tags Claude assigned to journal notes (vocabulary in data/tags/README.md),

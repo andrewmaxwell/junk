@@ -19,7 +19,9 @@ const apiScopes = {
     'health_metrics_and_measurements',
     'sleep',
   ].map((s) => `https://www.googleapis.com/auth/googlehealth.${s}.readonly`),
-  calendar: ['https://www.googleapis.com/auth/calendar.events.readonly'],
+  calendar: ['https://www.googleapis.com/auth/calendar.readonly'],
+  // Covers the Sheets API too, for the journal.
+  drive: ['https://www.googleapis.com/auth/drive.readonly'],
 };
 const scopes = Object.values(apiScopes).flat();
 
@@ -122,14 +124,15 @@ const getAccessToken = async (api) => {
 const accessTokens = {};
 
 // GETs a Google API URL, retrying rate limits and server errors, and getting
-// a fresh access token when the current one expires mid-run.
-export const googleGet = async (api, url) => {
+// a fresh access token when the current one expires mid-run. Returns parsed
+// JSON, or text with `as = 'text'`.
+export const googleGet = async (api, url, as = 'json') => {
   accessTokens[api] ??= await getAccessToken(api);
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(url, {
       headers: {Authorization: `Bearer ${accessTokens[api]}`},
     });
-    if (res.ok) return res.json();
+    if (res.ok) return res[as]();
     if (res.status === 401 && attempt === 0) {
       accessTokens[api] = await getAccessToken(api);
       continue;
