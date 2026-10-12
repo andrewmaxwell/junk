@@ -1,34 +1,42 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
+import {contains, distSq} from './geometry.js';
 
 // --- Constants ---
-const NUM_LENSES = 5;
 const HANDLE_RADIUS = 6;
 const HANDLE_HIT_RADIUS_SQ = 144; // 12²
 const HANDLE_WHITE = '255,255,255';
 const HANDLE_GOLD = '255,205,55';
 const HANDLE_TEAL = '90,235,220';
-const SOURCE_AIM_LENGTH = 40;
-const MIN_BEAM_WIDTH = 10;
 const DEFAULT_EXPOSURE = 0.12;
+const DEFAULT_DISPERSION = 0.027; // Cauchy B (µm²), ~6× real crown glass
 const RAINBOW_EXPOSURE = 0.6;
+
+// Lenses
+const NUM_LENSES = 5;
 const NEW_LENS_HEIGHT = 120;
-const NEW_DROP_RADIUS = 80;
-const MIN_DROP_RADIUS = 10;
-const WATER_IOR = 1.333;
-// Water disperses ~0.75× as much as crown glass; the dispersion setting
-// scales both.
-const WATER_DISPERSION_RATIO = 0.75;
 const NEW_LENS_SAGITTA = 15;
 const MIN_SAGITTA = 8; // minimum |sagitta| — surfaces are never perfectly flat
 const MAX_SAGITTA_RATIO = 0.44; // max |sagitta| as fraction of lens height
 const MAX_EDGE_RATIO = 0.7; // max cylindrical-edge width as fraction of height
 const MIN_CENTER_THICKNESS = 6; // glass never pinches to zero in the middle
 
+// Droplets
+const NEW_DROP_RADIUS = 80;
+const MIN_DROP_RADIUS = 10;
+const WATER_IOR = 1.333;
+// Water disperses ~0.75× as much as crown glass; the dispersion setting
+// scales both.
+const WATER_DISPERSION_RATIO = 0.75;
+
+// Light sources
+const SOURCE_AIM_LENGTH = 40;
+const MIN_BEAM_WIDTH = 10;
+
 // --- Settings ---
 const settings = {
   light: 'White', // 'White' | 'Rainbow'
   ior: 1.5,
-  dispersion: 0.027, // Cauchy B (µm²), ~6× real crown glass
+  dispersion: DEFAULT_DISPERSION,
   reflections: true,
   exposure: DEFAULT_EXPOSURE,
 };
@@ -47,35 +55,17 @@ gui.add(settings, 'reflections').onChange(render);
 gui.add(settings, 'exposure', 0.02, 2, 0.01).onChange(() => {
   rayWorker.postMessage({exposure: settings.exposure});
 });
+const button = (folder, name, onClick) => folder.add({[name]: onClick}, name);
 const scenes = gui.addFolder('Scenes');
-scenes.add({lenses: () => loadScene(lensScene)}, 'lenses');
-scenes.add({rainbow: () => loadScene(rainbowScene)}, 'rainbow');
+button(scenes, 'lenses', () => loadScene(lensScene));
+button(scenes, 'rainbow', () => loadScene(rainbowScene));
 const addFolder = gui.addFolder('Add (double-click to delete)');
-addFolder.add(
-  {
-    lens: () =>
-      addGlass(
-        new Lens(
-          width / 2,
-          height / 2,
-          NEW_LENS_HEIGHT,
-          NEW_LENS_SAGITTA,
-          NEW_LENS_SAGITTA,
-          0,
-        ),
-      ),
-  },
-  'lens',
-);
-addFolder.add(
-  {
-    droplet: () =>
-      addGlass(new Droplet(width / 2, height / 2, NEW_DROP_RADIUS)),
-  },
-  'droplet',
+button(addFolder, 'lens', () => addGlass(newLens(width / 2, height / 2)));
+button(addFolder, 'droplet', () =>
+  addGlass(new Droplet(width / 2, height / 2, NEW_DROP_RADIUS)),
 );
 for (const type of ['beam', 'laser', 'point']) {
-  addFolder.add({[type]: () => addSource(type)}, type);
+  button(addFolder, type, () => addSource(type));
 }
 
 // --- Canvas ---
@@ -87,9 +77,26 @@ let width, height, dpr;
 // rayWorker.js traces rays and renders the light with WebGL straight into the
 // #gl canvas underneath, refining progressively. This thread only draws the
 // lens and handle overlay on #canvas.
-const rayWorker = new Worker(new URL('./rayWorker.js', import.meta.url));
-const glCanvas = document.getElementById('gl').transferControlToOffscreen();
-rayWorker.postMessage({canvas: glCanvas}, [glCanvas]);
+const rayWorker = new Worker(new URL('./rayWorker.js', import.meta.url), {
+  type: 'module',
+});
+rayWorker.onmessage = ({data}) => data.error && showError(data.error);
+rayWorker.onerror = (e) =>
+  showError(e.message || 'the renderer failed to load');
+try {
+  const glCanvas = document.getElementById('gl').transferControlToOffscreen();
+  rayWorker.postMessage({canvas: glCanvas}, [glCanvas]);
+} catch {
+  showError('this browser can’t render from a worker');
+}
+
+// Without the renderer the lenses would still drag around with no light, so
+// say what's wrong instead.
+function showError(reason) {
+  const el = document.getElementById('error');
+  el.textContent = `Can’t draw the light: ${reason}. Try a recent Chrome, Firefox or Safari.`;
+  el.hidden = false;
+}
 let drawPending = false;
 
 // --- Scene state ---
@@ -97,19 +104,25 @@ let lenses = []; // Lens and Droplet: everything light refracts through
 let sources = [];
 
 // --- Interaction state ---
-// Each is {item, part} or null. `part` is 'body' or a handle name.
+// Each is {item, part} or null. `part` is 'body' or a handle name. A drag
+// belongs to the pointer that started it; other fingers are ignored.
 let hovered = null;
 let dragging = null;
-let lastMouse = null;
+let lastPointer = null;
 
 // --- Math utilities ---
-const distSq = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
-
 // Clamp a value's magnitude to [min, max] while preserving its sign.
 // Zero (ambiguous sign) defaults to +min.
 function clampSignedMag(v, min, max) {
   const sign = v < 0 ? -1 : 1;
   return sign * Math.max(min, Math.min(max, Math.abs(v)));
+}
+
+// Area of a circular segment of radius r and height (sagitta) s.
+function segmentArea(r, s) {
+  return (
+    r * r * Math.acos((r - s) / r) - (r - s) * Math.sqrt(2 * r * s - s * s)
+  );
 }
 
 // --- Lens ---
@@ -119,12 +132,13 @@ function clampSignedMag(v, min, max) {
 // flat cylindrical rim; W = 0 gives the classic pointed biconvex shape, while
 // W > 0 is required to give concave lenses a real (non-pinched) body.
 //
-// Lens-space coordinates: u = axial (along axisDir), v = perpendicular (perpDir).
+// Lens-space coordinates: u = axial (along `axis`), v = perpendicular (`perp`).
 // Surface vertices sit at u = -(W/2 + s1) and u = +(W/2 + s2); the rim spans
 // u ∈ [-W/2, +W/2] at v = ±H. Each surface circle passes through its vertex and
 // the two rim points at v = ±H.
 class Lens {
   constructor(x, y, height, s1, s2, angle, w = 0) {
+    this.type = 'lens';
     this.s1Ratio = s1 / height;
     this.s2Ratio = s2 / height;
     this.wRatio = w / height;
@@ -160,8 +174,8 @@ class Lens {
 
     const cosA = Math.cos(this.angle);
     const sinA = Math.sin(this.angle);
-    this.axisDir = {x: cosA, y: sinA};
-    this.perpDir = {x: -sinA, y: cosA}; // p1 = center + H * perpDir
+    this.axis = {x: cosA, y: sinA};
+    this.perp = {x: -sinA, y: cosA}; // p1 = center + H * perp
 
     this.sign1 = this.s1 < 0 ? -1 : 1;
     this.sign2 = this.s2 < 0 ? -1 : 1;
@@ -200,6 +214,12 @@ class Lens {
     this.uMin = -(hw + Math.max(0, this.s1));
     this.uMax = hw + Math.max(0, this.s2);
 
+    // Convex caps add to the rim rectangle, concave ones carve it away.
+    this.area =
+      this.w * this.h +
+      this.sign1 * segmentArea(this.r1, a1) +
+      this.sign2 * segmentArea(this.r2, a2);
+
     const maxAxial = this.w / 2 + Math.max(a1, a2);
     this.boundingRadius = Math.sqrt(maxAxial * maxAxial + H * H) + 2;
   }
@@ -207,29 +227,13 @@ class Lens {
   // Lens-space (u along axis, v along perp) → world point.
   corner(u, v) {
     return {
-      x: this.x + u * this.axisDir.x + v * this.perpDir.x,
-      y: this.y + u * this.axisDir.y + v * this.perpDir.y,
+      x: this.x + u * this.axis.x + v * this.perp.x,
+      y: this.y + u * this.axis.y + v * this.perp.y,
     };
   }
 
   contains(pt) {
-    const dx = pt.x - this.x;
-    const dy = pt.y - this.y;
-    const v = dx * this.perpDir.x + dy * this.perpDir.y;
-    if (Math.abs(v) > this.H) return false;
-    // "Outside the circle" alone would accept points far beyond a concave
-    // surface, so also bound the axial extent.
-    const u = dx * this.axisDir.x + dy * this.axisDir.y;
-    if (u < this.uMin || u > this.uMax) return false;
-    const d1 = distSq(pt, this.c1);
-    if (this.sign1 > 0 ? d1 > this.r1 * this.r1 : d1 < this.r1 * this.r1) {
-      return false;
-    }
-    const d2 = distSq(pt, this.c2);
-    if (this.sign2 > 0 ? d2 > this.r2 * this.r2 : d2 < this.r2 * this.r2) {
-      return false;
-    }
-    return true;
+    return contains(this, pt);
   }
 
   // Builds the closed lens outline as a polyline of world points by sampling
@@ -260,7 +264,7 @@ class Lens {
 
   // Axial (u) coordinate of a world point relative to the lens center.
   relAxis(pt) {
-    return (pt.x - this.x) * this.axisDir.x + (pt.y - this.y) * this.axisDir.y;
+    return (pt.x - this.x) * this.axis.x + (pt.y - this.y) * this.axis.y;
   }
 
   handles() {
@@ -300,59 +304,45 @@ class Lens {
   }
 
   draw(activePart) {
-    const isActive = activePart !== null;
-
-    const pts = this.outlinePath();
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.closePath();
-
-    ctx.fillStyle = isActive
-      ? 'rgba(100,180,255,0.13)'
-      : 'rgba(100,150,255,0.05)';
-    ctx.fill();
-
-    ctx.lineWidth = isActive ? 1.5 : 1;
-    ctx.strokeStyle = isActive
-      ? 'rgba(200,230,255,0.6)'
-      : 'rgba(160,210,255,0.28)';
-    ctx.stroke();
-
+    drawGlass(activePart !== null, () => {
+      const pts = this.outlinePath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (const pt of pts) ctx.lineTo(pt.x, pt.y);
+      ctx.closePath();
+    });
     for (const h of this.handles()) {
       drawHandle(h, h.part === activePart, this.angle);
     }
   }
 
-  // Returns a plain-object snapshot of the geometry needed by the worker.
+  // The geometry and material the worker traces against.
   serialize() {
-    return {
-      type: 'lens',
-      ior: settings.ior,
-      dispersion: settings.dispersion,
-      x: this.x,
-      y: this.y,
-      H: this.H,
-      axis: {x: this.axisDir.x, y: this.axisDir.y},
-      perp: {x: this.perpDir.x, y: this.perpDir.y},
-      r1: this.r1,
-      r2: this.r2,
-      c1: {x: this.c1.x, y: this.c1.y},
-      c2: {x: this.c2.x, y: this.c2.y},
-      sign1: this.sign1,
-      sign2: this.sign2,
-      rimLT: {x: this.rimLT.x, y: this.rimLT.y},
-      rimLB: {x: this.rimLB.x, y: this.rimLB.y},
-      rimRT: {x: this.rimRT.x, y: this.rimRT.y},
-      rimRB: {x: this.rimRB.x, y: this.rimRB.y},
-      uMin: this.uMin,
-      uMax: this.uMax,
-      boundingRadius: this.boundingRadius,
-    };
+    // prettier-ignore
+    const {type, x, y, H, axis, perp, r1, r2, c1, c2, sign1, sign2, uMin, uMax,
+      rimLT, rimLB, rimRT, rimRB, boundingRadius, area} = this;
+    // prettier-ignore
+    return {type, x, y, H, axis, perp, r1, r2, c1, c2, sign1, sign2, uMin, uMax,
+      rimLT, rimLB, rimRT, rimRB, boundingRadius, area,
+      ior: settings.ior, dispersion: settings.dispersion};
   }
 }
 
-// --- Handles ---
+// --- Overlay drawing ---
+// Lenses and droplets share one look; `tracePath` adds the outline.
+function drawGlass(isActive, tracePath) {
+  ctx.beginPath();
+  tracePath();
+  ctx.fillStyle = isActive
+    ? 'rgba(100,180,255,0.13)'
+    : 'rgba(100,150,255,0.05)';
+  ctx.fill();
+  ctx.lineWidth = isActive ? 1.5 : 1;
+  ctx.strokeStyle = isActive
+    ? 'rgba(200,230,255,0.6)'
+    : 'rgba(160,210,255,0.28)';
+  ctx.stroke();
+}
+
 // Faint ring when idle, solid when hovered or dragged.
 function drawHandle({pt, color, diamond}, active, angle = 0) {
   const r = HANDLE_RADIUS;
@@ -383,6 +373,7 @@ function drawHandle({pt, color, diamond}, active, angle = 0) {
 // color-reversed secondary (~51°).
 class Droplet {
   constructor(x, y, r) {
+    this.type = 'drop';
     this.x = x;
     this.y = y;
     this.r = r;
@@ -394,7 +385,7 @@ class Droplet {
   }
 
   contains(pt) {
-    return distSq(pt, this) < this.r * this.r;
+    return contains(this, pt);
   }
 
   drag(part, mouse, delta) {
@@ -407,25 +398,17 @@ class Droplet {
   }
 
   draw(activePart) {
-    const isActive = activePart !== null;
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-    ctx.fillStyle = isActive
-      ? 'rgba(100,180,255,0.13)'
-      : 'rgba(100,150,255,0.05)';
-    ctx.fill();
-    ctx.lineWidth = isActive ? 1.5 : 1;
-    ctx.strokeStyle = isActive
-      ? 'rgba(200,230,255,0.6)'
-      : 'rgba(160,210,255,0.28)';
-    ctx.stroke();
+    drawGlass(activePart !== null, () =>
+      ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2),
+    );
     for (const h of this.handles()) drawHandle(h, h.part === activePart);
   }
 
   serialize() {
-    const {x, y, r} = this;
+    const {type, x, y, r} = this;
     return {
-      type: 'drop',
+      type,
+      area: Math.PI * r * r,
       ior: WATER_IOR,
       dispersion: settings.dispersion * WATER_DISPERSION_RATIO,
       x,
@@ -536,7 +519,7 @@ function requestRayRender() {
   rayWorker.postMessage({
     scene: {
       lenses: lenses.map((l) => l.serialize()),
-      sources: sources.map((l) => l.serialize()),
+      sources: sources.map((s) => s.serialize()),
       light: settings.light,
       reflections: settings.reflections,
       width,
@@ -577,6 +560,7 @@ function resize() {
   width = window.innerWidth;
   height = window.innerHeight;
   // Keep every lens and light at the same relative position on screen.
+  // (Nothing exists yet on the first call.)
   for (const item of [...lenses, ...sources]) {
     const delta = {
       x: item.x * (width / oldWidth - 1),
@@ -595,8 +579,8 @@ function loadScene(scene) {
   hovered = null;
   dragging = null;
   gui.controllersRecursive().forEach((c) => c.updateDisplay());
-  rayWorker.postMessage({exposure: settings.exposure});
-  render();
+  dispersionControl.enable(settings.light === 'White');
+  render(); // also sends the scene's settings and exposure
 }
 
 function lensScene() {
@@ -610,6 +594,10 @@ function lensScene() {
 // the dark above and below it. Only a few percent of the light ends up in
 // them, hence the higher exposure.
 function rainbowScene() {
+  // The bows need spectral light, dispersion, and internal reflections.
+  settings.light = 'White';
+  settings.dispersion = DEFAULT_DISPERSION;
+  settings.reflections = true;
   settings.exposure = RAINBOW_EXPOSURE;
   const r = Math.min(height * 0.15, width * 0.12);
   const drop = new Droplet(width * 0.6, height / 2, r);
@@ -665,91 +653,88 @@ function generateLenses() {
 }
 
 // --- Interaction ---
-function getMousePos(e) {
-  const rect = canvas.getBoundingClientRect();
-  const source = e.touches ? e.touches[0] : e;
-  return {x: source.clientX - rect.left, y: source.clientY - rect.top};
-}
+// Pointer events cover mouse, touch and pen alike.
+const pointerPos = (e) => ({x: e.clientX, y: e.clientY}); // canvas fills the page
 
-// Topmost handle or body under the mouse. Sources sit above lenses.
-function pick(mouse) {
+// Topmost handle or body under the pointer. Sources sit above lenses.
+function pick(pt) {
   const items = [...lenses, ...sources];
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
     for (const h of item.handles()) {
-      if (distSq(mouse, h.pt) < HANDLE_HIT_RADIUS_SQ)
+      if (distSq(pt, h.pt) < HANDLE_HIT_RADIUS_SQ) {
         return {item, part: h.part};
+      }
     }
-    if (item.contains(mouse)) return {item, part: 'body'};
+    if (item.contains(pt)) return {item, part: 'body'};
   }
   return null;
 }
 
+function setHovered(next) {
+  if (hovered?.item !== next?.item || hovered?.part !== next?.part) {
+    hovered = next;
+    scheduleDrawScene();
+  }
+  const cursor = !next
+    ? 'default'
+    : next.part === 'body'
+      ? 'grab'
+      : 'crosshair';
+  canvas.style.cursor = cursor;
+}
+
 function handlePointerDown(e) {
-  if (e.target !== canvas) return;
-  if (e.detail >= 2) return; // dblclick will handle double-clicks
-  lastMouse = getMousePos(e);
-  dragging = pick(lastMouse);
+  if (dragging) return; // a second finger while dragging
+  lastPointer = pointerPos(e);
+  dragging = pick(lastPointer);
+  if (!dragging) return;
+  dragging.pointerId = e.pointerId;
+  // Keep receiving moves even if the pointer leaves the canvas mid-drag.
+  canvas.setPointerCapture(e.pointerId);
 }
 
 function handlePointerMove(e) {
-  const mouse = getMousePos(e);
-
-  if (dragging) {
-    const delta = {x: mouse.x - lastMouse.x, y: mouse.y - lastMouse.y};
-    dragging.item.drag(dragging.part, mouse, delta);
-    lastMouse = mouse;
-    canvas.style.cursor = 'grabbing';
-    render();
+  const pt = pointerPos(e);
+  if (!dragging) {
+    setHovered(pick(pt));
     return;
   }
-
-  const prev = hovered;
-  hovered = pick(mouse);
-  const cursor = !hovered
-    ? 'default'
-    : hovered.part === 'body'
-      ? 'grab'
-      : 'crosshair';
-  if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
-  if (prev?.item !== hovered?.item || prev?.part !== hovered?.part) {
-    scheduleDrawScene();
-  }
+  if (e.pointerId !== dragging.pointerId) return;
+  const delta = {x: pt.x - lastPointer.x, y: pt.y - lastPointer.y};
+  dragging.item.drag(dragging.part, pt, delta);
+  lastPointer = pt;
+  canvas.style.cursor = 'grabbing';
+  render();
 }
 
-function handlePointerUp() {
-  if (!dragging) return;
+function handlePointerUp(e) {
+  if (e.pointerId !== dragging?.pointerId) return;
   dragging = null;
+  setHovered(pick(pointerPos(e)));
   render();
 }
 
 function handleDoubleClick(e) {
   e.preventDefault();
-  const mouse = getMousePos(e);
+  const pt = pointerPos(e);
 
   // Double-click on a lens or light: delete it
-  const hit = pick(mouse);
+  const hit = pick(pt);
   if (hit) {
     lenses = lenses.filter((l) => l !== hit.item);
-    sources = sources.filter((l) => l !== hit.item);
-    hovered = null;
+    sources = sources.filter((s) => s !== hit.item);
+    setHovered(null);
     render();
     return;
   }
 
   // Double-click on empty space: create a new lens
-  lenses.push(
-    new Lens(
-      mouse.x,
-      mouse.y,
-      NEW_LENS_HEIGHT,
-      NEW_LENS_SAGITTA,
-      NEW_LENS_SAGITTA,
-      0,
-    ),
-  );
-  render();
+  addGlass(newLens(pt.x, pt.y));
 }
+
+const newLens = (x, y) =>
+  new Lens(x, y, NEW_LENS_HEIGHT, NEW_LENS_SAGITTA, NEW_LENS_SAGITTA, 0);
 
 function addGlass(item) {
   lenses.push(item);
@@ -767,28 +752,14 @@ window.addEventListener('resize', () => {
   render();
 });
 
-canvas.addEventListener('mousedown', handlePointerDown);
-canvas.addEventListener('mousemove', handlePointerMove);
+canvas.addEventListener('pointerdown', handlePointerDown);
+canvas.addEventListener('pointermove', handlePointerMove);
+canvas.addEventListener('pointerup', handlePointerUp);
+canvas.addEventListener('pointercancel', handlePointerUp);
+canvas.addEventListener('pointerleave', () => {
+  if (!dragging) setHovered(null);
+});
 canvas.addEventListener('dblclick', handleDoubleClick);
-window.addEventListener('mouseup', handlePointerUp);
-
-canvas.addEventListener(
-  'touchstart',
-  (e) => {
-    e.preventDefault();
-    handlePointerDown(e);
-  },
-  {passive: false},
-);
-canvas.addEventListener(
-  'touchmove',
-  (e) => {
-    e.preventDefault();
-    handlePointerMove(e);
-  },
-  {passive: false},
-);
-window.addEventListener('touchend', handlePointerUp);
 
 // --- Init ---
 resize();

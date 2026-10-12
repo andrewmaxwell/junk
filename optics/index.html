@@ -7,11 +7,13 @@
     <style>
         body { margin: 0; overflow: hidden; background-color: #0a0a0a; color: white; cursor: default; }
         canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; touch-action: none; }
+        #error { position: fixed; left: 50%; top: 40%; transform: translateX(-50%); max-width: 26em; padding: 12px 16px; border-radius: 8px; background: rgba(40, 20, 20, 0.9); font: 14px system-ui, sans-serif; text-align: center; z-index: 1; }
     </style>
 </head>
 <body>
     <canvas id="gl"></canvas>
     <canvas id="canvas"></canvas>
+    <div id="error" hidden></div>
     <script type="module" src="main.js"></script>
 </body>
 </html>

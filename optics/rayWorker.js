@@ -1,4 +1,4 @@
-'use strict';
+import {contains, distSq} from './geometry.js';
 
 // Rays are traced on the CPU in CSS pixels; the GPU adds their segments into a
 // float texture at device resolution. Each pass shifts ray origins and
@@ -75,11 +75,6 @@ function hueToRGB(h) {
 
 // --- Math helpers ---
 const dot = (a, b) => a.x * b.x + a.y * b.y;
-const distSq = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
-const normalize = (v) => {
-  const l = Math.sqrt(v.x * v.x + v.y * v.y);
-  return l ? {x: v.x / l, y: v.y / l} : {x: 0, y: 0};
-};
 
 // True if a point satisfies one surface's solid-side constraint.
 // Convex (sign > 0): inside the circle. Concave (sign < 0): outside it.
@@ -152,8 +147,7 @@ function checkSurface(lens, ray, hits, cc, cr, sign, oc, ocr, oSign, faceAxial) 
     if (!surfaceOK(pt, oc, ocr, oSign)) continue;
     // Outward normal (away from the glass): for a convex surface that's
     // away from the circle center, for concave it's toward it — hence ·sign.
-    const gn = normalize({x: pt.x - cc.x, y: pt.y - cc.y});
-    const n = {x: gn.x * sign, y: gn.y * sign};
+    const n = {x: ((pt.x - cc.x) / cr) * sign, y: ((pt.y - cc.y) / cr) * sign};
     const outwardAxial = n.x * axis.x + n.y * axis.y;
     // Keep only the branch whose outward normal faces this surface's side.
     if (faceAxial < 0 ? outwardAxial > 0.02 : outwardAxial < -0.02) continue;
@@ -177,21 +171,15 @@ function rimHit(ray, a, b, hits) {
   hits.push({t, pt, normal: {x: 0, y: 0}, absorb: true});
 }
 
-// Splits a ray hitting a surface into reflected and refracted directions,
-// with the unpolarised Fresnel reflectance R. `normal` points from the medium
-// of index nIn to the one of index nOut. Total internal reflection has no
-// refracted ray and R = 1.
-function scatter(d, normal, nIn, nOut) {
-  let cosI = dot(d, normal);
-  let n1, n2, N;
+// Splits a ray crossing from index n1 into n2 into reflected and refracted
+// directions, with the unpolarised Fresnel reflectance R. `normal` may face
+// either way. Total internal reflection has no refracted ray and R = 1.
+function scatter(d, normal, n1, n2) {
+  // Orient the normal against the ray.
+  let cosI = -dot(d, normal);
+  let N = normal;
   if (cosI < 0) {
-    n1 = nOut;
-    n2 = nIn;
-    N = normal;
     cosI = -cosI;
-  } else {
-    n1 = nIn;
-    n2 = nOut;
     N = {x: -normal.x, y: -normal.y};
   }
   const reflected = {x: d.x + 2 * cosI * N.x, y: d.y + 2 * cosI * N.y};
@@ -237,64 +225,63 @@ function nearestHit(lenses, ray) {
   let best = null;
   for (const lens of lenses) {
     for (const hit of getIntersections(lens, ray)) {
-      if (!best || hit.t < best.t) best = {...hit, lens};
+      if (!best || hit.t < best.t) best = hit;
     }
   }
   return best;
 }
 
-// Same tests as contains() on the main thread.
-function lensContains(lens, pt) {
-  if (lens.type === 'drop') return distSq(pt, lens) < lens.r * lens.r;
-  const dx = pt.x - lens.x;
-  const dy = pt.y - lens.y;
-  const v = dx * lens.perp.x + dy * lens.perp.y;
-  if (Math.abs(v) > lens.H) return false;
-  const u = dx * lens.axis.x + dy * lens.axis.y;
-  if (u < lens.uMin || u > lens.uMax) return false;
-  const d1 = distSq(pt, lens.c1);
-  if (lens.sign1 > 0 ? d1 > lens.r1 * lens.r1 : d1 < lens.r1 * lens.r1) {
-    return false;
+// The medium at a point: where elements overlap, the smallest one wins, so
+// nested objects (a lens in a droplet in a lens) resolve the same way in any
+// order. null is air.
+function mediumAt(lenses, pt) {
+  let best = null;
+  for (const l of lenses) {
+    if ((!best || l.area < best.area) && contains(l, pt)) best = l;
   }
-  const d2 = distSq(pt, lens.c2);
-  return lens.sign2 > 0 ? d2 <= lens.r2 * lens.r2 : d2 >= lens.r2 * lens.r2;
+  return best;
 }
 
-// The element (if any) on the far side of a hit surface: overlapping glass or
-// water rather than air.
-const otherElementAt = (lenses, hit) =>
-  lenses.find((l) => l !== hit.lens && lensContains(l, hit.pt));
+const nAt = (medium, lambda) => (medium ? iorAt(medium, lambda) : 1);
 
-const offset = (pt, d) => ({
-  x: pt.x + d.x * RAY_EPSILON,
-  y: pt.y + d.y * RAY_EPSILON,
+// A point just past `pt` along d (or just before it, with sign -1).
+const offset = (pt, d, sign = 1) => ({
+  x: pt.x + sign * d.x * RAY_EPSILON,
+  y: pt.y + sign * d.y * RAY_EPSILON,
 });
+
+// Where a ray that hits nothing is drawn to: well past the screen edge.
+const farPoint = (o, d, far) => ({x: o.x + d.x * far, y: o.y + d.y * far});
 
 // Traces one ray of a single wavelength, drawing every segment. With
 // reflections on, each surface spawns a Fresnel-weighted reflected branch.
-// `skipFirst` leaves the first segment undrawn when the caller already drew it.
-function traceRay(scene, origin, dir, lambda, rgb, far, skipFirst = false) {
+// `firstHit` means the caller already found and drew the first segment.
+function traceRay(scene, origin, dir, lambda, rgb, far, firstHit = null) {
   const stack = [{o: origin, d: dir, w: 1, depth: 0}];
+  let known = firstHit;
   while (stack.length) {
     let {o, d, w, depth} = stack.pop();
     for (; depth < MAX_SEGMENTS; depth++) {
-      const hit = nearestHit(scene.lenses, {o, d});
-      const end = hit ? hit.pt : {x: o.x + d.x * far, y: o.y + d.y * far};
-      if (!skipFirst) addLine(o, end, rgb[0] * w, rgb[1] * w, rgb[2] * w);
-      skipFirst = false;
+      const hit = known ?? nearestHit(scene.lenses, {o, d});
+      if (!known) {
+        const end = hit ? hit.pt : farPoint(o, d, far);
+        addLine(o, end, rgb[0] * w, rgb[1] * w, rgb[2] * w);
+      }
+      known = null;
       if (!hit) break;
-      // A rim buried in another element doesn't block light; neither does a
-      // boundary between two media of the same index.
-      const other = otherElementAt(scene.lenses, hit);
-      const nIn = iorAt(hit.lens, lambda);
-      const nOut = other ? iorAt(other, lambda) : 1;
-      if ((hit.absorb && other) || nIn === nOut) {
+      // Look just before and after the hit. A surface with the same index
+      // on both sides (hidden inside a smaller element, or between matching
+      // media) does nothing: it doesn't bend, and a ground rim turns clear,
+      // just as frosted glass does when wetted with a matching liquid.
+      const n1 = nAt(mediumAt(scene.lenses, offset(hit.pt, d, -1)), lambda);
+      const n2 = nAt(mediumAt(scene.lenses, offset(hit.pt, d)), lambda);
+      if (n1 === n2) {
         o = offset(hit.pt, d);
         continue;
       }
       if (hit.absorb) break;
 
-      const {reflected, refracted, R} = scatter(d, hit.normal, nIn, nOut);
+      const {reflected, refracted, R} = scatter(d, hit.normal, n1, n2);
       if (!refracted) {
         d = reflected;
       } else {
@@ -382,10 +369,10 @@ function traceOrigin(scene, {o, d}, t, weight, far) {
   // Every wavelength shares the path up to the first surface, so draw
   // that segment once (the costly part for rays that miss every lens).
   const hit = nearestHit(scene.lenses, {o, d});
-  addLine(o, hit ? hit.pt : {x: o.x + d.x * far, y: o.y + d.y * far}, ...sum);
+  addLine(o, hit ? hit.pt : farPoint(o, d, far), ...sum);
   if (!hit) return;
   for (const {lambda, rgb} of samples) {
-    traceRay(scene, o, d, lambda, rgb, far, true);
+    traceRay(scene, o, d, lambda, rgb, far, hit);
   }
 }
 
@@ -593,10 +580,11 @@ function compile(vsSource, fsSource) {
 function initGL(canvas) {
   glCanvas = canvas;
   gl = canvas.getContext('webgl2', {antialias: false, depth: false});
+  if (!gl) throw new Error('WebGL2 isn’t available');
   // Float render targets; blending into 32-bit floats needs EXT_float_blend,
   // otherwise fall back to half floats (blendable everywhere).
   if (!gl.getExtension('EXT_color_buffer_float')) {
-    throw new Error('optics needs EXT_color_buffer_float');
+    throw new Error('this GPU can’t render to float textures');
   }
   accumFormat = gl.getExtension('EXT_float_blend') ? gl.RGBA32F : gl.RGBA16F;
 
@@ -767,9 +755,15 @@ function schedule() {
 
 self.onmessage = ({data}) => {
   if (data.canvas) {
-    initGL(data.canvas);
+    try {
+      initGL(data.canvas);
+    } catch (e) {
+      gl = null;
+      self.postMessage({error: e.message});
+    }
     return;
   }
+  if (!gl) return; // no renderer; the page already shows why
   exposure = data.exposure;
   if (data.scene) {
     scene = data.scene;
