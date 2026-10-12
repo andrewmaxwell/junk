@@ -246,7 +246,7 @@ async function heaterOffAndExit(code) {
     (app && !['IDLE', 'OFF'].includes(app.getSession()?.phase ?? 'IDLE'));
   let confirmed = false;
   if (!MONITOR && !AUTOPILOT && machine.connected) {
-    const hot = active && machine.state.BT >= 60;
+    const hot = active && !(machine.state.BT < 60); // unknown BT: cool anyway
     // Locked off: the session is still running while we wait, and a step or
     // a click must not turn the heat back on.
     machine.heaterOff(hot ? {FC: 100, RC: 90} : {});

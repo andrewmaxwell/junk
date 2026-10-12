@@ -196,7 +196,7 @@ test('with no BT readings, the heater is held off until they come back', async (
   const readings = sim.readings.bind(sim);
   sim.readings = () => {
     const r = readings();
-    delete r.BT;
+    r.BT = 'ERR'; // a probe fault: not a number is no reading either
     return r;
   };
   await until(clock, () => sim.m.HS === 0 && sim.m.HP === 0, 15_000);

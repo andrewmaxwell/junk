@@ -668,9 +668,9 @@ function preheatText(s) {
 // the room, at the rate of the last minute. Null if it can't tell yet.
 function coolingEta(target, ambient = 25) {
   const last = samples.at(-1);
-  if (!last) return null;
+  if (last?.BT == null) return null;
   const rate = slope(
-    samples.filter((x) => last.t - x.t <= 60_000),
+    samples.filter((x) => last.t - x.t <= 60_000 && x.BT != null),
     'BT',
   );
   if (rate == null || rate > -0.2 || last.BT <= target) return null;

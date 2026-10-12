@@ -157,7 +157,7 @@ export class Session extends EventEmitter {
 
   // ---- user actions
 
-  // Choose the beans for the next batch. Allowed any time except mid-roast.
+  // Choose the beans for the next batch (mid-roast too: it's the one after).
   selectBatch({bean, variant, weightIn}) {
     if (this.phase === 'SHUTDOWN' || this.phase === 'OFF')
       throw new Error('the session is shutting down');
@@ -302,6 +302,9 @@ export class Session extends EventEmitter {
     while (this.recent.length && s.t - this.recent[0].t > KEEP_RECENT_MS)
       this.recent.shift();
     this.log.push(s);
+    // All off, the log only feeds the chart; don't let it grow all night.
+    if (this.phase === 'OFF')
+      while (s.t - this.log[0].t > KEEP_RECENT_MS) this.log.shift();
     const ror = rateOfRise(this.recent);
     const roastMs = this.batch?.charge ? s.t - this.batch.charge.t : null;
     const preheat = this.phase === 'PREHEAT' ? this.preheatStatus() : null;

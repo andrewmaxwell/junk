@@ -191,6 +191,8 @@ export class Machine extends EventEmitter {
     const msg = parse(line);
     if (!msg) return;
     this.lastRx = this.clock.now();
+    // A BT that isn't a number (a probe fault) is no reading at all.
+    if ('BT' in msg.vars && !Number.isFinite(msg.vars.BT)) delete msg.vars.BT;
     Object.assign(this.state, {sid: msg.sid}, msg.vars);
     if ('BT' in msg.vars) {
       this.lastReading = this.lastRx;
