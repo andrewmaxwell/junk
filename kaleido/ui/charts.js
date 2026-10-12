@@ -7,7 +7,7 @@
 // upcoming steps and the drop temperature are horizontal guides on the
 // temperature plot.
 
-import uPlot from 'https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.esm.js';
+import uPlot from './vendor/uPlot.esm.js';
 
 const css = (name) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim();

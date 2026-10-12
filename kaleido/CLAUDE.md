@@ -2,7 +2,7 @@
 
 Controller for a Kaleido M1 LITE roaster. Read `README.md` first for what it does. This file covers how it's built and the hard-won facts about the machine.
 
-This project is **not** a plain static page like the rest of the repo. It needs a local Node server (the `serialport`, `ws`, and `express` packages from the root `package.json`) because the server owns the serial port. The browser UI is a plain ES module page served by that server. Browser libraries still come from CDNs.
+This project is **not** a plain static page like the rest of the repo. It needs a local Node server (the `serialport`, `ws`, and `express` packages from the root `package.json`) because the server owns the serial port. The browser UI is a plain ES module page served by that server. Unlike the rest of the repo, its one browser library (uPlot 1.6.32) is copied into `ui/vendor/`, so the UI, STOP included, works with no internet. Keep it that way: no CDN imports here.
 
 ## Layout
 
@@ -35,6 +35,7 @@ server/
 test/            node --test kaleido/test/*.test.js
 index.html, main.js   browser UI: readouts, charts, side panel of actions, alarm banner
 ui/charts.js          three stacked uPlot charts (temps, RoR, burner/air) sharing time + cursor
+ui/vendor/            uPlot's ESM build and CSS, served locally (no CDN mid-roast)
 ui/sound.js           speech + chimes (needs the Start click to unlock audio)
 ui/pops.js            mic pop detector (AudioWorklet); hints only
 preheat.json          preheat settings + stability rule, shared by every bean
