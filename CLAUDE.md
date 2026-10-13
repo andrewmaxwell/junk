@@ -21,6 +21,7 @@ A collection of standalone browser experiments. Each top-level directory is its 
 - Use lil-gui for settings panels and controls (`import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm'`) rather than hand-built HTML inputs.
 
 - Lint and format with `npx eslint --fix <project>/*.js`. Prettier options live in `.prettierrc.json`, which ESLint reads, so `npx prettier --write` gives the same result.
+- Format once, when a change is finished and before committing, not after every edit. Formatting rewraps lines, so edits written against the earlier text stop matching. Claude's edits aren't formatted on save; VS Code's ESLint fix-on-save only runs when Andrew saves a file in the editor, which reformats the whole file. To check for errors mid-task without reformatting, run `npx eslint <files>` without `--fix`.
 
 ## Git
 
