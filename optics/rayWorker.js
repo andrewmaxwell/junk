@@ -1,6 +1,6 @@
-import {contains, distSq} from './geometry.js';
+import {containsAt} from './geometry.js';
 
-// Rays are traced on the CPU in CSS pixels; the GPU adds their segments into a
+// Rays are traced on the CPU in CSS pixels; WebGPU adds their segments into a
 // float texture at device resolution. Each pass shifts ray origins and
 // jitters wavelengths, so the image keeps refining while the scene is still.
 
@@ -73,128 +73,188 @@ function hueToRGB(h) {
   return [f(5), f(3), f(1)];
 }
 
-// --- Math helpers ---
-const dot = (a, b) => a.x * b.x + a.y * b.y;
+// --- Intersections ---
+// The tracer's hot loop works in plain numbers. Each *Hit function tests one
+// element and, if it finds a hit nearer than HIT.t, records it in HIT, so no
+// objects are allocated per ray.
+const HIT = {t: 0, x: 0, y: 0, nx: 0, ny: 0, absorb: false, el: null};
+let current = null; // the element being tested, for record()
+
+function record(t, ox, oy, dx, dy, nx, ny, absorb) {
+  HIT.t = t;
+  HIT.x = ox + dx * t;
+  HIT.y = oy + dy * t;
+  HIT.nx = nx;
+  HIT.ny = ny;
+  HIT.absorb = absorb;
+  HIT.el = current;
+}
+
+// Finds the nearest hit along a ray into HIT; false if it hits nothing.
+function nearestHit(elements, ox, oy, dx, dy) {
+  HIT.t = Infinity;
+  for (const el of elements) {
+    current = el;
+    if (el.type === 'lens') lensHit(el, ox, oy, dx, dy);
+    else if (el.type === 'drop') dropHit(el, ox, oy, dx, dy);
+    else polygonHit(el, ox, oy, dx, dy);
+  }
+  return HIT.t < Infinity;
+}
 
 // True if a point satisfies one surface's solid-side constraint.
 // Convex (sign > 0): inside the circle. Concave (sign < 0): outside it.
-function surfaceOK(pt, center, r, sign) {
-  const d = distSq(pt, center);
+function surfaceOK(x, y, cx, cy, r, sign) {
+  const d = (x - cx) ** 2 + (y - cy) ** 2;
   return sign > 0
     ? d <= r * r + INTERSECTION_SLACK
     : d >= r * r - INTERSECTION_SLACK;
 }
 
-function getIntersections(lens, ray) {
-  if (lens.type === 'drop') return dropHits(lens, ray);
-  const ocX = ray.o.x - lens.x;
-  const ocY = ray.o.y - lens.y;
-  const bHalf = ocX * ray.d.x + ocY * ray.d.y;
+function lensHit(lens, ox, oy, dx, dy) {
+  // Skip lenses whose bounding circle the ray misses.
+  const ocX = ox - lens.x;
+  const ocY = oy - lens.y;
+  const bHalf = ocX * dx + ocY * dy;
   const bC = ocX * ocX + ocY * ocY - lens.boundingRadius * lens.boundingRadius;
-  if (bC > 0 && bHalf > 0) return [];
-  if (bHalf * bHalf - bC < 0) return [];
-
-  const hits = [];
+  if (bC > 0 && bHalf > 0) return;
+  if (bHalf * bHalf - bC < 0) return;
 
   // Left surface faces −axis; right surface faces +axis.
   // prettier-ignore
-  checkSurface(lens, ray, hits, lens.c1, lens.r1, lens.sign1, lens.c2, lens.r2, lens.sign2, -1);
+  surfaceHit(lens, ox, oy, dx, dy, lens.c1, lens.r1, lens.sign1, lens.c2, lens.r2, lens.sign2, -1);
   // prettier-ignore
-  checkSurface(lens, ray, hits, lens.c2, lens.r2, lens.sign2, lens.c1, lens.r1, lens.sign1, 1);
+  surfaceHit(lens, ox, oy, dx, dy, lens.c2, lens.r2, lens.sign2, lens.c1, lens.r1, lens.sign1, 1);
 
   // Cylindrical rim segments absorb any ray that enters through the edge.
-  rimHit(ray, lens.rimLT, lens.rimRT, hits);
-  rimHit(ray, lens.rimLB, lens.rimRB, hits);
-
-  return hits;
-}
-
-// A droplet is a plain circle; its outward normal points away from the center.
-function dropHits(drop, ray) {
-  const dx = ray.o.x - drop.x;
-  const dy = ray.o.y - drop.y;
-  const b = dx * ray.d.x + dy * ray.d.y;
-  const disc = b * b - (dx * dx + dy * dy - drop.r * drop.r);
-  if (disc < 0) return [];
-  const sq = Math.sqrt(disc);
-  const hits = [];
-  for (const t of [-b - sq, -b + sq]) {
-    if (t <= RAY_EPSILON) continue;
-    const pt = {x: ray.o.x + ray.d.x * t, y: ray.o.y + ray.d.y * t};
-    const normal = {x: (pt.x - drop.x) / drop.r, y: (pt.y - drop.y) / drop.r};
-    hits.push({t, pt, normal, absorb: false});
-  }
-  return hits;
+  segmentHit(ox, oy, dx, dy, lens.rimLT, lens.rimRT, 0, 0, true);
+  segmentHit(ox, oy, dx, dy, lens.rimLB, lens.rimRB, 0, 0, true);
 }
 
 // Curved-surface intersection. `faceAxial` is +1 if the surface's outward
 // normal should point along +axis (right surface) or −1 (left surface).
 // prettier-ignore
-function checkSurface(lens, ray, hits, cc, cr, sign, oc, ocr, oSign, faceAxial) {
+function surfaceHit(lens, ox, oy, dx, dy, cc, cr, sign, oc, ocr, oSign, faceAxial) {
   const {axis, perp, H} = lens;
-  const dx = ray.o.x - cc.x;
-  const dy = ray.o.y - cc.y;
-  const b = 2 * (dx * ray.d.x + dy * ray.d.y);
-  const c = dx * dx + dy * dy - cr * cr;
-  const disc = b * b - 4 * c;
+  const ex = ox - cc.x;
+  const ey = oy - cc.y;
+  const b = ex * dx + ey * dy;
+  const disc = b * b - (ex * ex + ey * ey - cr * cr);
   if (disc < 0) return;
   const sq = Math.sqrt(disc);
-  for (const t of [(-b - sq) / 2, (-b + sq) / 2]) {
-    if (t <= RAY_EPSILON) continue;
-    const pt = {x: ray.o.x + ray.d.x * t, y: ray.o.y + ray.d.y * t};
-    const v = (pt.x - lens.x) * perp.x + (pt.y - lens.y) * perp.y;
+  for (let k = 0; k < 2; k++) {
+    const t = k ? -b + sq : -b - sq;
+    if (t <= RAY_EPSILON || t >= HIT.t) continue;
+    const x = ox + dx * t;
+    const y = oy + dy * t;
+    const v = (x - lens.x) * perp.x + (y - lens.y) * perp.y;
     if (Math.abs(v) > H + INTERSECTION_SLACK) continue;
-    if (!surfaceOK(pt, oc, ocr, oSign)) continue;
+    if (!surfaceOK(x, y, oc.x, oc.y, ocr, oSign)) continue;
     // Outward normal (away from the glass): for a convex surface that's
     // away from the circle center, for concave it's toward it — hence ·sign.
-    const n = {x: ((pt.x - cc.x) / cr) * sign, y: ((pt.y - cc.y) / cr) * sign};
-    const outwardAxial = n.x * axis.x + n.y * axis.y;
+    const nx = ((x - cc.x) / cr) * sign;
+    const ny = ((y - cc.y) / cr) * sign;
+    const outwardAxial = nx * axis.x + ny * axis.y;
     // Keep only the branch whose outward normal faces this surface's side.
     if (faceAxial < 0 ? outwardAxial > 0.02 : outwardAxial < -0.02) continue;
-    const absorb = Math.abs(v) >= H - 3;
-    hits.push({t, pt, normal: n, absorb});
+    record(t, ox, oy, dx, dy, nx, ny, Math.abs(v) >= H - 3);
   }
 }
 
-// Ray vs. a rim line segment (a→b). Any hit absorbs the ray.
-function rimHit(ray, a, b, hits) {
+// Ray vs. the segment a→b, with normal (nx, ny).
+function segmentHit(ox, oy, dx, dy, a, b, nx, ny, absorb) {
   const ex = b.x - a.x;
   const ey = b.y - a.y;
-  const denom = ray.d.x * ey - ray.d.y * ex;
+  const denom = dx * ey - dy * ex;
   if (Math.abs(denom) < 1e-9) return; // parallel
-  const wx = a.x - ray.o.x;
-  const wy = a.y - ray.o.y;
+  const wx = a.x - ox;
+  const wy = a.y - oy;
   const t = (wx * ey - wy * ex) / denom;
-  const s = (wx * ray.d.y - wy * ray.d.x) / denom;
-  if (t <= RAY_EPSILON || s < 0 || s > 1) return;
-  const pt = {x: ray.o.x + ray.d.x * t, y: ray.o.y + ray.d.y * t};
-  hits.push({t, pt, normal: {x: 0, y: 0}, absorb: true});
+  const s = (wx * dy - wy * dx) / denom;
+  if (t <= RAY_EPSILON || t >= HIT.t || s < 0 || s > 1) return;
+  record(t, ox, oy, dx, dy, nx, ny, absorb);
 }
 
-// Splits a ray crossing from index n1 into n2 into reflected and refracted
-// directions, with the unpolarised Fresnel reflectance R. `normal` may face
-// either way. Total internal reflection has no refracted ray and R = 1.
-function scatter(d, normal, n1, n2) {
-  // Orient the normal against the ray.
-  let cosI = -dot(d, normal);
-  let N = normal;
-  if (cosI < 0) {
-    cosI = -cosI;
-    N = {x: -normal.x, y: -normal.y};
+// A droplet is a plain circle; its outward normal points away from the center.
+function dropHit(drop, ox, oy, dx, dy) {
+  const ex = ox - drop.x;
+  const ey = oy - drop.y;
+  const b = ex * dx + ey * dy;
+  const disc = b * b - (ex * ex + ey * ey - drop.r * drop.r);
+  if (disc < 0) return;
+  const sq = Math.sqrt(disc);
+  for (let k = 0; k < 2; k++) {
+    const t = k ? -b + sq : -b - sq;
+    if (t <= RAY_EPSILON || t >= HIT.t) continue;
+    const nx = (ex + dx * t) / drop.r;
+    const ny = (ey + dy * t) / drop.r;
+    record(t, ox, oy, dx, dy, nx, ny, false);
   }
-  const reflected = {x: d.x + 2 * cosI * N.x, y: d.y + 2 * cosI * N.y};
+}
+
+// Each edge of a convex polygon (see prepareScene for `edges`).
+function polygonHit(poly, ox, oy, dx, dy) {
+  for (const {a, b, nx, ny} of poly.edges) {
+    segmentHit(ox, oy, dx, dy, a, b, nx, ny, false);
+  }
+}
+
+// Once per scene: polygon edges with outward normals, and whether any two
+// elements' bounding circles overlap (if not, tracing can skip mediumAt).
+function prepareScene(scene) {
+  for (const el of scene.lenses) {
+    if (el.type !== 'prism') continue;
+    el.edges = el.vertices.map((a, i) => {
+      const b = el.vertices[(i + 1) % el.vertices.length];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      let nx = (b.y - a.y) / len;
+      let ny = -(b.x - a.x) / len;
+      if ((a.x - el.x) * nx + (a.y - el.y) * ny < 0) {
+        nx = -nx;
+        ny = -ny;
+      }
+      return {a, b, nx, ny};
+    });
+  }
+  const radius = (el) => (el.type === 'drop' ? el.r : el.boundingRadius);
+  scene.disjoint = scene.lenses.every((a, i) =>
+    scene.lenses
+      .slice(i + 1)
+      .every((b) => Math.hypot(a.x - b.x, a.y - b.y) > radius(a) + radius(b)),
+  );
+}
+
+// --- Fresnel ---
+// scatter() fills OUT: the reflected direction (rx, ry), the refracted one
+// (tx, ty) unless it returns false for total internal reflection, and the
+// unpolarised reflectance R.
+const OUT = {rx: 0, ry: 0, tx: 0, ty: 0, R: 0};
+
+// A ray (dx, dy) crossing from index n1 into n2 at a surface with normal
+// (nx, ny), which may face either way.
+function scatter(dx, dy, nx, ny, n1, n2) {
+  let cosI = -(dx * nx + dy * ny);
+  if (cosI < 0) {
+    // Orient the normal against the ray.
+    cosI = -cosI;
+    nx = -nx;
+    ny = -ny;
+  }
+  OUT.rx = dx + 2 * cosI * nx;
+  OUT.ry = dy + 2 * cosI * ny;
   const eta = n1 / n2;
   const sinT2 = eta * eta * (1 - cosI * cosI);
-  if (sinT2 >= 1) return {reflected, refracted: null, R: 1};
-
+  if (sinT2 >= 1) {
+    OUT.R = 1;
+    return false;
+  }
   const cosT = Math.sqrt(1 - sinT2);
-  const refracted = {
-    x: eta * d.x + (eta * cosI - cosT) * N.x,
-    y: eta * d.y + (eta * cosI - cosT) * N.y,
-  };
+  OUT.tx = eta * dx + (eta * cosI - cosT) * nx;
+  OUT.ty = eta * dy + (eta * cosI - cosT) * ny;
   const rs = (n1 * cosI - n2 * cosT) / (n1 * cosI + n2 * cosT);
   const rp = (n1 * cosT - n2 * cosI) / (n1 * cosT + n2 * cosI);
-  return {reflected, refracted, R: (rs * rs + rp * rp) / 2};
+  OUT.R = (rs * rs + rp * rp) / 2;
+  return true;
 }
 
 // --- Segments ---
@@ -204,106 +264,113 @@ const SEG_FLOATS = 7;
 let segs = new Float32Array(SEG_FLOATS * 65536);
 let segCount = 0;
 
-function addLine(a, b, r, g, bl) {
+function addLine(x0, y0, x1, y1, r, g, b) {
   if (segCount * SEG_FLOATS === segs.length) {
     const bigger = new Float32Array(segs.length * 2);
     bigger.set(segs);
     segs = bigger;
   }
   const i = segCount++ * SEG_FLOATS;
-  segs[i] = a.x;
-  segs[i + 1] = a.y;
-  segs[i + 2] = b.x;
-  segs[i + 3] = b.y;
+  segs[i] = x0;
+  segs[i + 1] = y0;
+  segs[i + 2] = x1;
+  segs[i + 3] = y1;
   segs[i + 4] = r;
   segs[i + 5] = g;
-  segs[i + 6] = bl;
+  segs[i + 6] = b;
 }
 
 // --- Tracing ---
-function nearestHit(lenses, ray) {
-  let best = null;
-  for (const lens of lenses) {
-    for (const hit of getIntersections(lens, ray)) {
-      if (!best || hit.t < best.t) best = hit;
-    }
-  }
-  return best;
-}
-
 // The medium at a point: where elements overlap, the smallest one wins, so
 // nested objects (a lens in a droplet in a lens) resolve the same way in any
 // order. null is air.
-function mediumAt(lenses, pt) {
+function mediumAt(elements, x, y) {
   let best = null;
-  for (const l of lenses) {
-    if ((!best || l.area < best.area) && contains(l, pt)) best = l;
+  for (const el of elements) {
+    if ((!best || el.area < best.area) && containsAt(el, x, y)) best = el;
   }
   return best;
 }
 
-const nAt = (medium, lambda) => (medium ? iorAt(medium, lambda) : 1);
-
-// A point just past `pt` along d (or just before it, with sign -1).
-const offset = (pt, d, sign = 1) => ({
-  x: pt.x + sign * d.x * RAY_EPSILON,
-  y: pt.y + sign * d.y * RAY_EPSILON,
-});
-
-// Where a ray that hits nothing is drawn to: well past the screen edge.
-const farPoint = (o, d, far) => ({x: o.x + d.x * far, y: o.y + d.y * far});
-
-// Traces one ray of a single wavelength, drawing every segment. With
-// reflections on, each surface spawns a Fresnel-weighted reflected branch.
-// `firstHit` means the caller already found and drew the first segment.
-function traceRay(scene, origin, dir, lambda, rgb, far, firstHit = null) {
-  const stack = [{o: origin, d: dir, w: 1, depth: 0}];
-  let known = firstHit;
-  while (stack.length) {
-    let {o, d, w, depth} = stack.pop();
-    for (; depth < MAX_SEGMENTS; depth++) {
-      const hit = known ?? nearestHit(scene.lenses, {o, d});
-      if (!known) {
-        const end = hit ? hit.pt : farPoint(o, d, far);
-        addLine(o, end, rgb[0] * w, rgb[1] * w, rgb[2] * w);
-      }
-      known = null;
-      if (!hit) break;
-      // Look just before and after the hit. A surface with the same index
-      // on both sides (hidden inside a smaller element, or between matching
-      // media) does nothing: it doesn't bend, and a ground rim turns clear,
-      // just as frosted glass does when wetted with a matching liquid.
-      const n1 = nAt(mediumAt(scene.lenses, offset(hit.pt, d, -1)), lambda);
-      const n2 = nAt(mediumAt(scene.lenses, offset(hit.pt, d)), lambda);
-      if (n1 === n2) {
-        o = offset(hit.pt, d);
-        continue;
-      }
-      if (hit.absorb) break;
-
-      const {reflected, refracted, R} = scatter(d, hit.normal, n1, n2);
-      if (!refracted) {
-        d = reflected;
-      } else {
-        if (scene.reflections && w * R > MIN_WEIGHT) {
-          const branch = {o: offset(hit.pt, reflected), d: reflected};
-          stack.push({...branch, w: w * R, depth: depth + 1});
-        }
-        if (scene.reflections) w *= 1 - R;
-        d = refracted;
-      }
-      o = offset(hit.pt, d);
-    }
-  }
-}
-
 // Cauchy dispersion: n(λ) = ior + B·(1/λ² − 1/λref²), λ in µm. Each element
-// carries its own material's ior and B.
+// carries its own material's ior and B. Air (null) is 1.
 function iorAt(material, lambdaNm) {
+  if (!material) return 1;
   const l = lambdaNm / 1000;
   return (
     material.ior + material.dispersion * (1 / (l * l) - 1 / LAMBDA_REF ** 2)
   );
+}
+
+// Traces one ray of a single wavelength, drawing every segment. With
+// reflections on, each surface spawns a Fresnel-weighted reflected branch.
+// `first`, if given, is the first hit, already found and drawn by the caller.
+// prettier-ignore
+function traceRay(scene, ox, oy, dx, dy, lambda, r, g, b, far, first = null) {
+  const elements = scene.lenses;
+  const e = RAY_EPSILON;
+  // Pending reflected branches, flattened: x, y, dx, dy, weight, depth, plus
+  // the medium each travels through.
+  const stack = [ox, oy, dx, dy, 1, 0];
+  const media = [mediumAt(elements, ox, oy)];
+  while (stack.length) {
+    let medium = media.pop();
+    let depth = stack.pop();
+    let w = stack.pop();
+    dy = stack.pop();
+    dx = stack.pop();
+    oy = stack.pop();
+    ox = stack.pop();
+    for (; depth < MAX_SEGMENTS; depth++) {
+      let found = true;
+      if (first) {
+        Object.assign(HIT, first);
+        first = null;
+      } else {
+        found = nearestHit(elements, ox, oy, dx, dy);
+        const ex = found ? HIT.x : ox + dx * far;
+        const ey = found ? HIT.y : oy + dy * far;
+        addLine(ox, oy, ex, ey, r * w, g * w, b * w);
+      }
+      if (!found) break;
+      const {x: hx, y: hy, nx, ny, absorb} = HIT;
+
+      // The medium just past the hit decides what happens. A surface with
+      // the same index on both sides (hidden inside a smaller element, or
+      // between matching media) does nothing: it doesn't bend, and a ground
+      // rim turns clear, just as frosted glass does when wetted with a
+      // matching liquid.
+      // When nothing overlaps, crossing a boundary just toggles between that
+      // element and air.
+      const next = scene.disjoint
+        ? medium === HIT.el
+          ? null
+          : HIT.el
+        : mediumAt(elements, hx + dx * e, hy + dy * e);
+      const n1 = iorAt(medium, lambda);
+      const n2 = iorAt(next, lambda);
+      if (n1 === n2) {
+        medium = next;
+      } else {
+        if (absorb) break;
+        if (!scatter(dx, dy, nx, ny, n1, n2)) {
+          dx = OUT.rx; // total internal reflection: stays in this medium
+          dy = OUT.ry;
+        } else {
+          if (scene.reflections && w * OUT.R > MIN_WEIGHT) {
+            stack.push(hx + OUT.rx * e, hy + OUT.ry * e, OUT.rx, OUT.ry, w * OUT.R, depth + 1);
+            media.push(medium);
+          }
+          if (scene.reflections) w *= 1 - OUT.R;
+          dx = OUT.tx;
+          dy = OUT.ty;
+          medium = next;
+        }
+      }
+      ox = hx + dx * e;
+      oy = hy + dy * e;
+    }
+  }
 }
 
 // Light each source emits, in "CSS px of beam": a beam of width w has power w,
@@ -313,16 +380,16 @@ function sourcePower(src) {
   return src.type === 'laser' ? LASER_POWER : POINT_POWER;
 }
 
-// Ray `t` ∈ [0, 1) of a source: its start, direction, and rainbow hue.
+// Ray `t` ∈ [0, 1) of a source: its start and direction.
 function emit(src, t) {
   const c = Math.cos(src.angle);
   const s = Math.sin(src.angle);
   if (src.type === 'point') {
     const a = t * 2 * Math.PI;
-    return {o: {x: src.x, y: src.y}, d: {x: Math.cos(a), y: Math.sin(a)}};
+    return {ox: src.x, oy: src.y, dx: Math.cos(a), dy: Math.sin(a)};
   }
   const across = src.type === 'beam' ? (t - 0.5) * src.width : 0;
-  return {o: {x: src.x - across * s, y: src.y + across * c}, d: {x: c, y: s}};
+  return {ox: src.x - across * s, oy: src.y + across * c, dx: c, dy: s};
 }
 
 // Every pass traces evenly spaced rays from each source, shifted by a
@@ -346,376 +413,456 @@ function renderPass(scene, pass) {
   }
 }
 
-function traceOrigin(scene, {o, d}, t, weight, far) {
+const lambdas = new Float64Array(WAVELENGTHS_PER_RAY);
+const spectrumIndex = (lambda) => Math.round(lambda - LAMBDA_MIN) * 3;
+
+function traceOrigin(scene, {ox, oy, dx, dy}, t, weight, far) {
   if (scene.light !== 'White') {
-    const rgb = hueToRGB(t).map((v) => v * weight);
-    traceRay(scene, o, d, LAMBDA_REF * 1000, rgb, far); // base IOR
+    const [r, g, b] = hueToRGB(t);
+    // prettier-ignore
+    traceRay(scene, ox, oy, dx, dy, LAMBDA_REF * 1000, r * weight, g * weight, b * weight, far);
     return;
   }
   // Stratified wavelengths, jittered within each stratum.
-  const samples = [];
-  const sum = [0, 0, 0];
+  const k = weight / WAVELENGTHS_PER_RAY;
+  let sr = 0;
+  let sg = 0;
+  let sb = 0;
   for (let j = 0; j < WAVELENGTHS_PER_RAY; j++) {
     const lambda =
       LAMBDA_MIN +
       ((j + Math.random()) / WAVELENGTHS_PER_RAY) * (LAMBDA_MAX - LAMBDA_MIN);
-    const k = Math.round(lambda - LAMBDA_MIN) * 3;
-    const rgb = [0, 1, 2].map(
-      (c) => (SPECTRUM[k + c] * weight) / WAVELENGTHS_PER_RAY,
-    );
-    for (let c = 0; c < 3; c++) sum[c] += rgb[c];
-    samples.push({lambda, rgb});
+    lambdas[j] = lambda;
+    const i = spectrumIndex(lambda);
+    sr += SPECTRUM[i];
+    sg += SPECTRUM[i + 1];
+    sb += SPECTRUM[i + 2];
   }
   // Every wavelength shares the path up to the first surface, so draw
   // that segment once (the costly part for rays that miss every lens).
-  const hit = nearestHit(scene.lenses, {o, d});
-  addLine(o, hit ? hit.pt : farPoint(o, d, far), ...sum);
-  if (!hit) return;
-  for (const {lambda, rgb} of samples) {
-    traceRay(scene, o, d, lambda, rgb, far, hit);
+  const found = nearestHit(scene.lenses, ox, oy, dx, dy);
+  const ex = found ? HIT.x : ox + dx * far;
+  const ey = found ? HIT.y : oy + dy * far;
+  addLine(ox, oy, ex, ey, sr * k, sg * k, sb * k);
+  if (!found) return;
+  const first = {...HIT};
+  for (const lambda of lambdas) {
+    const i = spectrumIndex(lambda);
+    // prettier-ignore
+    traceRay(scene, ox, oy, dx, dy, lambda, SPECTRUM[i] * k, SPECTRUM[i + 1] * k, SPECTRUM[i + 2] * k, far, first);
   }
 }
 
 // --- GPU ---
-// Segments are drawn as thin quads with a tent profile across them, added
-// into a float texture (`accum`). Presenting runs a few full-screen passes:
-// bright parts → quarter-res bloom → blur → an even blurrier wide bloom, then
-// a composite that adds bloom, tone maps, vignettes and dithers.
+// WebGPU. Segments are drawn as thin quads with a tent profile across them,
+// added into a float texture (`accum`). Presenting runs a few full-screen
+// passes: bright parts → quarter-res bloom → blur → an even blurrier wide
+// bloom, then a composite that adds bloom, tone maps and vignettes.
+//
+// The canvas is always rgba16float. In HDR its tone mapping is 'extended', so
+// values over 1 show brighter than white (see anotherRaytracer).
 
-const LINE_VS = `#version 300 es
-layout(location = 0) in vec2 corner; // (along 0..1, across -1..1)
-layout(location = 1) in vec4 seg; // endpoints, CSS px
-layout(location = 2) in vec3 color;
-uniform vec2 res; // CSS px
-uniform float halfWidth; // CSS px
-out float across;
-out vec3 vColor;
-void main() {
-  vec2 d = seg.zw - seg.xy;
-  float len = length(d);
-  vec2 dir = len > 0.0 ? d / len : vec2(1.0, 0.0);
-  vec2 p = mix(seg.xy, seg.zw, corner.x) + vec2(-dir.y, dir.x) * corner.y * halfWidth;
-  across = corner.y;
-  vColor = color;
-  gl_Position = vec4(p.x / res.x * 2.0 - 1.0, 1.0 - p.y / res.y * 2.0, 0.0, 1.0);
-}`;
+const LINE_WGSL = /* wgsl */ `
+struct Uniforms { res: vec2f, halfWidth: f32 } // res in CSS px
+@group(0) @binding(0) var<uniform> u: Uniforms;
 
-// The tent integrates to 1 per CSS px across the line, so a beam of
-// evenly spaced rays with weight = spacing accumulates to exactly 1.
-const LINE_FS = `#version 300 es
-precision highp float;
-in float across;
-in vec3 vColor;
-uniform float halfWidth;
-out vec4 outColor;
-void main() {
-  outColor = vec4(vColor * (1.0 - abs(across)) / halfWidth, 0.0);
+struct Out {
+  @builtin(position) pos: vec4f,
+  @location(0) across: f32,
+  @location(1) color: vec3f,
+}
+
+@vertex
+fn vs(@builtin(vertex_index) i: u32, @location(0) seg: vec4f, @location(1) color: vec3f) -> Out {
+  // Triangle-strip corners: along 0..1, across -1..1.
+  let corner = vec2f(f32(i & 1u), f32(i >> 1u) * 2. - 1.);
+  let d = seg.zw - seg.xy;
+  let len = length(d);
+  let dir = select(vec2f(1., 0.), d / max(len, 1e-9), len > 0.);
+  let p = mix(seg.xy, seg.zw, corner.x) + vec2f(-dir.y, dir.x) * corner.y * u.halfWidth;
+  var o: Out;
+  o.pos = vec4f(p.x / u.res.x * 2. - 1., 1. - p.y / u.res.y * 2., 0., 1.);
+  o.across = corner.y;
+  o.color = color;
+  return o;
+}
+
+// The tent integrates to 1 per CSS px across the line, so a beam of evenly
+// spaced rays with weight = spacing accumulates to exactly 1.
+@fragment
+fn fs(i: Out) -> @location(0) vec4f {
+  return vec4f(i.color * (1. - abs(i.across)) / u.halfWidth, 0.);
 }`;
 
 // One triangle covering the screen.
-const FULLSCREEN_VS = `#version 300 es
-void main() {
-  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+const FULLSCREEN_WGSL = /* wgsl */ `
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+  return vec4f(p * 2. - 1., 0., 1.);
 }`;
 
-// Averages each `factor`×`factor` block of light above the threshold.
-const BRIGHT_FS = `#version 300 es
-precision highp float;
-uniform sampler2D accum;
-uniform float scale;
-uniform float threshold;
-uniform int factor;
-out vec4 outColor;
-void main() {
-  ivec2 base = ivec2(gl_FragCoord.xy) * factor;
-  ivec2 last = textureSize(accum, 0) - 1;
-  vec3 sum = vec3(0.0);
-  for (int y = 0; y < factor; y++) {
-    for (int x = 0; x < factor; x++) {
-      vec3 v = texelFetch(accum, min(base + ivec2(x, y), last), 0).rgb * scale;
-      sum += max(v - threshold, 0.0);
+// Averages each factor×factor block of light above the threshold.
+const BRIGHT_WGSL = /* wgsl */ `
+struct Uniforms { scale: f32, threshold: f32, factor: i32 }
+@group(0) @binding(0) var accum: texture_2d<f32>;
+@group(0) @binding(1) var<uniform> u: Uniforms;
+
+@fragment
+fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let base = vec2i(pos.xy) * u.factor;
+  let last = vec2i(textureDimensions(accum)) - 1;
+  var sum = vec3f(0.);
+  for (var y = 0; y < u.factor; y++) {
+    for (var x = 0; x < u.factor; x++) {
+      let v = textureLoad(accum, min(base + vec2i(x, y), last), 0).rgb * u.scale;
+      sum += max(v - u.threshold, vec3f(0.));
     }
   }
-  outColor = vec4(sum / float(factor * factor), 1.0);
+  return vec4f(sum / f32(u.factor * u.factor), 1.);
 }`;
 
-// Separable Gaussian, σ = 3 texels along `dir`.
-const BLUR_FS = `#version 300 es
-precision highp float;
-uniform sampler2D src;
-uniform vec2 dir;
-out vec4 outColor;
-void main() {
-  vec2 texel = 1.0 / vec2(textureSize(src, 0));
-  vec2 uv = gl_FragCoord.xy * texel;
-  vec3 sum = vec3(0.0);
-  float total = 0.0;
-  for (int i = -9; i <= 9; i++) {
-    float w = exp(-float(i * i) / 18.0);
-    sum += texture(src, uv + dir * texel * float(i)).rgb * w;
+// Separable Gaussian, σ = 3 texels along dir.
+const BLUR_WGSL = /* wgsl */ `
+@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var linearSampler: sampler;
+@group(0) @binding(2) var<uniform> dir: vec2f;
+
+@fragment
+fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let texel = 1. / vec2f(textureDimensions(src));
+  let uv = pos.xy * texel;
+  var sum = vec3f(0.);
+  var total = 0.;
+  for (var i = -9; i <= 9; i++) {
+    let w = exp(-f32(i * i) / 18.);
+    sum += textureSampleLevel(src, linearSampler, uv + dir * texel * f32(i), 0.).rgb * w;
     total += w;
   }
-  outColor = vec4(sum / total, 1.0);
+  return vec4f(sum / total, 1.);
 }`;
 
 // 4× smaller: four bilinear taps cover a 4×4 block.
-const DOWN_FS = `#version 300 es
-precision highp float;
-uniform sampler2D src;
-out vec4 outColor;
-void main() {
-  vec2 texel = 1.0 / vec2(textureSize(src, 0));
-  vec2 uv = gl_FragCoord.xy * 4.0 * texel;
-  vec3 sum = texture(src, uv + texel * vec2(-1.0, -1.0)).rgb
-           + texture(src, uv + texel * vec2(1.0, -1.0)).rgb
-           + texture(src, uv + texel * vec2(-1.0, 1.0)).rgb
-           + texture(src, uv + texel * vec2(1.0, 1.0)).rgb;
-  outColor = vec4(sum / 4.0, 1.0);
+const DOWN_WGSL = /* wgsl */ `
+@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var linearSampler: sampler;
+
+@fragment
+fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let texel = 1. / vec2f(textureDimensions(src));
+  let uv = pos.xy * 4. * texel;
+  var sum = vec3f(0.);
+  for (var k = 0; k < 4; k++) {
+    let o = vec2f(f32(k & 1) * 2. - 1., f32(k >> 1) * 2. - 1.);
+    sum += textureSampleLevel(src, linearSampler, uv + texel * o, 0.).rgb;
+  }
+  return vec4f(sum / 4., 1.);
 }`;
 
-const COMPOSITE_FS = `#version 300 es
-precision highp float;
-uniform sampler2D accum;
-uniform sampler2D bloom;
-uniform sampler2D wide;
-uniform float scale;
-uniform vec2 bloomAmount; // narrow, wide
-out vec4 outColor;
+const COMPOSITE_WGSL = /* wgsl */ `
+struct Uniforms {
+  scale: f32,
+  bloomNarrow: f32,
+  bloomWide: f32,
+  headroom: f32, // 0 in SDR
+}
+@group(0) @binding(0) var accum: texture_2d<f32>;
+@group(0) @binding(1) var bloom: texture_2d<f32>;
+@group(0) @binding(2) var wide: texture_2d<f32>;
+@group(0) @binding(3) var linearSampler: sampler;
+@group(0) @binding(4) var<uniform> u: Uniforms;
 
 // AgX (Troy Sobotka; polynomial fit by Benjamin Wrensch). Unlike per-channel
 // curves it keeps hues steady as they brighten and lets saturated highlights
 // fade gracefully to white. Input is linear sRGB; output is display-encoded.
-vec3 agxContrast(vec3 x) {
-  vec3 x2 = x * x;
-  vec3 x4 = x2 * x2;
+fn agxContrast(x: vec3f) -> vec3f {
+  let x2 = x * x;
+  let x4 = x2 * x2;
   return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4
        - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
 }
 
-vec3 toneMap(vec3 c) {
-  const mat3 inset = mat3(
+fn agx(color: vec3f) -> vec3f {
+  let inset = mat3x3f(
     0.842479062253094, 0.0423282422610123, 0.0423756549057051,
     0.0784335999999992, 0.878468636469772, 0.0784336,
     0.0792237451477643, 0.0791661274605434, 0.879142973793104);
-  const mat3 outset = mat3(
+  let outset = mat3x3f(
     1.19687900512017, -0.0528968517574562, -0.0529716355144438,
     -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
     -0.0990297440797205, -0.0989611768448433, 1.15107367264116);
-  const float minEv = -12.47393;
-  const float maxEv = 4.026069;
-  c = clamp(log2(max(inset * c, 1e-10)), minEv, maxEv);
+  let minEv = -12.47393;
+  let maxEv = 4.026069;
+  var c = clamp(log2(max(inset * color, vec3f(1e-10))), vec3f(minEv), vec3f(maxEv));
   c = agxContrast((c - minEv) / (maxEv - minEv));
-  return clamp(outset * c, 0.0, 1.0);
+  return clamp(outset * c, vec3f(0.), vec3f(1.));
 }
 
-float hash(vec2 p) {
-  return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+fn hash(p: vec2f) -> f32 {
+  return fract(sin(dot(p, vec2f(12.9898, 78.233))) * 43758.5453);
 }
 
-void main() {
-  vec2 res = vec2(textureSize(accum, 0));
-  vec2 uv = gl_FragCoord.xy / res;
-  vec3 hdr = texelFetch(accum, ivec2(gl_FragCoord.xy), 0).rgb * scale;
-  hdr += texture(bloom, uv).rgb * bloomAmount.x + texture(wide, uv).rgb * bloomAmount.y;
-  vec3 c = toneMap(hdr);
+@fragment
+fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let res = vec2f(textureDimensions(accum));
+  let uv = pos.xy / res;
+  var hdr = textureLoad(accum, vec2i(pos.xy), 0).rgb * u.scale;
+  hdr += textureSampleLevel(bloom, linearSampler, uv, 0.).rgb * u.bloomNarrow;
+  hdr += textureSampleLevel(wide, linearSampler, uv, 0.).rgb * u.bloomWide;
 
   // Vignette: darken toward the corners.
-  float r = length((uv - 0.5) * res) / (0.6 * length(res));
-  c *= 1.0 - 0.52 * pow(smoothstep(0.42, 1.0, r), 1.5);
+  let r = length((uv - 0.5) * res) / (0.6 * length(res));
+  let vignette = 1. - 0.52 * pow(smoothstep(0.42, 1., r), 1.5);
 
-  // Dither away 8-bit banding in the smooth gradients.
-  c += (hash(gl_FragCoord.xy) - 0.5) / 255.0;
-  outColor = vec4(c, 1.0);
+  if (u.headroom > 0.) {
+    // HDR: no tone curve. Anything brighter than the screen can show is
+    // scaled down as a whole, rather than clipped per channel into white.
+    var c = hdr * vignette;
+    let peak = max(c.r, max(c.g, c.b));
+    if (peak > u.headroom) {
+      c *= u.headroom / peak;
+    }
+    // The canvas takes sRGB-encoded values; over 1 is brighter than white.
+    return vec4f(pow(c, vec3f(1. / 2.2)), 1.);
+  }
+  // SDR: AgX, then dither away 8-bit banding in the smooth gradients.
+  let c = agx(hdr) * vignette + (hash(pos.xy) - 0.5) / 255.;
+  return vec4f(c, 1.);
 }`;
 
 const BLOOM_NARROW = 0.8;
 const BLOOM_WIDE = 0.5;
+const ACCUM_FALLBACK = 'rgba16float'; // when 32-bit floats can't be blended
+const BLOOM_FORMAT = 'rgba16float';
+const CANVAS_FORMAT = 'rgba16float';
 
-let gl = null;
-let glCanvas = null;
-let programs = null;
-let lineVAO = null;
+let device = null;
+let context = null;
+let accumFormat = 'rgba32float';
+let pipelines = null;
+let linearSampler = null;
+let uniforms = null; // name → GPUBuffer
 let segBuffer = null;
-let emptyVAO = null;
-let accum = null; // {tex, fb}
-let bloomA = null;
-let bloomB = null;
-let wideA = null;
-let wideB = null;
-let accumFormat = 0;
+let targets = null; // name → {texture, view}
+let bindGroups = null;
 let bloomFactor = 1; // device px per bloom px
+let headroom = 0; // HDR headroom, 0 in SDR
 let W = 0; // device pixels
 let H = 0;
 let dpr = 1;
 
-function compile(vsSource, fsSource) {
-  const program = gl.createProgram();
-  for (const [type, source] of [
-    [gl.VERTEX_SHADER, vsSource],
-    [gl.FRAGMENT_SHADER, fsSource],
-  ]) {
-    const shader = gl.createShader(type);
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      throw new Error(gl.getShaderInfoLog(shader));
+async function initGPU(canvas, hdrHeadroom) {
+  const adapter = await navigator.gpu?.requestAdapter();
+  if (!adapter) throw new Error('WebGPU isn’t available');
+  const blend32 = adapter.features.has('float32-blendable');
+  device = await adapter.requestDevice({
+    requiredFeatures: blend32 ? ['float32-blendable'] : [],
+  });
+  accumFormat = blend32 ? 'rgba32float' : ACCUM_FALLBACK;
+  device.lost.then((info) => {
+    if (info.reason !== 'destroyed') {
+      self.postMessage({error: `the GPU was lost (${info.message})`});
     }
-    gl.attachShader(program, shader);
-  }
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    throw new Error(gl.getProgramInfoLog(program));
-  }
-  // Look up every uniform once.
-  const uniforms = {};
-  const n = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
-  for (let i = 0; i < n; i++) {
-    const {name} = gl.getActiveUniform(program, i);
-    uniforms[name] = gl.getUniformLocation(program, name);
-  }
-  return {program, uniforms};
-}
+  });
+  device.addEventListener('uncapturederror', (e) =>
+    self.postMessage({error: e.error.message}),
+  );
 
-function initGL(canvas) {
-  glCanvas = canvas;
-  gl = canvas.getContext('webgl2', {antialias: false, depth: false});
-  if (!gl) throw new Error('WebGL2 isn’t available');
-  // Float render targets; blending into 32-bit floats needs EXT_float_blend,
-  // otherwise fall back to half floats (blendable everywhere).
-  if (!gl.getExtension('EXT_color_buffer_float')) {
-    throw new Error('this GPU can’t render to float textures');
-  }
-  accumFormat = gl.getExtension('EXT_float_blend') ? gl.RGBA32F : gl.RGBA16F;
+  context = canvas.getContext('webgpu');
+  setHeadroom(hdrHeadroom);
 
-  programs = {
-    line: compile(LINE_VS, LINE_FS),
-    bright: compile(FULLSCREEN_VS, BRIGHT_FS),
-    blur: compile(FULLSCREEN_VS, BLUR_FS),
-    down: compile(FULLSCREEN_VS, DOWN_FS),
-    composite: compile(FULLSCREEN_VS, COMPOSITE_FS),
+  const fullscreen = device.createShaderModule({code: FULLSCREEN_WGSL});
+  const pipeline = (code, format, blend) => {
+    const module = device.createShaderModule({code});
+    return device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {module: fullscreen},
+      fragment: {module, targets: [{format, blend}]},
+    });
+  };
+  const lineModule = device.createShaderModule({code: LINE_WGSL});
+  const add = {srcFactor: 'one', dstFactor: 'one', operation: 'add'};
+  pipelines = {
+    line: device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: lineModule,
+        buffers: [
+          {
+            arrayStride: SEG_FLOATS * 4,
+            stepMode: 'instance',
+            attributes: [
+              {shaderLocation: 0, offset: 0, format: 'float32x4'},
+              {shaderLocation: 1, offset: 16, format: 'float32x3'},
+            ],
+          },
+        ],
+      },
+      fragment: {
+        module: lineModule,
+        targets: [{format: accumFormat, blend: {color: add, alpha: add}}],
+      },
+      primitive: {topology: 'triangle-strip'},
+    }),
+    bright: pipeline(BRIGHT_WGSL, BLOOM_FORMAT),
+    blur: pipeline(BLUR_WGSL, BLOOM_FORMAT),
+    down: pipeline(DOWN_WGSL, BLOOM_FORMAT),
+    composite: pipeline(COMPOSITE_WGSL, CANVAS_FORMAT),
   };
 
-  lineVAO = gl.createVertexArray();
-  gl.bindVertexArray(lineVAO);
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-  // prettier-ignore
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 1, -1, 0, 1, 1, 1]), gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  segBuffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, segBuffer);
-  const stride = SEG_FLOATS * 4;
-  gl.enableVertexAttribArray(1);
-  gl.vertexAttribPointer(1, 4, gl.FLOAT, false, stride, 0);
-  gl.vertexAttribDivisor(1, 1);
-  gl.enableVertexAttribArray(2);
-  gl.vertexAttribPointer(2, 3, gl.FLOAT, false, stride, 16);
-  gl.vertexAttribDivisor(2, 1);
-  emptyVAO = gl.createVertexArray();
-  gl.bindVertexArray(null);
+  linearSampler = device.createSampler({
+    magFilter: 'linear',
+    minFilter: 'linear',
+  });
+  const buffer = (bytes) =>
+    device.createBuffer({
+      size: bytes,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+  uniforms = {
+    line: buffer(16),
+    bright: buffer(16),
+    blurX: buffer(16),
+    blurY: buffer(16),
+    composite: buffer(16),
+  };
+  device.queue.writeBuffer(uniforms.blurX, 0, new Float32Array([1, 0, 0, 0]));
+  device.queue.writeBuffer(uniforms.blurY, 0, new Float32Array([0, 1, 0, 0]));
 }
 
-function target(w, h, format, filter) {
-  const tex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texStorage2D(gl.TEXTURE_2D, 1, format, w, h);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  const fb = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-  // prettier-ignore
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-  return {tex, fb, w, h};
+// 0 for SDR, else how many times brighter than white the screen may go.
+function setHeadroom(h) {
+  headroom = h;
+  context.configure({
+    device,
+    // Float, so values over 1 survive to the screen
+    format: CANVAS_FORMAT,
+    alphaMode: 'opaque',
+    // 'extended' shows values over 1 as brighter than white
+    toneMapping: {mode: headroom ? 'extended' : 'standard'},
+  });
 }
 
 function resizeTargets() {
-  for (const t of [accum, bloomA, bloomB, wideA, wideB]) {
-    if (!t) continue;
-    gl.deleteTexture(t.tex);
-    gl.deleteFramebuffer(t.fb);
-  }
-  glCanvas.width = W;
-  glCanvas.height = H;
-  accum = target(W, H, accumFormat, gl.NEAREST);
+  if (targets) for (const t of Object.values(targets)) t.texture.destroy();
+  context.canvas.width = W;
+  context.canvas.height = H;
+  const target = (w, h, format) => {
+    const texture = device.createTexture({
+      size: [w, h],
+      format,
+      usage:
+        GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    return {texture, view: texture.createView()};
+  };
   bloomFactor = Math.max(1, Math.round(BLOOM_DOWNSAMPLE * dpr));
-  const f = bloomFactor;
-  const bw = Math.ceil(W / f);
-  const bh = Math.ceil(H / f);
-  bloomA = target(bw, bh, gl.RGBA16F, gl.LINEAR);
-  bloomB = target(bw, bh, gl.RGBA16F, gl.LINEAR);
+  const bw = Math.ceil(W / bloomFactor);
+  const bh = Math.ceil(H / bloomFactor);
   const ww = Math.ceil(bw / 4);
   const wh = Math.ceil(bh / 4);
-  wideA = target(ww, wh, gl.RGBA16F, gl.LINEAR);
-  wideB = target(ww, wh, gl.RGBA16F, gl.LINEAR);
+  targets = {
+    accum: target(W, H, accumFormat),
+    bloomA: target(bw, bh, BLOOM_FORMAT),
+    bloomB: target(bw, bh, BLOOM_FORMAT),
+    wideA: target(ww, wh, BLOOM_FORMAT),
+    wideB: target(ww, wh, BLOOM_FORMAT),
+  };
+
+  // Bind groups follow the textures, so rebuild them with them.
+  const group = (name, entries) =>
+    device.createBindGroup({
+      layout: pipelines[name].getBindGroupLayout(0),
+      entries: entries.map((resource, binding) => ({
+        binding,
+        resource: resource instanceof GPUBuffer ? {buffer: resource} : resource,
+      })),
+    });
+  const t = targets;
+  bindGroups = {
+    line: group('line', [uniforms.line]),
+    bright: group('bright', [t.accum.view, uniforms.bright]),
+    blurAX: group('blur', [t.bloomA.view, linearSampler, uniforms.blurX]),
+    blurBY: group('blur', [t.bloomB.view, linearSampler, uniforms.blurY]),
+    down: group('down', [t.bloomA.view, linearSampler]),
+    blurWideX: group('blur', [t.wideA.view, linearSampler, uniforms.blurX]),
+    blurWideY: group('blur', [t.wideB.view, linearSampler, uniforms.blurY]),
+    composite: group('composite', [
+      t.accum.view,
+      t.bloomA.view,
+      t.wideA.view,
+      linearSampler,
+      uniforms.composite,
+    ]),
+  };
 }
 
-function clearAccum() {
-  gl.bindFramebuffer(gl.FRAMEBUFFER, accum.fb);
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-}
-
-// Adds this pass's segments into `accum`.
-function drawSegments(scene) {
-  const {program, uniforms} = programs.line;
-  gl.bindFramebuffer(gl.FRAMEBUFFER, accum.fb);
-  gl.viewport(0, 0, W, H);
-  gl.useProgram(program);
-  gl.uniform2f(uniforms.res, scene.width, scene.height);
-  gl.uniform1f(uniforms.halfWidth, 1 / dpr); // one device px each side
-  gl.bindVertexArray(lineVAO);
-  gl.bindBuffer(gl.ARRAY_BUFFER, segBuffer);
-  gl.bufferData(
-    gl.ARRAY_BUFFER,
-    segs.subarray(0, segCount * SEG_FLOATS),
-    gl.STREAM_DRAW,
-  );
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.ONE, gl.ONE);
-  gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, segCount);
-  gl.disable(gl.BLEND);
-  segCount = 0;
-}
-
-function fullscreen(name, dst, inputs, setUniforms) {
-  const {program, uniforms} = programs[name];
-  gl.bindFramebuffer(gl.FRAMEBUFFER, dst ? dst.fb : null);
-  gl.viewport(0, 0, dst ? dst.w : W, dst ? dst.h : H);
-  gl.useProgram(program);
-  Object.entries(inputs).forEach(([uniform, t], i) => {
-    gl.activeTexture(gl.TEXTURE0 + i);
-    gl.bindTexture(gl.TEXTURE_2D, t.tex);
-    gl.uniform1i(uniforms[uniform], i);
+// Runs one render pass into `view`; `draw` records its commands.
+function renderTo(encoder, view, load, draw) {
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [
+      {view, loadOp: load, storeOp: 'store', clearValue: [0, 0, 0, 0]},
+    ],
   });
-  setUniforms?.(uniforms);
-  gl.bindVertexArray(emptyVAO);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  draw?.(pass);
+  pass.end();
 }
 
-function blur(a, b) {
-  fullscreen('blur', b, {src: a}, (u) => gl.uniform2f(u.dir, 1, 0));
-  fullscreen('blur', a, {src: b}, (u) => gl.uniform2f(u.dir, 0, 1));
+function fullscreen(encoder, name, group, view) {
+  renderTo(encoder, view, 'clear', (pass) => {
+    pass.setPipeline(pipelines[name]);
+    pass.setBindGroup(0, bindGroups[group]);
+    pass.draw(3);
+  });
+}
+
+// Adds this pass's segments into `accum`, clearing it first if `clear`.
+function drawSegments(scene, clear) {
+  const bytes = segCount * SEG_FLOATS * 4;
+  if (!segBuffer || segBuffer.size < bytes) {
+    segBuffer?.destroy();
+    segBuffer = device.createBuffer({
+      size: Math.max(bytes, 1 << 20) * 2,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+  }
+  device.queue.writeBuffer(segBuffer, 0, segs, 0, segCount * SEG_FLOATS);
+  // prettier-ignore
+  device.queue.writeBuffer(uniforms.line, 0, new Float32Array([scene.width, scene.height, 1 / dpr, 0]));
+  const encoder = device.createCommandEncoder();
+  renderTo(encoder, targets.accum.view, clear ? 'clear' : 'load', (pass) => {
+    if (!segCount) return;
+    pass.setPipeline(pipelines.line);
+    pass.setBindGroup(0, bindGroups.line); // half width: one device px
+    pass.setVertexBuffer(0, segBuffer);
+    pass.draw(4, segCount);
+  });
+  device.queue.submit([encoder.finish()]);
+  segCount = 0;
 }
 
 // An unobstructed beam accumulates 1 per pass; `scale` averages the passes
 // and applies exposure.
 function present(passes, exposure) {
   const scale = exposure / passes;
-  fullscreen('bright', bloomA, {accum}, (u) => {
-    gl.uniform1f(u.scale, scale);
-    gl.uniform1f(u.threshold, BLOOM_THRESHOLD);
-    gl.uniform1i(u.factor, bloomFactor);
-  });
-  blur(bloomA, bloomB);
-  fullscreen('down', wideA, {src: bloomA});
-  blur(wideA, wideB);
-  fullscreen('composite', null, {accum, bloom: bloomA, wide: wideA}, (u) => {
-    gl.uniform1f(u.scale, scale);
-    gl.uniform2f(u.bloomAmount, BLOOM_NARROW, BLOOM_WIDE);
-  });
+  const brightU = new ArrayBuffer(16);
+  new Float32Array(brightU, 0, 2).set([scale, BLOOM_THRESHOLD]);
+  new Int32Array(brightU, 8, 1)[0] = bloomFactor;
+  device.queue.writeBuffer(uniforms.bright, 0, brightU);
+  // prettier-ignore
+  device.queue.writeBuffer(uniforms.composite, 0, new Float32Array([scale, BLOOM_NARROW, BLOOM_WIDE, headroom]));
+
+  const encoder = device.createCommandEncoder();
+  const t = targets;
+  fullscreen(encoder, 'bright', 'bright', t.bloomA.view);
+  fullscreen(encoder, 'blur', 'blurAX', t.bloomB.view);
+  fullscreen(encoder, 'blur', 'blurBY', t.bloomA.view);
+  fullscreen(encoder, 'down', 'down', t.wideA.view);
+  fullscreen(encoder, 'blur', 'blurWideX', t.wideB.view);
+  fullscreen(encoder, 'blur', 'blurWideY', t.wideA.view);
+  const screen = context.getCurrentTexture().createView();
+  fullscreen(encoder, 'composite', 'composite', screen);
+  device.queue.submit([encoder.finish()]);
 }
 
 // --- Progressive loop ---
@@ -729,6 +876,8 @@ let timer = 0;
 
 function step() {
   timer = 0;
+  if (!device || !scene) return; // the GPU is still starting up
+  let clear = false;
   if (dirty) {
     dpr = scene.dpr;
     const w = Math.round(scene.width * dpr);
@@ -738,12 +887,12 @@ function step() {
       H = h;
       resizeTargets();
     }
-    clearAccum();
+    clear = true;
     passes = 0;
     dirty = false;
   }
   renderPass(scene, passes);
-  drawSegments(scene);
+  drawSegments(scene, clear);
   passes++;
   present(passes, exposure);
   if (passes < MAX_PASSES) schedule();
@@ -753,20 +902,28 @@ function schedule() {
   if (!timer) timer = setTimeout(step, 0);
 }
 
-self.onmessage = ({data}) => {
+let failed = false;
+
+self.onmessage = async ({data}) => {
+  if (failed) return; // no renderer; the page already shows why
   if (data.canvas) {
     try {
-      initGL(data.canvas);
+      await initGPU(data.canvas, data.headroom);
+      schedule(); // a scene may have arrived while starting up
     } catch (e) {
-      gl = null;
+      failed = true;
       self.postMessage({error: e.message});
     }
     return;
   }
-  if (!gl) return; // no renderer; the page already shows why
-  exposure = data.exposure;
+  if ('headroom' in data && device) {
+    setHeadroom(data.headroom);
+    if (passes) present(passes, exposure);
+  }
+  if ('exposure' in data) exposure = data.exposure;
   if (data.scene) {
     scene = data.scene;
+    prepareScene(scene);
     dirty = true;
     schedule();
   } else if (passes) {

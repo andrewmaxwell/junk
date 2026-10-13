@@ -28,6 +28,11 @@ const WATER_IOR = 1.333;
 // scales both.
 const WATER_DISPERSION_RATIO = 0.75;
 
+// Prisms (size = circumradius)
+const NEW_PRISM_SIZE = 90;
+const MIN_PRISM_SIZE = 15;
+const PRISM_EXPOSURE = 0.5;
+
 // Light sources
 const SOURCE_AIM_LENGTH = 40;
 const MIN_BEAM_WIDTH = 10;
@@ -39,7 +44,20 @@ const settings = {
   dispersion: DEFAULT_DISPERSION,
   reflections: true,
   exposure: DEFAULT_EXPOSURE,
+  hdr: matchMedia('(dynamic-range: high)').matches,
+  // In HDR, how many times brighter than white light may get. Browsers don't
+  // say how much headroom the screen has; brighter than it just clips.
+  headroom: 8,
 };
+// HDR is remembered per browser, since some (Chrome on macOS, as of 154) say
+// the screen is HDR but then show HDR canvases clipped.
+try {
+  const saved = localStorage.getItem('optics.hdr');
+  if (saved) settings.hdr = saved === 'on';
+} catch {
+  // Storage blocked; use the default
+}
+const headroom = () => (settings.hdr ? settings.headroom : 0);
 
 const gui = new GUI();
 gui.add(settings, 'light', ['White', 'Rainbow']).onChange(() => {
@@ -55,12 +73,31 @@ gui.add(settings, 'reflections').onChange(render);
 gui.add(settings, 'exposure', 0.02, 2, 0.01).onChange(() => {
   rayWorker.postMessage({exposure: settings.exposure});
 });
+gui
+  .add(settings, 'hdr')
+  .name('HDR')
+  .onChange(() => {
+    try {
+      localStorage.setItem('optics.hdr', settings.hdr ? 'on' : 'off');
+    } catch {
+      // Storage blocked; the choice lasts until reload
+    }
+    rayWorker.postMessage({headroom: headroom()});
+  });
+gui
+  .add(settings, 'headroom', 1, 16, 0.5)
+  .name('HDR headroom')
+  .onChange(() => rayWorker.postMessage({headroom: headroom()}));
 const button = (folder, name, onClick) => folder.add({[name]: onClick}, name);
 const scenes = gui.addFolder('Scenes');
 button(scenes, 'lenses', () => loadScene(lensScene));
+button(scenes, 'prism', () => loadScene(prismScene));
 button(scenes, 'rainbow', () => loadScene(rainbowScene));
 const addFolder = gui.addFolder('Add (double-click to delete)');
 button(addFolder, 'lens', () => addGlass(newLens(width / 2, height / 2)));
+button(addFolder, 'prism', () =>
+  addGlass(new Prism(width / 2, height / 2, NEW_PRISM_SIZE)),
+);
 button(addFolder, 'droplet', () =>
   addGlass(new Droplet(width / 2, height / 2, NEW_DROP_RADIUS)),
 );
@@ -74,7 +111,7 @@ const ctx = canvas.getContext('2d');
 let width, height, dpr;
 
 // --- Worker ---
-// rayWorker.js traces rays and renders the light with WebGL straight into the
+// rayWorker.js traces rays and renders the light with WebGPU straight into the
 // #gl canvas underneath, refining progressively. This thread only draws the
 // lens and handle overlay on #canvas.
 const rayWorker = new Worker(new URL('./rayWorker.js', import.meta.url), {
@@ -85,7 +122,7 @@ rayWorker.onerror = (e) =>
   showError(e.message || 'the renderer failed to load');
 try {
   const glCanvas = document.getElementById('gl').transferControlToOffscreen();
-  rayWorker.postMessage({canvas: glCanvas}, [glCanvas]);
+  rayWorker.postMessage({canvas: glCanvas, headroom: headroom()}, [glCanvas]);
 } catch {
   showError('this browser can’t render from a worker');
 }
@@ -304,7 +341,7 @@ class Lens {
   }
 
   draw(activePart) {
-    drawGlass(activePart !== null, () => {
+    drawGlass(this, this.boundingRadius, activePart !== null, () => {
       const pts = this.outlinePath();
       ctx.moveTo(pts[0].x, pts[0].y);
       for (const pt of pts) ctx.lineTo(pt.x, pt.y);
@@ -328,19 +365,54 @@ class Lens {
 }
 
 // --- Overlay drawing ---
-// Lenses and droplets share one look; `tracePath` adds the outline.
-function drawGlass(isActive, tracePath) {
+// Lenses, droplets and prisms share one look, lit from the nearest light: a
+// faint tint brightening toward it, a soft sheen on that side, a glow just
+// inside the rim, and a crisp edge. `tracePath` adds the outline of an
+// element centered on `center` within radius r.
+function drawGlass(center, r, isActive, tracePath) {
+  const {x, y} = center;
+  const light = towardNearestLight(center);
+  const lit = (k) => ({x: x + light.x * r * k, y: y + light.y * r * k});
+
+  ctx.save();
   ctx.beginPath();
   tracePath();
-  ctx.fillStyle = isActive
-    ? 'rgba(100,180,255,0.13)'
-    : 'rgba(100,150,255,0.05)';
+  const near = lit(1);
+  const far = lit(-1);
+  const body = ctx.createLinearGradient(near.x, near.y, far.x, far.y);
+  body.addColorStop(0, `rgba(190,225,255,${isActive ? 0.16 : 0.08})`);
+  body.addColorStop(1, `rgba(110,150,255,${isActive ? 0.06 : 0.02})`);
+  ctx.fillStyle = body;
   ctx.fill();
-  ctx.lineWidth = isActive ? 1.5 : 1;
-  ctx.strokeStyle = isActive
-    ? 'rgba(200,230,255,0.6)'
-    : 'rgba(160,210,255,0.28)';
+
+  ctx.clip(); // the sheen and rim glow stay inside the glass
+  const s = lit(0.45);
+  const sheen = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * 0.6);
+  sheen.addColorStop(0, `rgba(255,255,255,${isActive ? 0.14 : 0.08})`);
+  sheen.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sheen;
+  ctx.fill();
+  ctx.lineWidth = 6; // half of it falls inside the clip
+  ctx.strokeStyle = `rgba(200,230,255,${isActive ? 0.14 : 0.07})`;
   ctx.stroke();
+  ctx.restore();
+
+  // The path survives restore(), so the edge reuses it.
+  ctx.lineWidth = isActive ? 1.5 : 1;
+  ctx.strokeStyle = `rgba(215,238,255,${isActive ? 0.65 : 0.32})`;
+  ctx.stroke();
+}
+
+// Unit vector from `pt` toward the nearest light (up and left if none).
+function towardNearestLight(pt) {
+  let nearest = null;
+  for (const s of sources) {
+    if (!nearest || distSq(s, pt) < distSq(nearest, pt)) nearest = s;
+  }
+  const dx = nearest ? nearest.x - pt.x : -1;
+  const dy = nearest ? nearest.y - pt.y : -1;
+  const len = Math.hypot(dx, dy) || 1;
+  return {x: dx / len, y: dy / len};
 }
 
 // Faint ring when idle, solid when hovered or dragged.
@@ -398,7 +470,7 @@ class Droplet {
   }
 
   draw(activePart) {
-    drawGlass(activePart !== null, () =>
+    drawGlass(this, this.r, activePart !== null, () =>
       ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2),
     );
     for (const h of this.handles()) drawHandle(h, h.part === activePart);
@@ -414,6 +486,70 @@ class Droplet {
       x,
       y,
       r,
+    };
+  }
+}
+
+// --- Prism ---
+// An equilateral glass triangle. The gold handle on its apex rotates and
+// resizes it.
+class Prism {
+  constructor(x, y, size, angle = 0) {
+    this.type = 'prism';
+    this.x = x;
+    this.y = y;
+    this.size = size;
+    this.angle = angle; // 0: apex straight up
+  }
+
+  // Apex first, then clockwise on screen.
+  get vertices() {
+    return [0, 1, 2].map((k) => {
+      const a = this.angle - Math.PI / 2 + (k * 2 * Math.PI) / 3;
+      return {
+        x: this.x + this.size * Math.cos(a),
+        y: this.y + this.size * Math.sin(a),
+      };
+    });
+  }
+
+  handles() {
+    return [{part: 'apex', pt: this.vertices[0], color: HANDLE_GOLD}];
+  }
+
+  contains(pt) {
+    return contains(this, pt);
+  }
+
+  drag(part, mouse, delta) {
+    if (part === 'body') {
+      this.x += delta.x;
+      this.y += delta.y;
+    } else {
+      this.angle = Math.atan2(mouse.y - this.y, mouse.x - this.x) + Math.PI / 2;
+      this.size = Math.max(MIN_PRISM_SIZE, Math.sqrt(distSq(mouse, this)));
+    }
+  }
+
+  draw(activePart) {
+    drawGlass(this, this.size, activePart !== null, () => {
+      for (const v of this.vertices) ctx.lineTo(v.x, v.y);
+      ctx.closePath();
+    });
+    for (const h of this.handles()) drawHandle(h, h.part === activePart);
+  }
+
+  serialize() {
+    const {type, x, y, vertices} = this;
+    return {
+      type,
+      ior: settings.ior,
+      dispersion: settings.dispersion,
+      x,
+      y,
+      vertices,
+      area: ((3 * Math.sqrt(3)) / 4) * this.size ** 2,
+      boundingRadius: this.size,
     };
   }
 }
@@ -587,6 +723,38 @@ function lensScene() {
   settings.exposure = DEFAULT_EXPOSURE;
   generateSources();
   generateLenses();
+}
+
+// A narrow white beam meeting a prism at minimum deviation, where light
+// passes through symmetrically: incidence asin(n·sin 30°) on a 60° prism.
+// The spectrum fans out into the dark on the far side.
+function prismScene() {
+  settings.light = 'White';
+  settings.dispersion = DEFAULT_DISPERSION;
+  settings.reflections = true;
+  settings.exposure = PRISM_EXPOSURE;
+  const prism = new Prism(
+    width * 0.45,
+    height * 0.55,
+    Math.min(height * 0.22, width * 0.18),
+  );
+  lenses = [prism];
+
+  const [apex, , left] = prism.vertices;
+  const target = {x: (apex.x + left.x) / 2, y: (apex.y + left.y) / 2};
+  // The left face's inward normal points 30° below horizontal; tilt the
+  // beam up from it by the incidence angle.
+  const angle = Math.PI / 6 - Math.asin(Math.min(1, settings.ior / 2));
+  const back = width * 0.3;
+  sources = [
+    new Source(
+      'beam',
+      target.x - Math.cos(angle) * back,
+      target.y - Math.sin(angle) * back,
+      angle,
+      prism.size * 0.25,
+    ),
+  ];
 }
 
 // One big droplet lit by a beam exactly its width. Both bows head back
