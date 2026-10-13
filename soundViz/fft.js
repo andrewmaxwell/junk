@@ -1,6 +1,11 @@
 // Iterative in-place radix-2 complex FFT.
+//
+// `Table` is the precision of the twiddles and the scratch. Float32 is what
+// every analysis transform has always used, and changing it would change every
+// cell; `czt.js` asks for Float64, because a chirp-z transform runs three FFTs
+// end to end and it costs nothing at the sizes it runs at.
 export class FFT {
-  constructor(n) {
+  constructor(n, Table = Float32Array) {
     if (n & (n - 1)) throw new Error('FFT size must be a power of two');
     this.n = n;
     this.rev = new Uint32Array(n);
@@ -14,8 +19,9 @@ export class FFT {
       this.rev[i] = (this.rev[i >> 1] >> 1) | ((i & 1) << (bits - 1));
     }
 
-    this.cos = new Float32Array(n / 2);
-    this.sin = new Float32Array(n / 2);
+    this.Table = Table;
+    this.cos = new Table(n / 2);
+    this.sin = new Table(n / 2);
     for (let i = 0; i < n / 2; i++) {
       this.cos[i] = Math.cos((-2 * Math.PI * i) / n);
       this.sin[i] = Math.sin((-2 * Math.PI * i) / n);
@@ -49,8 +55,8 @@ export class FFT {
       const pad = n / nz;
 
       if (!this.sr || this.sr.length < nz) {
-        this.sr = new Float32Array(nz);
-        this.si = new Float32Array(nz);
+        this.sr = new this.Table(nz);
+        this.si = new this.Table(nz);
       }
 
       const {sr, si} = this;

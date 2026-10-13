@@ -1,5 +1,6 @@
 import {REACH, SHARE_ROWS, rowScaleFor} from './ridge.js';
 import {createView} from './glview.js';
+import {bandCost} from './czt.js';
 
 export const F_MIN = 60;
 
@@ -625,7 +626,19 @@ function grids(rec, vp, w, h, sc, cells, cost) {
     // cost in cells once the band is fixed, so without the second term this
     // would always take the maximum padding on offer and then wonder where the
     // afternoon went.
-    const per = bins + XFM_COST * fftSize * Math.log2(winLen);
+    //
+    // Two ways to compute the band, and the cheaper one is used: the padded
+    // FFT, whose cost is the whole spectrum's, or the chirp-z in `czt.js`,
+    // whose cost follows the band. Two chirp-z transforms do a frame where the
+    // FFT path does two of its own, and the band is computed two unpadded bins
+    // wider at each end: one for the coherence neighbours, one for the Hann
+    // identity.
+    // The chirp-z wins wherever the band is a small part of the spectrum, which
+    // is every zoomed view; the full view keeps the FFT and is unchanged.
+    const viaFft = fftSize * Math.log2(winLen);
+    const viaChirp = 2 * bandCost(winLen, bins + 4 * pad);
+    const chirp = viaChirp < viaFft;
+    const per = bins + XFM_COST * Math.min(viaFft, viaChirp);
     const room = Math.min(Math.floor(cells / bins), Math.floor(cost / per));
 
     if (room < 64) {
@@ -679,6 +692,7 @@ function grids(rec, vp, w, h, sc, cells, cost) {
     out.push({
       pad,
       fftSize,
+      chirp,
       bin0,
       bins,
       ring,
@@ -1136,7 +1150,7 @@ async function pass(canvas, rec, viewport, calibrate) {
     let ring = 0;
 
     for (const a of active) {
-      const {bin0, bins, hop, frames, start, fftSize} = a.grid;
+      const {bin0, bins, hop, frames, start, fftSize, chirp} = a.grid;
       const count = regionsFor(frames, hop);
       const first = jobs.length;
 
@@ -1155,6 +1169,7 @@ async function pass(canvas, rec, viewport, calibrate) {
             scale: a.index,
             winLen: a.winLen,
             fftSize,
+            chirp,
             bin0,
             bins,
             hop,

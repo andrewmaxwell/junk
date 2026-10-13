@@ -1,4 +1,5 @@
 import {FFT} from './fft.js';
+import {BandDFT} from './czt.js';
 import {REACH, SHARE_ROWS} from './ridge.js';
 
 // Reassigned spectrogram, as a cloud of cells rather than a grid.
@@ -101,8 +102,8 @@ export function analyzeCells({
   shareFrames,
   rowScale,
   out,
+  chirp = false,
 }) {
-  const fft = new FFT(fftSize);
   const centre = (winLen - 1) / 2;
   const align = -(winLen >> 1);
 
@@ -228,11 +229,50 @@ export function analyzeCells({
     });
   }
 
-  const re = new Float32Array(fftSize);
-  const im = new Float32Array(fftSize);
+  // Two ways to get the band's spectra, and `render.js` picks whichever is
+  // cheaper for the grid — see `bandCost` there.
+  //
+  // The FFT computes the whole zero-padded spectrum and keeps the band: two
+  // real windows packed into one transform, the derivative window in another.
+  // This is what every full view uses, and it is unchanged to the bit.
+  //
+  // The chirp-z computes only the band, which at a deep zoom is a few hundred
+  // bins of a quarter-million. And it needs two transforms rather than three,
+  // because a periodic Hann window is three complex exponentials: w = 1/2 -
+  // e^{iθn}/4 - e^{-iθn}/4 with θ = 2π/winLen, and multiplying by e^{iθn} shifts
+  // a spectrum by exactly `step` padded bins. So with X the spectrum of the
+  // bare frame and Q that of the frame times (n - centre),
+  //
+  //   X_w[k]  = X[k]/2 - (X[k-step] + X[k+step])/4
+  //   X_tw[k] = the same of Q
+  //   X_dw[k] = (π/winLen) (X[k-step] - X[k+step]) / 2i
+  //
+  // which is exact, not an approximation: it is the same three windows. So the
+  // band is computed `step` wider on each side and the windows applied after.
+  const fft = chirp ? null : new FFT(fftSize);
 
-  const dRe = new Float32Array(fftSize);
-  const dIm = new Float32Array(fftSize);
+  const re = chirp ? null : new Float32Array(fftSize);
+  const im = chirp ? null : new Float32Array(fftSize);
+
+  const dRe = chirp ? null : new Float32Array(fftSize);
+  const dIm = chirp ? null : new Float32Array(fftSize);
+
+  const k0 = cLo - step;
+  const kw = width + 2 * step;
+  const dft = chirp ? new BandDFT(winLen, fftSize, k0, kw) : null;
+
+  const bRe = chirp ? new Float64Array(kw) : null;
+  const bIm = chirp ? new Float64Array(kw) : null;
+  const qRe = chirp ? new Float64Array(kw) : null;
+  const qIm = chirp ? new Float64Array(kw) : null;
+
+  const ramp = new Float64Array(winLen);
+
+  for (let n = 0; n < winLen; n++) {
+    ramp[n] = n - centre;
+  }
+
+  const dwGain = Math.PI / winLen / 2;
 
   // The ridge map is indexed by absolute instant and by the unpadded bins every
   // pass shares, so a cell asks it the same question however finely it was
@@ -429,26 +469,31 @@ export function analyzeCells({
     // power of two, floored at 1), so this rounding is only defensive.
     const off = tStart + Math.round(frame * hop) + align;
 
-    for (let n = 0; n < winLen; n++) {
-      const s = off + n;
+    if (chirp) {
+      dft.transform(samples, off, null, bRe, bIm);
+      dft.transform(samples, off, ramp, qRe, qIm);
+    } else {
+      for (let n = 0; n < winLen; n++) {
+        const s = off + n;
 
-      const v = s >= 0 && s < samples.length ? samples[s] : 0;
+        const v = s >= 0 && s < samples.length ? samples[s] : 0;
 
-      re[n] = v * w[n];
-      im[n] = v * tw[n];
-      dRe[n] = v * dw[n];
+        re[n] = v * w[n];
+        im[n] = v * tw[n];
+        dRe[n] = v * dw[n];
+      }
+
+      // Only the imaginary half of the derivative transform needs clearing:
+      // everything past `winLen` is zero padding the transform is told about
+      // rather than made to read, and every other input slot below it was just
+      // written.
+      dIm.fill(0, 0, winLen);
+
+      // Two real sequences packed into one complex transform, unpacked per bin
+      // below; the derivative window needs a transform of its own.
+      fft.transform(re, im, winLen);
+      fft.transform(dRe, dIm, winLen);
     }
-
-    // Only the imaginary half of the derivative transform needs clearing:
-    // everything past `winLen` is zero padding the transform is told about
-    // rather than made to read, and every other input slot below it was just
-    // written.
-    dIm.fill(0, 0, winLen);
-
-    // Two real sequences packed into one complex transform, unpacked per bin
-    // below; the derivative window needs a transform of its own.
-    fft.transform(re, im, winLen);
-    fft.transform(dRe, dIm, winLen);
 
     const frameCentre = off + centre;
     const cur = slot[frame % R];
@@ -459,15 +504,31 @@ export function analyzeCells({
 
       cur.ok[bi] = 0;
 
-      const j = fftSize - b;
+      // The ordinary windowed transform, the time-ramped one, and the
+      // derivative one.
+      let xr, xi, tr, ti, dr, di;
 
-      // The ordinary windowed transform.
-      const xr = (re[b] + re[j]) * 0.5;
-      const xi = (im[b] - im[j]) * 0.5;
+      if (chirp) {
+        const m = b - k0;
+        const lo = m - step;
+        const hi = m + step;
 
-      // The time-ramped transform.
-      const tr = (im[b] + im[j]) * 0.5;
-      const ti = (re[j] - re[b]) * 0.5;
+        xr = 0.5 * bRe[m] - 0.25 * (bRe[lo] + bRe[hi]);
+        xi = 0.5 * bIm[m] - 0.25 * (bIm[lo] + bIm[hi]);
+        tr = 0.5 * qRe[m] - 0.25 * (qRe[lo] + qRe[hi]);
+        ti = 0.5 * qIm[m] - 0.25 * (qIm[lo] + qIm[hi]);
+        dr = dwGain * (bIm[lo] - bIm[hi]);
+        di = -dwGain * (bRe[lo] - bRe[hi]);
+      } else {
+        const j = fftSize - b;
+
+        xr = (re[b] + re[j]) * 0.5;
+        xi = (im[b] - im[j]) * 0.5;
+        tr = (im[b] + im[j]) * 0.5;
+        ti = (re[j] - re[b]) * 0.5;
+        dr = dRe[b];
+        di = dIm[b];
+      }
 
       const power = xr * xr + xi * xi;
 
@@ -486,7 +547,7 @@ export function analyzeCells({
       }
 
       // -Im{X_dw / X} — displacement in Hz from the bin centre.
-      const df = -((dIm[b] * xr - dRe[b] * xi) / power) * hzPerRad;
+      const df = -((di * xr - dr * xi) / power) * hzPerRad;
 
       // Ridge direction. For a signal that is locally a linear chirp,
       //
@@ -499,7 +560,7 @@ export function analyzeCells({
       // degenerate cases finite — a steady tone has zero rise and a click has
       // zero run, and a ratio would blow up on one or the other.
       const run = (ti * xr - tr * xi) / power; // Im{X_tw / X}, samples
-      const rise = (dRe[b] * xr + dIm[b] * xi) / power; // Re{X_dw / X}, rad/sample
+      const rise = (dr * xr + di * xi) / power; // Re{X_dw / X}, rad/sample
 
       cur.t[bi] = frameCentre + dt;
       cur.f[bi] = b * binHz + df;

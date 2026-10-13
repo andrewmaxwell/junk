@@ -44,6 +44,7 @@ stays because it costs nothing and a trackpad uses some of it.
 | `glview.js`                                                    | WebGL2: strokes, accumulation, exposure, colour, tiled export    |
 | `zoom.js`                                                      | viewport model (samples x Hz), gestures, hold-vs-drag            |
 | `analysis-worker.js`                                           | one pool thread; owns nothing, decides nothing                   |
+| `czt.js`                                                       | chirp-z: the DFT at just a band's bins, for zoomed grids         |
 | `fft.js`, `recorder.js`, `playback.js`, `capture-processor.js` | as named                                                         |
 
 Dependency direction: `main -> {recorder, render, zoom, playback}`,
@@ -180,7 +181,9 @@ invariant:
 
 Verified: re-emitting a cloud at half the hop and twice the padding reproduced
 the support of **100%** of cells, and a band pass reproduces a full-spectrum pass
-**bit for bit**.
+**bit for bit** — on the FFT path. A zoomed grid usually runs on the chirp-z path
+instead (see below), which agrees with the FFT to float32 rounding rather than to
+the bit, and is the closer of the two to the exact DFT.
 
 ## Where the analysis runs
 
@@ -262,6 +265,19 @@ is the index.
   permutation the non-zero entries sit at multiples of `pad`, and every butterfly
   below `size = 2*pad` combines a value with a zero. `FFT.transform(re, im, nz)`
   skips them **bit-identically**; 2.34x at the 262144 the deepest zooms use.
+- **A zoomed grid computes only its band, by chirp-z** (`czt.js`). A padded FFT
+  computes the whole spectrum whatever is kept, so at depth almost all of it was
+  wasted. Bluestein's identity gives just the band's bins for the cost of an FFT
+  of `winLen + bins` points, and because a periodic Hann window is three complex
+  exponentials, `X_w`, `X_tw` and `X_dw` all come exactly from two of them (the
+  bare frame and the frame times `n - centre`), read at bins `±pad` apart.
+  `plan()` costs both ways per grid and takes the cheaper, so the full view stays
+  on the FFT and is unchanged to the bit. Measured: 22x faster per frame at
+  `fftSize` 262144, and 25x closer to a float64 direct DFT than the float32 FFT
+  (power-weighted time error 4.8e-4 against 1.2e-2 samples). In the browser the
+  101x settle went 2.5-3.4 s to 0.6 s with a finer hop, and 305x-916x need no
+  settle at all because the 101x cloud already holds the finest grid
+  `MAX_FFT` allows.
 - **`Math.hypot` and `Math.exp` cost a third of a second each per pass.** Both
   are once per cell across tens of millions. A tabulated Gaussian rather than an
   approximation, on purpose: a re-emitted cell must get back the coherence it had.
@@ -310,7 +326,14 @@ that get reached for.
   moves a partial off its own measured direction, the chains break, and the gate
   correctly disbelieves it. See the table in the comment.
 - **`MAX_FFT = 262144`** (`render.js`) — how far zero padding may go. Not a
-  resolution limit; how finely the reassignment field is _sampled_.
+  resolution limit; how finely the reassignment field is _sampled_. With the
+  chirp-z it is no longer bound by cost, and it is now the limit at depth: from
+  about 27x down every scale sits at hop 1 and this padding. Raising it to
+  4194304 was tried and works (passes 1.9-4.8 s, against 1.1-6.5 s before the
+  chirp-z), but it changes the *look*: the off-ridge skirts stop drawing as a
+  lattice of dashes and draw as continuous fine rays, so lit pixels rise and
+  mean luma falls (305x at 1080 Hz: 32% -> 37% lit, 126 -> 102 luma). Andrew's
+  call, not one to take quietly.
 - **`REACH = 64` samples** (`ridge.js`) — the distance corroboration is asked
   over, and the ridge maps' and arena's frame spacing. Part of the zoom
   invariant: changing it recolours every recording.
@@ -400,10 +423,12 @@ again:
   Blackman-Harris**: the wider main lobe puts more components inside one window.
   Hann is the right window and it is right for the reassignment's reasons, not
   by inheritance.
-- **Raising `MAX_FFT` buys nothing _above about 500 Hz_.** Four times it, at
-  1048576, plans byte-identical grids at every zoom from 1x to 500x with the
-  viewport centred at 2.6 kHz. It does *not* generalise down the spectrum: see
-  the low-register limit under Known limitations.
+- **Raising `MAX_FFT` bought nothing _above about 500 Hz_ — before the
+  chirp-z.** Four times it, at 1048576, planned byte-identical grids at every
+  zoom from 1x to 500x at 2.6 kHz, because the FFT path's cost grew with
+  `fftSize`. That is no longer true: with the transform's cost following the
+  band, `plan()` takes the extra padding wherever it is allowed to. See
+  `MAX_FFT` above.
 - **`slice` does not starve the screen edges.** It bounds a run by cell position
   (`winLen / 2 + hop`) and not by how far a stroke can reach, which looks like a
   bug and is not one in practice: comparing a viewport against the same content
@@ -427,8 +452,11 @@ changes:
 - Splitting a grid into 2, 3, 5, 8 and 16 regions must reproduce a single call
   **bit for bit**, at every window length, banded and full-spectrum. That is the
   guarantee the whole pool rests on.
-- A cell emitted inside a band must be **bit-identical** to the same cell emitted
-  at full spectrum. Cells come out in bin order, so the band's run appears inside
+- On the FFT path (`chirp: false`), a cell emitted inside a band must be
+  **bit-identical** to the same cell emitted at full spectrum. On the chirp-z
+  path it must agree to float32 rounding — compare power-weighted, frame by
+  frame via `starts`, since worst-case numbers land on ill-conditioned cells
+  near a zero of `X`. Cells come out in bin order, so the band's run appears inside
   the full run at one contiguous offset — match on _position_, not on `(t, f)`:
   on a strong tone many bins reassign onto coordinates equal to the last bit, and
   a `(t, f)` match silently pairs the wrong cells. Check the bottom edge, the top
@@ -440,6 +468,12 @@ changes:
   "brightness is amplitude" stated as an assertion.
 
 Driving the real thing:
+
+- **Turn the HTTP cache off.** A plain static server lets Chrome cache modules
+  and, worse, the worker script, so a run can silently execute yesterday's
+  `analysis-worker.js` against today's `render.js`. In Playwright,
+  `context.route('**/*', r => r.continue())` disables the cache. A cached
+  worker once made the chirp-z look ten times slower than the FFT it replaced.
 
 - **`Page.bringToFront` before anything**, and check `document.hidden`. An
   occluded tab delivers no input and fires no `requestAnimationFrame`, and every
@@ -503,9 +537,13 @@ signal and is not.
   0.0016 Hz apart — an `fftSize` near 30 million. Raising `MAX_FFT` one step to
   524288 does halve that view's worst gap, 119.9 to 60.0 px, but it is a trade
   and not a gift: `plan()` pays for it by doubling the hop, so gapT goes 14.4 to
-  28.8 and the cost is flat at 32M. There is no setting that fixes the bottom of
-  the picture. Worth knowing before reading a deep zoom down there as thin
-  analysis — it is thin *sampling*, and it is arithmetic.
+  28.8 and the cost is flat at 32M. That was on the FFT path; with the chirp-z
+  the padding is nearly free and raising `MAX_FFT` does close the gap — 4194304
+  takes the 916x view at 180 Hz (1.1 Hz over 850 px) from bins 141 px apart to
+  9, by arithmetic — at the cost in
+  look described under `MAX_FFT`. Until that is decided, worth knowing before
+  reading a deep zoom down there as thin analysis — it is thin *sampling*, and it
+  is arithmetic.
 - **Past about 100x it is the _time_ sampling that limits the picture** — above
   about 500 Hz, where the entry above stops biting — **and nothing here can fix
   it.** This used to be the other way round; the band

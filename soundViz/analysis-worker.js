@@ -111,6 +111,7 @@ self.onmessage = ({data}) => {
         sampleRate,
         winLen: data.winLen,
         fftSize: data.fftSize,
+        chirp: data.chirp,
         hop: data.hop,
         frames: data.frames,
         frame0,
