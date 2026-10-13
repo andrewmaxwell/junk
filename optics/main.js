@@ -33,18 +33,23 @@ const NEW_PRISM_SIZE = 90;
 const MIN_PRISM_SIZE = 15;
 const PRISM_EXPOSURE = 0.5;
 
+// Ambient motion: each piece of glass sways around where it was put
+const DRIFT_DISTANCE = 25; // px
+const DRIFT_ANGLE = 0.12; // radians, about 7°
+const DRIFT_PERIOD = [18, 40]; // seconds, randomized per piece and axis
+
 // Light sources
 const SOURCE_AIM_LENGTH = 40;
 const MIN_BEAM_WIDTH = 10;
 
 // --- Settings ---
 const settings = {
-  light: 'White', // 'White' | 'Rainbow'
   ior: 1.5,
   dispersion: DEFAULT_DISPERSION,
   reflections: true,
   exposure: DEFAULT_EXPOSURE,
-  dust: 1, // how strongly drifting dust catches the light; 0 for none
+  dust: 3, // how strongly drifting dust catches the light; 0 for none
+  motion: 1, // how fast the glass drifts; 0 holds it still
   hdr: matchMedia('(dynamic-range: high)').matches,
   // In HDR, how many times brighter than white light may get. Browsers don't
   // say how much headroom the screen has; brighter than it just clips.
@@ -61,21 +66,15 @@ try {
 const headroom = () => (settings.hdr ? settings.headroom : 0);
 
 const gui = new GUI();
-gui.add(settings, 'light', ['White', 'Rainbow']).onChange(() => {
-  dispersionControl.enable(settings.light === 'White');
-  render();
-});
 gui.add(settings, 'ior', 1.1, 2.5, 0.01).name('IOR').onChange(render);
-// Rainbow colors rays by where they start, so every ray uses the base IOR.
-const dispersionControl = gui
-  .add(settings, 'dispersion', 0, 0.1, 0.001)
-  .onChange(render);
+gui.add(settings, 'dispersion', 0, 0.1, 0.001).onChange(render);
 gui.add(settings, 'reflections').onChange(render);
 gui.add(settings, 'exposure', 0.02, 2, 0.01).onChange(() => {
   rayWorker.postMessage({exposure: settings.exposure});
 });
+gui.add(settings, 'motion', 0, 4, 0.1);
 gui
-  .add(settings, 'dust', 0, 3, 0.1)
+  .add(settings, 'dust', 0, 6, 0.1)
   .onChange(() => rayWorker.postMessage({dust: settings.dust}));
 gui
   .add(settings, 'hdr')
@@ -347,6 +346,20 @@ class Lens {
     this.updateGeometry();
   }
 
+  // Turns the lens about its center.
+  rotate(da) {
+    const turn = (p) => {
+      const dx = p.x - this.x;
+      const dy = p.y - this.y;
+      const c = Math.cos(da);
+      const s = Math.sin(da);
+      return {x: this.x + dx * c - dy * s, y: this.y + dx * s + dy * c};
+    };
+    this.p1 = turn(this.p1);
+    this.p2 = turn(this.p2);
+    this.updateGeometry();
+  }
+
   draw(activePart) {
     drawGlass(this, this.boundingRadius, activePart !== null, () => {
       const pts = this.outlinePath();
@@ -538,6 +551,10 @@ class Prism {
     }
   }
 
+  rotate(da) {
+    this.angle += da;
+  }
+
   draw(activePart) {
     drawGlass(this, this.size, activePart !== null, () => {
       for (const v of this.vertices) ctx.lineTo(v.x, v.y);
@@ -658,12 +675,14 @@ class Source {
 }
 
 // --- Rendering ---
-function requestRayRender() {
+// `ambient`: the change is just the glass drifting, so the worker can blend
+// it into the current image instead of starting over.
+function requestRayRender(ambient = false) {
   rayWorker.postMessage({
+    ambient,
     scene: {
       lenses: lenses.map((l) => l.serialize()),
       sources: sources.map((s) => s.serialize()),
-      light: settings.light,
       reflections: settings.reflections,
       width,
       height,
@@ -722,7 +741,6 @@ function loadScene(scene) {
   hovered = null;
   dragging = null;
   gui.controllersRecursive().forEach((c) => c.updateDisplay());
-  dispersionControl.enable(settings.light === 'White');
   render(); // also sends the scene's settings and exposure
 }
 
@@ -736,7 +754,6 @@ function lensScene() {
 // passes through symmetrically: incidence asin(n·sin 30°) on a 60° prism.
 // The spectrum fans out into the dark on the far side.
 function prismScene() {
-  settings.light = 'White';
   settings.dispersion = DEFAULT_DISPERSION;
   settings.reflections = true;
   settings.exposure = PRISM_EXPOSURE;
@@ -769,8 +786,7 @@ function prismScene() {
 // the dark above and below it. Only a few percent of the light ends up in
 // them, hence the higher exposure.
 function rainbowScene() {
-  // The bows need spectral light, dispersion, and internal reflections.
-  settings.light = 'White';
+  // The bows need dispersion and internal reflections.
   settings.dispersion = DEFAULT_DISPERSION;
   settings.reflections = true;
   settings.exposure = RAINBOW_EXPOSURE;
@@ -936,6 +952,44 @@ canvas.addEventListener('pointerleave', () => {
 });
 canvas.addEventListener('dblclick', handleDoubleClick);
 
+// --- Ambient motion ---
+// Each piece of glass sways on its own slow sines. The offsets are applied
+// as per-frame deltas, so dragging a piece simply moves what it sways
+// around. The clock only runs while moving, so pausing doesn't jump.
+let driftClock = 0;
+let lastFrame = 0;
+
+function driftOffset(item, t) {
+  item.drift ??= Array.from({length: 3}, () => ({
+    period:
+      DRIFT_PERIOD[0] + Math.random() * (DRIFT_PERIOD[1] - DRIFT_PERIOD[0]),
+    phase: Math.random() * 2 * Math.PI,
+  }));
+  const [x, y, a] = item.drift.map(({period, phase}) =>
+    Math.sin((2 * Math.PI * t) / period + phase),
+  );
+  return {x: x * DRIFT_DISTANCE, y: y * DRIFT_DISTANCE, angle: a * DRIFT_ANGLE};
+}
+
+function drift(now) {
+  const dt = Math.min(now - lastFrame, 50) / 1000; // seconds; skip long gaps
+  lastFrame = now;
+  if (settings.motion && !dragging && lenses.length) {
+    const t0 = driftClock;
+    driftClock += dt * settings.motion;
+    for (const item of lenses) {
+      const before = driftOffset(item, t0);
+      const after = driftOffset(item, driftClock);
+      item.drag('body', null, {x: after.x - before.x, y: after.y - before.y});
+      item.rotate?.(after.angle - before.angle);
+    }
+    scheduleDrawScene();
+    requestRayRender(true);
+  }
+  requestAnimationFrame(drift);
+}
+
 // --- Init ---
 resize();
 loadScene(lensScene);
+requestAnimationFrame(drift);

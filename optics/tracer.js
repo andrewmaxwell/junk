@@ -7,7 +7,7 @@
 
 export const LAMBDA_MIN = 380;
 export const LAMBDA_MAX = 700;
-export const WAVELENGTHS_PER_RAY = 8; // in white light
+export const WAVELENGTHS_PER_RAY = 8;
 const LAMBDA_REF = 550; // nm; an element's ior is its index here
 const LASER_POWER = 12; // a laser is as bright as a 12px beam squeezed into one ray
 const POINT_POWER = 800;
@@ -21,6 +21,7 @@ const WGSL = /* wgsl */ `
 const LAMBDA_MIN = ${LAMBDA_MIN}.;
 const LAMBDA_MAX = ${LAMBDA_MAX}.;
 const LAMBDA_REF = ${LAMBDA_REF}.;
+const WAVELENGTHS = ${WAVELENGTHS_PER_RAY}u; // per ray origin
 // Safety cap for rays trapped by total internal reflection; ordinary
 // crossings (two per lens) never come close.
 const MAX_SEGMENTS = 64u;
@@ -79,14 +80,12 @@ struct Params {
   shift: f32, // golden-ratio offset of this pass's evenly spaced rays
   far: f32, // how far a ray that hits nothing is drawn
   seed: u32,
-  white: u32, // else colored by where rays start, all at LAMBDA_REF
   reflections: u32,
   elementCount: u32,
   sourceCount: u32,
   threads: u32,
   disjoint: u32, // no bounding circles overlap
   capacity: u32, // segments the buffer holds
-  wavelengths: u32, // per ray origin
 }
 
 struct Segment {
@@ -299,10 +298,10 @@ struct Branch {
 
 // Traces one ray of a single wavelength, drawing every segment. With
 // reflections on, each surface spawns a Fresnel-weighted reflected branch.
-// Every wavelength of a white ray shares the path up to the first surface,
-// so only one thread draws it, in their combined color (firstColor); the
-// rest pass firstColor = 0 and skip it.
-fn trace(origin: vec2f, dir: vec2f, lambda: f32, rgb: vec3f, firstColor: vec3f, shareFirst: bool, seed: u32) {
+// Every wavelength of a ray shares the path up to the first surface, so only
+// one thread draws it, in their combined color (firstColor); the rest pass
+// firstColor = 0 and skip it.
+fn trace(origin: vec2f, dir: vec2f, lambda: f32, rgb: vec3f, firstColor: vec3f, seed: u32) {
   var drawFirst = true;
   var rng = seed;
   var stack: array<Branch, STACK_SIZE>;
@@ -319,7 +318,7 @@ fn trace(origin: vec2f, dir: vec2f, lambda: f32, rgb: vec3f, firstColor: vec3f, 
       let hit = nearestHit(o, d);
       let found = hit.el >= 0;
       let end = select(o + d * params.far, hit.pos, found);
-      if (!shareFirst || !drawFirst) {
+      if (!drawFirst) {
         addSegment(o, end, rgb * w);
       } else if (any(firstColor > vec3f(0.))) {
         addSegment(o, end, firstColor);
@@ -380,12 +379,6 @@ fn emit(src: Source, t: f32) -> array<vec2f, 2> {
   return array(src.pos + vec2f(-dir.y, dir.x) * across, dir);
 }
 
-// Fully saturated hue (h in [0, 1)), averaging (1,1,1) around the wheel.
-fn hue(h: f32) -> vec3f {
-  let k = (vec3f(5., 3., 1.) + h * 6.) % 6.;
-  return 2. * (1. - clamp(min(k, 4. - k), vec3f(0.), vec3f(1.)));
-}
-
 fn random(id: u32) -> f32 {
   // PCG hash
   var s = id * 747796405u + params.seed * 2891336453u + 2891336453u;
@@ -397,12 +390,12 @@ fn random(id: u32) -> f32 {
 // Thread id's wavelength, the j-th of its ray: stratified, jittered within
 // each stratum.
 fn wavelength(id: u32, j: u32) -> f32 {
-  return LAMBDA_MIN + (f32(j) + random(id)) / f32(params.wavelengths) * (LAMBDA_MAX - LAMBDA_MIN);
+  return LAMBDA_MIN + (f32(j) + random(id)) / f32(WAVELENGTHS) * (LAMBDA_MAX - LAMBDA_MIN);
 }
 
 fn spectrumColor(id: u32, j: u32) -> vec3f {
   let lambda = wavelength(id, j);
-  return spectrum[u32(round(lambda - LAMBDA_MIN))].rgb / f32(params.wavelengths);
+  return spectrum[u32(round(lambda - LAMBDA_MIN))].rgb / f32(WAVELENGTHS);
 }
 
 // Each pass traces evenly spaced rays from each source, shifted by a
@@ -413,7 +406,7 @@ fn spectrumColor(id: u32, j: u32) -> vec3f {
 fn main(@builtin(global_invocation_id) gid: vec3u) {
   let id = gid.x;
   if (id >= params.threads) { return; }
-  let ray = id / params.wavelengths;
+  let ray = id / WAVELENGTHS;
   var src = sources[0];
   for (var i = 0u; i < params.sourceCount; i++) {
     src = sources[i];
@@ -421,22 +414,17 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
   let t = (f32(ray - src.first) + params.shift) / f32(src.count);
   let path = emit(src, t);
-  if (params.white == 1u) {
-    let j = id % params.wavelengths;
-    let rgb = spectrumColor(id, j) * src.weight;
-    // The first of the ray's threads draws the shared first segment for all.
-    var first = vec3f(0.);
-    if (j == 0u) {
-      for (var k = 0u; k < params.wavelengths; k++) {
-        first += spectrumColor(id + k, k);
-      }
-      first *= src.weight;
+  let j = id % WAVELENGTHS;
+  let rgb = spectrumColor(id, j) * src.weight;
+  // The first of the ray's threads draws the shared first segment for all.
+  var first = vec3f(0.);
+  if (j == 0u) {
+    for (var k = 0u; k < WAVELENGTHS; k++) {
+      first += spectrumColor(id + k, k);
     }
-    trace(path[0], path[1], wavelength(id, j), rgb, first, true, id * 977u);
-  } else {
-    let rgb = hue(t) * src.weight;
-    trace(path[0], path[1], LAMBDA_REF, rgb, rgb, false, id * 977u);
+    first *= src.weight;
   }
+  trace(path[0], path[1], wavelength(id, j), rgb, first, id * 977u);
 }
 
 // Atomics count every segment, even ones past the buffer's end; clamp the
@@ -605,8 +593,6 @@ export class Tracer {
   // Returns how many paths it traces.
   encode(encoder, pass, origins) {
     const {device, scene} = this;
-    const white = scene.light === 'White';
-    const wavelengths = white ? WAVELENGTHS_PER_RAY : 1;
 
     const totalPower = scene.sources.reduce(
       (s, src) => s + sourcePower(src),
@@ -637,21 +623,19 @@ export class Tracer {
     }
     device.queue.writeBuffer(this.sources, 0, srcData);
 
-    const threads = rays * wavelengths;
+    const threads = rays * WAVELENGTHS_PER_RAY;
     const params = new ArrayBuffer(48);
     const f32 = new Float32Array(params);
     const u32 = new Uint32Array(params);
     f32[0] = (pass * 0.6180339887) % 1;
     f32[1] = Math.max(scene.width, scene.height) * 2;
     u32[2] = (pass * 2654435761) >>> 0;
-    u32[3] = +white;
-    u32[4] = +scene.reflections;
-    u32[5] = scene.lenses.length;
-    u32[6] = scene.sources.length;
-    u32[7] = threads;
-    u32[8] = +this.disjoint;
-    u32[9] = this.capacity;
-    u32[10] = wavelengths;
+    u32[3] = +scene.reflections;
+    u32[4] = scene.lenses.length;
+    u32[5] = scene.sources.length;
+    u32[6] = threads;
+    u32[7] = +this.disjoint;
+    u32[8] = this.capacity;
     device.queue.writeBuffer(this.params, 0, params);
     // 4 vertices per segment quad, instance count reset to 0.
     device.queue.writeBuffer(this.draw, 0, new Uint32Array([4, 0, 0, 0]));

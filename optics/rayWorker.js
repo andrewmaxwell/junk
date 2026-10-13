@@ -17,6 +17,9 @@ const START_ORIGINS = 4000;
 const MIN_ORIGINS = 256;
 const SEGMENT_CAPACITY = 1 << 21; // 64MB of segments
 const SEGMENTS_PER_PATH = 16; // generous, to keep passes inside the capacity
+// While the glass drifts, the image fades by this much per pass instead of
+// starting over: a short running average that hides noise without trails.
+const DRIFT_FADE = 0.9;
 const BLOOM_THRESHOLD = 0.25;
 const BLOOM_PX = 4; // bloom resolution, in CSS px (roughly)
 const BLOOM_NARROW = 0.8;
@@ -341,6 +344,7 @@ async function initGPU(canvas, hdrHeadroom) {
     });
   };
   const addModule = device.createShaderModule({code: ADD_WGSL});
+  const fade = {srcFactor: 'one', dstFactor: 'constant', operation: 'add'};
   pipelines = {
     line: additive(LINE_WGSL, FLOAT16, [
       {
@@ -354,12 +358,13 @@ async function initGPU(canvas, hdrHeadroom) {
     ]),
     // Faint enough to add straight onto the finished frame.
     dust: additive(DUST_WGSL, CANVAS_FORMAT),
+    // accum = pass + accum × blend constant (1, or DRIFT_FADE)
     add: device.createRenderPipeline({
       layout: 'auto',
       vertex: {module: fullscreen},
       fragment: {
         module: addModule,
-        targets: [{format: accumFormat, blend: {color: add, alpha: add}}],
+        targets: [{format: accumFormat, blend: {color: fade, alpha: fade}}],
       },
     }),
     bright: pipeline(BRIGHT_WGSL, FLOAT16),
@@ -493,9 +498,9 @@ function fullscreen(encoder, name, group, view) {
 }
 
 // Shows the light accumulated so far. An unobstructed beam accumulates 1 per
-// pass; `scale` averages the passes and applies exposure.
+// pass; `scale` averages the (faded) passes and applies exposure.
 function present(time) {
-  const scale = exposure / passes;
+  const scale = exposure / weight;
   const cssW = W / dpr;
   const cssH = H / dpr;
   // prettier-ignore
@@ -508,7 +513,7 @@ function present(time) {
   const encoder = device.createCommandEncoder();
   const t = targets;
   // Bloom only changes with the image, not with the drifting dust.
-  const key = `${passes} ${exposure}`;
+  const key = `${weight} ${exposure}`;
   if (key !== bloomKey) {
     bloomKey = key;
     fullscreen(encoder, 'bright', 'bright', t.half.view);
@@ -532,11 +537,15 @@ function present(time) {
 
 // --- Tracing loop ---
 // Messages only record the latest scene; the loop resets the image when it
-// next runs, so a burst of drag events costs one reset.
+// next runs, so a burst of drag events costs one reset. A reset is 'clear'
+// to start over, or 'fade' when the glass has only drifted.
 let scene = null;
 let exposure = 1;
-let dirty = false;
-let passes = 0; // submitted since the last reset
+let reset = null; // null, 'fade' or 'clear'
+let passes = 0; // since the last reset
+let passCount = 0; // ever: drives each pass's ray offsets and random seed, so
+// passes that blend together never repeat
+let weight = 0; // passes in the image, counting faded ones fractionally
 let origins = START_ORIGINS;
 let busy = false;
 let timer = 0;
@@ -546,8 +555,9 @@ async function step() {
   if (!device || !scene || busy) return;
   busy = true;
   const encoder = device.createCommandEncoder();
-  const clear = dirty;
-  if (dirty) {
+  const fade = reset === 'fade' ? DRIFT_FADE : 1;
+  const clear = reset === 'clear';
+  if (reset) {
     dpr = scene.dpr;
     const w = Math.round(scene.width * dpr);
     const h = Math.round(scene.height * dpr);
@@ -560,9 +570,10 @@ async function step() {
     device.queue.writeBuffer(uniforms.line, 0, new Float32Array([scene.width, scene.height, 1 / dpr, 0]));
     tracer.setScene(scene);
     passes = 0;
-    dirty = false;
+    weight = clear ? 0 : weight * fade;
+    reset = null;
   }
-  tracer.encode(encoder, passes, origins);
+  tracer.encode(encoder, passCount++, origins);
   renderTo(encoder, targets.pass.view, 'clear', (pass) => {
     pass.setPipeline(pipelines.line);
     pass.setBindGroup(0, bindGroups.line); // half width: one device px
@@ -571,17 +582,19 @@ async function step() {
   });
   renderTo(encoder, targets.accum.view, clear ? 'clear' : 'load', (pass) => {
     pass.setPipeline(pipelines.add);
+    pass.setBlendConstant([fade, fade, fade, fade]);
     pass.setBindGroup(0, bindGroups.add);
     pass.draw(3);
   });
   device.queue.submit([encoder.finish()]);
-  passes++; // presents queued from now on include this pass
+  passes++;
+  weight++; // presents queued from now on include this pass
 
   const start = performance.now();
   await device.queue.onSubmittedWorkDone();
   adaptOrigins(performance.now() - start);
   busy = false;
-  if (dirty || passes < MAX_PASSES) schedule();
+  if (reset || passes < MAX_PASSES) schedule();
 }
 
 // Steer the rays per pass toward TARGET_PASS_MS, within the segment buffer.
@@ -591,8 +604,7 @@ let msPerOrigin = 0;
 function adaptOrigins(ms) {
   const sample = ms / origins;
   msPerOrigin = msPerOrigin ? 0.8 * msPerOrigin + 0.2 * sample : sample;
-  const wavelengths = scene.light === 'White' ? WAVELENGTHS_PER_RAY : 1;
-  const max = SEGMENT_CAPACITY / (SEGMENTS_PER_PATH * wavelengths);
+  const max = SEGMENT_CAPACITY / (SEGMENTS_PER_PATH * WAVELENGTHS_PER_RAY);
   const target = TARGET_PASS_MS / msPerOrigin;
   origins = Math.round(Math.min(max, Math.max(MIN_ORIGINS, target)));
 }
@@ -609,7 +621,7 @@ const nextFrame = self.requestAnimationFrame
 // About 60fps is plenty for drifting dust, even on 120Hz screens.
 let lastPresent = 0;
 function frame(now) {
-  if (passes && now - lastPresent >= 15) {
+  if (weight && now - lastPresent >= 15) {
     lastPresent = now;
     present(now / 1000);
   }
@@ -637,7 +649,8 @@ self.onmessage = async ({data}) => {
   if ('exposure' in data) exposure = data.exposure;
   if (data.scene) {
     scene = data.scene;
-    dirty = true;
+    // A pending clear wins over a fade.
+    reset = data.ambient && reset !== 'clear' ? 'fade' : 'clear';
     schedule();
   }
 };
