@@ -191,10 +191,23 @@ have given it, and one unpadded bin beyond each end of its band for the same
 reason in frequency. A region boundary and a band edge are both invisible in the
 result.
 
-**Passes are discarded, not cancelled.** A worker inside a region cannot be
-interrupted without a `SharedArrayBuffer`, and the page is not cross-origin
-isolated, so a superseded pass runs to completion and its result is dropped on a
-generation check.
+**A superseded pass stops at region granularity.** A worker inside a region
+cannot be interrupted without a `SharedArrayBuffer`, and the page is not
+cross-origin isolated, so the regions already running finish. But `share()`
+hands regions out one at a time and stops handing them out once the pass's
+generation is stale, so nothing queued behind them runs. Measured on a run of
+four superseding zooms at 30-100x: 6.0-6.5 s to the last view against 6.9-7.6 s.
+
+**The calibrating pass cannot be superseded by one that does not calibrate.**
+A gesture during a recording's first pass used to start a non-calibrating pass
+that overtook it, and the recording drew with the last one's exposure — or, on
+the first recording of a session, an entirely black screen. `analyze()` now makes
+an uncalibrated recording's later passes wait for the calibrating one in flight.
+
+**A worker error fails the pass rather than hanging it.** `onerror` rejects every
+job that worker owes; `main.js` reports it in the status line. Before, a throw in
+a worker (a failed allocation of a region's staging array is the likely one)
+left the spinner turning forever and every later save waiting on it.
 
 **The `WORTH_REDOING` guard asks about the pass in flight**, not only the cloud
 in hand — otherwise it starts a second identical pass behind the first.
@@ -552,8 +565,8 @@ signal and is not.
   recalibrate only when the cloud covers the whole recording, but whether a
   resize should hold the old exposure is an aesthetic call, and the exposure is
   meant to be measured once per recording.
-- **A superseded pass still has to finish**, and **the commit still blocks**
-  (0.4-0.6 s on a first analysis, 0.1-0.6 s on a settle).
+- **A superseded pass still finishes the regions it has running**, and **the
+  commit still blocks** (0.4-0.6 s on a first analysis, 0.1-0.6 s on a settle).
 - The picture arrives in two stages past ~2x: the cloud in hand is re-projected
   instantly, then the refined pass lands about a second later. Anything reading a
   screenshot must wait for the second or it will conclude the picture is empty.

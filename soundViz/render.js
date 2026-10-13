@@ -294,7 +294,10 @@ let wanted = null; // what the newest pass in flight will make it, if any
 let audioFor = null; // the recording the pool has a copy of
 let ridgeFor = null; // the recording the pool has ridge and share maps for
 let arena = null; // the share arena and its power, for deciding which scales to run
-let generation = 0; // passes are discarded rather than cancelled; this says which
+let generation = 0; // which pass is current; a stale one stops at its next region
+let latest = null; // the newest recording asked to be calibrated
+let calibratedFor = null; // the recording the exposure was measured from
+let calibrating = null; // the calibrating pass in flight, {rec, done}
 
 // Somebody to tell while a pass is in flight, so the status line can show it.
 let onBusy = null;
@@ -322,7 +325,23 @@ function leave() {
 // message per region and nothing else.
 let workers = null;
 let nextJob = 1;
-const waiting = new Map();
+const waiting = new Map(); // job -> {resolve, reject, worker}
+
+// A worker that throws — a region's staging array is hundreds of megabytes,
+// and an allocation that size can fail — never answers the job it was on. Left
+// waiting, that pass would never finish: the spinner would turn forever and a
+// save would wait on it forever. So everything that worker owes is failed
+// instead, and the pass rejects like any other error.
+function fail(worker, e) {
+  const err = new Error(e.message || 'analysis worker failed');
+
+  for (const [id, job] of waiting) {
+    if (job.worker === worker) {
+      waiting.delete(id);
+      job.reject(err);
+    }
+  }
+}
 
 function pool() {
   if (!workers) {
@@ -337,13 +356,16 @@ function pool() {
       );
 
       worker.onmessage = ({data}) => {
-        const done = waiting.get(data.job);
+        const job = waiting.get(data.job);
 
-        if (done) {
+        if (job) {
           waiting.delete(data.job);
-          done(data);
+          job.resolve(data);
         }
       };
+
+      worker.onerror = (e) => fail(worker, e);
+      worker.onmessageerror = (e) => fail(worker, e);
 
       workers.push(worker);
     }
@@ -361,8 +383,8 @@ function tell(worker, msg) {
 function ask(worker, msg) {
   const job = nextJob++;
 
-  return new Promise((resolve) => {
-    waiting.set(job, resolve);
+  return new Promise((resolve, reject) => {
+    waiting.set(job, {resolve, reject, worker});
     worker.postMessage({...msg, job});
   });
 }
@@ -371,16 +393,28 @@ function ask(worker, msg) {
 // comes free. Resolves with the answers in the order the jobs were given.
 // `threads` is how many of the pool may be busy at once, which is how the
 // coherence rings are kept inside their collective budget.
-async function share(jobs, threads = POOL) {
+//
+// Jobs are handed out one at a time, so a pass that stops being wanted — `live`
+// turns false — stops here: the regions already running finish, and the rest
+// are never sent. A region cannot be interrupted, but nothing forces the queue
+// behind it to run. The answers are then incomplete, which is fine, because a
+// pass that is no longer live is discarded.
+async function share(jobs, threads, live) {
   const ws = pool().slice(0, Math.max(1, threads));
   const results = new Array(jobs.length);
 
   let next = 0;
+  let failed = false;
 
   await Promise.all(
     ws.map(async (worker) => {
-      for (let i = next++; i < jobs.length; i = next++) {
-        results[i] = await ask(worker, jobs[i]);
+      try {
+        for (let i = next++; i < jobs.length && !failed && live(); i = next++) {
+          results[i] = await ask(worker, jobs[i]);
+        }
+      } catch (err) {
+        failed = true;
+        throw err;
       }
     }),
   );
@@ -407,6 +441,7 @@ export function clear(canvas) {
   current = wanted = null;
   audioFor = ridgeFor = null;
   arena = null;
+  latest = calibratedFor = calibrating = null;
   generation++;
   view.resize(w, h);
   view.clear();
@@ -871,7 +906,50 @@ function scalesFor(rec) {
 // the page is not cross-origin isolated. Nothing outside this function ever
 // sees a half-finished cloud: a pass is staged whole in the workers and lands
 // in one piece.
+//
+// The exposure is the one thing a pass must not be superseded out of. The
+// first pass of a recording calibrates, and a gesture made while it runs would
+// start a pass that does not — and that pass, by overtaking the first, would
+// leave the recording drawn with the last one's exposure, or with none at all.
+// So a pass for a recording not yet calibrated waits for the calibrating pass
+// in flight, then runs. If nothing in flight will calibrate it, it calibrates
+// itself, from whatever stretch it covers: worse than the full view, but the
+// same degradation a resize while zoomed already accepts.
 export async function analyze(canvas, rec, viewport, calibrate) {
+  if (calibrate) {
+    latest = rec;
+  } else if (calibratedFor !== rec) {
+    while (calibrating?.rec === rec) {
+      await calibrating.done.catch(() => {});
+    }
+
+    // A newer recording has taken over while this waited.
+    if (rec !== latest) {
+      return null;
+    }
+
+    calibrate = calibratedFor !== rec;
+  }
+
+  if (!calibrate) {
+    return pass(canvas, rec, viewport, false);
+  }
+
+  const done = pass(canvas, rec, viewport, true);
+  const entry = {rec, done};
+
+  calibrating = entry;
+
+  try {
+    return await done;
+  } finally {
+    if (calibrating === entry) {
+      calibrating = null;
+    }
+  }
+}
+
+async function pass(canvas, rec, viewport, calibrate) {
   const {w, h} = sizeOf(canvas);
   view.resize(w, h);
 
@@ -1093,7 +1171,11 @@ export async function analyze(canvas, rec, viewport, calibrate) {
       offset += frames * bins;
     }
 
-    const parts = await share(jobs, Math.floor(MAX_POOL_RING_CELLS / ring));
+    const parts = await share(
+      jobs,
+      Math.floor(MAX_POOL_RING_CELLS / ring),
+      () => gen === generation,
+    );
 
     if (gen !== generation) {
       return null;
@@ -1152,6 +1234,7 @@ export async function analyze(canvas, rec, viewport, calibrate) {
 
     if (calibrate) {
       view.calibrate(fullSpan(rec));
+      calibratedFor = rec;
     }
 
     return {

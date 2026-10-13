@@ -102,8 +102,15 @@ setBusyHandler((on) => busyEl.classList.toggle('show', on));
 // rather than exporting one that is about to be replaced.
 let analysing = null;
 
+// A pass that fails says so, rather than leaving a save waiting on it. Caught
+// here so that what a save awaits always settles.
 function track(promise) {
-  const done = promise.finally(() => {
+  const failed = promise.catch((err) => {
+    console.error(err);
+    setStatus(`analysis failed: ${err.message}`, false);
+  });
+
+  const done = failed.finally(() => {
     if (analysing === done) {
       analysing = null;
     }
