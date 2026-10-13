@@ -159,6 +159,11 @@ export function attachGestures(el, opts) {
     (e) => {
       e.preventDefault();
 
+      // Nothing recorded yet, so no view to move.
+      if (!getLimits()) {
+        return;
+      }
+
       const r = rect();
       const u = (e.clientX - r.left) / r.width;
       const v = (e.clientY - r.top) / r.height;
@@ -258,7 +263,7 @@ export function attachGestures(el, opts) {
       return;
     }
 
-    if (pointers.size !== 2 || !pinch) {
+    if (pointers.size !== 2 || !pinch || !getLimits()) {
       return;
     }
 
@@ -310,16 +315,22 @@ export function attachGestures(el, opts) {
 
   el.addEventListener('dblclick', (e) => {
     e.preventDefault();
+
+    if (!getLimits()) {
+      return;
+    }
+
     setView(fullView(getLimits()));
     onGesture();
     onSettle();
   });
 
-  // Two-finger tap, the touch equivalent of a double click.
+  // Double tap with one finger, the touch equivalent of a double click. The
+  // two lifts at the end of a pinch would look like one, hence `multiUntil`.
   let lastTap = 0;
 
   el.addEventListener('pointerup', (e) => {
-    if (e.pointerType !== 'touch') {
+    if (e.pointerType !== 'touch' || !getLimits()) {
       return;
     }
 

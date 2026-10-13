@@ -298,6 +298,7 @@ let generation = 0; // which pass is current; a stale one stops at its next regi
 let latest = null; // the newest recording asked to be calibrated
 let calibratedFor = null; // the recording the exposure was measured from
 let calibrating = null; // the calibrating pass in flight, {rec, done}
+let cloudFor = null; // the recording the cloud on the GPU was analysed from
 
 // Somebody to tell while a pass is in flight, so the status line can show it.
 let onBusy = null;
@@ -441,7 +442,7 @@ export function clear(canvas) {
   current = wanted = null;
   audioFor = ridgeFor = null;
   arena = null;
-  latest = calibratedFor = calibrating = null;
+  latest = calibratedFor = calibrating = cloudFor = null;
   generation++;
   view.resize(w, h);
   view.clear();
@@ -1229,6 +1230,7 @@ async function pass(canvas, rec, viewport, calibrate) {
     }
 
     view.end({sampleRate, scales});
+    cloudFor = rec;
 
     current = wanted;
 
@@ -1284,7 +1286,14 @@ function crop(v, u0, u1, y0, y1) {
 // tiles: the accumulation buffer costs 16 bytes a pixel, so one the size of the
 // whole export would run to gigabytes, and a tile only has to touch the cells
 // whose time falls inside it.
-export async function exportImage(canvas, viewport, onProgress) {
+//
+// Resolves to null when there is no cloud of this recording to draw — its
+// analysis failed, and what is on the GPU, if anything, is another take's.
+export async function exportImage(canvas, rec, viewport, onProgress) {
+  if (cloudFor !== rec) {
+    return null;
+  }
+
   const {w, h} = sizeOf(canvas);
 
   const fit = Math.min(

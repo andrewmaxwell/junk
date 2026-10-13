@@ -257,7 +257,7 @@ export function buildRidge({samples, sampleRate, winLen, fMin, fMax}) {
   // Which arena row each bin falls in, and -1 for the bins this window has no
   // business speaking about. A window shorter than about one and a half cycles
   // of a frequency measures its phase out of noise, so the short windows simply
-  // do not bid for the bottom of the picture — see `fMinFor` in `render.js`.
+  // do not bid for the bottom of the picture — see `MIN_CYCLES` in `render.js`.
   const rowOfBin = new Int32Array(bins);
   const rowScale = rowScaleFor(sampleRate);
 

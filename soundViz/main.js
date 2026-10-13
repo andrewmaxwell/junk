@@ -549,10 +549,19 @@ async function save() {
       await analysing;
     }
 
-    const {blob, W, H} = await exportImage(canvas, viewport, (done, total) =>
+    const image = await exportImage(canvas, rec, viewport, (done, total) =>
       setStatus(`saving… ${Math.round((100 * done) / total)}%`, false),
     );
 
+    // No cloud to draw — the analysis failed — so a save would be a black
+    // rectangle the size of a wall.
+    if (!image) {
+      setStatus('nothing to save — the analysis did not finish', false);
+      nagTimer = setTimeout(showZoom, 2400);
+      return;
+    }
+
+    const {blob, W, H} = image;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -677,6 +686,9 @@ window.addEventListener('keydown', (e) => {
     track(analyze(canvas, rec, viewport, false).then(requestFrame));
     return;
   }
+  // Cmd+S and Cmd+P belong to the browser. Taking them as well would export
+  // behind a Save Page dialog, or start playback behind a Print one.
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.code === 'KeyS' && rec) {
     save();
     return;

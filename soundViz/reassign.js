@@ -31,7 +31,7 @@ export const STRIDE = 5;
 // Cells are written straight into an array the caller owns, sized from the
 // grid, rather than handed back in batches. The caller is an analysis worker
 // staging a whole region so it can be transferred to the main thread in one
-// piece — see `worker.js` — and writing into that array directly is one fewer
+// piece — see `analysis-worker.js` — and writing into that array directly is one fewer
 // copy of something that runs to hundreds of megabytes.
 
 // Coherence.

@@ -1050,10 +1050,13 @@ export function createView(canvas) {
         return null;
       }
 
-      const x = Math.min(accum.w - 1, Math.max(0, Math.round(u * accum.w)));
+      // Floor, not round: pixel x covers [x, x + 1), so rounding would read the
+      // neighbour for half of every pixel — on a one-pixel filament, the
+      // difference between the filament and "nothing here".
+      const x = Math.min(accum.w - 1, Math.max(0, Math.floor(u * accum.w)));
       const y = Math.min(
         accum.h - 1,
-        Math.max(0, Math.round((1 - v) * accum.h)),
+        Math.max(0, Math.floor((1 - v) * accum.h)),
       );
 
       gl.disable(gl.BLEND);
