@@ -44,6 +44,7 @@ const settings = {
   dispersion: DEFAULT_DISPERSION,
   reflections: true,
   exposure: DEFAULT_EXPOSURE,
+  dust: 1, // how strongly drifting dust catches the light; 0 for none
   hdr: matchMedia('(dynamic-range: high)').matches,
   // In HDR, how many times brighter than white light may get. Browsers don't
   // say how much headroom the screen has; brighter than it just clips.
@@ -73,6 +74,9 @@ gui.add(settings, 'reflections').onChange(render);
 gui.add(settings, 'exposure', 0.02, 2, 0.01).onChange(() => {
   rayWorker.postMessage({exposure: settings.exposure});
 });
+gui
+  .add(settings, 'dust', 0, 3, 0.1)
+  .onChange(() => rayWorker.postMessage({dust: settings.dust}));
 gui
   .add(settings, 'hdr')
   .name('HDR')
@@ -111,8 +115,8 @@ const ctx = canvas.getContext('2d');
 let width, height, dpr;
 
 // --- Worker ---
-// rayWorker.js traces rays and renders the light with WebGPU straight into the
-// #gl canvas underneath, refining progressively. This thread only draws the
+// rayWorker.js traces rays on the GPU (tracer.js) and renders the light with
+// WebGPU straight into the #gl canvas underneath, refining progressively. This thread only draws the
 // lens and handle overlay on #canvas.
 const rayWorker = new Worker(new URL('./rayWorker.js', import.meta.url), {
   type: 'module',
@@ -122,7 +126,10 @@ rayWorker.onerror = (e) =>
   showError(e.message || 'the renderer failed to load');
 try {
   const glCanvas = document.getElementById('gl').transferControlToOffscreen();
-  rayWorker.postMessage({canvas: glCanvas, headroom: headroom()}, [glCanvas]);
+  rayWorker.postMessage(
+    {canvas: glCanvas, headroom: headroom(), dust: settings.dust},
+    [glCanvas],
+  );
 } catch {
   showError('this browser can’t render from a worker');
 }

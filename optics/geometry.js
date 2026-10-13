@@ -1,5 +1,6 @@
-// Geometry shared by the main thread (hit testing) and rayWorker.js
-// (tracing), so the two can never disagree about what's inside the glass.
+// What's inside the glass, for hit testing on the main thread. The GPU
+// tracer's containsAt() in tracer.js is the same test in WGSL; keep them in
+// step.
 
 export const distSq = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
 
