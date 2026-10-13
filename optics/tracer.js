@@ -11,7 +11,7 @@ export const WAVELENGTHS_PER_RAY = 8;
 const LAMBDA_REF = 550; // nm; an element's ior is its index here
 const LASER_POWER = 12; // a laser is as bright as a 12px beam squeezed into one ray
 const POINT_POWER = 800;
-const ELEMENT_FLOATS = 40; // matches struct Element
+const ELEMENT_FLOATS = 48; // matches struct Element
 const SOURCE_FLOATS = 8; // matches struct Source
 export const SEGMENT_BYTES = 32; // matches struct Segment
 const KINDS = {lens: 0, drop: 1, prism: 2};
@@ -34,6 +34,8 @@ const INTERSECTION_SLACK = 0.1;
 // (Russian roulette): the same light on average, for far fewer lines to draw.
 const ROULETTE_WEIGHT = 0.1;
 const NO_HIT = 1e30;
+const COAT_INDEX = 1.9; // the coating film's refractive index
+const ABSORB_STEP = 12.; // px; absorbing paths are drawn in pieces this long
 
 // A lens, droplet or prism (kind 0, 1, 2), packed by packElements().
 struct Element {
@@ -62,7 +64,12 @@ struct Element {
   n0: vec2f, // prism: outward normals of edges p0→p1, p1→p2, p2→p0
   n1: vec2f,
   n2: vec2f,
-  _pad2: vec2f, // 160 bytes = ELEMENT_FLOATS
+  _pad2: vec2f,
+  tint: vec3f, // linear rgb light keeps after ABSORB_DEPTH px at density 1
+  density: f32, // absorption strength; 0 is clear
+  coat: f32, // thin-film coating thickness in nm; 0 for none
+  _pad3: f32,
+  _pad4: vec2f, // 192 bytes = ELEMENT_FLOATS
 }
 
 // A light (kind 0 beam, 1 laser, 2 point) and the rays it gets this pass.
@@ -251,12 +258,27 @@ fn iorAt(medium: i32, lambda: f32) -> f32 {
   return e.ior + e.dispersion * (1. / (l * l) - 1. / (l0 * l0));
 }
 
+// --- Colored glass ---
+// Beer–Lambert: light fades as exp(-a·distance). A tint is the fraction of
+// each color that survives, so a wavelength survives as much as its color
+// mixes those fractions (red light through red-tinted glass, say).
+fn absorptionAt(medium: i32, lambda: f32) -> f32 {
+  if (medium < 0) { return 0.; }
+  let e = elements[medium];
+  if (e.density == 0.) { return 0.; }
+  let c = spectrum[u32(round(lambda - LAMBDA_MIN))].rgb;
+  let kept = clamp(dot(e.tint, c) / max(c.r + c.g + c.b, 1e-6), 1e-3, 1.);
+  return -log(kept) * e.density;
+}
+
 // --- Fresnel ---
 struct Scatter {
   reflected: vec2f,
   refracted: vec2f,
   R: f32, // unpolarised reflectance
   tir: bool, // total internal reflection: no refracted ray
+  cosI: f32,
+  cosT: f32,
 }
 
 // A ray d crossing from index n1 into n2 at a surface with normal n, which
@@ -272,12 +294,33 @@ fn scatter(d: vec2f, normal: vec2f, n1: f32, n2: f32) -> Scatter {
   let reflected = d + 2. * cosI * n;
   let eta = n1 / n2;
   let sinT2 = eta * eta * (1. - cosI * cosI);
-  if (sinT2 >= 1.) { return Scatter(reflected, vec2f(0.), 1., true); }
+  if (sinT2 >= 1.) { return Scatter(reflected, vec2f(0.), 1., true, cosI, 0.); }
   let cosT = sqrt(1. - sinT2);
   let refracted = eta * d + (eta * cosI - cosT) * n;
   let rs = (n1 * cosI - n2 * cosT) / (n1 * cosI + n2 * cosT);
   let rp = (n1 * cosT - n2 * cosI) / (n1 * cosT + n2 * cosI);
-  return Scatter(reflected, refracted, (rs * rs + rp * rp) / 2., false);
+  return Scatter(reflected, refracted, (rs * rs + rp * rp) / 2., false, cosI, cosT);
+}
+
+// Reflectance of a surface under a thin film (index COAT_INDEX, thickness
+// nm) between indices n1 and n2: the film's two reflections interfere,
+// strengthening some wavelengths and cancelling others depending on angle,
+// which is what colors soap bubbles and oil slicks. Airy's formula, averaged
+// over the two polarizations.
+fn filmReflectance(cos1: f32, cos2: f32, n1: f32, n2: f32, nm: f32, lambda: f32) -> f32 {
+  let nf = COAT_INDEX;
+  let sinF = n1 * sqrt(max(0., 1. - cos1 * cos1)) / nf;
+  let cosF = sqrt(max(0., 1. - sinF * sinF));
+  let phase = 12.566370614 * nf * nm * cosF / lambda; // 4π·n·d·cosθ / λ
+  let c = cos(phase);
+  // Each interface's reflection amplitude, s and p.
+  let s12 = (n1 * cos1 - nf * cosF) / (n1 * cos1 + nf * cosF);
+  let s23 = (nf * cosF - n2 * cos2) / (nf * cosF + n2 * cos2);
+  let p12 = (nf * cos1 - n1 * cosF) / (nf * cos1 + n1 * cosF);
+  let p23 = (n2 * cosF - nf * cos2) / (n2 * cosF + nf * cos2);
+  let rs = (s12 * s12 + s23 * s23 + 2. * s12 * s23 * c) / (1. + s12 * s12 * s23 * s23 + 2. * s12 * s23 * c);
+  let rp = (p12 * p12 + p23 * p23 + 2. * p12 * p23 * c) / (1. + p12 * p12 * p23 * p23 + 2. * p12 * p23 * c);
+  return (rs + rp) / 2.;
 }
 
 // --- Tracing ---
@@ -300,12 +343,14 @@ struct Branch {
 // reflections on, each surface spawns a Fresnel-weighted reflected branch.
 // Every wavelength of a ray shares the path up to the first surface, so only
 // one thread draws it, in their combined color (firstColor); the rest pass
-// firstColor = 0 and skip it.
+// firstColor = 0 and skip it. (Unless it starts inside colored glass, which
+// treats each wavelength differently.)
 fn trace(origin: vec2f, dir: vec2f, lambda: f32, rgb: vec3f, firstColor: vec3f, seed: u32) {
-  var drawFirst = true;
+  let start = mediumAt(origin);
+  var drawFirst = start < 0 || elements[start].density == 0.;
   var rng = seed;
   var stack: array<Branch, STACK_SIZE>;
-  stack[0] = Branch(origin, dir, 1., 0u, mediumAt(origin));
+  stack[0] = Branch(origin, dir, 1., 0u, start);
   var sp = 1;
   while (sp > 0) {
     sp--;
@@ -318,7 +363,18 @@ fn trace(origin: vec2f, dir: vec2f, lambda: f32, rgb: vec3f, firstColor: vec3f, 
       let hit = nearestHit(o, d);
       let found = hit.el >= 0;
       let end = select(o + d * params.far, hit.pos, found);
-      if (!drawFirst) {
+      let a = absorptionAt(medium, lambda);
+      if (a > 0.) {
+        // Fading through colored glass: draw it in pieces, each dimmer.
+        let len = distance(o, end);
+        let pieces = min(ceil(len / ABSORB_STEP), 32.);
+        for (var k = 0.; k < pieces; k += 1.) {
+          let p0 = mix(o, end, k / pieces);
+          let p1 = mix(o, end, (k + 1.) / pieces);
+          addSegment(p0, p1, rgb * w * exp(-a * len * (k + 0.5) / pieces));
+        }
+        w *= exp(-a * len);
+      } else if (!drawFirst) {
         addSegment(o, end, rgb * w);
       } else if (any(firstColor > vec3f(0.))) {
         addSegment(o, end, firstColor);
@@ -347,7 +403,11 @@ fn trace(origin: vec2f, dir: vec2f, lambda: f32, rgb: vec3f, firstColor: vec3f, 
       }
       if (hit.absorb) { break; }
 
-      let s = scatter(d, hit.normal, n1, n2);
+      var s = scatter(d, hit.normal, n1, n2);
+      let coat = elements[hit.el].coat;
+      if (coat > 0. && !s.tir) {
+        s.R = filmReflectance(s.cosI, s.cosT, n1, n2, coat, lambda);
+      }
       if (s.tir) {
         d = s.reflected; // stays in this medium
       } else {
@@ -488,6 +548,7 @@ function packElements(elements) {
     const o = i * ELEMENT_FLOATS;
     u32[o] = KINDS[el.type];
     put(o + 1, el.ior, el.dispersion, el.area, el.x, el.y);
+    put(o + 40, ...el.tint, el.density, el.coat);
     if (el.type === 'drop') {
       put(o + 6, el.r, el.r);
     } else if (el.type === 'prism') {

@@ -9,12 +9,19 @@ const HANDLE_GOLD = '255,205,55';
 const HANDLE_TEAL = '90,235,220';
 const DEFAULT_EXPOSURE = 0.12;
 const DEFAULT_DISPERSION = 0.027; // Cauchy B (µm²), ~6× real crown glass
-const RAINBOW_EXPOSURE = 0.6;
 
 // Lenses
 const NUM_LENSES = 5;
 const NEW_LENS_HEIGHT = 120;
 const NEW_LENS_SAGITTA = 15;
+
+// Glass materials (any lens, prism or droplet)
+// A tint is the share of each color light keeps after this far through the
+// glass at strength 1 (Beer–Lambert).
+const ABSORB_DEPTH = 100; // px
+const CLEAR_GLASS = {tint: '#ffffff', strength: 0, coat: 0}; // coat: film nm
+const TINTED_SHARE = 0.25; // of the random scene's lenses
+const COATED_SHARE = 0.25;
 const MIN_SAGITTA = 8; // minimum |sagitta| — surfaces are never perfectly flat
 const MAX_SAGITTA_RATIO = 0.44; // max |sagitta| as fraction of lens height
 const MAX_EDGE_RATIO = 0.7; // max cylindrical-edge width as fraction of height
@@ -95,7 +102,9 @@ const button = (folder, name, onClick) => folder.add({[name]: onClick}, name);
 const scenes = gui.addFolder('Scenes');
 button(scenes, 'lenses', () => loadScene(lensScene));
 button(scenes, 'prism', () => loadScene(prismScene));
-button(scenes, 'rainbow', () => loadScene(rainbowScene));
+// Shown while a lens, prism or droplet is selected (click it).
+const glassFolder = gui.addFolder('Selected glass');
+glassFolder.hide();
 const addFolder = gui.addFolder('Add (double-click to delete)');
 button(addFolder, 'lens', () => addGlass(newLens(width / 2, height / 2)));
 button(addFolder, 'prism', () =>
@@ -182,6 +191,7 @@ function segmentArea(r, s) {
 class Lens {
   constructor(x, y, height, s1, s2, angle, w = 0) {
     this.type = 'lens';
+    Object.assign(this, CLEAR_GLASS);
     this.s1Ratio = s1 / height;
     this.s2Ratio = s2 / height;
     this.wRatio = w / height;
@@ -380,7 +390,7 @@ class Lens {
     // prettier-ignore
     return {type, x, y, H, axis, perp, r1, r2, c1, c2, sign1, sign2, uMin, uMax,
       rimLT, rimLB, rimRT, rimRB, boundingRadius, area,
-      ior: settings.ior, dispersion: settings.dispersion};
+      ior: settings.ior, dispersion: settings.dispersion, ...material(this)};
   }
 }
 
@@ -389,8 +399,16 @@ class Lens {
 // faint tint brightening toward it, a soft sheen on that side, a glow just
 // inside the rim, and a crisp edge. `tracePath` adds the outline of an
 // element centered on `center` within radius r.
+// A tinted piece shows its tint; a coated one gets an iridescent edge.
 function drawGlass(center, r, isActive, tracePath) {
   const {x, y} = center;
+  const [tr, tg, tb] = hexToRGB(center.tint).map((v) => Math.round(v * 255));
+  // Fade the tint in with its strength (white glass stays bluish clear).
+  const k = Math.min(1, center.strength);
+  const mix = (a, b) => Math.round(a + (b - a) * k);
+  const near0 = `${mix(190, tr)},${mix(225, tg)},${mix(255, tb)}`;
+  const far0 = `${mix(110, tr)},${mix(150, tg)},${mix(255, tb)}`;
+  const fill = (alpha) => alpha * (1 + 2 * k); // tinted glass is denser
   const light = towardNearestLight(center);
   const lit = (k) => ({x: x + light.x * r * k, y: y + light.y * r * k});
 
@@ -400,8 +418,8 @@ function drawGlass(center, r, isActive, tracePath) {
   const near = lit(1);
   const far = lit(-1);
   const body = ctx.createLinearGradient(near.x, near.y, far.x, far.y);
-  body.addColorStop(0, `rgba(190,225,255,${isActive ? 0.16 : 0.08})`);
-  body.addColorStop(1, `rgba(110,150,255,${isActive ? 0.06 : 0.02})`);
+  body.addColorStop(0, `rgba(${near0},${fill(isActive ? 0.16 : 0.08)})`);
+  body.addColorStop(1, `rgba(${far0},${fill(isActive ? 0.06 : 0.02)})`);
   ctx.fillStyle = body;
   ctx.fill();
 
@@ -420,7 +438,45 @@ function drawGlass(center, r, isActive, tracePath) {
   // The path survives restore(), so the edge reuses it.
   ctx.lineWidth = isActive ? 1.5 : 1;
   ctx.strokeStyle = `rgba(215,238,255,${isActive ? 0.65 : 0.32})`;
+  if (center.coat) {
+    ctx.lineWidth = isActive ? 2.5 : 2;
+    const sheen = ctx.createConicGradient(center.coat / 100, x, y);
+    for (let i = 0; i <= 6; i++) {
+      sheen.addColorStop(
+        i / 6,
+        `hsla(${i * 60},90%,70%,${isActive ? 0.8 : 0.5})`,
+      );
+    }
+    ctx.strokeStyle = sheen;
+  }
   ctx.stroke();
+}
+
+// HSL (hue in degrees, s and l in 0..1) → '#rrggbb'.
+function hslToHex(h, s, l) {
+  const f = (n) => {
+    const k = (n + h / 30) % 12;
+    const c =
+      l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(c * 255)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+// '#rrggbb' → [r, g, b] in 0..1 (sRGB).
+const hexToRGB = (hex) =>
+  [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+
+// What the tracer needs to know about a piece's glass: its tint in linear
+// light, absorption per px, and coating.
+function material({tint, strength, coat}) {
+  return {
+    tint: hexToRGB(tint).map((v) => v ** 2.2),
+    density: strength / ABSORB_DEPTH,
+    coat,
+  };
 }
 
 // Unit vector from `pt` toward the nearest light (up and left if none).
@@ -466,6 +522,7 @@ function drawHandle({pt, color, diamond}, active, angle = 0) {
 class Droplet {
   constructor(x, y, r) {
     this.type = 'drop';
+    Object.assign(this, CLEAR_GLASS);
     this.x = x;
     this.y = y;
     this.r = r;
@@ -503,6 +560,7 @@ class Droplet {
       area: Math.PI * r * r,
       ior: WATER_IOR,
       dispersion: settings.dispersion * WATER_DISPERSION_RATIO,
+      ...material(this),
       x,
       y,
       r,
@@ -516,6 +574,7 @@ class Droplet {
 class Prism {
   constructor(x, y, size, angle = 0) {
     this.type = 'prism';
+    Object.assign(this, CLEAR_GLASS);
     this.x = x;
     this.y = y;
     this.size = size;
@@ -569,6 +628,7 @@ class Prism {
       type,
       ior: settings.ior,
       dispersion: settings.dispersion,
+      ...material(this),
       x,
       y,
       vertices,
@@ -706,7 +766,9 @@ function drawScene() {
 
   const active = dragging ?? hovered;
   for (const item of [...lenses, ...sources]) {
-    item.draw(active?.item === item ? active.part : null);
+    let part = active?.item === item ? active.part : null;
+    if (item === selected) part ??= 'selected';
+    item.draw(part);
   }
 }
 
@@ -736,7 +798,31 @@ function resize() {
 }
 
 // --- Scenes ---
+// Puts a piece of glass's material in the "Selected glass" folder.
+let selected = null;
+function select(item) {
+  if (item === selected) return;
+  selected = item;
+  for (const c of [...glassFolder.controllers]) c.destroy();
+  scheduleDrawScene();
+  if (!item) {
+    glassFolder.hide();
+    return;
+  }
+  glassFolder.addColor(item, 'tint').onChange(render);
+  glassFolder
+    .add(item, 'strength', 0, 3, 0.01)
+    .name('tint strength')
+    .onChange(render);
+  glassFolder
+    .add(item, 'coat', 0, 1000, 10)
+    .name('coating (nm)')
+    .onChange(render);
+  glassFolder.show();
+}
+
 function loadScene(scene) {
+  select(null);
   scene();
   hovered = null;
   dragging = null;
@@ -779,21 +865,6 @@ function prismScene() {
       prism.size * 0.25,
     ),
   ];
-}
-
-// One big droplet lit by a beam exactly its width. Both bows head back
-// toward the light at 42° and 51°, so they clear the beam and fan out into
-// the dark above and below it. Only a few percent of the light ends up in
-// them, hence the higher exposure.
-function rainbowScene() {
-  // The bows need dispersion and internal reflections.
-  settings.dispersion = DEFAULT_DISPERSION;
-  settings.reflections = true;
-  settings.exposure = RAINBOW_EXPOSURE;
-  const r = Math.min(height * 0.15, width * 0.12);
-  const drop = new Droplet(width * 0.6, height / 2, r);
-  lenses = [drop];
-  sources = [new Source('beam', width * 0.6 - r * 1.5, height / 2, 0, 2 * r)];
 }
 
 // --- Scene generation ---
@@ -839,7 +910,16 @@ function generateLenses() {
         distSq(candidate, existing) <
         (candidate.boundingRadius + existing.boundingRadius + padding) ** 2,
     );
-    if (!overlaps) lenses.push(candidate);
+    if (overlaps) continue;
+    // Some colored glass and some coated, for variety.
+    if (Math.random() < TINTED_SHARE) {
+      const hue = Math.random() * 360;
+      candidate.tint = hslToHex(hue, 0.8, 0.6);
+      candidate.strength = 1;
+    }
+    if (Math.random() < COATED_SHARE)
+      candidate.coat = 200 + Math.random() * 250;
+    lenses.push(candidate);
   }
 }
 
@@ -879,6 +959,8 @@ function handlePointerDown(e) {
   if (dragging) return; // a second finger while dragging
   lastPointer = pointerPos(e);
   dragging = pick(lastPointer);
+  // Clicking glass selects it; clicking anything else lets go.
+  select(lenses.includes(dragging?.item) ? dragging.item : null);
   if (!dragging) return;
   dragging.pointerId = e.pointerId;
   // Keep receiving moves even if the pointer leaves the canvas mid-drag.
@@ -914,6 +996,7 @@ function handleDoubleClick(e) {
   const hit = pick(pt);
   if (hit) {
     lenses = lenses.filter((l) => l !== hit.item);
+    if (hit.item === selected) select(null);
     sources = sources.filter((s) => s !== hit.item);
     setHovered(null);
     render();
