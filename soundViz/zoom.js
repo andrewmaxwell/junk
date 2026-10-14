@@ -109,6 +109,8 @@ export function zoomFactor(view, limits) {
   return (limits.tMax - limits.tMin) / (view.t1 - view.t0);
 }
 
+const SETTLE_MS = 150;
+
 // How far a press may wander before it is a pan rather than a hold. Generous,
 // because a finger resting on glass is never quite still.
 const DRAG_SLOP = 8;
@@ -134,9 +136,13 @@ export function attachGestures(el, opts) {
   let drag = null;
   let settleTimer = null;
 
+  // How long a gesture has to pause before the view it reached is analysed.
+  // Short, now that a pass takes a few hundred milliseconds rather than
+  // seconds: this wait was most of what zooming felt like. A pass started by
+  // a pause that turns out to be mid-gesture is dropped at its next region.
   function settleLater() {
     clearTimeout(settleTimer);
-    settleTimer = setTimeout(onSettle, 400);
+    settleTimer = setTimeout(onSettle, SETTLE_MS);
   }
 
   // Lifting two fingers off a pinch produces two pointerups in quick

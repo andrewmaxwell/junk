@@ -1128,12 +1128,12 @@ export function createView(canvas) {
       return exposureFrom(view);
     },
 
-    // Put the pass's cloud on screen, with the exposure measured from it if
-    // there is one. One step, so no frame draws the new cloud with the old
-    // exposure. The old cloud's buffers are released at once.
+    // Put a cloud on screen — a pass's, or one kept from earlier — with the
+    // exposure measured from it if there is one. One step, so no frame draws
+    // the new cloud with the old exposure. The cloud it replaces is not
+    // released here; `render.js` decides what is worth keeping (see
+    // `release`).
     commit(params, exposure) {
-      const old = analysis;
-
       analysis = params;
       pending = [];
 
@@ -1147,22 +1147,31 @@ export function createView(canvas) {
       if (accumFor && accumFor.an !== analysis) {
         accumFor = null;
       }
+    },
 
-      for (const sc of old?.scales ?? []) {
+    // Free a cloud's buffers.
+    release(params) {
+      for (const sc of params?.scales ?? []) {
         for (const r of sc.regions) {
           if (r.buf) {
             gl.deleteBuffer(r.buf);
+            r.buf = null;
           }
         }
       }
+
+      if (accumFor?.an === params) {
+        accumFor = null;
+      }
     },
 
-    render(view) {
-      if (!analysis) {
+    // `an` is the cloud to draw: the one on screen unless told otherwise.
+    render(view, an = analysis) {
+      if (!an) {
         return;
       }
 
-      accumulate(view);
+      accumulate(view, an);
       present(view, null, canvas.width, canvas.height);
     },
 

@@ -1,5 +1,5 @@
 import {FFT} from './fft.js';
-import {BandDFT} from './czt.js';
+import {BandDFT, bandCost} from './czt.js';
 
 // One frame of the reassigned STFT, for a band of bins. Shared by the analysis
 // (`reassign.js`) and the ridge map (`ridge.js`), which must agree on every
@@ -39,9 +39,25 @@ import {BandDFT} from './czt.js';
 //
 // which is exact, not an approximation: it is the same three windows. So the
 // band is computed `step` wider on each side and the windows applied after.
+// Sliding beats transforming afresh when the hop is small: a step costs a few
+// operations per bin per sample, a transform four FFTs of the band. So a grid
+// slides when `hop` steps across its band cost less than one transform does
+// (`bandCost`, which counts one of the two). Measured on the M4 over a whole
+// region, cells included, at `winLen` 1024 and 2560 bins: 4.4x faster at a hop
+// of 1, 3.0x at 4, 1.8x at 16, 1.2x at 32 — the last the rule still takes.
+//
+// Every `SLIDE_ANCHOR` frames, on the grid's own lattice, a frame is
+// transformed exactly instead, so rounding cannot accumulate past that and a
+// frame never depends on where in the grid a caller began. The cells sliding
+// emits come out bit-identical to the exact ones in practice: the drift is
+// around 1e-12 of the band's level, far under float32.
+export const SLIDE_ANCHOR = 64;
+
 export class Spectra {
   // Bins `lo` to `hi - 1` of a `fftSize`-point transform of `winLen` samples.
-  constructor({winLen, fftSize, sampleRate, lo, hi, chirp = false}) {
+  // `hop`, when the caller will step through frames that far apart, lets the
+  // chirp-z path slide from one frame to the next instead — see `slide`.
+  constructor({winLen, fftSize, sampleRate, lo, hi, chirp = false, hop = 0}) {
     this.winLen = winLen;
     this.fftSize = fftSize;
     this.lo = lo;
@@ -96,6 +112,34 @@ export class Spectra {
       for (let n = 0; n < winLen; n++) {
         this.ramp[n] = n - this.centre;
       }
+
+      // Sliding, where it is cheaper than transforming: per bin, a one-sample
+      // step turns the window's phase back by e^{2πik/N}, and the sample that
+      // enters at the far end comes in at e^{-2πik/pad}. Both reduced exactly
+      // before they become angles, as the chirps in `czt.js` are.
+      if (hop > 0 && hop * kw <= bandCost(winLen, kw)) {
+        this.hop = hop;
+        this.rotRe = new Float64Array(kw);
+        this.rotIm = new Float64Array(kw);
+        this.endRe = new Float64Array(kw);
+        this.endIm = new Float64Array(kw);
+
+        const pad = fftSize / winLen;
+
+        for (let i = 0; i < kw; i++) {
+          const k = k0 + i;
+          const a =
+            (2 * Math.PI * (((k % fftSize) + fftSize) % fftSize)) / fftSize;
+          const e = (-2 * Math.PI * (((k % pad) + pad) % pad)) / pad;
+
+          this.rotRe[i] = Math.cos(a);
+          this.rotIm[i] = Math.sin(a);
+          this.endRe[i] = Math.cos(e);
+          this.endIm[i] = Math.sin(e);
+        }
+      }
+
+      this.last = -2; // the frame index the spectra above belong to
     } else {
       this.fft = new FFT(fftSize);
       this.re = new Float32Array(fftSize);
@@ -110,12 +154,24 @@ export class Spectra {
   // index `b - lo`; a bin with no power to speak of gets `ok = 0` and nothing
   // else. The caller chooses the arrays' types, and so the precision each
   // number is kept at.
-  frame(samples, off, out, gain = 1) {
+  //
+  // `index` is the frame's place on the caller's grid. Given it, and a hop to
+  // slide by, consecutive frames are slid rather than transformed, except on
+  // the anchors every `SLIDE_ANCHOR` frames, which are always transformed —
+  // so a frame's numbers depend only on its place on the grid and never on
+  // where a caller started, which is what keeps regions invisible.
+  frame(samples, off, out, gain = 1, index) {
     const {winLen, fftSize, lo, hi, chirp, centre, binHz, hzPerRad} = this;
 
     if (chirp) {
-      this.dft.transform(samples, off, null, this.bRe, this.bIm);
-      this.dft.transform(samples, off, this.ramp, this.qRe, this.qIm);
+      if (this.hop && index === this.last + 1 && index % SLIDE_ANCHOR !== 0) {
+        this.slide(samples, off - this.hop);
+      } else {
+        this.dft.transform(samples, off, null, this.bRe, this.bIm);
+        this.dft.transform(samples, off, this.ramp, this.qRe, this.qIm);
+      }
+
+      this.last = index ?? -2;
     } else {
       const {w, tw, dw, re, im, dRe, dIm} = this;
 
@@ -208,6 +264,64 @@ export class Spectra {
       out.rise[i] = ((dr * xr + di * xi) / power) * hzPerRad;
       out.p[i] = power * gain;
       out.ok[i] = 1;
+    }
+  }
+
+  // Move the bare and the time-ramped spectra on by `hop` samples, from the
+  // window that started at `from`. With E = e^{-2πik/N}, X the bare spectrum
+  // and Q the ramped one, one sample in and one out is
+  //
+  //   X' = E^{-1} (X - x[m] + x[m+L] E^L)
+  //   Q' = E^{-1} (Q - X + (c+1) x[m] + (L-1-c) x[m+L] E^L)
+  //
+  // where m is where the old window started, L its length and c its centre.
+  // A few operations a bin, against four FFTs of the whole band for a fresh
+  // transform. The error of a step is a rounding of a double; over the
+  // `SLIDE_ANCHOR` frames between transforms it stays below 1e-12 of the
+  // band's level, measured.
+  slide(samples, from) {
+    const {
+      winLen,
+      centre,
+      hop,
+      bRe,
+      bIm,
+      qRe,
+      qIm,
+      rotRe,
+      rotIm,
+      endRe,
+      endIm,
+    } = this;
+    const n = samples.length;
+    const kw = bRe.length;
+    const a = 1 + centre;
+    const b = winLen - 1 - centre;
+
+    for (let s = 0; s < hop; s++) {
+      const m = from + s;
+      const x0 = m >= 0 && m < n ? samples[m] : 0;
+      const x1 = m + winLen >= 0 && m + winLen < n ? samples[m + winLen] : 0;
+
+      for (let i = 0; i < kw; i++) {
+        const xr = bRe[i];
+        const xi = bIm[i];
+        const er = x1 * endRe[i];
+        const ei = x1 * endIm[i];
+
+        const ur = xr - x0 + er;
+        const ui = xi + ei;
+        const vr = qRe[i] - xr + a * x0 + b * er;
+        const vi = qIm[i] - xi + b * ei;
+
+        const cr = rotRe[i];
+        const ci = rotIm[i];
+
+        bRe[i] = ur * cr - ui * ci;
+        bIm[i] = ur * ci + ui * cr;
+        qRe[i] = vr * cr - vi * ci;
+        qIm[i] = vr * ci + vi * cr;
+      }
     }
   }
 }

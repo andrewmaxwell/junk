@@ -305,6 +305,14 @@ let latest = null; // the newest recording asked to be calibrated
 let calibratedFor = null; // the recording the exposure was measured from
 let calibrating = null; // the calibrating pass in flight, {rec, done}
 let cloudFor = null; // the recording the cloud on the GPU was analysed from
+let shown = null; // the cloud on screen, as `glview.js` holds it
+
+// The full view's cloud, kept after zooming in rather than released. It is the
+// same cloud every time the full view is asked for, so zooming back out puts it
+// back instead of computing it again, and while a zoomed-out view is still
+// being analysed it is what the screen shows, rather than a deep zoom's
+// sliver of picture squashed into a corner. {params, record, rec}.
+let overview = null;
 
 // Somebody to tell while a pass is in flight, so the status line can show it.
 let onBusy = null;
@@ -450,6 +458,7 @@ export function clear(canvas) {
   audioFor = ridgeFor = null;
   arena = null;
   latest = calibratedFor = calibrating = cloudFor = null;
+  shown = overview = null;
   generation++;
   view.resize(w, h);
   view.clear();
@@ -1022,19 +1031,16 @@ async function pass(canvas, rec, viewport, calibrate) {
   // one, since the pass has to redraw all of them together regardless.
   const against = wanted || current;
 
-  if (!calibrate && against) {
-    const settled = active.every((a) => {
-      const was = against[a.index];
+  // Is a cloud built on `record` as good as this pass would be, here?
+  const serves = (record) =>
+    active.every((a) => {
+      const was = record[a.index];
 
       // Reaching outside what that cloud covers — in time, or now in
       // frequency too — is the one thing that forces a pass regardless of how
       // fine the grid is. Panning up out of the analysed band would otherwise
       // slide off the edge of the picture into black.
-      if (!was || viewport.t0 < was.start || viewport.t1 > was.end) {
-        return false;
-      }
-
-      if (viewport.f0 < was.fLo || viewport.f1 > was.fHi) {
+      if (!was || !reaches(was, viewport)) {
         return false;
       }
 
@@ -1046,9 +1052,24 @@ async function pass(canvas, rec, viewport, calibrate) {
       );
     });
 
-    if (settled) {
-      return null;
-    }
+  if (!calibrate && against && serves(against)) {
+    return null;
+  }
+
+  // The kept full view may be all this view needs — zooming back out, most
+  // often. Then it goes back on screen, and any pass in flight for a view
+  // between is dropped.
+  if (
+    !calibrate &&
+    overview?.rec === rec &&
+    cloudFor === rec &&
+    serves(overview.record)
+  ) {
+    generation++;
+    wanted = null;
+    put(overview.params, null);
+    current = overview.record;
+    return null;
   }
 
   const gen = ++generation;
@@ -1287,9 +1308,19 @@ async function pass(canvas, rec, viewport, calibrate) {
       return null;
     }
 
-    view.commit(params, exposure);
+    put(params, exposure);
     cloudFor = rec;
     current = wanted;
+
+    // A cloud of the whole recording at the full view becomes the one kept.
+    if (
+      viewport.t0 <= 0 &&
+      viewport.t1 >= samples.length &&
+      viewport.f0 <= F_MIN &&
+      viewport.f1 >= sampleRate / 2
+    ) {
+      keep({params, record: current, rec});
+    }
 
     if (calibrate) {
       calibratedFor = rec;
@@ -1309,10 +1340,57 @@ async function pass(canvas, rec, viewport, calibrate) {
   }
 }
 
+// Put a cloud on screen, and release the one it replaces unless it is kept.
+function put(params, exposure) {
+  const old = shown;
+
+  view.commit(params, exposure);
+  shown = params;
+
+  if (old && old !== params && old !== overview?.params) {
+    view.release(old);
+  }
+}
+
+// Make `next` the kept full view, releasing the one before unless it is
+// still on screen.
+function keep(next) {
+  if (
+    overview &&
+    overview.params !== shown &&
+    overview.params !== next.params
+  ) {
+    view.release(overview.params);
+  }
+
+  overview = next;
+}
+
+// Whether a scale's cloud reaches across all of `vp`, in time and frequency.
+function reaches(was, vp) {
+  return (
+    vp.t0 >= was.start &&
+    vp.t1 <= was.end &&
+    vp.f0 >= was.fLo &&
+    vp.f1 <= was.fHi
+  );
+}
+
 export function draw(canvas, viewport) {
   const {w, h} = sizeOf(canvas);
   view.resize(w, h);
-  view.render(viewport);
+
+  // A view the cloud on screen does not reach — zooming out past a deep
+  // zoom's cloud, before the pass for it lands — is drawn from the kept full
+  // view, which reaches everywhere.
+  const short =
+    current && Object.values(current).some((was) => !reaches(was, viewport));
+
+  if (short && overview && overview.rec === cloudFor) {
+    view.render(viewport, overview.params);
+  } else {
+    view.render(viewport);
+  }
 }
 
 // What the accumulation buffer holds at one point of the current viewport:

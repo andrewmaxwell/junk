@@ -1,4 +1,4 @@
-import {Spectra} from './spectra.js';
+import {Spectra, SLIDE_ANCHOR} from './spectra.js';
 import {REACH, SHARE_ROWS} from './ridge.js';
 
 // Reassigned spectrogram, as a cloud of cells rather than a grid.
@@ -201,6 +201,7 @@ export function analyzeCells({
     lo: cLo,
     hi: cHi,
     chirp,
+    hop,
   });
 
   // Coherent gain, then one correction: zero padding samples the same spectrum
@@ -406,7 +407,13 @@ export function analyzeCells({
   const a0 = Math.max(0, frame0 - D);
   const a1 = Math.min(frames, frame1 + D);
 
-  for (let frame = a0; frame < a1; frame++) {
+  // When the spectra slide, a call starts on the anchor at or before `a0`, so
+  // every frame it slides to was reached from the same anchor a single call
+  // over the whole grid would have used. The frames before `a0` are computed
+  // only to be slid from; nothing is emitted from them.
+  const from = spectra.hop ? a0 - (a0 % SLIDE_ANCHOR) : a0;
+
+  for (let frame = from; frame < a1; frame++) {
     // hop is always a whole number of samples (render.js quantises it to a
     // power of two, floored at 1), so this rounding is only defensive.
     const off = tStart + Math.round(frame * hop) + align;
@@ -419,6 +426,7 @@ export function analyzeCells({
       off,
       {ok: cur.ok, t: cur.t, f: cur.f, run: hot.run, rise: hot.rise, p: hot.p},
       scale,
+      frame,
     );
 
     const e = frame - D;

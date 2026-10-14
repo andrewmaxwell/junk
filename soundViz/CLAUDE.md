@@ -165,6 +165,15 @@ fixed split, and only happens when a scale has stopped drawing anything.
 
 ## How zooming works
 
+**What a zoom costs, measured on the M4 with the demo at 1400x850:** a
+pass at 4x / 10x / 30x / 100x takes 0.46 / 0.32 / 0.24 / 0.19 s; it was
+1.27 / 1.54 / 1.31 / 1.21 s before the sliding DFT below. Zooming back out to
+the full view takes 12 ms, because the full view's cloud is kept (`overview`
+in `render.js`) and put back rather than recomputed — it was 1.3 s. A gesture
+waits `SETTLE_MS` = 150 ms before its pass starts. The slowest case left is a
+zoom of 1-3x: a wide band at a large hop, so the FFT path, about 1.8 s — and
+the kept full view is what is on screen meanwhile.
+
 There is no master image. The **cloud of cells is the master** — resolution
 independent, so a viewport is projected exactly rather than interpolated. A
 raster large enough for 100x zoom would be hundreds of gigapixels.
@@ -281,6 +290,17 @@ is the index.
 - **More detail meant more padding, not longer strokes.** A longer stroke
   extrapolates; more padding samples the reassignment field at more points, each
   placed by its own phase, nesting exactly with the coarser grid.
+- **At a small hop, slide rather than transform.** Frames a few samples apart
+  share almost all their samples, so on the chirp-z path each frame's spectra
+  are updated from the last one's — a few operations per bin per sample, from
+  the rectangular-window form the Hann identity already uses — instead of four
+  FFTs of the band (`slide` in `spectra.js`). A grid slides when that is the
+  cheaper of the two. Every `SLIDE_ANCHOR` = 64 frames on the grid's own
+  lattice is transformed exactly, and a region starts on the anchor before
+  it, so a frame's numbers never depend on where a region began: splits stay
+  bit-identical, and the cells come out bit-identical to the exact transform's
+  in practice (the drift is ~1e-12, under float32). Per region in Node: 4.3x
+  at a hop of 1, 3.2x at 4, 1.8x at 16, 1.2x at 32.
 - **Zero padding is most of the FFT, and free to skip.** After the bit-reversal
   permutation the non-zero entries sit at multiples of `pad`, and every butterfly
   below `size = 2*pad` combines a value with a zero. `FFT.transform(re, im, nz)`
@@ -416,6 +436,14 @@ had to be kept in step with the shaders.
    saturation pulled toward grey by 1 − mean coherence.
 
 ## Ruled out, with the measurement
+
+- **More workers, or smaller regions, do not speed a pass up.** Nine workers
+  instead of eight (the M4 is 4 performance + 6 efficiency cores) measured the
+  same within noise. Cutting each scale into up to four times as many regions,
+  to even out the slow cores, made every pass 7-45% *slower*: a region carries
+  fixed setup — the chirp-z tables, the coherence rings, the slide from the
+  anchor before it — and the split `regionsFor` already picks was the better
+  trade.
 
 Andrew reported vertical transitions in the picture. Not reproduced on synthetic
 sources, and these four candidates are eliminated — do not spend the day on them
@@ -679,7 +707,10 @@ signal and is not.
   screenshot must wait for the second or it will conclude the picture is empty.
 - Longer recordings get fewer frames per second of audio. Zooming in recovers it.
 - Peak memory is ~1 GB of GPU vertex buffer for one cloud, and while a pass is
-  building the next one both are held, so up to ~2 GB at the full view. Each
+  building the next one both are held, so up to ~2 GB at the full view. The
+  full view's cloud is also kept while zoomed in, for zooming back out: a
+  zoomed pass then holds it, the zoomed cloud on screen, and the one being
+  built. Each
   region's buffer is exactly its cells, not a reservation. The full view is where
   it peaks: a zoomed pass stages a band, so 30x/92x/221x measured 589/781/645 MB
   before the band and 104/60/43 MB after. Add up to 250 MB of `Float32Array` per
