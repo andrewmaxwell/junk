@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="description"
+      content="Childcare rate inputs and calculations."
+    />
+    <title>Childcare rate calculator</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Childcare rate</h1>
+        <div class="header-actions">
+          <button id="undo" disabled>Undo</button>
+          <button id="blank">Start blank</button>
+          <button id="reset">Reset example</button>
+        </div>
+      </header>
+      <div class="layout">
+        <div class="inputs">
+          <section>
+            <h2>Session</h2>
+            <div id="session" class="fields"></div>
+            <p class="hint">
+              Base pay is per caregiver per hour. The example uses the agreed
+              $12.50 rate.
+            </p>
+          </section>
+          <section>
+            <h2>Responsibilities</h2>
+            <p class="hint">
+              Select tasks the caregivers handle. Parents handle tasks left off.
+            </p>
+            <div id="tasks" class="tasks"></div>
+            <div id="setting" class="fields"></div>
+            <p class="hint">
+              Tasks apply to all children. Choosing diapers or meals adds a
+              toileting or food-precautions setting to each child below.
+              Feeding, bathing and bedtime each mean one routine per booking.
+            </p>
+          </section>
+          <section>
+            <div class="section-head">
+              <h2>Children</h2>
+              <button id="add">Add child</button>
+            </div>
+            <p class="hint">
+              Age sets supervision needs. Attention and settling add to that
+              baseline.
+            </p>
+            <div id="children"></div>
+          </section>
+          <section>
+            <h2>Compare changes</h2>
+            <p class="hint">
+              Each option changes your current plan. Select one to apply it.
+            </p>
+            <div id="comparisons" class="comparisons"></div>
+          </section>
+        </div>
+        <aside>
+          <div id="result" aria-live="polite"></div>
+          <details class="model">
+            <summary>Formula and assumptions</summary>
+            <div id="math"></div>
+            <div id="weights"></div>
+            <p>
+              Experimental weights calibrated to the example, not market rates
+              or validated staffing limits. Covers indoor care, excluding
+              medical care and overnight bookings.
+            </p>
+          </details>
+        </aside>
+      </div>
+      <footer><span id="saved"></span></footer>
+      <div id="tip" class="tip" hidden></div>
+      <div id="mini" class="mini" aria-hidden="true"></div>
+    </main>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
