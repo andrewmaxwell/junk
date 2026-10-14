@@ -63,7 +63,10 @@ Newborn scenario: a ~3-week-old sibling. Andrew wants the parents nearby for a n
 ## Files
 
 - `model.js`: all the math, with no DOM access. `WEIGHTS` holds every tunable number. `workload()` turns a state into points, and `calculate()` turns points into a rate plus warnings. `scenarios` are the "Compare changes" options.
-- `main.js`: renders the page from `state` and writes it to `localStorage` under `care-v5`. Rename the key if the state shape changes incompatibly.
+- `main.js`: holds `state` and the undo stack, and handles events. `render()` rebuilds the inputs (button clicks only); `updateResult()` refreshes everything that follows from them.
+- `view.js`: markup for each part of the page, as strings built from a plan and its calculation. No DOM access.
+- `storage.js`: saves the plan to `localStorage` under `care-v5` and to the URL hash, and loads it back through `sanitize()`. Rename the key if the state shape changes in a way `sanitize()` can't migrate.
+- `weightsPanel.js`: the lazily loaded lil-gui weights panel.
 - `test.js`: model checks, including 500 randomized states that test monotonicity and pay splitting. Run with `node careCalculator/test.js`.
 - `test-browser.js`: drives the real page in headless Chrome. Run with `node careCalculator/test-browser.js`. It serves the folder itself, so the dev server doesn't need to be running. Playwright isn't a repo dependency, so the test imports the copy in the npx cache (`~/.npm/_npx`) and launches the installed Google Chrome (`channel: 'chrome'`), so the cached Playwright's browser version doesn't matter.
 
@@ -72,8 +75,9 @@ Run both tests after any change.
 ## How the rate works
 
 - **Unit:** points are relative, calibrated so the reference session carries `included` per caregiver. Task times are real minutes. Don't describe points as a literal share of someone's attention anywhere in the UI.
-- Each child gets points for supervision (by age), extra attention, settling and any tasks the caregivers take on. Sleep scales those points down. Parents being away adds a share of supervision for having no backup.
-- Tasks are a caregiver's minutes divided by the booking's minutes, times a factor. Tasks done away from the group (toileting, baths, bedtime) use `away.team`, or the larger `away.solo` with one caregiver, who must manage the group too. Feeding happens with the group, so it uses the smaller `inRoom`. Food precautions are minutes per meal, so they don't grow with booking length.
+- Each child gets points for supervision (by age), extra attention, settling and the tasks the caregivers take on for that child. Sleep scales those points down. Parents being away adds a share of supervision for having no backup.
+- Tasks are a caregiver's minutes divided by the booking's minutes, times a factor. Tasks done away from the group (toileting, baths, bedtime) use `away.team`, or the larger `away.solo` with one caregiver, who must manage the group too. Feeding happens with the group, so it uses the smaller `inRoom`. Food precautions are minutes per meal, so they don't grow with booking length, and only count for a child who's fed.
+- Tasks are per child (`c.diapers`, `c.feeding`, `c.bath`, `c.bed`). The Responsibilities chips are "every child" toggles, shown mixed when only some children have the task. A new child (Add child, the newborn comparison) takes on the tasks every existing child has. Plans saved before this kept tasks on the plan; `sanitize()` gives them to every child.
 - Staffing limits (children and under-2s per caregiver, a newborn with one caregiver) raise warnings, never the price.
 - Base pay covers `weights.included` points per caregiver. Each point above that adds `weights.premium` $/hr to the team rate, and each caregiver's booking pay rounds to a whole dollar.
 - `included` is a fixed number, calibrated so `example()` costs exactly base pay ($25/hr). It isn't derived from `example()`, so editing the example doesn't change other quotes. If you retune the weights and want the example to cost base pay again, recompute it as `workload(example()).total / 2`.
@@ -84,7 +88,7 @@ Run both tests after any change.
 - Age-based values are `{months, value}` anchors that `byAge()` interpolates linearly, holding the end values beyond the first and last anchors. That keeps quotes from jumping on a birthday; `test.js` checks it. Don't go back to step brackets.
 - `NEWBORN_MONTHS` (3) only drives the newborn warnings.
 - Child attention is stored as a level name (`none`, `occasional`, `frequent`, `constant`) that indexes `weights.attention`, so retuning a weight applies to saved children too.
-- Don't re-render the inputs in the `change` handler. Replacing the DOM while a field blurs drops focus from the field the user tabbed or clicked into. Patch the dependent bits (age boxes, remove-button label, the settling-style field) and call `updateResult()`. The task checkboxes re-render the cards to show or hide toileting and food precautions, which is safe because focus is on the checkbox. A full `render()` is fine after button clicks (add, remove, reset, scenarios).
+- Don't re-render the inputs in the `change` handler. Replacing the DOM while a field blurs drops focus from the field the user tabbed or clicked into. `patchCard()` patches the dependent bits (labels that use the name, and the settling-style, toileting and food-precaution fields, which are hidden rather than removed), then `refresh()`. The Responsibilities toggles re-render the cards, which is safe because focus is on the toggle, outside them. A full `render()` is fine after button clicks (add, remove, reset, scenarios).
 - `childName()` gives a blank name a "Child N" fallback. Use it anywhere a name is shown.
 
 ## Look
@@ -98,16 +102,15 @@ Run both tests after any change.
 
 ## Sharing, undo and pay rounding
 
-- The URL hash holds the whole plan, including the full weights, as base64url JSON, so retuning the defaults never changes an old link. A link reproduces the plan in any browser, and on load it wins over `localStorage`. The quote card notes that links include names, ages and care details.
-- "Copy quote" puts a plain-text summary on the clipboard for messaging parents. "Copy link" copies the URL.
+- The URL hash holds the whole plan, including the full weights, as base64url JSON, so retuning the defaults never changes an old link. A link reproduces the plan in any browser, and on load it wins over `localStorage`. The footer notes that the address includes names and care details. There are no copy buttons, by Andrew's choice: the address bar is the link.
 - Undo covers the buttons that replace or remove things: removing a child, applying a comparison, resetting, restoring default weights, and a pasted link. Typing in fields isn't on the stack, because the browser's own undo covers inputs.
 - Each caregiver's pay for the booking rounds to a whole dollar, since babysitters are usually paid cash. The hourly figures are derived from that rounded pay, so they can show odd cents.
 - Age is entered as years plus months. The months box rolls over into years, and the model still stores only `months`.
 
 ## Child card layout
 
-- Responsibilities sit above Children because the task choices decide which per-child fields appear.
-- Every field is inline; there's no collapsible section. "Toileting needs" shows only when diapers & potty is selected, and "Food precautions" only when meals are. "Settling takes" shows only when the child needs settling.
+- Responsibilities sit above Children because the task toggles set tasks for every child below.
+- Every field is inline; there's no collapsible section. "Toileting needs" shows only when that child has diapers & potty, and "Food precautions" only when that child has a meal. "Settling takes" shows only when the child needs settling.
 
 ## Review fixes (October 2026)
 
@@ -115,10 +118,9 @@ A GPT-6.1 review found these; keep them fixed.
 
 - **Untrusted plans.** Links and saves go through `sanitize()` in `model.js`, which rebuilds the plan from known fields: numbers clamped, options checked against their lists, weights matched to the shape of `WEIGHTS` with fixed anchor ages. Only those clean values reach `innerHTML`; names are still escaped. Before this, a crafted link could inject markup through the weights. Any new state field needs a line in `sanitize()`.
 - **Swallowed clicks.** A field commits on blur, which can happen on pointerdown over a button. `refresh()` waits for pointerup before re-rendering, so the button isn't replaced mid-click. Use `refresh()`, not `updateResult()`, from the `change` handler.
-- **State that survives re-renders.** Disclosures inside re-rendered markup use `keep('id')` to keep their open state. The copy buttons' "Copied" confirmation lives in `copyStatus`.
+- **State that survives re-renders.** Disclosures inside re-rendered markup use `keep('id')` to keep their open state.
 - **Settling minutes** count as entered, capped at the child's awake time. Sleep used to discount them a second time.
 - **Staffing warning:** one caregiver with a child needing one-to-one settling for at least half the booking.
-- **Copied quotes** include where the parents are and every warning as a "Note:" line.
 - **lil-gui loads lazily**, so the calculator works without the CDN; only the weights panel needs it.
 - **Focus:** after removing a child, focus moves to the card that took its place (or Add child). After applying a comparison, it moves to the first comparison. Each child card is a labelled group, and its age boxes are labelled with the child's name.
 - **Layout:** below 900px the page is one column, form first, with a fixed mini bar showing the price. Muted text (`--text-3`) meets 4.5:1 contrast on white, the page background and the quote card.
@@ -126,12 +128,12 @@ A GPT-6.1 review found these; keep them fixed.
 
 A second review found these; also keep them fixed.
 
-- **Links are built from state.** "Copy link" encodes the current plan when clicked, never `location.href`, which can lag an edit. In-page navigation must never use `#anchor` links, because the hash holds the plan; the mobile "Details" button scrolls with `scrollIntoView`.
+- **The hash is the plan.** In-page navigation must never use `#anchor` links, because the hash holds the plan; the mobile "Details" button scrolls with `scrollIntoView`.
 - **Model version.** Links and saves carry `v: MODEL_VERSION`. `sanitize()` drops weights from any other version rather than misread them. Bump it whenever a weight or rule changes meaning.
 - **Weight floors.** `included` is at least 0.05 and `heavyLoad` at least 1, so the meter never divides by zero.
 - **One settling rule.** `settleMinutes()` (entered minutes, capped at awake time) feeds both pricing and the one-to-one warning. That warning is team-wide: it fires when the children needing one-to-one for half the booking or more take up every caregiver.
 - **Group play** scales with children's average awake share, so sleeping children add none.
-- **Parents away without diapers & potty** warns when any child isn't independent. The task is never assigned silently. Toileting defaults to independent from age 5.
+- **Parents away without diapers & potty** warns, naming each child who isn't independent and doesn't have the task. The task is never assigned silently. Toileting defaults to independent from age 5.
 - `refresh()` also clears on `pointercancel`, which touch scrolling sends instead of `pointerup`.
 - "Start blank" clears only the children.
 - Renaming a child updates every label that uses the name.
@@ -141,7 +143,6 @@ A second review found these; also keep them fixed.
 A third review (October 2026) found these; also keep them fixed.
 
 - **One-to-one warning** also fires when there are more one-to-one children than caregivers, even with no other children (two such children, one caregiver).
-- **Copy buttons** relabel in place ("Copied") instead of re-rendering the quote, which dropped keyboard focus to the page.
 - **Weights panel** is rebuilt only when `state.weights` is replaced (undo, reset, restore, a link), so open folders survive adding a child. Weight edits must mutate `state.weights` in place.
 - **Screen readers:** `#result` isn't a live region, because it's re-rendered on every edit. A hidden `#announce` line speaks the price and note count when they change.
 - The newborn comparison is hidden at `MAX_CHILDREN`.
@@ -149,9 +150,7 @@ A third review (October 2026) found these; also keep them fixed.
 Not done, and worth considering:
 
 - Easier sleep entry (hours rather than a percentage), and showing when settling was capped at awake time.
-- A review summary before copying a quote.
-- Separating state, calculation, rendering, persistence and sharing in `main.js`. `updateResult()` still does all of them.
 - Checking the prices against bookings Andrew prices that weren't used for fitting.
 
-- Per-child task participation and routine counts. Tasks still apply to every child once per booking.
+- Routine counts. Meals, baths and bedtimes are still one each per child per booking.
 - Pinning Playwright as a dev dependency so `test-browser.js` doesn't rely on the npx cache. That's a root `package.json` change, so ask first.

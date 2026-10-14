@@ -149,21 +149,6 @@ button:disabled {
 .age-input input {
   color: var(--text);
 }
-.copy-row {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-.copy-row button {
-  flex: 1;
-  font-size: 12px;
-  padding: 6px 8px;
-  background: var(--surface);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-}
-.copy-row button:hover {
-  border-color: var(--accent);
-}
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
@@ -331,6 +316,35 @@ summary:hover {
   height: 15px;
   margin: 0;
   accent-color: var(--accent);
+}
+/* Smaller chips for one child's tasks. */
+.child-tasks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.child-tasks .caption {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-right: 2px;
+}
+.child-tasks .task {
+  font-size: 12px;
+  gap: 6px;
+  padding: 3px 10px 3px 7px;
+}
+.child-tasks .task input {
+  width: 13px;
+  height: 13px;
+}
+.task:has(input:indeterminate) {
+  border-color: var(--accent);
+}
+.task:has(input:disabled) {
+  opacity: 0.5;
+  cursor: default;
 }
 .comparisons {
   display: grid;

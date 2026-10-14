@@ -73,6 +73,13 @@ export const WEIGHTS = {
 };
 
 export const childName = (c, i) => c.name.trim() || `Child ${i + 1}`;
+// Tasks the caregivers can take on, set per child.
+export const TASKS = [
+  ['diapers', 'Diapers & potty'],
+  ['feeding', 'Meal / bottles'],
+  ['bath', 'Bathing'],
+  ['bed', 'Bedtime'],
+];
 export function byAge(anchors, months) {
   const next = anchors.findIndex((a) => months < a.months);
   if (next === -1) return anchors[anchors.length - 1].value;
@@ -94,6 +101,17 @@ export const child = (name = 'New child', months = 48) => ({
   sleep: 0,
   toilet: months < 36 ? 'diaper' : months < 60 ? 'help' : 'independent',
   allergy: false,
+  ...Object.fromEntries(TASKS.map(([k]) => [k, false])),
+});
+// A child added to a plan takes on the tasks every child there already has.
+export const addedChild = (s, ...args) => ({
+  ...child(...args),
+  ...Object.fromEntries(
+    TASKS.map(([k]) => [
+      k,
+      s.children.length > 0 && s.children.every((c) => c[k]),
+    ]),
+  ),
 });
 export function example() {
   return {
@@ -103,10 +121,6 @@ export function example() {
     parents: true,
     space: 'shared',
     play: 'together',
-    diapers: false,
-    feeding: false,
-    bath: false,
-    bed: false,
     children: [
       {...child('Johnny', 48), allergy: true},
       child('Layla', 24),
@@ -140,16 +154,16 @@ export function workload(s) {
     const attention = w.attention[c.attention] * awake;
     const settling =
       (settleMinutes(c, minutes) / minutes) * w.settling[c.comfort];
-    const toileting = s.diapers
+    const toileting = c.diapers
       ? (w.toiletingPerHour[c.toilet] / 60) * away
       : 0;
-    const feeding = s.feeding
+    const feeding = c.feeding
       ? (byAge(w.feedingMinutes, c.months) / minutes) * w.inRoom
       : 0;
-    const bath = s.bath ? (w.bathMinutes / minutes) * away : 0;
-    const bed = s.bed ? (byAge(w.bedMinutes, c.months) / minutes) * away : 0;
+    const bath = c.bath ? (w.bathMinutes / minutes) * away : 0;
+    const bed = c.bed ? (byAge(w.bedMinutes, c.months) / minutes) * away : 0;
     const allergy =
-      s.feeding && c.allergy ? (w.allergyMinutes / minutes) * w.inRoom : 0;
+      c.feeding && c.allergy ? (w.allergyMinutes / minutes) * w.inRoom : 0;
     return {
       name: childName(c, i),
       supervision,
@@ -229,13 +243,13 @@ export function calculate(s) {
     warnings.push(
       `${dedicated === 1 ? 'One child needs' : `${dedicated} children need`} one-to-one settling for much of the booking, leaving nobody free to watch the others. Consider another caregiver.`,
     );
-  if (
-    !s.parents &&
-    !s.diapers &&
-    s.children.some((c) => c.toilet !== 'independent')
-  )
+  const unassigned = s.children
+    .map((c, i) => (!c.diapers && c.toilet !== 'independent' ? i : -1))
+    .filter((i) => i >= 0)
+    .map((i) => childName(s.children[i], i));
+  if (!s.parents && unassigned.length)
     warnings.push(
-      'Parents are away, but nobody is assigned diapers & potty. Add it under Responsibilities, or confirm the children won’t need it.',
+      `Parents are away, but nobody is assigned diapers & potty for ${unassigned.join(', ')}. Add the task, or confirm ${unassigned.length === 1 ? 'they' : 'those children'} won’t need it.`,
     );
   if (newborn)
     warnings.push(
@@ -249,7 +263,7 @@ export function calculate(s) {
     warnings.push(
       'Your newborn preference is parents nearby; this arrangement does not meet it.',
     );
-  if (s.feeding && s.children.some((c) => c.allergy))
+  if (s.children.some((c) => c.feeding && c.allergy))
     warnings.push(
       'Food precautions: confirm the child’s instructions and emergency plan with parents.',
     );
@@ -269,16 +283,22 @@ export function calculate(s) {
     warnings,
   };
 }
+// Task options apply to every child.
+const forAll = (k) => (s) => s.children.forEach((c) => (c[k] = true));
 export const scenarios = [
-  ['diapers', 'We handle potty & diapers', (s) => (s.diapers = true)],
-  ['feeding', 'Add a meal / bottles', (s) => (s.feeding = true)],
-  ['bed', 'Include bedtime', (s) => (s.bed = true)],
+  ['diapers', 'We handle potty & diapers', forAll('diapers')],
+  ['feeding', 'Add a meal / bottles', forAll('feeding')],
+  ['bed', 'Include bedtime', forAll('bed')],
   [
     'baby',
     'Add a newborn',
     (s) =>
       s.children.length < MAX_CHILDREN &&
-      s.children.push({...child('Baby brother', 0.75), sleep: 50, settle: 30}),
+      s.children.push({
+        ...addedChild(s, 'Baby brother', 0.75),
+        sleep: 50,
+        settle: 30,
+      }),
   ],
   ['solo', 'One caregiver', (s) => (s.caregivers = 1)],
   ['away', 'Parents leave', (s) => (s.parents = false)],
@@ -313,7 +333,9 @@ function mergeWeights(dflt, raw, key) {
     ]),
   );
 }
-function sanitizeChild(raw, i) {
+// Plans saved before tasks were per child carry them on the plan; those apply
+// to every child.
+function sanitizeChild(raw, i, plan) {
   if (!raw || typeof raw !== 'object') return null;
   const months = numIn(raw.months, 0, 216, 48);
   const d = child('', months);
@@ -331,6 +353,9 @@ function sanitizeChild(raw, i) {
     sleep: numIn(raw.sleep, 0, 100, d.sleep),
     toilet: oneOf(raw.toilet, Object.keys(WEIGHTS.toiletingPerHour), d.toilet),
     allergy: bool(raw.allergy, d.allergy),
+    ...Object.fromEntries(
+      TASKS.map(([k]) => [k, bool(raw[k], bool(plan[k], false))]),
+    ),
     ...(Number.isInteger(raw.hue) && raw.hue >= 0 && raw.hue <= 8
       ? {hue: raw.hue}
       : {}),
@@ -346,12 +371,11 @@ export function sanitize(raw) {
     parents: bool(raw.parents, d.parents),
     space: oneOf(raw.space, ['shared', 'split'], d.space),
     play: oneOf(raw.play, Object.keys(WEIGHTS.play), d.play),
-    diapers: bool(raw.diapers, d.diapers),
-    feeding: bool(raw.feeding, d.feeding),
-    bath: bool(raw.bath, d.bath),
-    bed: bool(raw.bed, d.bed),
     children: Array.isArray(raw.children)
-      ? raw.children.slice(0, MAX_CHILDREN).map(sanitizeChild).filter(Boolean)
+      ? raw.children
+          .slice(0, MAX_CHILDREN)
+          .map((c, i) => sanitizeChild(c, i, raw))
+          .filter(Boolean)
       : d.children,
     weights: mergeWeights(
       WEIGHTS,

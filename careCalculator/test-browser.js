@@ -42,9 +42,7 @@ const url = `http://localhost:${server.address().port}/`;
 const {chromium} = await loadPlaywright();
 // Installed Chrome, so the cached Playwright's browser version doesn't matter.
 const browser = await chromium.launch({channel: 'chrome'});
-const context = await browser.newContext({
-  permissions: ['clipboard-read', 'clipboard-write'],
-});
+const context = await browser.newContext();
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
@@ -113,13 +111,43 @@ try {
     !(await shown('toilet')) && !(await shown('allergy')),
     'task fields hidden',
   );
-  await page.check('[data-key=diapers]');
+  await page.check('[data-key=diapers] >> nth=0');
   check(
     (await shown('toilet')) && !(await shown('allergy')),
     'toileting shown',
   );
-  await page.check('[data-key=feeding]');
-  check(await shown('allergy'), 'food precautions shown');
+  check(
+    await page.evaluate(
+      () => document.querySelector('[data-all=diapers]').indeterminate,
+    ),
+    'one child with a task shows as mixed',
+  );
+  check(
+    (await saved()).children.map((c) => c.diapers).join() ===
+      'true,false,false,false,false',
+    'task set for one child',
+  );
+  check(
+    (await active()) === 'diapers',
+    'per-child task keeps focus on its checkbox',
+  );
+  await page.check('[data-all=feeding]');
+  check(
+    (await saved()).children.every((c) => c.feeding) &&
+      (await page.locator('[data-key=allergy]').last().isVisible()),
+    'toggle sets every child',
+  );
+  await page.uncheck('[data-key=feeding] >> nth=2');
+  check(
+    await page.evaluate(
+      () => document.querySelector('[data-all=feeding]').indeterminate,
+    ),
+    'unticking one child makes the toggle mixed',
+  );
+  await page.check('[data-all=diapers]');
+  await page.click('#add');
+  check((await saved()).children[5].diapers, 'new child gets shared tasks');
+  check(!(await saved()).children[5].feeding, 'but not partial ones');
   await page.click('#reset');
 
   await page.fill('.name >> nth=0', '<b>x</b>');
@@ -156,39 +184,26 @@ try {
   await page.click('#undo');
   check((await text('.price')).includes('$25.00'), 'undo a comparison');
 
-  await page.click('[data-copy=quote]');
-  const quote = await page.evaluate(() => navigator.clipboard.readText());
-  check(
-    quote ===
-      'Childcare quote: 2 hours, 5 children, 2 caregivers. $25.00/hr total ($12.50/hr each), $50.00 for the booking ($25.00 each). Parents on site.',
-    'copied quote: ' + quote,
-  );
-  check((await text('[data-copy=quote]')) === 'Copied', 'copy confirmed');
-  await page.focus('[data-copy=link]');
-  await page.keyboard.press('Enter');
-  check(
-    await page.evaluate(() => document.activeElement.dataset.copy === 'link'),
-    'keyboard copy keeps focus on the button',
-  );
   check(
     (await text('#announce')) === '$25.00 per hour, $12.50 each',
     'price announced',
   );
 
   // Editing a field then clicking straight onto a button still clicks it.
-  await page.click('details.result-breakdown summary, #result details summary');
+  await page.click('#result details summary');
   await page.fill('[data-key=hours]', '3');
-  await page.click('[data-copy=quote]');
-  const quote3 = await page.evaluate(() => navigator.clipboard.readText());
-  check(quote3.includes('3 hours'), 'click after an edit is not swallowed');
-  // Same for Copy link: it's built from the plan, not the lagging address bar.
-  await page.fill('[data-key=hours]', '4');
-  await page.click('[data-copy=link]');
-  const link = await page.evaluate(() => navigator.clipboard.readText());
-  const linked = JSON.parse(
-    Buffer.from(link.split('#')[1], 'base64url').toString(),
+  await page.click('[data-scenario=away]');
+  check(
+    (await saved()).hours === 3 && (await saved()).parents === false,
+    'click after an edit is not swallowed',
   );
-  check(linked.hours === 4, 'copied link has the just-edited value');
+  // The page address follows the plan.
+  await page.fill('[data-key=hours]', '4');
+  await page.keyboard.press('Tab');
+  const linked = JSON.parse(
+    Buffer.from(page.url().split('#')[1], 'base64url').toString(),
+  );
+  check(linked.hours === 4, 'address has the just-edited value');
   check(
     await page
       .locator('#result details')
@@ -196,8 +211,7 @@ try {
       .evaluate((d) => d.open),
     'workload table stays open across refreshes',
   );
-  await page.fill('[data-key=hours]', '2');
-  await page.keyboard.press('Tab');
+  await page.click('#reset');
 
   await page.click('.remove');
   check((await saved()).children.length === 4, 'remove child');

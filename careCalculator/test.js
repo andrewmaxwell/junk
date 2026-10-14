@@ -9,12 +9,16 @@ import {
   sanitize,
   MODEL_VERSION,
   MAX_CHILDREN,
+  TASKS,
+  addedChild,
 } from './model.js';
 let checks = 0;
 const check = (v, msg) => {
   assert.ok(v, msg);
   checks++;
 };
+// Gives every child a task, as the Responsibilities toggles do.
+const all = (s, k) => s.children.forEach((c) => (c[k] = true));
 const base = calculate(example());
 check(
   base.rate === 25 && base.each === 12.5 && base.total === 50,
@@ -55,7 +59,7 @@ sleep.children = [{...child('Baby', 1), sleep: 100, settle: 999}];
 check(workload(sleep).total > 0, 'sleep retains supervision');
 check(workload(sleep).rows[0].settling === 0, 'sleep removes active soothing');
 const meals = example();
-meals.feeding = true;
+all(meals, 'feeding');
 check(
   calculate(meals).warnings.some((x) => x.includes('Food')),
   'allergy plan prompt',
@@ -79,8 +83,9 @@ for (let k = 0; k < 500; k++) {
     sleep: rand() * 100,
   }));
   // Mix responsibilities, parents and setting, not just the children.
-  for (const field of ['diapers', 'feeding', 'bath', 'bed', 'parents'])
-    s[field] = rand() < 0.5;
+  s.parents = rand() < 0.5;
+  for (const c of s.children)
+    for (const field of TASKS.map(([k]) => k)) c[field] = rand() < 0.5;
   s.space = rand() < 0.5 ? 'shared' : 'split';
   s.play = ['together', 'led', 'conflict'][Math.floor(rand() * 3)];
   s.base = 8 + rand() * 20;
@@ -90,8 +95,10 @@ for (let k = 0; k < 500; k++) {
   check(Math.abs(r.total - r.rate * s.hours) < 1e-8, 'duration total');
   for (const field of ['diapers', 'feeding', 'bath', 'bed']) {
     const next = structuredClone(s);
-    next[field] = true;
+    next.children[0][field] = true;
     check(calculate(next).rate >= r.rate, 'task monotonic ' + field);
+    all(next, field);
+    check(calculate(next).rate >= r.rate, 'all-children task ' + field);
   }
   const next = structuredClone(s);
   next.children.push(child());
@@ -125,9 +132,9 @@ check(
 );
 const tuned = example();
 tuned.weights.premium = 40;
-tuned.diapers = true;
+all(tuned, 'diapers');
 const plain = example();
-plain.diapers = true;
+all(plain, 'diapers');
 check(calculate(tuned).rate > calculate(plain).rate, 'weights drive the rate');
 // Andrew's guesses (October 2026) of the hourly pay that would make the
 // second caregiver happy in each scenario, against the reference session's
@@ -139,9 +146,9 @@ const bump = (fn) => {
   return calculate(s);
 };
 const GUESSES = [
-  ['diapers', 15, 1, (s) => (s.diapers = true)],
-  ['dinner', 14, 1, (s) => (s.feeding = true)],
-  ['bedtime', 20, 1, (s) => (s.bed = true)],
+  ['diapers', 15, 1, (s) => all(s, 'diapers')],
+  ['dinner', 14, 1, (s) => all(s, 'feeding')],
+  ['bedtime', 20, 1, (s) => all(s, 'bed')],
   ['alone', 25, 1.25, (s) => (s.caregivers = 1)],
   [
     'alone with diapers',
@@ -149,7 +156,7 @@ const GUESSES = [
     1,
     (s) => {
       s.caregivers = 1;
-      s.diapers = true;
+      all(s, 'diapers');
     },
   ],
   [
@@ -178,10 +185,10 @@ for (const [name, guess, tolerance, fn] of GUESSES) {
 }
 const alone = bump((s) => (s.caregivers = 1));
 check(alone.rate > base.rate / 2, 'solo quote is not simply halved');
-const moderate = bump((s) => (s.feeding = true)).rate;
+const moderate = bump((s) => all(s, 'feeding')).rate;
 check(
-  bump((s) => (s.diapers = true)).rate > moderate &&
-    bump((s) => (s.bed = true)).rate > moderate,
+  bump((s) => all(s, 'diapers')).rate > moderate &&
+    bump((s) => all(s, 'bed')).rate > moderate,
   'dinner is the lightest task',
 );
 const easy = example();
@@ -200,7 +207,7 @@ for (let m = 0; m < 200; m += 0.25) {
 }
 // Away tasks cost the lone caregiver more than a team member.
 const teamDiapers = example();
-teamDiapers.diapers = true;
+all(teamDiapers, 'diapers');
 const soloDiapers = structuredClone(teamDiapers);
 soloDiapers.caregivers = 1;
 const plainSolo = example();
@@ -215,7 +222,7 @@ check(
 const precautionCost = (hours) => {
   const s = example();
   s.hours = hours;
-  s.feeding = true;
+  all(s, 'feeding');
   return workload(s).rows[0].allergy * hours;
 };
 check(
@@ -395,9 +402,62 @@ check(
   calculate(gone).warnings.some((x) => x.includes('nobody is assigned')),
   'parents away without diapers warns',
 );
-gone.diapers = true;
+all(gone, 'diapers');
 check(
   !calculate(gone).warnings.some((x) => x.includes('nobody is assigned')),
   'assigned diapers clears it',
 );
+// Tasks are per child: one child's bath costs less than everyone's.
+const oneBath = example();
+oneBath.children[0].bath = true;
+const allBaths = example();
+all(allBaths, 'bath');
+check(
+  calculate(example()).raw < calculate(oneBath).raw &&
+    calculate(oneBath).raw < calculate(allBaths).raw,
+  'per-child tasks scale with the children who have them',
+);
+check(
+  workload(oneBath).rows[1].bath === 0,
+  "another child's task costs nothing",
+);
+// Food precautions only count for a child who is fed.
+const fedOther = example();
+fedOther.children[1].feeding = true;
+check(
+  workload(fedOther).rows[0].allergy === 0 &&
+    !calculate(fedOther).warnings.some((x) => x.includes('Food')),
+  'allergy only matters when that child eats',
+);
+// The diapers prompt names the children nobody is assigned to.
+const partly = example();
+partly.parents = false;
+all(partly, 'diapers');
+partly.children[1].diapers = false;
+check(
+  calculate(partly).warnings.some((x) => x.includes('for Layla.')),
+  'unassigned diapers names the child',
+);
+// Old plans kept tasks on the plan; they apply to every child.
+const legacy = sanitize({
+  ...example(),
+  diapers: true,
+  children: [
+    {name: 'A', months: 20},
+    {name: 'B', months: 30, diapers: false},
+  ],
+});
+check(
+  legacy.children[0].diapers && !legacy.children[0].bath,
+  'old plan-wide tasks migrate to each child',
+);
+check(!legacy.children[1].diapers, 'a per-child value wins over the plan');
+check(!('diapers' in legacy), 'no plan-level tasks after loading');
+// New children take on the tasks every child already has.
+const allDiapers = example();
+all(allDiapers, 'diapers');
+allDiapers.children[0].bed = true;
+const added = addedChild(allDiapers);
+check(added.diapers && !added.bed, 'added child inherits shared tasks');
+check(!addedChild({children: []}).diapers, 'first child starts with no tasks');
 console.log('PASS ' + checks + ' model checks');
