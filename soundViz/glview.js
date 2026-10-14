@@ -108,6 +108,19 @@ const DEAD_DB = -200;
 // cost of filling one enormously stretched quad — at the bottom of a log axis,
 // deep into a zoom, a single bin can span a screen height many times over.
 const MIN_HALF = 0.6;
+
+// A cloud drawn at a view much wider than the one it was analysed for — a deep
+// zoom's cloud, between zooming out and the pass that replaces it — lands its
+// frames a small fraction of a pixel apart, and every stroke piles onto the
+// same few pixels. Drawing the 30x cloud at the full view took the GPU 0.6 s a
+// frame, and the uploads of the pass replacing it queued behind that. So frames
+// closer than this on screen are thinned, a power of two at a time: invisible
+// as detail, since several frames already share every pixel, and brightness
+// is held by the same coverage arithmetic that holds it across zooms. At any
+// view a grid was planned for, frames are at least `TARGET_GAP` apart in
+// `render.js` — more than this — so the views the analysis serves are drawn
+// exactly as before.
+const LOD_GAP = 0.25;
 const MAX_HALF_SCREENS = 3;
 
 // The ramp at a stroke's edges is one *screen* pixel wide, measured along each
@@ -565,7 +578,19 @@ export function createView(canvas) {
     gl.STATIC_DRAW,
   );
 
-  const cloud = gl.createBuffer();
+  // The cloud is held one GPU buffer per region, each exactly as large as the
+  // cells its region produced. A pass creates and fills its buffers the moment
+  // each region lands, while the screen goes on drawing the cloud in hand, and
+  // when the pass is complete the new set replaces the old in one step. So the
+  // upload is spread across the pass instead of blocking the main thread in one
+  // piece at its end, no frame ever shows half of each, and no allocation is
+  // ever large: a single buffer for the whole cloud ran to most of a gigabyte,
+  // and the first write into a fresh one blocked for 0.6 s while it was found.
+  let pending = []; // buffers of the pass in flight
+
+  // Where the exposure measurement is read back into without waiting for the
+  // GPU — see `measure`.
+  const probeBuffer = gl.createBuffer();
 
   // (along, across) signs for the two triangles of a stroke.
   const corners = gl.createBuffer();
@@ -663,14 +688,13 @@ export function createView(canvas) {
   // run — which is what makes it affordable to hold a cloud far larger than any
   // one view of it needs.
   //
-  // One run per region of one scale, not one overall. The pass is several
-  // window lengths, each cut into regions and analysed by a pool of threads,
-  // and each region writes into the stretch its frames would fill at their
-  // widest — so the buffer has a gap wherever a region emitted fewer cells than
-  // it reserved. Regions are in frame order and there are at most a couple of
-  // dozen per scale, so this is a handful of draw calls rather than one, and
-  // the gaps are never touched.
-  function slice(view, sc, out) {
+  // One run per region of one scale, each in that region's own buffer — see
+  // `pending`. Regions are in frame order and there are at most a couple of
+  // dozen per scale, so this is a handful of draw calls rather than one.
+  //
+  // `every` draws only every that-many-th frame, one draw per frame — see
+  // `LOD_GAP`. At 1 the runs are whole regions, as always.
+  function slice(view, sc, out, every = 1) {
     out.length = 0;
 
     const {starts, regions, hop, winLen, frames, tStart} = sc;
@@ -696,11 +720,27 @@ export function createView(canvas) {
       // `starts` holds where each frame begins. One past the last frame of a
       // region is the next region's base, not this one's end, so the region
       // carries its own end.
-      const first = starts[a];
-      const last = b < r.f1 ? starts[b] : r.end;
+      const endOf = (f) => (f < r.f1 ? starts[f] : r.end);
 
-      if (last > first) {
-        out.push(first, last - first);
+      if (every === 1) {
+        const first = starts[a];
+        const last = endOf(b);
+
+        if (last > first) {
+          out.push(r.buf, first, last - first);
+        }
+
+        continue;
+      }
+
+      // Frames on an absolute lattice, so a pan does not change which are kept.
+      for (let f = Math.ceil(a / every) * every; f < b; f += every) {
+        const first = starts[f];
+        const last = endOf(f + 1);
+
+        if (last > first) {
+          out.push(r.buf, first, last - first);
+        }
       }
     }
 
@@ -717,9 +757,12 @@ export function createView(canvas) {
   // a new cloud, a resize, an export tile.
   let accumFor = null;
 
-  function accumulate(view) {
+  // `an` is the analysis to draw — the one on screen unless a pass is measuring
+  // the one it has just built.
+  function accumulate(view, an = analysis) {
     if (
       accumFor &&
+      accumFor.an === an &&
       accumFor.t0 === view.t0 &&
       accumFor.t1 === view.t1 &&
       accumFor.f0 === view.f0 &&
@@ -728,7 +771,7 @@ export function createView(canvas) {
       return;
     }
 
-    accumFor = {t0: view.t0, t1: view.t1, f0: view.f0, f1: view.f1};
+    accumFor = {an, t0: view.t0, t1: view.t1, f0: view.f0, f1: view.f1};
 
     const l0 = Math.log(view.f0);
     const l1 = Math.log(view.f1);
@@ -751,7 +794,7 @@ export function createView(canvas) {
       gl.getUniformLocation(accumProg, 'uMaxHalf'),
       MAX_HALF_SCREENS * imageHeight,
     );
-    gl.uniform1f(gl.getUniformLocation(accumProg, 'uSr'), analysis.sampleRate);
+    gl.uniform1f(gl.getUniformLocation(accumProg, 'uSr'), an.sampleRate);
 
     const hopLoc = gl.getUniformLocation(accumProg, 'uHop');
     const binHzLoc = gl.getUniformLocation(accumProg, 'uBinHz');
@@ -766,7 +809,6 @@ export function createView(canvas) {
 
     const cellLoc = gl.getAttribLocation(accumProg, 'cell');
     const confLoc = gl.getAttribLocation(accumProg, 'conf');
-    gl.bindBuffer(gl.ARRAY_BUFFER, cloud);
     gl.enableVertexAttribArray(cellLoc);
     gl.vertexAttribDivisor(cellLoc, 1);
     gl.enableVertexAttribArray(confLoc);
@@ -776,18 +818,25 @@ export function createView(canvas) {
     // grid of its own, and the stroke length a cell earns is the gap to where
     // its neighbour fell — so the hop and the bin spacing change between them.
     // Two uniforms per scale is the whole of the cost.
-    for (const sc of analysis.scales) {
-      gl.uniform1f(hopLoc, sc.hop);
+    for (const sc of an.scales) {
+      // Frames closer together on screen than `LOD_GAP` are thinned to every
+      // `every`-th, and the shader is told the hop is that much longer, so
+      // each stroke left carries the light of the ones skipped.
+      const gap = (sc.hop * accum.w) / (view.t1 - view.t0);
+      const every = Math.max(1, 2 ** Math.floor(Math.log2(LOD_GAP / gap)));
+
+      gl.uniform1f(hopLoc, sc.hop * every);
       gl.uniform1f(binHzLoc, sc.binHz);
 
-      slice(view, sc, ranges);
+      slice(view, sc, ranges, every);
 
-      for (let i = 0; i < ranges.length; i += 2) {
-        const base = ranges[i] * stride;
+      for (let i = 0; i < ranges.length; i += 3) {
+        const base = ranges[i + 1] * stride;
 
+        gl.bindBuffer(gl.ARRAY_BUFFER, ranges[i]);
         gl.vertexAttribPointer(cellLoc, 4, gl.FLOAT, false, stride, base);
         gl.vertexAttribPointer(confLoc, 1, gl.FLOAT, false, stride, base + 16);
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, ranges[i + 1]);
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, ranges[i + 2]);
       }
     }
 
@@ -797,7 +846,8 @@ export function createView(canvas) {
     gl.disableVertexAttribArray(confLoc);
   }
 
-  function measureBackground(view) {
+  // The point-sampled copy the background is measured from.
+  function decimate() {
     gl.disable(gl.BLEND);
     gl.bindFramebuffer(gl.FRAMEBUFFER, probe.fbo);
     gl.viewport(0, 0, PROBE, PROBE);
@@ -811,8 +861,14 @@ export function createView(canvas) {
       inner[1],
     );
     fullScreen(decimateProg);
+  }
 
-    gl.readPixels(0, 0, PROBE, PROBE, gl.RGBA, gl.FLOAT, probePixels);
+  // The exposure, from `probePixels`: the background level per band, smoothed,
+  // and the floor and range the ramp spans. Returned rather than applied, so a
+  // pass can measure the cloud it has staged and apply the answer at the same
+  // moment the cloud goes on screen.
+  function exposureFrom(view) {
+    const smooth = new Float32Array(PROBE);
 
     let peak = DEAD_DB;
 
@@ -894,21 +950,32 @@ export function createView(canvas) {
         weight += g;
       }
 
-      smoothed[r] = sum / weight;
+      smooth[r] = sum / weight;
     }
 
     // Absolute, not peak-relative: a recording of nothing has a tiny peak, and
     // scoring its own room tone against that peak fills the screen with
     // texture. The peak-relative term only rescues a genuinely quiet take.
-    floorDb = Math.min(ABS_FLOOR, peak - QUIET_HEADROOM);
-    bgLogF = [Math.log(view.f0), Math.log(view.f1)];
+    const floor = Math.min(ABS_FLOOR, peak - QUIET_HEADROOM);
 
     // Typical background, against which the peak says how much range the
     // picture actually contains.
-    const sorted = Float32Array.from(smoothed).sort();
-    const mid = Math.max(sorted[PROBE >> 1], floorDb);
+    const sorted = Float32Array.from(smooth).sort();
+    const mid = Math.max(sorted[PROBE >> 1], floor);
 
-    range = Math.min(CONTRAST_RANGE, Math.max(MIN_RANGE, peak - mid));
+    return {
+      smooth,
+      floor,
+      range: Math.min(CONTRAST_RANGE, Math.max(MIN_RANGE, peak - mid)),
+      logF: [Math.log(view.f0), Math.log(view.f1)],
+    };
+  }
+
+  function applyExposure(e) {
+    smoothed.set(e.smooth);
+    floorDb = e.floor;
+    range = e.range;
+    bgLogF = e.logF;
 
     gl.bindTexture(gl.TEXTURE_2D, bgTex);
     gl.texImage2D(
@@ -992,52 +1059,100 @@ export function createView(canvas) {
       return ensureAccum(w, h);
     },
 
-    // Reserve room for the whole cloud, then take the finished regions of a
-    // pass. Nothing is thinned and nothing is thrown away.
-    //
-    // `bufferData` runs every time even when the size has not changed, and
-    // that is the point of it: it *orphans* the old storage, so the uploads
-    // below get fresh memory instead of waiting for whatever draw calls are
-    // still reading the buffer. Skipping it as an optimisation was tried and
-    // was much worse — a pass landing in the middle of a drag, with sixty
-    // frames' worth of draws queued against the same buffer, blocked the main
-    // thread for 2.2 s instead of 65 ms. Allocating a gigabyte costs 0–180 ms
-    // and only the first touch of it costs anything at all.
-    begin(cells) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, cloud);
-      gl.bufferData(gl.ARRAY_BUFFER, cells * CELL_FLOATS * 4, gl.STATIC_DRAW);
+    // A new pass. Any buffers a superseded pass left behind are released.
+    stage() {
+      for (const buf of pending) {
+        gl.deleteBuffer(buf);
+      }
 
-      analysis = null;
-      accumFor = null;
+      pending = [];
     },
 
-    // One region, at the cell offset it reserved for itself.
-    pushAt(at, data, n) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, cloud);
+    // A buffer for one region of the pass in flight, `cells` long.
+    region(cells) {
+      const buf = gl.createBuffer();
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, cells * CELL_FLOATS * 4, gl.STATIC_DRAW);
+      pending.push(buf);
+
+      return buf;
+    },
+
+    // `n` cells from cell `from` of `data`, to cell `at` of a region's buffer.
+    // Called in slices, so no one call blocks for long.
+    push(buf, at, data, from, n) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferSubData(
         gl.ARRAY_BUFFER,
         at * CELL_FLOATS * 4,
         data,
-        0,
+        from * CELL_FLOATS,
         n * CELL_FLOATS,
       );
     },
 
-    end(params) {
-      analysis = params;
-      accumFor = null;
-    },
+    // Measure the exposure of the pass's cloud over `view`, the whole
+    // recording, without blocking: the decimated copy is read back into a
+    // pixel buffer, and the CPU waits on a fence rather than on `readPixels`.
+    // A synchronous read stalled the main thread for as long as the GPU took
+    // to draw the whole cloud — measured at 0.4-1.1 s on a first pass.
+    async measure(view, params) {
+      accumulate(view, params);
+      decimate();
 
-    // Set the exposure from the whole recording, once. Everything after this is
-    // a crop of the picture it describes, so nothing about the colours depends
-    // on where you happen to be looking.
-    calibrate(view) {
-      if (!analysis) {
-        return;
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, probeBuffer);
+      gl.bufferData(
+        gl.PIXEL_PACK_BUFFER,
+        probePixels.byteLength,
+        gl.STREAM_READ,
+      );
+      gl.readPixels(0, 0, PROBE, PROBE, gl.RGBA, gl.FLOAT, 0);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+
+      const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
+
+      while (gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED) {
+        await new Promise((r) => setTimeout(r, 8));
       }
 
-      accumulate(view);
-      measureBackground(view);
+      gl.deleteSync(sync);
+
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, probeBuffer);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, probePixels);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+
+      return exposureFrom(view);
+    },
+
+    // Put the pass's cloud on screen, with the exposure measured from it if
+    // there is one. One step, so no frame draws the new cloud with the old
+    // exposure. The old cloud's buffers are released at once.
+    commit(params, exposure) {
+      const old = analysis;
+
+      analysis = params;
+      pending = [];
+
+      if (exposure) {
+        applyExposure(exposure);
+      }
+
+      // The accumulation may already hold the new cloud at this view — the
+      // exposure was measured from it — and that stays good. What it held of
+      // the old one does not.
+      if (accumFor && accumFor.an !== analysis) {
+        accumFor = null;
+      }
+
+      for (const sc of old?.scales ?? []) {
+        for (const r of sc.regions) {
+          if (r.buf) {
+            gl.deleteBuffer(r.buf);
+          }
+        }
+      }
     },
 
     render(view) {

@@ -393,11 +393,14 @@ had to be kept in step with the shaders.
 1. **skip** — if the buffer already holds this exact viewport, nothing runs.
 2. **accumulate** — every visible cell as an antialiased quad along its own
    ridge, additively blended into `RGBA32F` (`RGBA16F` without
-   `EXT_float_blend`). One instanced draw per region per scale, hop and bin
-   spacing reset between scales. R accumulates power, G power·conf·hueDrive, A
+   `EXT_float_blend`). One instanced draw per region per scale, each region in
+   its own GPU buffer, hop and bin spacing reset between scales. A cloud drawn
+   at a view far wider than it was analysed for has its sub-pixel frames thinned
+   (`LOD_GAP`), with the hop scaled to match so brightness holds. R accumulates power, G power·conf·hueDrive, A
    power·conf; the clear is `(0,0,0,0)` because **alpha is data**.
 3. **decimate** — a small point-sampled copy read back so the CPU can measure the
-   background per band. Only during `calibrate()`, not per frame.
+   background per band. Only when a pass calibrates, not per frame, and read
+   back asynchronously through a pixel buffer and a fence (`measure`).
 4. **present** — dB, background subtraction, colour ramp with a soft shoulder
    above `SHOULDER_KNEE` so the loud end compresses instead of clipping; hue
    rotated about the grey axis by the pixel's mean coherent chirp drive,
@@ -651,14 +654,24 @@ signal and is not.
   recalibrate only when the cloud covers the whole recording, but whether a
   resize should hold the old exposure is an aesthetic call, and the exposure is
   meant to be measured once per recording.
-- **A superseded pass still finishes the regions it has running**, and **the
-  commit still blocks** (0.4-0.6 s on a first analysis, 0.1-0.6 s on a settle).
+- **A superseded pass still finishes the regions it has running.** The commit no
+  longer blocks: each region is uploaded into a buffer of its own as it lands,
+  in 10 MB slices, the exposure is read back without waiting on the GPU, and
+  the finished pass replaces the old cloud in one step. Measured on the M4
+  (Playwright's Chrome runs on ANGLE/Metal, not software): the longest
+  main-thread task went from 0.5-1.8 s to under 50 ms on a first analysis, and
+  from 0.17-0.29 s to under 50 ms on zooming back out. The second of those had
+  a hidden cause worth knowing: the deep cloud drawn at the full view as a
+  preview took the GPU 0.6 s, and uploads queued behind it — `LOD_GAP` exists
+  for that.
 - The picture arrives in two stages past ~2x: the cloud in hand is re-projected
   instantly, then the refined pass lands about a second later. Anything reading a
   screenshot must wait for the second or it will conclude the picture is empty.
 - Longer recordings get fewer frames per second of audio. Zooming in recovers it.
-- Peak memory is ~1 GB of GPU vertex buffer, and the full view is now where it
-  peaks: a zoomed pass stages a band, so 30x/92x/221x measured 589/781/645 MB
+- Peak memory is ~1 GB of GPU vertex buffer for one cloud, and while a pass is
+  building the next one both are held, so up to ~2 GB at the full view. Each
+  region's buffer is exactly its cells, not a reservation. The full view is where
+  it peaks: a zoomed pass stages a band, so 30x/92x/221x measured 589/781/645 MB
   before the band and 104/60/43 MB after. Add up to 250 MB of `Float32Array` per
   region in flight, and up to 800 MB of 2D canvas while an export encodes.
 - The export is one PNG on a 2D canvas, so it is bounded by the browser's canvas

@@ -254,6 +254,11 @@ const SCALE_FLOOR = 0.01;
 // lit pixels 29% to 11%). The display's own ratio is the right one.
 const MAX_DPR = 2;
 
+// How many cells go to the GPU in one slice of a pass's upload — 10 MB. Small
+// enough that a slice blocks the main thread for a few milliseconds, large
+// enough that the yields between them cost nothing worth measuring.
+const UPLOAD_CELLS = 524288;
+
 // Export size, as a multiple of the canvas. Rendered in tiles, so the ceiling
 // is the browser's rather than the GPU's — and the browser's is close: a 2D
 // canvas of 253 MP still reads back on this machine and one of 288 MP does
@@ -401,7 +406,7 @@ function ask(worker, msg) {
 // are never sent. A region cannot be interrupted, but nothing forces the queue
 // behind it to run. The answers are then incomplete, which is fine, because a
 // pass that is no longer live is discarded.
-async function share(jobs, threads, live) {
+async function share(jobs, threads, live, onResult) {
   const ws = pool().slice(0, Math.max(1, threads));
   const results = new Array(jobs.length);
 
@@ -413,6 +418,7 @@ async function share(jobs, threads, live) {
       try {
         for (let i = next++; i < jobs.length && !failed && live(); i = next++) {
           results[i] = await ask(worker, jobs[i]);
+          onResult?.(i, results[i]);
         }
       } catch (err) {
         failed = true;
@@ -1140,13 +1146,10 @@ async function pass(canvas, rec, viewport, calibrate) {
     }
 
     // One queue of regions across every scale, so the pool never idles waiting
-    // on the slowest scale, and one layout saying where each scale's stretch of
-    // the buffer begins. A scale reserves the room its frames would fill at
-    // their widest — one cell per bin — for the same reason a region does.
+    // on the slowest scale, and one layout saying which jobs are whose.
     const jobs = [];
     const layout = [];
 
-    let offset = 0;
     let ring = 0;
 
     for (const a of active) {
@@ -1183,52 +1186,80 @@ async function pass(canvas, rec, viewport, calibrate) {
         }
       }
 
-      layout.push({a, base: offset, first, count: jobs.length - first});
-      offset += frames * bins;
+      layout.push({a, first, count: jobs.length - first});
     }
+
+    // Every region goes to the GPU the moment it lands, into a buffer of its
+    // own, while the screen draws the cloud in hand. Sliced, with a yield
+    // between slices, so no one upload holds the main thread for long; a
+    // superseded pass stops uploading at the next slice.
+    view.stage();
+
+    let uploads = Promise.resolve();
+
+    const upload = (i, part) => {
+      if (!part.count) {
+        return;
+      }
+
+      part.buf = view.region(part.count);
+
+      uploads = uploads.then(async () => {
+        for (let k = 0; k < part.count; k += UPLOAD_CELLS) {
+          if (gen !== generation) {
+            return;
+          }
+
+          view.push(
+            part.buf,
+            k,
+            part.cells,
+            k,
+            Math.min(UPLOAD_CELLS, part.count - k),
+          );
+
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      });
+    };
 
     const parts = await share(
       jobs,
       Math.floor(MAX_POOL_RING_CELLS / ring),
       () => gen === generation,
+      upload,
     );
+
+    await uploads;
 
     if (gen !== generation) {
       return null;
     }
 
-    // Every region owns the stretch of the buffer its frames would fill at
-    // their widest, so it knows where its cells go without waiting to hear how
-    // many its neighbours produced. The gaps that leaves — bins that held
-    // nothing, or fell outside the audible band — are simply never drawn: each
-    // region is a contiguous run of its own, and `glview.js` draws the visible
-    // frames as one range per region of each scale rather than one range
-    // overall.
+    // The gaps the reservation leaves — bins that held nothing, or fell
+    // outside the audible band — are simply never drawn: each region is a
+    // contiguous run of its own, and `glview.js` draws the visible frames as
+    // one range per region of each scale rather than one range overall.
     const scales = [];
 
     let total = 0;
 
-    view.begin(offset);
-
-    for (const {a, base, first, count} of layout) {
-      const {bins, hop, frames, start, fftSize} = a.grid;
+    for (const {a, first, count} of layout) {
+      const {hop, frames, start, fftSize} = a.grid;
       const starts = new Uint32Array(frames);
       const regions = [];
 
       for (let k = 0; k < count; k++) {
         const part = parts[first + k];
-        const at = base + part.frame0 * bins;
-
-        view.pushAt(at, part.cells, part.count);
-
         for (let f = part.frame0; f < part.frame1; f++) {
-          starts[f] = at + part.starts[f - part.frame0];
+          starts[f] = part.starts[f - part.frame0];
         }
 
         regions.push({
           f0: part.frame0,
           f1: part.frame1,
-          end: at + part.count,
+          end: part.count,
+          buf: part.buf ?? null,
         });
         total += part.count;
       }
@@ -1244,13 +1275,23 @@ async function pass(canvas, rec, viewport, calibrate) {
       });
     }
 
-    view.end({sampleRate, scales});
-    cloudFor = rec;
+    const params = {sampleRate, scales};
 
+    // The exposure is measured from the staged cloud before it goes on screen,
+    // so the two arrive together.
+    const exposure = calibrate
+      ? await view.measure(fullSpan(rec), params)
+      : null;
+
+    if (gen !== generation) {
+      return null;
+    }
+
+    view.commit(params, exposure);
+    cloudFor = rec;
     current = wanted;
 
     if (calibrate) {
-      view.calibrate(fullSpan(rec));
       calibratedFor = rec;
     }
 
