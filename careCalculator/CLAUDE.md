@@ -100,7 +100,7 @@ Run both tests after any change.
 
 - The URL hash holds the whole plan, including the full weights, as base64url JSON, so retuning the defaults never changes an old link. A link reproduces the plan in any browser, and on load it wins over `localStorage`. The quote card notes that links include names, ages and care details.
 - "Copy quote" puts a plain-text summary on the clipboard for messaging parents. "Copy link" copies the URL.
-- Undo covers the buttons that replace or remove things: removing a child, applying a comparison, resetting, and a pasted link. Typing in fields isn't on the stack, because the browser's own undo covers inputs.
+- Undo covers the buttons that replace or remove things: removing a child, applying a comparison, resetting, restoring default weights, and a pasted link. Typing in fields isn't on the stack, because the browser's own undo covers inputs.
 - Each caregiver's pay for the booking rounds to a whole dollar, since babysitters are usually paid cash. The hourly figures are derived from that rounded pay, so they can show odd cents.
 - Age is entered as years plus months. The months box rolls over into years, and the model still stores only `months`.
 
@@ -137,6 +137,14 @@ A second review found these; also keep them fixed.
 - Renaming a child updates every label that uses the name.
 - `MAX_CHILDREN` (30) caps Add child and loading alike.
 - The mobile bar shows a note count when there are warnings, and the Calculation card says when custom weights are active.
+
+A third review (October 2026) found these; also keep them fixed.
+
+- **One-to-one warning** also fires when there are more one-to-one children than caregivers, even with no other children (two such children, one caregiver).
+- **Copy buttons** relabel in place ("Copied") instead of re-rendering the quote, which dropped keyboard focus to the page.
+- **Weights panel** is rebuilt only when `state.weights` is replaced (undo, reset, restore, a link), so open folders survive adding a child. Weight edits must mutate `state.weights` in place.
+- **Screen readers:** `#result` isn't a live region, because it's re-rendered on every edit. A hidden `#announce` line speaks the price and note count when they change.
+- The newborn comparison is hidden at `MAX_CHILDREN`.
 
 Not done, and worth considering:
 

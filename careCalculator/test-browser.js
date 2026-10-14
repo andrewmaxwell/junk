@@ -164,6 +164,16 @@ try {
     'copied quote: ' + quote,
   );
   check((await text('[data-copy=quote]')) === 'Copied', 'copy confirmed');
+  await page.focus('[data-copy=link]');
+  await page.keyboard.press('Enter');
+  check(
+    await page.evaluate(() => document.activeElement.dataset.copy === 'link'),
+    'keyboard copy keeps focus on the button',
+  );
+  check(
+    (await text('#announce')) === '$25.00 per hour, $12.50 each',
+    'price announced',
+  );
 
   // Editing a field then clicking straight onto a button still clicks it.
   await page.click('details.result-breakdown summary, #result details summary');
@@ -211,6 +221,17 @@ try {
     'custom weights flagged',
   );
   check((await text('#math')).includes('$10.00 ×'), 'formula follows weight');
+  // Open weight folders survive re-renders.
+  const folderClosed = () =>
+    page.evaluate(() =>
+      document
+        .querySelector('#weights .lil-gui .lil-gui')
+        .classList.contains('lil-closed'),
+    );
+  await page.locator('#weights .lil-gui .lil-gui .lil-title').first().click();
+  await page.click('#add');
+  check(!(await folderClosed()), 'weights folder stays open');
+  await page.click('.remove >> nth=-1');
   await page.click('text=Restore default weights');
   check((await saved()).weights.premium === WEIGHTS.premium, 'restore weights');
   check(

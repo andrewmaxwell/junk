@@ -156,10 +156,13 @@ import('https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm')
       '<p class="hint">The weights panel couldn’t load (it needs the lil-gui library from the internet).</p>';
   });
 function buildGui() {
-  if (!GUI) return;
+  if (!GUI || gui?.weights === state.weights) return;
   gui?.destroy();
   const w = state.weights;
   gui = new GUI({container: $('weights'), title: 'Weights'});
+  // Rebuilt only when the weights object is replaced (undo, reset, a link),
+  // so open folders survive ordinary re-renders.
+  gui.weights = w;
   gui.add(w, 'premium', 0, 60, 0.5).name('Premium ($/hr per point)');
   gui.add(w, 'soloBonus', 0, 15, 0.5).name('Sole caregiver ($/hr)');
   gui.add(w, 'included', 0.1, 1.5, 0.001).name('Included pts / caregiver');
@@ -199,6 +202,7 @@ function buildGui() {
     .add(
       {
         restore: () => {
+          remember();
           state.weights = structuredClone(WEIGHTS);
           buildGui();
           updateResult();
@@ -320,15 +324,21 @@ function quoteText() {
 // Copy buttons are re-rendered with the quote, so their brief "Copied"
 // confirmation lives here rather than on the element.
 const copyStatus = {};
-const copyButton = (kind, label) =>
-  `<button data-copy="${kind}">${copyStatus[kind] || label}</button>`;
+const COPY_LABELS = {quote: 'Copy quote', link: 'Copy link'};
+const copyButton = (kind) =>
+  `<button data-copy="${kind}">${copyStatus[kind] || COPY_LABELS[kind]}</button>`;
 function updateResult() {
   const r = calculate(state);
   const line = (a, b) => `<div class="line"><span>${a}</span><b>${b}</b></div>`;
   $('result').innerHTML =
-    `<div class="quote"><span class="quote-title">Team hourly estimate</span><div class="price">${money(r.rate)}<small> / hour</small></div><div class="per">${money(r.each)} / hour each · equal split</div>${state.children.length ? meter(r) : ''}<div class="total"><span>${state.hours}-hour booking<br>${state.caregivers} caregiver${state.caregivers === 1 ? '' : 's'}</span><strong>${money(r.total)}</strong></div><p class="quote-note">${money(r.pay)} each for the session. Each caregiver’s pay is rounded to a whole dollar.</p><div class="copy-row">${copyButton('quote', 'Copy quote')}${copyButton('link', 'Copy link')}</div><p class="quote-note">Links include names, ages and care details.</p></div><div class="white-card"><h3>Calculation</h3>${JSON.stringify(state.weights) === JSON.stringify(WEIGHTS) ? '' : '<p class="hint">Using custom weights (see Formula and assumptions).</p>'}${line('Combined base pay', money(state.children.length ? state.base * state.caregivers : 0) + '/hr')}${r.solo ? line('Sole caregiver', money(r.solo) + '/hr') : ''}${line('Workload premium', money(r.extra) + '/hr')}${line('Rounding adjustment', money(r.rate - r.raw) + '/hr')}<details ${keep('breakdown')}><summary>Workload by child</summary><div class="table-wrap"><table class="breakdown"><thead><tr><th>Child</th><th>Supervision</th><th>Attention¹</th><th>Tasks²</th><th>Total</th></tr></thead><tbody>${r.rows.map((c, i) => `<tr><td><i class="dot" style="${hueVar(state.children[i])}"></i>${esc(c.name)}</td><td>${c.supervision.toFixed(2)}</td><td>${(c.attention + c.settling).toFixed(2)}</td><td>${(c.toileting + c.feeding + c.bath + c.bed + c.allergy).toFixed(2)}</td><td>${c.total.toFixed(2)}</td></tr>`).join('')}</tbody></table></div><p class="hint">All values in points.<br>¹ Play attention + settling. ² Toileting, feeding, bathing, bedtime and food precautions.</p>${line('Group + space', (r.group + r.environment).toFixed(2) + ' pts')}${line('Total workload', r.workload.toFixed(2) + ' pts')}<p class="hint">Points describe care demands, not a rating of the child.</p></details>${r.warnings.map((w) => `<div class="note">${esc(w)}</div>`).join('')}</div>`;
-  // Visual shortcut only; the full quote is the accessible source.
+    `<div class="quote"><span class="quote-title">Team hourly estimate</span><div class="price">${money(r.rate)}<small> / hour</small></div><div class="per">${money(r.each)} / hour each · equal split</div>${state.children.length ? meter(r) : ''}<div class="total"><span>${state.hours}-hour booking<br>${state.caregivers} caregiver${state.caregivers === 1 ? '' : 's'}</span><strong>${money(r.total)}</strong></div><p class="quote-note">${money(r.pay)} each for the session. Each caregiver’s pay is rounded to a whole dollar.</p><div class="copy-row">${copyButton('quote')}${copyButton('link')}</div><p class="quote-note">Links include names, ages and care details.</p></div><div class="white-card"><h3>Calculation</h3>${JSON.stringify(state.weights) === JSON.stringify(WEIGHTS) ? '' : '<p class="hint">Using custom weights (see Formula and assumptions).</p>'}${line('Combined base pay', money(state.children.length ? state.base * state.caregivers : 0) + '/hr')}${r.solo ? line('Sole caregiver', money(r.solo) + '/hr') : ''}${line('Workload premium', money(r.extra) + '/hr')}${line('Rounding adjustment', money(r.rate - r.raw) + '/hr')}<details ${keep('breakdown')}><summary>Workload by child</summary><div class="table-wrap"><table class="breakdown"><thead><tr><th>Child</th><th>Supervision</th><th>Attention¹</th><th>Tasks²</th><th>Total</th></tr></thead><tbody>${r.rows.map((c, i) => `<tr><td><i class="dot" style="${hueVar(state.children[i])}"></i>${esc(c.name)}</td><td>${c.supervision.toFixed(2)}</td><td>${(c.attention + c.settling).toFixed(2)}</td><td>${(c.toileting + c.feeding + c.bath + c.bed + c.allergy).toFixed(2)}</td><td>${c.total.toFixed(2)}</td></tr>`).join('')}</tbody></table></div><p class="hint">All values in points.<br>¹ Play attention + settling. ² Toileting, feeding, bathing, bedtime and food precautions.</p>${line('Group + space', (r.group + r.environment).toFixed(2) + ' pts')}${line('Total workload', r.workload.toFixed(2) + ' pts')}<p class="hint">Points describe care demands, not a rating of the child.</p></details>${r.warnings.map((w) => `<div class="note">${esc(w)}</div>`).join('')}</div>`;
+  // The quote card is re-rendered on every edit, so screen readers hear only
+  // this summary, and only when it changes.
   const notes = r.warnings.length;
+  const summary = `${money(r.rate)} per hour, ${money(r.each)} each${notes ? `, ${plural(notes, 'note')}` : ''}`;
+  if ($('announce').textContent !== summary)
+    $('announce').textContent = summary;
+  // Visual shortcut only; the full quote is the accessible source.
   $('mini').innerHTML =
     `<span><strong>${money(r.rate)}</strong>/hr · ${money(r.each)} each</span><button data-scroll="result" tabindex="-1" ${notes ? 'class="mini-notes"' : ''}>${notes ? `! ${plural(notes, 'note')}` : 'Details'}</button>`;
   $('comparisons').innerHTML = scenarios
@@ -344,9 +354,9 @@ function updateResult() {
   const w = state.weights;
   $('math').innerHTML =
     `<div class="formula">Points are relative units, calibrated to the reference session.<br>Included workload/person: ${w.included.toFixed(3)} pts<br>Assigned average/person: ${r.load.toFixed(3)} pts (${(r.load / w.included).toFixed(2)}× the reference)<br>Premium = ${money(w.premium)} × max(0, total points − caregivers × ${w.included.toFixed(3)})<br>Team rate = base × caregivers + premium${state.caregivers === 1 ? ` + ${money(w.soloBonus)} sole caregiver` : ''}<br>Each caregiver’s booking pay rounds to the nearest dollar.</div><p>Reference: five children, two caregivers, two hours, parents handle personal care. Equal work sharing is assumed; actual assignments can be uneven.</p><details ${keep('assumptions')}><summary>All workload assumptions</summary><p>Age-based values change in straight lines between these ages, holding steady past the last one. Supervision points: ${anchors(w.supervision)}. Sleep retains ${pct(w.asleepSupervision)} of supervision. Extra play attention adds ${w.attention.occasional} / ${w.attention.frequent} / ${w.attention.constant} points while awake.</p><p>Settling: minutes entered (capped at the child’s awake time) as a share of the booking, × ${w.settling.holding} for holding or ${w.settling.active} for one-to-one.</p><p>Tasks count a caregiver’s minutes as a share of the booking, times a factor. Tasks away from the group (toileting, baths, bedtime) count ×${w.away.team} with a team, whose other members stretch to cover, and ×${w.away.solo} for one caregiver, who must manage the group too. Feeding happens with the group and partly overlaps supervision, so it counts ×${w.inRoom}.</p><p>Toileting: ${w.toiletingPerHour.diaper} minutes per hour for diapers, ${w.toiletingPerHour.help} for potty assistance. One meal: ${anchors(w.feedingMinutes)} minutes, plus ${w.allergyMinutes} per child with food precautions. One bath: ${w.bathMinutes} minutes. One bedtime: ${anchors(w.bedMinutes)} minutes.</p><p>Adult-led group play adds ${w.play.led} points per awake child; frequent mediation ${w.play.conflict}. Awake means each child’s average awake share, since sleep percentages don’t say who naps when. No group adjustment for one child. Divided sightlines add ${pct(w.splitSpace)} of supervision; parents being away adds ${pct(w.soleResponsibility)}, since there’s no backup. Heavy-load prompt appears above ${w.heavyLoad}× the reference load per caregiver; staffing prompts above ${w.maxChildrenPerCaregiver} children or ${w.maxUnder2PerCaregiver} under-2s per caregiver. These are editable-model heuristics, not safety limits.</p></details>`;
+  $('undo').disabled = !undoStack.length;
   try {
     history.replaceState(null, '', '#' + encode(state));
-    $('undo').disabled = !undoStack.length;
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({state: {...state, v: MODEL_VERSION}}),
@@ -501,10 +511,15 @@ async function copy(kind) {
   } catch {
     copyStatus[kind] = 'Copy failed';
   }
-  updateResult();
+  // Relabel in place: re-rendering would replace the focused button.
+  const label = () => {
+    const btn = document.querySelector(`[data-copy=${kind}]`);
+    if (btn) btn.textContent = copyStatus[kind] || COPY_LABELS[kind];
+  };
+  label();
   setTimeout(() => {
     delete copyStatus[kind];
-    updateResult();
+    label();
   }, 1500);
 }
 document.addEventListener('click', (e) => {

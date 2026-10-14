@@ -219,12 +219,13 @@ export function calculate(s) {
       `Heavy workload: each caregiver carries more than ${heavyLoad}× the reference session’s load. Review task assignments and arrange backup before agreeing to this quote.`,
     );
   // Children who tie up a caregiver one-to-one for at least half the booking.
-  // If they take every caregiver, nobody is left for the others.
+  // If they take every caregiver and anyone is left over (another child, or
+  // more of them than caregivers), nobody is free to watch them.
   const minutes = s.hours * 60;
   const dedicated = s.children.filter(
     (c) => c.comfort === 'active' && settleMinutes(c, minutes) >= minutes / 2,
   ).length;
-  if (dedicated >= n && s.children.length > dedicated)
+  if (dedicated >= n && s.children.length > n)
     warnings.push(
       `${dedicated === 1 ? 'One child needs' : `${dedicated} children need`} one-to-one settling for much of the booking, leaving nobody free to watch the others. Consider another caregiver.`,
     );
@@ -276,6 +277,7 @@ export const scenarios = [
     'baby',
     'Add a newborn',
     (s) =>
+      s.children.length < MAX_CHILDREN &&
       s.children.push({...child('Baby brother', 0.75), sleep: 50, settle: 30}),
   ],
   ['solo', 'One caregiver', (s) => (s.caregivers = 1)],

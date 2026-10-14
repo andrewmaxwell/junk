@@ -8,6 +8,7 @@ import {
   NEWBORN_MONTHS,
   sanitize,
   MODEL_VERSION,
+  MAX_CHILDREN,
 } from './model.js';
 let checks = 0;
 const check = (v, msg) => {
@@ -360,6 +361,24 @@ check(
   calculate(twoDedicated).warnings.some((x) => x.includes('2 children need')),
   'team-wide one-to-one warning',
 );
+// One caregiver, two children each needing them throughout: one is left over.
+const twoForOne = example();
+twoForOne.caregivers = 1;
+twoForOne.children = twoDedicated.children.slice(0, 2);
+check(
+  calculate(twoForOne).warnings.some((x) => x.includes('one-to-one')),
+  'more one-to-one children than caregivers warns',
+);
+twoForOne.caregivers = 2;
+check(
+  !calculate(twoForOne).warnings.some((x) => x.includes('one-to-one')),
+  'one caregiver per one-to-one child is fine',
+);
+// The newborn comparison respects the child limit.
+const full = example();
+full.children = Array.from({length: MAX_CHILDREN}, () => child());
+scenarios.find(([id]) => id === 'baby')[2](full);
+check(full.children.length === MAX_CHILDREN, 'newborn scenario capped');
 // Group play counts awake children only.
 const napping = example();
 napping.play = 'conflict';
