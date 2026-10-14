@@ -67,7 +67,7 @@ try {
     'workload meter',
   );
   check(
-    (await text('[data-scenario=solo]')).includes('Team -$1.00 · each +$11.50'),
+    (await text('[data-scenario=solo]')).includes('Team +$4.50 · each +$17.00'),
     'solo shows per-person change',
   );
   check(

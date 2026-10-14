@@ -39,11 +39,12 @@ Modeling principles:
 | Diapers and potty                      | $15    | $14.50 |
 | Dinner with allergy care               | $14    | $14    |
 | Bedtime for all five                   | $20    | $20    |
-| One caregiver                          | $25    | $24    |
-| One caregiver plus diapers             | $28    | $29    |
+| One caregiver                          | $25    | $29.50 |
+| One caregiver plus diapers             | $28    | $34    |
 | One caregiver, just Johnny and Eden    | $15    | $15    |
 | Four hours instead of two              | $12.50 | $12.50 |
 | Plus the newborn, asleep half the time | $13    | $14    |
+| Alone with just Eliam, parents away    | $25?   | $19.50 |
 
 A ninth guess, "no dad helping with Eliam" at $13, became moot once unplanned parent help was dropped from the model.
 
@@ -53,6 +54,8 @@ The weights came from a least-squares fit pulled toward the previous values, the
 - Tasks away from the group stay dearer alone than with a team.
 
 The "easy job alone" guess is why `soloBonus` exists: being the only one in charge is worth something even when the work is light.
+
+**Solo guesses don't fit a straight line.** Johnny and Eden alone (0.4× the reference load) at $15, Eliam alone (0.9×, a later, unsure guess) at about $25 and all five alone (2×) at $25 rise steeply, then go flat. A constant premium per point can't do that, so Andrew chose to favor Eliam (October 2026). `soloFree` (0.4) starts a lone caregiver's premium at 0.4× the reference load instead of 1×, so a hard single child costs more than an easy pair. The cost is that "alone with all five" and "alone with diapers" sit about $5 over their guesses. Teams are unaffected. The meter's base-pay mark moves to `soloFree` for one caregiver.
 
 After fitting, every point weight was scaled by one factor, and the premium per point by its inverse, so the reference keeps each caregiver about 60% busy. Prices didn't change. Points are now explicitly relative to the reference session, not a literal share of attention: Andrew's guesses priced one-to-one consoling barely above holding, which no literal attention scale supports. The meter and heavy-load warning are expressed as multiples of the reference (warning above 1.7×).
 

@@ -2,8 +2,9 @@
 export const NEWBORN_MONTHS = 3;
 // Bump when a weight or rule changes meaning. Links and saves carry it, and
 // sanitize() drops weights saved under another version rather than misread
-// them (version 2: heavyLoad became a multiple of the reference load).
-export const MODEL_VERSION = 2;
+// them (version 2: heavyLoad became a multiple of the reference load;
+// version 3: added soloFree).
+export const MODEL_VERSION = 3;
 export const MAX_CHILDREN = 30;
 
 // Every tunable number in the model. The math, the "All workload assumptions"
@@ -31,6 +32,12 @@ export const WEIGHTS = {
   // $/hr for being the only one in charge, with nobody to tag in. Applies
   // even when the children are easy.
   soloBonus: 2.5,
+  // A lone caregiver's premium starts above this multiple of `included`,
+  // not at the full reference load: one person on their own feels a harder
+  // child sooner. Set just above Andrew's "easy job alone" (Johnny and Eden,
+  // 0.39×), so that stays at base pay, while his "alone with Eliam" guess
+  // rises toward $25.
+  soloFree: 0.4,
   heavyLoad: 1.7, // warn above this multiple of the included load per caregiver
   supervision: [
     {months: 0, value: 0.17},
@@ -197,7 +204,9 @@ export function calculate(s) {
   const {included, premium, heavyLoad} = s.weights;
   const n = s.caregivers;
   const load = w.total / n;
-  const extra = premium * Math.max(0, w.total - n * included);
+  // Workload covered by base pay, in points.
+  const covered = n === 1 ? included * s.weights.soloFree : n * included;
+  const extra = premium * Math.max(0, w.total - covered);
   const solo = n === 1 ? s.weights.soloBonus : 0;
   const raw = s.children.length ? n * s.base + solo + extra : 0;
   // Babysitters are usually paid in cash, so each caregiver's pay for the
@@ -261,6 +270,7 @@ export function calculate(s) {
     ...w,
     workload: w.total,
     load,
+    covered,
     solo,
     extra,
     raw,

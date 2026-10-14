@@ -28,6 +28,7 @@ export function showWeights(w) {
   gui.weights = w;
   gui.add(w, 'premium', 0, 60, 0.5).name('Premium ($/hr per point)');
   gui.add(w, 'soloBonus', 0, 15, 0.5).name('Sole caregiver ($/hr)');
+  gui.add(w, 'soloFree', 0, 1, 0.05).name('Sole caregiver: premium from (×)');
   gui.add(w, 'included', 0.1, 1.5, 0.001).name('Included pts / caregiver');
   gui.add(w, 'heavyLoad', 1, 3, 0.05).name('Heavy-load warning (×)');
   const sup = gui.addFolder('Supervision by age (pts)').close();

@@ -137,7 +137,10 @@ check(calculate(tuned).rate > calculate(plain).rate, 'weights drive the rate');
 // Andrew's guesses (October 2026) of the hourly pay that would make the
 // second caregiver happy in each scenario, against the reference session's
 // $12.50. The weights were fitted to these, keeping tasks away from the group
-// dearer for a lone caregiver, which leaves "alone" a little under the guess.
+// dearer for a lone caregiver. The solo guesses don't fit one straight line
+// (Eliam alone nearly matches all five alone), so Andrew chose Eliam closer to
+// his guess: the lone-caregiver premium starts early (soloFree), which puts
+// "alone" and "alone with diapers" about $5 over theirs.
 const bump = (fn) => {
   const s = example();
   fn(s);
@@ -147,11 +150,11 @@ const GUESSES = [
   ['diapers', 15, 1, (s) => all(s, 'diapers')],
   ['dinner', 14, 1, (s) => all(s, 'feeding')],
   ['bedtime', 20, 1, (s) => all(s, 'bed')],
-  ['alone', 25, 1.25, (s) => (s.caregivers = 1)],
+  ['alone', 25, 5, (s) => (s.caregivers = 1)],
   [
     'alone with diapers',
     28,
-    1,
+    6.5,
     (s) => {
       s.caregivers = 1;
       all(s, 'diapers');
@@ -167,6 +170,16 @@ const GUESSES = [
     },
   ],
   ['four hours', 12.5, 0.01, (s) => (s.hours = 4)],
+  [
+    'alone with Eliam, parents away',
+    25,
+    6,
+    (s) => {
+      s.caregivers = 1;
+      s.parents = false;
+      s.children = [s.children[4]];
+    },
+  ],
   [
     'newborn',
     13,
@@ -453,4 +466,16 @@ allDiapers.children[0].bed = true;
 const added = addedChild(allDiapers);
 check(added.diapers && !added.bed, 'added child inherits shared tasks');
 check(!addedChild({children: []}).diapers, 'first child starts with no tasks');
+// A lone caregiver's premium starts below the reference load, so a hard
+// single child costs more than an easy pair; teams are unaffected.
+const soloEliam = bump((s) => {
+  s.caregivers = 1;
+  s.children = [s.children[4]];
+});
+const soloEasy = bump((s) => {
+  s.caregivers = 1;
+  s.children = [s.children[0], s.children[2]];
+});
+check(soloEliam.each > soloEasy.each, 'hard child alone costs more');
+check(base.covered === 2 * WEIGHTS_COPY().included, 'team premium unchanged');
 console.log('PASS ' + checks + ' model checks');
