@@ -117,12 +117,6 @@ try {
     'toileting shown',
   );
   check(
-    await page.evaluate(
-      () => document.querySelector('[data-all=diapers]').indeterminate,
-    ),
-    'one child with a task shows as mixed',
-  );
-  check(
     (await saved()).children.map((c) => c.diapers).join() ===
       'true,false,false,false,false',
     'task set for one child',
@@ -131,20 +125,14 @@ try {
     (await active()) === 'diapers',
     'per-child task keeps focus on its checkbox',
   );
-  await page.check('[data-all=feeding]');
+  await page.check('[data-key=feeding] >> nth=4');
   check(
-    (await saved()).children.every((c) => c.feeding) &&
-      (await page.locator('[data-key=allergy]').last().isVisible()),
-    'toggle sets every child',
+    (await page.locator('[data-key=allergy]').last().isVisible()) &&
+      !(await page.locator('[data-key=allergy]').first().isVisible()),
+    'food precautions shown for the fed child only',
   );
-  await page.uncheck('[data-key=feeding] >> nth=2');
-  check(
-    await page.evaluate(
-      () => document.querySelector('[data-all=feeding]').indeterminate,
-    ),
-    'unticking one child makes the toggle mixed',
-  );
-  await page.check('[data-all=diapers]');
+  for (let i = 1; i < 5; i++)
+    await page.check(`[data-key=diapers] >> nth=${i}`);
   await page.click('#add');
   check((await saved()).children[5].diapers, 'new child gets shared tasks');
   check(!(await saved()).children[5].feeding, 'but not partial ones');
@@ -281,8 +269,8 @@ try {
   const evil = '<img src=x onerror="document.title=1">';
   const crafted = {
     ...(await saved()),
-    play: evil,
-    weights: {included: evil, premium: evil, play: {led: evil}},
+    hours: evil,
+    weights: {included: evil, premium: evil, attention: {frequent: evil}},
   };
   crafted.children[0].name = evil;
   const hash = Buffer.from(JSON.stringify(crafted)).toString('base64url');

@@ -17,7 +17,7 @@ const check = (v, msg) => {
   assert.ok(v, msg);
   checks++;
 };
-// Gives every child a task, as the Responsibilities toggles do.
+// Gives every child a task.
 const all = (s, k) => s.children.forEach((c) => (c[k] = true));
 const base = calculate(example());
 check(
@@ -82,12 +82,10 @@ for (let k = 0; k < 500; k++) {
     settle: rand() * 180,
     sleep: rand() * 100,
   }));
-  // Mix responsibilities, parents and setting, not just the children.
+  // Mix tasks and parents, not just the children.
   s.parents = rand() < 0.5;
   for (const c of s.children)
     for (const field of TASKS.map(([k]) => k)) c[field] = rand() < 0.5;
-  s.space = rand() < 0.5 ? 'shared' : 'split';
-  s.play = ['together', 'led', 'conflict'][Math.floor(rand() * 3)];
   s.base = 8 + rand() * 20;
   const r = calculate(s);
   check(r.rate >= 0 && Number.isFinite(r.total), 'finite nonnegative');
@@ -263,7 +261,7 @@ const dirty = sanitize({
   v: MODEL_VERSION,
   base: -10,
   hours: '3',
-  play: evil,
+  parents: evil,
   children: [
     {name: 5, months: 'x', attention: evil, settle: 7, hue: evil},
     null,
@@ -273,11 +271,15 @@ const dirty = sanitize({
     included: '0.6',
     premium: evil,
     supervision: [{months: -50, value: evil}],
-    play: {led: -1},
+    attention: {frequent: -1},
   },
 });
 check(dirty.base === 0 && dirty.hours === 2, 'numbers clamped or defaulted');
-check(dirty.play === 'together', 'unknown option replaced');
+check(dirty.parents === true, 'wrong type replaced');
+check(
+  !('play' in sanitize({...example(), play: 'led'})),
+  'removed fields are dropped',
+);
 check(dirty.children.length === 2, 'non-object children dropped');
 check(
   dirty.children[0].name === 'Child 1' &&
@@ -293,7 +295,7 @@ check(
     JSON.stringify(example().weights.supervision) &&
     dirty.weights.included === example().weights.included &&
     dirty.weights.premium === example().weights.premium &&
-    dirty.weights.play.led === 0,
+    dirty.weights.attention.frequent === 0,
   'bad weights replaced, anchors fixed, negatives clamped',
 );
 const json = JSON.stringify(sanitize(JSON.parse(JSON.stringify(dirty))));
@@ -386,15 +388,6 @@ const full = example();
 full.children = Array.from({length: MAX_CHILDREN}, () => child());
 scenarios.find(([id]) => id === 'baby')[2](full);
 check(full.children.length === MAX_CHILDREN, 'newborn scenario capped');
-// Group play counts awake children only.
-const napping = example();
-napping.play = 'conflict';
-const awakeGroup = workload(napping).group;
-napping.children.forEach((c) => (c.sleep = 100));
-check(
-  workload(napping).group === 0 && awakeGroup > 0,
-  'sleeping children add no group work',
-);
 // Parents away with nobody on diapers is flagged, not silently priced.
 const gone = example();
 gone.parents = false;

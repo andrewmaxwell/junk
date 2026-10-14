@@ -65,8 +65,6 @@ export const WEIGHTS = {
     {months: 36, value: 24},
     {months: 60, value: 10.5},
   ],
-  play: {together: 0, led: 0.03, conflict: 0.07}, // per child, 2+ children
-  splitSpace: 0.25, // share of total supervision
   // Staffing warnings. These raise a prompt rather than the price.
   maxChildrenPerCaregiver: 4,
   maxUnder2PerCaregiver: 2,
@@ -119,8 +117,6 @@ export function example() {
     caregivers: 2,
     base: 12.5,
     parents: true,
-    space: 'shared',
-    play: 'together',
     children: [
       {...child('Johnny', 48), allergy: true},
       child('Layla', 24),
@@ -186,22 +182,14 @@ export function workload(s) {
       ]),
     };
   });
-  const supervision = sum(rows.map((r) => r.supervision));
-  // Group play scales with how much of the booking children are awake. Sleep
-  // shares don't say whether they're awake at the same time, so this is an
-  // average, not a schedule.
-  const group =
-    s.children.length < 2
-      ? 0
-      : w.play[s.play] * sum(s.children.map(awakeShare));
-  const environment =
-    (s.space === 'split' ? w.splitSpace * supervision : 0) +
-    (s.parents ? 0 : w.soleResponsibility * supervision);
+  // No backup when parents are away: a share of supervision.
+  const environment = s.parents
+    ? 0
+    : w.soleResponsibility * sum(rows.map((r) => r.supervision));
   return {
     rows,
-    group,
     environment,
-    total: sum(rows.map((r) => r.total)) + group + environment,
+    total: sum(rows.map((r) => r.total)) + environment,
   };
 }
 export function calculate(s) {
@@ -369,8 +357,6 @@ export function sanitize(raw) {
     caregivers: Math.round(numIn(raw.caregivers, 1, 6, d.caregivers)),
     base: numIn(raw.base, 0, 150, d.base),
     parents: bool(raw.parents, d.parents),
-    space: oneOf(raw.space, ['shared', 'split'], d.space),
-    play: oneOf(raw.play, Object.keys(WEIGHTS.play), d.play),
     children: Array.isArray(raw.children)
       ? raw.children
           .slice(0, MAX_CHILDREN)

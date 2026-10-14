@@ -285,11 +285,6 @@ summary:hover {
   color: var(--text);
 }
 /* Tasks as toggle chips. */
-.tasks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .task {
   flex-direction: row;
   align-items: center;
@@ -338,13 +333,6 @@ summary:hover {
 .child-tasks .task input {
   width: 13px;
   height: 13px;
-}
-.task:has(input:indeterminate) {
-  border-color: var(--accent);
-}
-.task:has(input:disabled) {
-  opacity: 0.5;
-  cursor: default;
 }
 .comparisons {
   display: grid;

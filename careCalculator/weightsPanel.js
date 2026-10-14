@@ -52,10 +52,6 @@ export function showWeights(w) {
   tasks.add(w, 'bathMinutes', 0, 60, 1).name('Bath');
   for (const a of w.bedMinutes)
     tasks.add(a, 'value', 0, 60, 1).name(`Bedtime, ${a.months} mo`);
-  const group = gui.addFolder('Group & space').close();
-  group.add(w.play, 'led', 0, 0.5, 0.01).name('Adult-led, pts / child');
-  group.add(w.play, 'conflict', 0, 0.5, 0.01).name('Mediation, pts / child');
-  group.add(w, 'splitSpace', 0, 1, 0.05).name('Divided sightlines (+share)');
   const staff = gui.addFolder('Staffing warnings').close();
   staff
     .add(w, 'maxChildrenPerCaregiver', 1, 10, 1)

@@ -77,7 +77,7 @@ Run both tests after any change.
 - **Unit:** points are relative, calibrated so the reference session carries `included` per caregiver. Task times are real minutes. Don't describe points as a literal share of someone's attention anywhere in the UI.
 - Each child gets points for supervision (by age), extra attention, settling and the tasks the caregivers take on for that child. Sleep scales those points down. Parents being away adds a share of supervision for having no backup.
 - Tasks are a caregiver's minutes divided by the booking's minutes, times a factor. Tasks done away from the group (toileting, baths, bedtime) use `away.team`, or the larger `away.solo` with one caregiver, who must manage the group too. Feeding happens with the group, so it uses the smaller `inRoom`. Food precautions are minutes per meal, so they don't grow with booking length, and only count for a child who's fed.
-- Tasks are per child (`c.diapers`, `c.feeding`, `c.bath`, `c.bed`). The Responsibilities chips are "every child" toggles, shown mixed when only some children have the task. A new child (Add child, the newborn comparison) takes on the tasks every existing child has. Plans saved before this kept tasks on the plan; `sanitize()` gives them to every child.
+- Tasks are per child (`c.diapers`, `c.feeding`, `c.bath`, `c.bed`). Each card has its own task chips; there's no plan-wide task setting. A new child (Add child, the newborn comparison) takes on the tasks every existing child has. Plans saved before this kept tasks on the plan; `sanitize()` gives them to every child.
 - Staffing limits (children and under-2s per caregiver, a newborn with one caregiver) raise warnings, never the price.
 - Base pay covers `weights.included` points per caregiver. Each point above that adds `weights.premium` $/hr to the team rate, and each caregiver's booking pay rounds to a whole dollar.
 - `included` is a fixed number, calibrated so `example()` costs exactly base pay ($25/hr). It isn't derived from `example()`, so editing the example doesn't change other quotes. If you retune the weights and want the example to cost base pay again, recompute it as `workload(example()).total / 2`.
@@ -88,7 +88,7 @@ Run both tests after any change.
 - Age-based values are `{months, value}` anchors that `byAge()` interpolates linearly, holding the end values beyond the first and last anchors. That keeps quotes from jumping on a birthday; `test.js` checks it. Don't go back to step brackets.
 - `NEWBORN_MONTHS` (3) only drives the newborn warnings.
 - Child attention is stored as a level name (`none`, `occasional`, `frequent`, `constant`) that indexes `weights.attention`, so retuning a weight applies to saved children too.
-- Don't re-render the inputs in the `change` handler. Replacing the DOM while a field blurs drops focus from the field the user tabbed or clicked into. `patchCard()` patches the dependent bits (labels that use the name, and the settling-style, toileting and food-precaution fields, which are hidden rather than removed), then `refresh()`. The Responsibilities toggles re-render the cards, which is safe because focus is on the toggle, outside them. A full `render()` is fine after button clicks (add, remove, reset, scenarios).
+- Don't re-render the inputs in the `change` handler. Replacing the DOM while a field blurs drops focus from the field the user tabbed or clicked into. `patchCard()` patches the dependent bits (labels that use the name, and the settling-style, toileting and food-precaution fields, which are hidden rather than removed), then `refresh()`. A full `render()` is fine after button clicks (add, remove, reset, scenarios).
 - `childName()` gives a blank name a "Child N" fallback. Use it anywhere a name is shown.
 
 ## Look
@@ -109,7 +109,7 @@ Run both tests after any change.
 
 ## Child card layout
 
-- Responsibilities sit above Children because the task toggles set tasks for every child below.
+- There's no Responsibilities section, by Andrew's choice (October 2026): tasks are set on each child's card, and the model assumes one suitable, visible play area with the children mostly entertaining each other, as in the reference session. The play-space and group-play settings and their weights were removed.
 - Every field is inline; there's no collapsible section. "Toileting needs" shows only when that child has diapers & potty, and "Food precautions" only when that child has a meal. "Settling takes" shows only when the child needs settling.
 
 ## Review fixes (October 2026)
@@ -132,7 +132,6 @@ A second review found these; also keep them fixed.
 - **Model version.** Links and saves carry `v: MODEL_VERSION`. `sanitize()` drops weights from any other version rather than misread them. Bump it whenever a weight or rule changes meaning.
 - **Weight floors.** `included` is at least 0.05 and `heavyLoad` at least 1, so the meter never divides by zero.
 - **One settling rule.** `settleMinutes()` (entered minutes, capped at awake time) feeds both pricing and the one-to-one warning. That warning is team-wide: it fires when the children needing one-to-one for half the booking or more take up every caregiver.
-- **Group play** scales with children's average awake share, so sleeping children add none.
 - **Parents away without diapers & potty** warns, naming each child who isn't independent and doesn't have the task. The task is never assigned silently. Toileting defaults to independent from age 5.
 - `refresh()` also clears on `pointercancel`, which touch scrolling sends instead of `pointerup`.
 - "Start blank" clears only the children.

@@ -8,15 +8,12 @@ import {
   calculate,
   scenarios,
   WEIGHTS,
-  TASKS,
   MAX_CHILDREN,
 } from './model.js';
 import {encode, loadState, readLink, save} from './storage.js';
 import {
   assignHues,
   sessionHtml,
-  tasksHtml,
-  settingHtml,
   childrenHtml,
   resultHtml,
   summaryText,
@@ -53,8 +50,6 @@ function render() {
   $('add').disabled = state.children.length >= MAX_CHILDREN;
   $('add').title = $('add').disabled ? `Up to ${MAX_CHILDREN} children` : '';
   $('session').innerHTML = sessionHtml(state);
-  $('tasks').innerHTML = tasksHtml(state);
-  $('setting').innerHTML = settingHtml(state);
   renderChildren();
   showWeights(state.weights);
   updateResult();
@@ -74,21 +69,10 @@ function updateResult() {
   $('mini').innerHTML = miniHtml(r);
   $('comparisons').innerHTML = comparisonsHtml(state, r);
   $('math').innerHTML = mathHtml(state, r);
-  syncTaskToggles();
   $('undo').disabled = !undoStack.length;
   $('saved').textContent = save(state)
     ? 'Saved on this device. The page address links to this plan, including names and care details.'
     : 'Storage unavailable; changes last for this visit';
-}
-// The Responsibilities toggles show whether every child, some or none has
-// each task.
-function syncTaskToggles() {
-  for (const [k] of TASKS) {
-    const el = document.querySelector(`[data-all=${k}]`);
-    const count = state.children.filter((c) => c[k]).length;
-    el.checked = count > 0 && count === state.children.length;
-    el.indeterminate = count > 0 && count < state.children.length;
-  }
 }
 // Patches a card after an edit: names in its labels, and fields that only
 // matter for some choices.
@@ -106,14 +90,6 @@ function patchCard(card, c, i) {
 
 document.addEventListener('change', (e) => {
   const el = e.target;
-  // A Responsibilities toggle sets the task for every child. Re-rendering the
-  // cards is safe here: focus is on the toggle.
-  if (el.dataset.all) {
-    for (const c of state.children) c[el.dataset.all] = el.checked;
-    renderChildren();
-    refresh();
-    return;
-  }
   const key = el.dataset.key;
   if (!key) return;
   const card = el.closest('.child');
