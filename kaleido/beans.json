@@ -17,6 +17,7 @@
   "10_speed": {"name": "10 Speed", "aliases": ["10_speed", "10_Speed"]},
   "honduran_mwp_decaf": {
     "name": "Honduran MWP Decaf",
+    "supplier": "Burman Coffee",
     "aliases": ["decaf_honduran", "decaf_honduran_mwp"]
   },
   "brazil_cerrado": {"name": "Brazil Cerrado", "aliases": ["brazil_cerrado"]},
