@@ -546,7 +546,14 @@ const HANDLERS = {
     nextSection.editing = true;
     sideKey = '';
     renderSide();
-    syncVariants();
+    // Start from the current choice, not the first bean in the list.
+    const {next} = state;
+    if (next) {
+      $('bean').value = next.bean;
+      syncVariants();
+      if (next.variant) $('variant').value = next.variant;
+      $('weightIn').value = next.weightIn ?? '';
+    }
   },
   cancelEdit: () => {
     nextSection.editing = false;
