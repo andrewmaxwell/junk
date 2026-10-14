@@ -1,5 +1,10 @@
 // Children younger than this get the newborn prompts.
 export const NEWBORN_MONTHS = 3;
+// Bump when a weight or rule changes meaning. Links and saves carry it, and
+// sanitize() drops weights saved under another version rather than misread
+// them (version 2: heavyLoad became a multiple of the reference load).
+export const MODEL_VERSION = 2;
+export const MAX_CHILDREN = 30;
 
 // Every tunable number in the model. The math, the "All workload assumptions"
 // text and the lil-gui panel all read from this table.
@@ -87,7 +92,7 @@ export const child = (name = 'New child', months = 48) => ({
   settle: 0,
   comfort: 'holding',
   sleep: 0,
-  toilet: months < 36 ? 'diaper' : 'help',
+  toilet: months < 36 ? 'diaper' : months < 60 ? 'help' : 'independent',
   allergy: false,
 });
 export function example() {
@@ -118,19 +123,23 @@ export function example() {
   };
 }
 const sum = (a) => a.reduce((x, y) => x + y, 0);
+const awakeShare = (c) => 1 - c.sleep / 100;
+// Settling minutes count as entered, up to the child's awake time. Pricing
+// and the staffing warning both use this.
+export const settleMinutes = (c, minutes) =>
+  Math.min(c.settle, minutes * awakeShare(c));
 export function workload(s) {
   const w = s.weights;
   const minutes = s.hours * 60;
   const away = s.caregivers === 1 ? w.away.solo : w.away.team;
   const rows = s.children.map((c, i) => {
-    const awake = 1 - c.sleep / 100;
+    const awake = awakeShare(c);
     const supervision =
       byAge(w.supervision, c.months) *
       (w.asleepSupervision + (1 - w.asleepSupervision) * awake);
     const attention = w.attention[c.attention] * awake;
-    // Settling minutes count as entered, up to the child's awake time.
     const settling =
-      (Math.min(c.settle, minutes * awake) / minutes) * w.settling[c.comfort];
+      (settleMinutes(c, minutes) / minutes) * w.settling[c.comfort];
     const toileting = s.diapers
       ? (w.toiletingPerHour[c.toilet] / 60) * away
       : 0;
@@ -164,7 +173,13 @@ export function workload(s) {
     };
   });
   const supervision = sum(rows.map((r) => r.supervision));
-  const group = s.children.length < 2 ? 0 : w.play[s.play] * s.children.length;
+  // Group play scales with how much of the booking children are awake. Sleep
+  // shares don't say whether they're awake at the same time, so this is an
+  // average, not a schedule.
+  const group =
+    s.children.length < 2
+      ? 0
+      : w.play[s.play] * sum(s.children.map(awakeShare));
   const environment =
     (s.space === 'split' ? w.splitSpace * supervision : 0) +
     (s.parents ? 0 : w.soleResponsibility * supervision);
@@ -203,17 +218,23 @@ export function calculate(s) {
     warnings.push(
       `Heavy workload: each caregiver carries more than ${heavyLoad}× the reference session’s load. Review task assignments and arrange backup before agreeing to this quote.`,
     );
+  // Children who tie up a caregiver one-to-one for at least half the booking.
+  // If they take every caregiver, nobody is left for the others.
   const minutes = s.hours * 60;
+  const dedicated = s.children.filter(
+    (c) => c.comfort === 'active' && settleMinutes(c, minutes) >= minutes / 2,
+  ).length;
+  if (dedicated >= n && s.children.length > dedicated)
+    warnings.push(
+      `${dedicated === 1 ? 'One child needs' : `${dedicated} children need`} one-to-one settling for much of the booking, leaving nobody free to watch the others. Consider another caregiver.`,
+    );
   if (
-    n === 1 &&
-    s.children.length > 1 &&
-    s.children.some(
-      (c) =>
-        c.comfort === 'active' && Math.min(c.settle, minutes) >= minutes / 2,
-    )
+    !s.parents &&
+    !s.diapers &&
+    s.children.some((c) => c.toilet !== 'independent')
   )
     warnings.push(
-      'One child needs one-to-one settling for much of the booking, leaving nobody free to watch the others. Consider a second caregiver.',
+      'Parents are away, but nobody is assigned diapers & potty. Add it under Responsibilities, or confirm the children won’t need it.',
     );
   if (newborn)
     warnings.push(
@@ -274,8 +295,11 @@ const oneOf = (v, options, fallback) => (options.includes(v) ? v : fallback);
 const bool = (v, fallback) => (typeof v === 'boolean' ? v : fallback);
 // Same shape as the defaults; numbers must be finite and non-negative. Anchor
 // ages stay fixed so the interpolation order can't break.
-function mergeWeights(dflt, raw) {
-  if (typeof dflt === 'number') return numIn(raw, 0, 1000, dflt);
+// `included` is a divisor and heavyLoad a multiple of it, so both need floors.
+const WEIGHT_MIN = {included: 0.05, heavyLoad: 1};
+function mergeWeights(dflt, raw, key) {
+  if (typeof dflt === 'number')
+    return numIn(raw, WEIGHT_MIN[key] ?? 0, 1000, dflt);
   if (Array.isArray(dflt))
     return dflt.map((d, i) =>
       mergeWeights(d, Array.isArray(raw) ? raw[i] : undefined),
@@ -283,7 +307,7 @@ function mergeWeights(dflt, raw) {
   return Object.fromEntries(
     Object.entries(dflt).map(([k, d]) => [
       k,
-      k === 'months' ? d : mergeWeights(d, raw?.[k]),
+      k === 'months' ? d : mergeWeights(d, raw?.[k], k),
     ]),
   );
 }
@@ -325,8 +349,11 @@ export function sanitize(raw) {
     bath: bool(raw.bath, d.bath),
     bed: bool(raw.bed, d.bed),
     children: Array.isArray(raw.children)
-      ? raw.children.slice(0, 30).map(sanitizeChild).filter(Boolean)
+      ? raw.children.slice(0, MAX_CHILDREN).map(sanitizeChild).filter(Boolean)
       : d.children,
-    weights: mergeWeights(WEIGHTS, raw.weights),
+    weights: mergeWeights(
+      WEIGHTS,
+      raw.v === MODEL_VERSION ? raw.weights : undefined,
+    ),
   };
 }

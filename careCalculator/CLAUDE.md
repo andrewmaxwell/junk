@@ -124,7 +124,26 @@ A GPT-6.1 review found these; keep them fixed.
 - **Layout:** below 900px the page is one column, form first, with a fixed mini bar showing the price. Muted text (`--text-3`) meets 4.5:1 contrast on white, the page background and the quote card.
 - "Start blank" clears the children but keeps session settings and weights.
 
+A second review found these; also keep them fixed.
+
+- **Links are built from state.** "Copy link" encodes the current plan when clicked, never `location.href`, which can lag an edit. In-page navigation must never use `#anchor` links, because the hash holds the plan; the mobile "Details" button scrolls with `scrollIntoView`.
+- **Model version.** Links and saves carry `v: MODEL_VERSION`. `sanitize()` drops weights from any other version rather than misread them. Bump it whenever a weight or rule changes meaning.
+- **Weight floors.** `included` is at least 0.05 and `heavyLoad` at least 1, so the meter never divides by zero.
+- **One settling rule.** `settleMinutes()` (entered minutes, capped at awake time) feeds both pricing and the one-to-one warning. That warning is team-wide: it fires when the children needing one-to-one for half the booking or more take up every caregiver.
+- **Group play** scales with children's average awake share, so sleeping children add none.
+- **Parents away without diapers & potty** warns when any child isn't independent. The task is never assigned silently. Toileting defaults to independent from age 5.
+- `refresh()` also clears on `pointercancel`, which touch scrolling sends instead of `pointerup`.
+- "Start blank" clears only the children.
+- Renaming a child updates every label that uses the name.
+- `MAX_CHILDREN` (30) caps Add child and loading alike.
+- The mobile bar shows a note count when there are warnings, and the Calculation card says when custom weights are active.
+
 Not done, and worth considering:
+
+- Easier sleep entry (hours rather than a percentage), and showing when settling was capped at awake time.
+- A review summary before copying a quote.
+- Separating state, calculation, rendering, persistence and sharing in `main.js`. `updateResult()` still does all of them.
+- Checking the prices against bookings Andrew prices that weren't used for fitting.
 
 - Per-child task participation and routine counts. Tasks still apply to every child once per booking.
 - Pinning Playwright as a dev dependency so `test-browser.js` doesn't rely on the npx cache. That's a root `package.json` change, so ask first.

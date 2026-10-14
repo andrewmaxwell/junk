@@ -171,6 +171,14 @@ try {
   await page.click('[data-copy=quote]');
   const quote3 = await page.evaluate(() => navigator.clipboard.readText());
   check(quote3.includes('3 hours'), 'click after an edit is not swallowed');
+  // Same for Copy link: it's built from the plan, not the lagging address bar.
+  await page.fill('[data-key=hours]', '4');
+  await page.click('[data-copy=link]');
+  const link = await page.evaluate(() => navigator.clipboard.readText());
+  const linked = JSON.parse(
+    Buffer.from(link.split('#')[1], 'base64url').toString(),
+  );
+  check(linked.hours === 4, 'copied link has the just-edited value');
   check(
     await page
       .locator('#result details')
@@ -198,6 +206,10 @@ try {
   await page.locator('#weights .lil-gui input').first().fill('10');
   await page.keyboard.press('Enter');
   check((await saved()).weights.premium === 10, 'premium weight saved');
+  check(
+    (await text('#result')).includes('Using custom weights'),
+    'custom weights flagged',
+  );
   check((await text('#math')).includes('$10.00 ×'), 'formula follows weight');
   await page.click('text=Restore default weights');
   check((await saved()).weights.premium === WEIGHTS.premium, 'restore weights');
@@ -255,8 +267,13 @@ try {
   await attacked.close();
 
   // Start blank, then focus lands somewhere sensible after a removal.
+  await page.fill('[data-key=base]', '20');
+  await page.keyboard.press('Tab');
   await page.click('#blank');
-  check((await saved()).children.length === 0, 'start blank');
+  check(
+    (await saved()).children.length === 0 && (await saved()).base === 20,
+    'start blank clears children, keeps settings',
+  );
   check(
     await page.evaluate(() => document.activeElement.id === 'add'),
     'add child focused after blank',
@@ -265,6 +282,26 @@ try {
   await page.click('#add');
   await page.click('.remove');
   check((await active()) === 'name', 'focus moves to the next card');
+  await page.fill('.name >> nth=0', 'Robin');
+  await page.keyboard.press('Tab');
+  check(
+    (await page.locator('.child').first().getAttribute('aria-label')) ===
+      'Robin' &&
+      (await page
+        .locator('[data-key=years]')
+        .first()
+        .getAttribute('aria-label')) === 'Robin, age in years',
+    'rename updates the card and age labels',
+  );
+
+  // On a phone, Details scrolls to the quote without touching the plan URL.
+  const phone = await context.newPage();
+  await phone.setViewportSize({width: 390, height: 844});
+  await phone.goto(page.url());
+  const before = phone.url();
+  await phone.click('#mini [data-scroll]');
+  check(phone.url() === before, 'details keeps the plan in the URL');
+  await phone.close();
 
   check(errors.length === 0, 'page errors: ' + errors.join('; '));
   console.log('PASS ' + checks + ' browser checks');

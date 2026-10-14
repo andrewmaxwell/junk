@@ -7,6 +7,7 @@ import {
   scenarios,
   NEWBORN_MONTHS,
   sanitize,
+  MODEL_VERSION,
 } from './model.js';
 let checks = 0;
 const check = (v, msg) => {
@@ -63,6 +64,7 @@ check(
   'no unnecessary food premium',
 );
 const LEVELS = ['none', 'occasional', 'frequent', 'constant'];
+const WEIGHTS_COPY = () => structuredClone(example().weights);
 let seed = 42;
 const rand = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
 for (let k = 0; k < 500; k++) {
@@ -75,6 +77,12 @@ for (let k = 0; k < 500; k++) {
     settle: rand() * 180,
     sleep: rand() * 100,
   }));
+  // Mix responsibilities, parents and setting, not just the children.
+  for (const field of ['diapers', 'feeding', 'bath', 'bed', 'parents'])
+    s[field] = rand() < 0.5;
+  s.space = rand() < 0.5 ? 'shared' : 'split';
+  s.play = ['together', 'led', 'conflict'][Math.floor(rand() * 3)];
+  s.base = 8 + rand() * 20;
   const r = calculate(s);
   check(r.rate >= 0 && Number.isFinite(r.total), 'finite nonnegative');
   check(Math.abs(r.each * s.caregivers - r.rate) < 1e-8, 'pay splits');
@@ -244,6 +252,7 @@ check(
 const evil = '<img src=x onerror=alert(1)>';
 const dirty = sanitize({
   ...example(),
+  v: MODEL_VERSION,
   base: -10,
   hours: '3',
   play: evil,
@@ -312,5 +321,64 @@ oneToOne.children = [
 check(
   calculate(oneToOne).warnings.some((x) => x.includes('one-to-one')),
   'one-to-one with one caregiver warns',
+);
+// Weights saved under another model version are dropped, not misread.
+const oldSave = {...example(), weights: {...WEIGHTS_COPY(), heavyLoad: 1}};
+check(
+  sanitize(oldSave).weights.heavyLoad === example().weights.heavyLoad,
+  'old-version weights dropped',
+);
+check(
+  sanitize({...oldSave, v: MODEL_VERSION}).weights.heavyLoad === 1,
+  'current-version weights kept',
+);
+check(
+  sanitize({...example(), v: MODEL_VERSION, weights: {included: 0}}).weights
+    .included > 0,
+  'included can never be zero',
+);
+// The one-to-one warning uses the same capped settling time as pricing.
+const sleeper = example();
+sleeper.caregivers = 1;
+sleeper.children = [
+  {...child('A', 18), settle: 999, comfort: 'active', sleep: 100},
+  child('B', 48),
+];
+check(
+  !calculate(sleeper).warnings.some((x) => x.includes('one-to-one')),
+  'no one-to-one warning for a sleeping child',
+);
+// Two caregivers, two children each needing one of them: nobody left over.
+const twoDedicated = example();
+twoDedicated.children = [
+  {...child('A', 18), settle: 999, comfort: 'active'},
+  {...child('B', 18), settle: 999, comfort: 'active'},
+  child('C', 48),
+  child('D', 48),
+];
+check(
+  calculate(twoDedicated).warnings.some((x) => x.includes('2 children need')),
+  'team-wide one-to-one warning',
+);
+// Group play counts awake children only.
+const napping = example();
+napping.play = 'conflict';
+const awakeGroup = workload(napping).group;
+napping.children.forEach((c) => (c.sleep = 100));
+check(
+  workload(napping).group === 0 && awakeGroup > 0,
+  'sleeping children add no group work',
+);
+// Parents away with nobody on diapers is flagged, not silently priced.
+const gone = example();
+gone.parents = false;
+check(
+  calculate(gone).warnings.some((x) => x.includes('nobody is assigned')),
+  'parents away without diapers warns',
+);
+gone.diapers = true;
+check(
+  !calculate(gone).warnings.some((x) => x.includes('nobody is assigned')),
+  'assigned diapers clears it',
 );
 console.log('PASS ' + checks + ' model checks');
