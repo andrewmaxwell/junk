@@ -4,6 +4,8 @@ import {
   endTake,
   isArming,
   audioContext,
+  fadeEnds,
+  RING_SECONDS,
 } from './recorder.js';
 import * as audio from './playback.js';
 import {
@@ -14,9 +16,12 @@ import {
   exportImage,
   sampleCell,
   setBusyHandler,
+  readAccum,
+  snapshot,
   F_MIN,
 } from './render.js';
 import {fullView, isFullView, zoomFactor, attachGestures} from './zoom.js';
+import {measure} from './probe.js';
 
 const MIN_SAMPLES = 4096; // ~85 ms; shorter than this there is nothing to transform
 
@@ -82,6 +87,11 @@ function freqLabel(f) {
 const canvas = document.getElementById('view');
 const status = document.getElementById('status');
 const hint = document.getElementById('hint');
+const recBtn = document.getElementById('rec-btn');
+const openBtn = document.getElementById('open-btn');
+const playBtn = document.getElementById('play-btn');
+const saveBtn = document.getElementById('save-btn');
+const fileInput = document.getElementById('file');
 const inspectEl = document.getElementById('inspect');
 const inspectHead = document.getElementById('inspect-head');
 const inspectRows = document.getElementById('inspect-rows');
@@ -127,53 +137,36 @@ let limits = null;
 
 let take = null; // start position of the live take
 let opening = false; // ensureMic still in flight
-let released = false; // button let go before the mic opened
+let cancelled = false; // stop pressed while the mic was still opening
 let ticker = null;
 let nagTimer = null;
 let pressAt = 0; // event timestamp of the press being served
 let saving = false;
 let sawArming = false; // the mic was still opening partway through this take
 
-// How long ago the button actually went down, as opposed to when we got round
-// to noticing. Event timestamps share an origin with performance.now().
-const lag = () => Math.max(0, performance.now() - pressAt);
+// How long ago an event actually happened, as opposed to when we got round to
+// noticing. Event timestamps share an origin with performance.now().
+const since = (at) => Math.max(0, performance.now() - at);
 
-const held = new Set(); // pointers currently down
-let quietUntil = 0; // suppress the short-take nag right after a gesture
-
-// Hold to record, drag to pan. The two are only ambiguous when there is
-// something to pan, and they stay ambiguous for this long: past it the press is
-// committed to a recording, so a hand that drifts mid-take does not throw it
-// away. Waiting costs no audio — `beginTake` reaches back by the real press
-// time and the sound is already in the ring buffer.
-const HOLD_MS = 180;
-
-let holdTimer = null;
-
-// Two different questions, both answered once per press and both off the same
-// event. `canPan` gates the drag; `hasPicture` gates the wait that lets a tap
-// mean something. They are not the same predicate — a tap reads the picture at
-// every zoom, while only a zoomed-in view has anywhere to pan to — but
-// `canPan` implies `hasPicture`, so the gesture code can never arm a drag on a
-// press this file decided to record immediately.
 const canPan = () => !!rec && !isFullView(viewport, limits);
-const hasPicture = () => !!rec;
 
-function cancelHold() {
-  if (holdTimer === null) {
-    return false;
-  }
-
-  clearTimeout(holdTimer);
-  holdTimer = null;
-
-  return true;
-}
+const recording = () => take !== null || opening;
 
 function setStatus(text, recording) {
   clearTimeout(nagTimer);
   status.textContent = text;
   status.className = recording ? 'rec' : '';
+}
+
+// The buttons say what is possible right now: nothing to play or save until
+// there is a picture, and record and play each show a stop icon while running.
+function syncButtons() {
+  recBtn.classList.toggle('on', recording());
+  recBtn.title = recording() ? 'Stop recording (R)' : 'Record (R)';
+  playBtn.classList.toggle('on', audio.isPlaying());
+  playBtn.disabled = !rec;
+  saveBtn.disabled = !rec || saving;
+  hint.classList.toggle('hide', !!rec || recording());
 }
 
 // What the picture in front of you is: how far in, how much time it covers,
@@ -255,7 +248,7 @@ function showInspectAt(x, y, title, rows) {
 }
 
 // The close button sits over the canvas, so its press must not reach the
-// window handler below — that would hide the readout and then immediately
+// canvas handler below — that would hide the readout and then immediately
 // reopen it, since the point tapped is still a point of the picture.
 closeBtn.addEventListener('pointerdown', (e) => {
   e.stopPropagation();
@@ -263,11 +256,9 @@ closeBtn.addEventListener('pointerdown', (e) => {
   hideInspect();
 });
 
-// A tap that never became a hold or a drag: report what is at that point of
-// the picture instead of doing nothing with it. Available at every zoom,
-// full view included — the numbers are as meaningful there as anywhere, and
-// the only press that cannot spare a second meaning is one made before any
-// recording exists.
+// A tap that never became a drag: report what is at that point of the picture
+// instead of doing nothing with it. Available at every zoom, full view
+// included — the numbers are as meaningful there as anywhere.
 function inspect(x, y) {
   if (!rec) return;
 
@@ -337,6 +328,7 @@ function stopPlaying() {
   playFrame = null;
   playheadEl.classList.remove('show');
   showZoom();
+  syncButtons();
 }
 
 // The playhead is a DOM element rather than something drawn into the picture,
@@ -405,37 +397,51 @@ function togglePlay() {
 
   setStatus(`▶ ${span} · ${band(clip.f0, clip.f1)}${caveat}`, false);
   trackPlayhead();
+  syncButtons();
 }
 
-async function press(pressedAt) {
-  if (take !== null || opening) return;
+// Recording is a button, not a gesture: press to start, press again to stop.
+// Both ends are timed from the press itself — `beginTake` and `endTake` reach
+// back by how long ago it happened, so neither the click of the button nor a
+// main thread busy with a commit moves where the take starts or stops.
+async function startRecording(pressedAt) {
+  if (recording()) return;
 
   // The mic is about to open and the speakers are playing the last thing it
   // heard. Stop, or the take is a recording of the recording.
   stopPlaying();
+  hideInspect();
 
   pressAt = pressedAt;
   opening = true;
-  released = false;
-  setStatus('● REC', true);
+  cancelled = false;
+  setStatus('● opening mic…', true);
+  syncButtons();
 
   try {
     await ensureMic();
   } catch (err) {
     opening = false;
     setStatus(`mic unavailable: ${err.message}`, false);
+    syncButtons();
     return;
   }
+
   opening = false;
 
-  if (released) {
-    // let go while the mic was still opening
-    finish(endTake(beginTake(lag())));
+  // Stopped before the mic was even open: nothing was recorded.
+  if (cancelled) {
+    showZoom();
+    syncButtons();
     return;
   }
-  take = beginTake(lag());
+
+  take = beginTake(since(pressAt));
   sawArming = isArming();
+  syncButtons();
+
   const started = performance.now();
+
   ticker = setInterval(() => {
     const arming = isArming();
     sawArming = sawArming || arming;
@@ -444,55 +450,52 @@ async function press(pressedAt) {
   }, 100);
 }
 
-function release() {
+function stopRecording(pressedAt) {
   if (opening) {
-    released = true;
+    cancelled = true;
     return;
   }
+
   if (take === null) return;
+
   const from = take;
   take = null;
-  finish(endTake(from));
-}
-
-// A second finger means the gesture was never a recording. Throw the take away
-// rather than rendering whatever was caught before the pinch started.
-function abort() {
-  cancelHold();
   clearInterval(ticker);
   ticker = null;
-  opening = false;
-  released = false;
 
-  if (take !== null) {
-    endTake(take);
-    take = null;
-  }
-
-  quietUntil = performance.now() + 600;
-  showZoom();
-}
-
-function finish(result) {
-  clearInterval(ticker);
-  ticker = null;
+  const result = endTake(from, since(pressedAt));
 
   if (result.samples.length < MIN_SAMPLES) {
-    if (performance.now() > quietUntil) {
-      // Distinguish "you tapped" from "the mic had not finished opening yet",
-      // which is only ever the first hold and is not the user's fault.
-      setStatus(
-        sawArming
-          ? 'mic was still opening — hold again'
-          : 'hold a little longer',
-        false,
-      );
-
-      // A stray tap should not cost the zoom readout its place.
-      nagTimer = setTimeout(showZoom, 1600);
-    }
+    // Distinguish "too short" from "the mic had not finished opening yet",
+    // which is only ever the first take and is not the user's fault.
+    setStatus(
+      sawArming ? 'mic was still opening — try again' : 'too short to analyse',
+      false,
+    );
+    nagTimer = setTimeout(showZoom, 1600);
+    syncButtons();
     return;
   }
+
+  show(result);
+}
+
+function toggleRecording(pressedAt) {
+  if (recording()) {
+    stopRecording(pressedAt);
+  } else {
+    startRecording(pressedAt);
+  }
+
+  syncButtons();
+}
+
+// Put a recording on screen, whether it came from the mic or a file, and
+// analyse it at the full view. Nothing here blocks: the pool does the work and
+// this returns to the event loop immediately.
+function show(result) {
+  stopPlaying();
+  hideInspect();
 
   rec = result;
 
@@ -508,18 +511,91 @@ function finish(result) {
   viewport = fullView(limits);
 
   // The readout describes the view before there is anything in it, and the
-  // spinner beside it says the picture is on its way. Nothing here blocks: the
-  // pool does the work and this returns to the event loop immediately.
+  // spinner beside it says the picture is on its way.
   showZoom();
+  syncButtons();
 
-  track(
+  return track(
     analyze(canvas, rec, viewport, true).then(() => {
-      hint.textContent =
-        'Hold to record · tap to read · drag to pan · scroll to zoom · P to play · S to save';
       draw(canvas, viewport);
       showZoom();
     }),
   );
+}
+
+// Decoded at a fixed rate rather than the device's, so a file gives the same
+// samples — and the same picture — on every machine. Channels are averaged to
+// mono, and anything past the length a take can be is left out.
+const DECODE_RATE = 48000;
+
+async function loadAudio(data, name) {
+  if (recording()) {
+    setStatus('stop recording first', false);
+    nagTimer = setTimeout(showZoom, 1600);
+    return;
+  }
+
+  setStatus(`opening ${name}…`, false);
+
+  let decoded;
+
+  try {
+    decoded = await new OfflineAudioContext(1, 1, DECODE_RATE).decodeAudioData(
+      data,
+    );
+  } catch (err) {
+    setStatus(
+      `could not read ${name}: ${err.message || 'unknown format'}`,
+      false,
+    );
+    return;
+  }
+
+  const total = decoded.length;
+  const n = Math.min(total, Math.round(RING_SECONDS * decoded.sampleRate));
+  const samples = new Float32Array(n);
+
+  for (let c = 0; c < decoded.numberOfChannels; c++) {
+    const ch = decoded.getChannelData(c);
+
+    for (let i = 0; i < n; i++) {
+      samples[i] += ch[i] / decoded.numberOfChannels;
+    }
+  }
+
+  if (n < MIN_SAMPLES) {
+    setStatus(`${name} is too short to analyse`, false);
+    return;
+  }
+
+  fadeEnds(samples, decoded.sampleRate);
+
+  const done = show({samples, sampleRate: decoded.sampleRate, name});
+
+  if (n < total) {
+    setStatus(
+      `${name}: showing the first ${RING_SECONDS} s of ${(total / decoded.sampleRate).toFixed(0)} s`,
+      false,
+    );
+    nagTimer = setTimeout(showZoom, 4000);
+  }
+
+  return done;
+}
+
+async function loadUrl(url) {
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    setStatus(`could not fetch ${url}: ${res.status}`, false);
+    return;
+  }
+
+  return loadAudio(await res.arrayBuffer(), url.split('/').pop());
+}
+
+function loadFile(file) {
+  return file.arrayBuffer().then((buf) => loadAudio(buf, file.name));
 }
 
 let framePending = false;
@@ -538,8 +614,9 @@ function requestFrame() {
 // being displayed, so this is genuinely the same picture at a higher
 // resolution, not an upscale of the screen.
 async function save() {
-  if (saving) return;
+  if (saving || !rec) return;
   saving = true;
+  syncButtons();
 
   try {
     // Exporting a cloud that is about to be replaced would write out the
@@ -576,11 +653,12 @@ async function save() {
     nagTimer = setTimeout(showZoom, 2400);
   } finally {
     saving = false;
+    syncButtons();
     draw(canvas, viewport);
   }
 }
 
-const gestures = attachGestures(canvas, {
+attachGestures(canvas, {
   getView: () => viewport,
   setView: (v) => {
     viewport = v;
@@ -588,7 +666,6 @@ const gestures = attachGestures(canvas, {
   getLimits: () => limits,
   onGesture: () => {
     if (!rec) return;
-    quietUntil = performance.now() + 600;
     requestFrame();
   },
   // The cloud in hand covers the whole recording until the zoom outruns the
@@ -603,69 +680,107 @@ const gestures = attachGestures(canvas, {
       }),
     );
   },
-  onMultiTouch: abort,
   canPan,
-  // A drag is not a recording. Throw away whatever the press had started
-  // rather than rendering the moment before the pan.
-  onDragStart: abort,
 });
 
-// The whole screen is the button, so this works the same under a finger.
-window.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
+// A tap on the picture reads it. A press that moves past this many pixels is
+// a pan, and one that ever has a second finger with it is a pinch; neither is
+// a tap. The press itself does nothing, so there is nothing to undo.
+const TAP_SLOP = 8;
+
+let tap = null;
+
+canvas.addEventListener('pointerdown', (e) => {
   hideInspect();
-  held.add(e.pointerId);
 
-  if (held.size > 1) {
-    abort();
-    return;
-  }
-
-  // With nothing on screen there is nothing to tap and nowhere to pan, so the
-  // press can only mean "record" and does so at once. This is every press made
-  // before the first recording exists.
-  if (!hasPicture()) {
-    press(e.timeStamp);
-    return;
-  }
-
-  const at = e.timeStamp;
-
-  cancelHold();
-  holdTimer = setTimeout(() => {
-    holdTimer = null;
-
-    // Held long enough to be a take, so it is one from here on: the gesture
-    // handler must stop watching this press for a drag, or a hand that drifts
-    // mid-recording would abort it.
-    gestures.cancelDrag();
-    press(at);
-  }, HOLD_MS);
+  tap = tap
+    ? {...tap, multi: true}
+    : {id: e.pointerId, x: e.clientX, y: e.clientY};
 });
 
-function lift(e) {
-  const wasHeld = held.delete(e.pointerId);
-  if (held.size > 0 || !wasHeld) return;
-
-  // Let go before the press committed to anything: a tap, not a take. Report
-  // what is under it rather than doing nothing with it.
-  if (cancelHold()) {
-    inspect(e.clientX, e.clientY);
-    return;
+window.addEventListener('pointermove', (e) => {
+  if (
+    tap &&
+    e.pointerId === tap.id &&
+    Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_SLOP
+  ) {
+    tap.moved = true;
   }
+});
 
-  release();
+window.addEventListener('pointerup', (e) => {
+  if (!tap || e.pointerId !== tap.id) return;
+
+  const was = tap;
+  tap = null;
+
+  if (!was.moved && !was.multi) {
+    inspect(e.clientX, e.clientY);
+  }
+});
+
+window.addEventListener('pointercancel', () => {
+  tap = null;
+});
+
+// The buttons. A press is timed from pointerdown — that is when the click is
+// heard — so the take ends before it rather than after it. Taking the press
+// also keeps the button from holding focus, where Space would press it again.
+let recDownAt = 0;
+
+recBtn.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  recDownAt = e.timeStamp;
+});
+
+recBtn.addEventListener('click', (e) =>
+  toggleRecording(e.detail ? recDownAt : e.timeStamp),
+);
+
+for (const btn of [openBtn, playBtn, saveBtn]) {
+  btn.addEventListener('pointerdown', (e) => e.preventDefault());
 }
 
-window.addEventListener('pointerup', lift);
-window.addEventListener('pointercancel', lift);
-window.addEventListener('blur', () => {
-  held.clear();
-  cancelHold();
-  release();
+openBtn.addEventListener('click', () => fileInput.click());
+playBtn.addEventListener('click', togglePlay);
+saveBtn.addEventListener('click', save);
+
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  fileInput.value = '';
+
+  if (file) loadFile(file);
+});
+
+// Drop a file anywhere on the window.
+window.addEventListener('dragover', (e) => {
+  if (![...e.dataTransfer.types].includes('Files')) return;
+  e.preventDefault();
+  document.body.classList.add('dropping');
+});
+
+window.addEventListener('dragleave', (e) => {
+  if (!e.relatedTarget) document.body.classList.remove('dropping');
+});
+
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  document.body.classList.remove('dropping');
+
+  const file = e.dataTransfer.files[0];
+
+  if (file) loadFile(file);
 });
 
 window.addEventListener('keydown', (e) => {
+  // A focused button already answers Space and Enter itself.
+  if (
+    e.target instanceof HTMLButtonElement &&
+    (e.code === 'Space' || e.code === 'Enter')
+  ) {
+    return;
+  }
+
   if (e.code === 'Escape' && rec) {
     // One layer at a time, outermost first: the sound, then the readout, then
     // the zoom. Each of these is something you would want to back out of
@@ -686,25 +801,21 @@ window.addEventListener('keydown', (e) => {
     track(analyze(canvas, rec, viewport, false).then(requestFrame));
     return;
   }
+
   // Cmd+S and Cmd+P belong to the browser. Taking them as well would export
   // behind a Save Page dialog, or start playback behind a Print one.
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.code === 'KeyS' && rec) {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+
+  if (e.code === 'KeyR') {
+    toggleRecording(e.timeStamp);
+  } else if (e.code === 'KeyO') {
+    fileInput.click();
+  } else if (e.code === 'KeyS') {
     save();
-    return;
-  }
-  if (e.code === 'KeyP' && rec && !e.repeat) {
+  } else if (e.code === 'KeyP' || e.code === 'Space') {
+    e.preventDefault();
     togglePlay();
-    return;
   }
-  if (e.code !== 'Space' || e.repeat) return;
-  e.preventDefault();
-  press(e.timeStamp);
-});
-window.addEventListener('keyup', (e) => {
-  if (e.code !== 'Space') return;
-  e.preventDefault();
-  release();
 });
 
 let resizeTimer = null;
@@ -743,4 +854,68 @@ if (accelerated) {
 } else {
   hint.textContent =
     'This needs WebGL2 — try a current Chrome, Safari or Firefox';
+}
+
+syncButtons();
+
+// Everything a test needs to drive the page and score it — see `probe.js`.
+// Viewports are in seconds and hertz, and every call resolves once the
+// analysis it started has landed.
+async function idle() {
+  while (analysing) {
+    await analysing;
+  }
+}
+
+function setView(v) {
+  viewport = v;
+  requestFrame();
+  track(
+    analyze(canvas, rec, viewport, false).then(() => {
+      draw(canvas, viewport);
+      showZoom();
+    }),
+  );
+  return idle();
+}
+
+window.soundViz = {
+  load: (url) => loadUrl(url).then(idle),
+  idle,
+
+  // An exact viewport, {t0, t1} in seconds and {f0, f1} in Hz.
+  view: ({t0, t1, f0, f1}) =>
+    setView({t0: t0 * rec.sampleRate, t1: t1 * rec.sampleRate, f0, f1}),
+
+  // Centred on (t seconds, f Hz), `zoom` times narrower than the full view in
+  // both time and log-frequency — what that many notches of scrolling gives.
+  zoomTo: ({t, f, zoom}) => {
+    const span = (limits.tMax - limits.tMin) / zoom;
+    const ratio = (limits.fMax / limits.fMin) ** (1 / zoom);
+    const at = t * rec.sampleRate;
+
+    return setView({
+      t0: at - span / 2,
+      t1: at + span / 2,
+      f0: f / Math.sqrt(ratio),
+      f1: f * Math.sqrt(ratio),
+    });
+  },
+
+  measure: () =>
+    measure({
+      rec,
+      viewport,
+      readAccum: () => readAccum(canvas, viewport),
+      snapshot: () => snapshot(canvas, viewport),
+      status: () => status.textContent,
+    }),
+};
+
+// `?file=signals/chirp.wav` opens a file on load — a test signal, usually,
+// so a browser driver needs no microphone.
+const startFile = new URLSearchParams(location.search).get('file');
+
+if (startFile && accelerated) {
+  loadUrl(startFile);
 }

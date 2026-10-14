@@ -1,10 +1,17 @@
 # soundViz
 
-Hold anywhere to record from the microphone; on release the sound is drawn
+Record from the microphone (the record button, or `R`) or open an audio file
+(the open button, `O`, or drop one on the window), and the sound is drawn
 full-screen as a **reassigned spectrogram**. Scroll or pinch to zoom, drag to
-pan, tap a point to read off what is there, `P` to hear the part you are looking
-at, `S` to save it as a large PNG. Served from `http://localhost:3000/soundViz/`.
-No build step, no dependencies — plain ES modules loaded by `index.html`.
+pan, tap a point to read off what is there, `P` or Space to hear the part you
+are looking at, `S` to save it as a large PNG. Served from
+`http://localhost:3000/soundViz/`. No build step, no dependencies — plain ES
+modules loaded by `index.html`.
+
+The controls are four small buttons in the top-left corner and nothing else;
+Andrew asked for them to stay minimal so they do not obscure the picture.
+Recording used to be "hold anywhere", and was removed because it made
+accidental recordings too easy — a press on the picture never records.
 
 The look being chased is the MATLAB spectrograms from Mythbusters: fine bright
 filaments on black, not fuzzy blobs.
@@ -42,7 +49,9 @@ stays because it costs nothing and a trackpad uses some of it.
 | `reassign.js`                                                  | the STFT and the reassignment — one region of one scale          |
 | `ridge.js`                                                     | ridge chains, the support gate, the share arena                  |
 | `glview.js`                                                    | WebGL2: strokes, accumulation, exposure, colour, tiled export    |
-| `zoom.js`                                                      | viewport model (samples x Hz), gestures, hold-vs-drag            |
+| `zoom.js`                                                      | viewport model (samples x Hz), wheel, drag and pinch             |
+| `probe.js`                                                     | `window.soundViz`: drive the page and score it against the truth |
+| `signals/`                                                     | test signals with known answers, and `make.mjs` to render them   |
 | `analysis-worker.js`                                           | one pool thread; owns nothing, decides nothing                   |
 | `czt.js`                                                       | chirp-z: the DFT at just a band's bins, for zoomed grids         |
 | `fft.js`, `recorder.js`, `playback.js`, `capture-processor.js` | as named                                                         |
@@ -437,9 +446,45 @@ again:
 
 ## Testing
 
-There is no test runner. Verification is by driving real Chrome over CDP with
-Node's built-in `WebSocket`, plus things checkable in Node alone. Scripts live in
-the session scratchpad, not the repo; recreate as needed.
+There is no test runner. Verification is by driving real Chrome (Playwright MCP,
+or CDP with Node's built-in `WebSocket`), plus things checkable in Node alone.
+Scripts live in the session scratchpad, not the repo; recreate as needed.
+
+**Start from a test signal, not the microphone.** `signals/signals.js` defines
+each signal as a formula with its right answer — every partial's frequency at
+every instant, every click's instant — and `node soundViz/signals/make.mjs`
+renders them to the WAVs beside it. Open one with `?file=signals/<name>.wav`
+and the page needs no mic, gives the same samples on every run, and can be
+scored against the truth:
+
+```js
+await soundViz.load('signals/chirp.wav');        // resolves once analysed
+await soundViz.zoomTo({t: 1, f: 2100, zoom: 100}); // seconds, Hz; or view({t0, t1, f0, f1})
+await soundViz.measure();
+// {onTarget, p50, p90, unit, pixel, coherence, lit, luma, chroma, status, ...}
+```
+
+`onTarget` is the share of drawn power within 0.5% (or 1 ms for clicks) of the
+truth; `p50`/`p90` are power-weighted percentiles of the distance from it, in
+cents or ms, and `pixel` is one pixel in the same unit — the floor `p50` can
+reach. `coherence` on `noise.wav` is the false-structure rate. Two things the
+numbers mean that are easy to misread: `harmonics` sits near 1.8 cents p50 at
+every zoom because the sawtooth's once-per-period edge spreads real energy
+across the view, and `close` at a deep zoom *between* its partials has no truth
+in view at all, so `onTarget` is 0 and what is measured is the dust.
+
+Baseline at w = 1400, MAX_FFT 262144 (p50 in cents, ms for clicks):
+
+| signal @ point          | 10x  | 30x  | 100x  | 300x   |
+| ----------------------- | ---- | ---- | ----- | ------ |
+| tones @ 1000 Hz         | 0.63 | 0.21 | 0.19  | 0.10   |
+| chirp @ 1 s, 2100 Hz    | 0.69 | 0.23 | 0.072 | 0.029  |
+| vibrato @ 1.05 s, 630   | 1.05 | 0.72 | 0.69  | 0.66   |
+| clicks @ 1.125 s (ms)   | 0.072 | 0.024 | 0.0072 | 0.017 |
+
+Raising `MAX_FFT` to 4194304 was scored this way and changes almost none of
+these, while deep settles go from 0-1.3 s to 1.7-4.3 s; only the clicks' 300x
+p50 improves (0.017 to 0.0024 ms).
 
 ```
 chrome --remote-debugging-port=9223 --user-data-dir=/tmp/prof \
@@ -479,7 +524,8 @@ Driving the real thing:
   occluded tab delivers no input and fires no `requestAnimationFrame`, and every
   script silently does nothing. The tell is a "longest block" of exactly 1005 ms,
   which is a background tab's `setInterval` throttle.
-- **`getUserMedia` does not work in headless Chrome** under any flag. Patch it
+- **For the mic path only:** `getUserMedia` does not work in headless Chrome
+  under any flag. Patch it
   via `Page.addScriptToEvaluateOnNewDocument` to return a
   `MediaStreamAudioDestinationNode` stream, and **synthesise the source when the
   patch is injected**, not inside the patched call — otherwise the recording is

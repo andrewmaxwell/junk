@@ -15,7 +15,7 @@
         height: 100%;
         background: #000;
         overflow: hidden;
-        touch-action: none; /* no scroll or pinch while holding */
+        touch-action: none; /* the picture owns drags and pinches */
         user-select: none;
         -webkit-user-select: none;
         -webkit-touch-callout: none; /* no callout on a long press */
@@ -36,18 +36,87 @@
         flex-wrap: wrap; /* the hint outgrows a phone on its own */
         gap: 8px 12px;
         font:
-          13px "Helvetica Neue",
+          13px 'Helvetica Neue',
           Helvetica,
           Arial,
           sans-serif;
         pointer-events: none; /* the whole screen is the button */
       }
+      /* Four small buttons in the corner, and nothing else on top of the
+         picture. Translucent so the spectrogram shows through them. */
+      #controls {
+        display: flex;
+        gap: 6px;
+      }
+      .ctl {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 6px;
+        background: rgba(6, 10, 16, 0.55);
+        color: rgba(232, 240, 255, 0.8);
+        cursor: pointer;
+        pointer-events: auto;
+      }
+      .ctl:hover:not(:disabled) {
+        color: #fff;
+        border-color: rgba(255, 255, 255, 0.38);
+      }
+      .ctl:focus-visible {
+        outline: 2px solid rgba(120, 180, 255, 0.8);
+        outline-offset: 1px;
+      }
+      .ctl:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+      .ctl svg {
+        width: 14px;
+        height: 14px;
+      }
+      /* Each button carries its idle icon and its active one. */
+      .ctl .on-icon,
+      .ctl.on .off-icon {
+        display: none;
+      }
+      .ctl.on .on-icon {
+        display: block;
+      }
+      #rec-btn {
+        color: #ff5a4a;
+      }
+      #rec-btn.on {
+        border-color: rgba(255, 90, 74, 0.9);
+        background: rgba(255, 90, 74, 0.85);
+        color: #fff;
+      }
+      /* Only before there is a picture: what the buttons are for. */
       #hint {
-        padding: 7px 15px;
-        border: 1px solid rgba(255, 255, 255, 0.35);
-        border-radius: 4px;
-        background: rgba(0, 0, 0, 0.35);
-        color: #e8f0ff;
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: rgba(232, 240, 255, 0.45);
+        font:
+          14px 'Helvetica Neue',
+          Helvetica,
+          Arial,
+          sans-serif;
+        pointer-events: none;
+      }
+      #hint.hide {
+        display: none;
+      }
+      body.dropping::after {
+        content: '';
+        position: fixed;
+        inset: 12px;
+        border: 1.5px dashed rgba(232, 240, 255, 0.45);
+        border-radius: 10px;
+        pointer-events: none;
       }
       /* The readout and the sign that it is about to get sharper, kept
          together so the spinner sits with the numbers rather than out at the
@@ -98,7 +167,7 @@
         box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
         color: #e8f0ff;
         font:
-          12px/1.5 "Helvetica Neue",
+          12px/1.5 'Helvetica Neue',
           Helvetica,
           Arial,
           sans-serif;
@@ -146,7 +215,7 @@
         background: none;
         color: rgba(232, 240, 255, 0.45);
         font:
-          16px/1 "Helvetica Neue",
+          16px/1 'Helvetica Neue',
           Helvetica,
           Arial,
           sans-serif;
@@ -192,8 +261,82 @@
   </head>
   <body>
     <canvas id="view"></canvas>
+    <div id="hint">Record, or open or drop an audio file</div>
     <div id="ui">
-      <div id="hint">Hold anywhere to record</div>
+      <div id="controls">
+        <button
+          class="ctl"
+          id="rec-btn"
+          type="button"
+          title="Record (R)"
+          aria-label="Record"
+        >
+          <svg class="off-icon" viewBox="0 0 16 16">
+            <circle cx="8" cy="8" r="5" fill="currentColor" />
+          </svg>
+          <svg class="on-icon" viewBox="0 0 16 16">
+            <rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" />
+          </svg>
+        </button>
+        <button
+          class="ctl"
+          id="open-btn"
+          type="button"
+          title="Open an audio file (O)"
+          aria-label="Open an audio file"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M8 10V2.5M4.75 5.5 8 2.25l3.25 3.25M2.5 10v3.5h11V10" />
+          </svg>
+        </button>
+        <button
+          class="ctl"
+          id="play-btn"
+          type="button"
+          title="Play what is on screen (P or Space)"
+          aria-label="Play"
+          disabled
+        >
+          <svg class="off-icon" viewBox="0 0 16 16">
+            <path d="M5 3.25v9.5L12.5 8z" fill="currentColor" />
+          </svg>
+          <svg class="on-icon" viewBox="0 0 16 16">
+            <rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" />
+          </svg>
+        </button>
+        <button
+          class="ctl"
+          id="save-btn"
+          type="button"
+          title="Save a large image (S)"
+          aria-label="Save image"
+          disabled
+        >
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M8 2.25v7.5M4.75 6.75 8 10l3.25-3.25M2.5 10v3.5h11V10" />
+          </svg>
+        </button>
+      </div>
+      <input
+        id="file"
+        type="file"
+        accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg"
+        hidden
+      />
       <div id="readout">
         <span id="status"></span>
         <span id="busy" aria-hidden="true"></span>

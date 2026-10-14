@@ -4,9 +4,13 @@
 // startup click before real audio arrives, which would otherwise land at the
 // start of every recording.
 
-const RING_SECONDS = 32;
+// Also the longest stretch of a loaded file that is analysed: the budgets below
+// were sized for takes this long, and past it the per-recording maps alone run
+// to gigabytes across the worker pool.
+export const RING_SECONDS = 32;
 const WARMUP_SEC = 0.25; // discarded after opening: silence + the startup click
 const LEAD_TRIM = 0.15; // skipped after the press: the mouse/key click itself is audible
+const TAIL_TRIM = 0.02; // and before the stop, for the same click arriving early
 const IDLE_RELEASE_SEC = 60; // close the mic if unused this long, so its light goes out
 const FADE_SEC = 0.004; // raised-cosine at each end of a take, see endTake
 
@@ -58,7 +62,7 @@ export async function ensureMic() {
     },
   });
 
-  if (!audioCtx) audioCtx = new AudioContext();
+  audioContext();
   if (audioCtx.state === 'suspended') await audioCtx.resume();
   if (!workletLoaded) {
     await audioCtx.audioWorklet.addModule('./capture-processor.js');
@@ -79,10 +83,27 @@ export async function ensureMic() {
 
 // The playback path needs somewhere to send audio, and this is the context the
 // recording's sample rate belongs to — resampling a take just to play it back
-// would put the picture and the sound on different clocks. Only ever called
-// once a recording exists, so the context is always already open.
+// would put the picture and the sound on different clocks. Created on first
+// use, so a loaded file can be played without the mic ever being opened; it
+// starts suspended until a click or key resumes it.
 export function audioContext() {
+  if (!audioCtx) audioCtx = new AudioContext();
   return audioCtx;
+}
+
+// A hard cut at either end is a step, and a step is broadband: it drew a
+// bright vertical curtain down the edges of every recording. A few
+// milliseconds of raised cosine removes energy that was never in the sound.
+// Applied to loaded files as well as takes, since a file cut from the middle
+// of something has the same steps.
+export function fadeEnds(samples, sampleRate) {
+  const n = samples.length;
+  const fade = Math.min(Math.round(sampleRate * FADE_SEC), n >> 1);
+  for (let i = 0; i < fade; i++) {
+    const g = 0.5 - 0.5 * Math.cos((Math.PI * i) / fade);
+    samples[i] *= g;
+    samples[n - 1 - i] *= g;
+  }
 }
 
 export function releaseMic() {
@@ -113,24 +134,21 @@ export function beginTake(lagMs = 0) {
   return Math.max(0, written - back + lead);
 }
 
-export function endTake(from) {
-  const start = Math.max(from, written - ringSize);
-  const n = Math.max(0, written - start);
+// Where a take should end, by the same reasoning run the other way: `lagMs` is
+// how long ago the stop was pressed, and everything written since — including
+// the click of pressing it — is not part of the take.
+export function endTake(from, lagMs = 0) {
+  const back = Math.round(audioCtx.sampleRate * (lagMs / 1000 + TAIL_TRIM));
+  const end = Math.max(from, written - back);
+  const start = Math.max(from, end - ringSize);
+  const n = Math.max(0, end - start);
   const samples = new Float32Array(n);
   const at = start % ringSize;
   const firstRun = Math.min(n, ringSize - at);
   samples.set(ring.subarray(at, at + firstRun), 0);
   if (firstRun < n) samples.set(ring.subarray(0, n - firstRun), firstRun);
 
-  // A hard cut at either end is a step, and a step is broadband: it drew a
-  // bright vertical curtain down the edges of every recording. A few
-  // milliseconds of raised cosine removes energy that was never in the sound.
-  const fade = Math.min(Math.round(audioCtx.sampleRate * FADE_SEC), n >> 1);
-  for (let i = 0; i < fade; i++) {
-    const g = 0.5 - 0.5 * Math.cos((Math.PI * i) / fade);
-    samples[i] *= g;
-    samples[n - 1 - i] *= g;
-  }
+  fadeEnds(samples, audioCtx.sampleRate);
 
   idleTimer = setTimeout(releaseMic, IDLE_RELEASE_SEC * 1000);
   return {samples, sampleRate: audioCtx.sampleRate};

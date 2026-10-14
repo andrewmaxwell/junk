@@ -1283,6 +1283,28 @@ export function sampleCell(u, v, f) {
   return view.sampleCell(u, v, f);
 }
 
+// For `probe.js`: what the accumulation buffer holds for this viewport, and
+// the picture exactly as the screen shows it, rows top-first. Both draw first,
+// so they describe this viewport and not whatever was last on screen.
+export function readAccum(canvas, viewport) {
+  draw(canvas, viewport);
+  return view.readAccum();
+}
+
+export function snapshot(canvas, viewport) {
+  const {w, h} = sizeOf(canvas);
+  const pixels = new Uint8ClampedArray(w * h * 4);
+
+  if (!view.tile(viewport, w, h, h, pixels)) {
+    return null;
+  }
+
+  // The screen wants its own buffer back, as after an export.
+  draw(canvas, viewport);
+
+  return {w, h, pixels};
+}
+
 // The part of `v` covered by the given fractions of its width and height, the
 // vertical ones measured downwards from the top.
 function crop(v, u0, u1, y0, y1) {

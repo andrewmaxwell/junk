@@ -63,7 +63,7 @@
     "filePath": "soundViz",
     "title": "SoundViz",
     "year": 2026,
-    "desc": "Record sound and see it"
+    "desc": "Record or load sound and see it"
   },
   {
     "filePath": "perf",

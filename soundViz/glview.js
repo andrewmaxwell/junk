@@ -405,6 +405,17 @@ void main() {
   frag = texelFetch(uAccum, uAt, 0);
 }`;
 
+// The whole accumulation buffer, verbatim, into an RGBA32F target the same
+// size — for the same reason `PICK_FS` exists: the buffer itself may be half
+// float. Only `probe.js` reads this, to measure the picture against the truth.
+const COPY_FS = `#version 300 es
+precision highp float;
+uniform highp sampler2D uAccum;
+out vec4 frag;
+void main() {
+  frag = texelFetch(uAccum, ivec2(gl_FragCoord.xy), 0);
+}`;
+
 const PRESENT_FS = `#version 300 es
 precision highp float;
 
@@ -544,6 +555,7 @@ export function createView(canvas) {
   const decimateProg = program(gl, QUAD_VS, DECIMATE_FS);
   const presentProg = program(gl, QUAD_VS, PRESENT_FS);
   const pickProg = program(gl, QUAD_VS, PICK_FS);
+  const copyProg = program(gl, QUAD_VS, COPY_FS);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -1103,6 +1115,38 @@ export function createView(canvas) {
         conf,
         drive,
       };
+    },
+
+    // Every texel of the accumulation buffer — power, coherence-weighted drive,
+    // unused, coherence-weighted power — rows bottom-first, as a test reads it.
+    readAccum() {
+      if (!accum) {
+        return null;
+      }
+
+      const {w, h} = accum;
+      const copy = target(gl, w, h, gl.RGBA32F, gl.RGBA, gl.FLOAT);
+
+      if (!copy) {
+        return null;
+      }
+
+      gl.disable(gl.BLEND);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, copy.fbo);
+      gl.viewport(0, 0, w, h);
+      gl.useProgram(copyProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, accum.tex);
+      gl.uniform1i(gl.getUniformLocation(copyProg, 'uAccum'), 0);
+      fullScreen(copyProg);
+
+      const data = new Float32Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, data);
+
+      gl.deleteTexture(copy.tex);
+      gl.deleteFramebuffer(copy.fbo);
+
+      return {w, h, data};
     },
 
     // One tile of a larger image, returned as RGBA rows top-first. Strokes are

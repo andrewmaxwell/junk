@@ -117,8 +117,7 @@ const DRAG_SLOP = 8;
 // on the same two operations.
 //
 // A single pointer is only taken as a pan when there is something to pan —
-// otherwise it belongs to the recorder, which owns every press made at full
-// view. `canPan` is asked once per press so the two cannot disagree.
+// at the full view there is nowhere to go. `canPan` is asked once per press.
 //
 // A gesture only ever re-projects the cloud already in hand, which is instant.
 // If the new view wants a finer grid than that cloud was built on, one is
@@ -126,16 +125,7 @@ const DRAG_SLOP = 8;
 // cells without moving any, so it reads as detail arriving rather than as the
 // picture changing.
 export function attachGestures(el, opts) {
-  const {
-    getView,
-    setView,
-    getLimits,
-    onGesture,
-    onSettle,
-    onMultiTouch,
-    canPan,
-    onDragStart,
-  } = opts;
+  const {getView, setView, getLimits, onGesture, onSettle, canPan} = opts;
 
   const rect = () => el.getBoundingClientRect();
   const pointers = new Map();
@@ -219,7 +209,6 @@ export function attachGestures(el, opts) {
         cx: (a.x + b.x) / 2,
         cy: (a.y + b.y) / 2,
       };
-      onMultiTouch();
       onGesture();
     }
   });
@@ -237,10 +226,8 @@ export function attachGestures(el, opts) {
           return;
         }
 
-        // Past the slop the gesture has declared itself, and whatever the press
-        // had begun is no longer wanted.
+        // Past the slop the gesture has declared itself.
         drag.moved = true;
-        onDragStart();
       }
 
       const r = rect();
@@ -350,15 +337,4 @@ export function attachGestures(el, opts) {
       lastTap = now;
     }
   });
-
-  return {
-    pointerCount: () => pointers.size,
-
-    // The press has committed to something else — a recording — so it is no
-    // longer a candidate for a pan. Without this a hand that drifts *after* the
-    // take has started would be read as a drag and throw the take away.
-    cancelDrag: () => {
-      drag = null;
-    },
-  };
 }
