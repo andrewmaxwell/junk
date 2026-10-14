@@ -1,4 +1,4 @@
-import {FFT} from './fft.js';
+import {Spectra} from './spectra.js';
 
 // The ridge map: how much of a ridge stands behind each part of the picture.
 //
@@ -186,31 +186,19 @@ export function buildRidge({samples, sampleRate, winLen, fMin, fMax}) {
   const bins = fftSize / 2;
   const frames = Math.floor(samples.length / REACH) + 1;
 
-  const fft = new FFT(fftSize);
-  const centre = (winLen - 1) / 2;
   const align = -(winLen >> 1);
 
-  const w = new Float32Array(winLen);
-  const tw = new Float32Array(winLen);
-  const dw = new Float32Array(winLen);
-
-  for (let n = 0; n < winLen; n++) {
-    const phase = (2 * Math.PI * n) / winLen;
-    w[n] = 0.5 - 0.5 * Math.cos(phase);
-    tw[n] = (n - centre) * w[n];
-    dw[n] = (Math.PI / winLen) * Math.sin(phase);
-  }
-
-  const binHz = sampleRate / fftSize;
-  const hzPerRad = sampleRate / (2 * Math.PI);
+  // Every bin but DC, unpadded — the bins every analysis pass shares.
+  const spectra = new Spectra({winLen, fftSize, sampleRate, lo: 1, hi: bins});
 
   const tau = winLen / 4; // time scale, samples
   const phi = sampleRate / winLen; // frequency scale: one bin of this map, Hz
 
-  const re = new Float32Array(fftSize);
-  const im = new Float32Array(fftSize);
-  const dRe = new Float32Array(fftSize);
-  const dIm = new Float32Array(fftSize);
+  // Run, rise and power arrive here at full precision, as they always were
+  // computed, before the map stores what it keeps of them.
+  const run = new Float64Array(bins);
+  const rise = new Float64Array(bins);
+  const power = new Float64Array(bins);
 
   const makeRow = () => ({
     t: new Float32Array(bins),
@@ -301,60 +289,28 @@ export function buildRidge({samples, sampleRate, winLen, fMin, fMax}) {
   for (let frame = 0; frame < frames; frame++) {
     const off = frame * REACH + align;
 
-    for (let n = 0; n < winLen; n++) {
-      const s = off + n;
-      const v = s >= 0 && s < samples.length ? samples[s] : 0;
-
-      re[n] = v * w[n];
-      im[n] = v * tw[n];
-      dRe[n] = v * dw[n];
-    }
-
-    dIm.fill(0);
-
-    fft.transform(re, im);
-    fft.transform(dRe, dIm);
-
-    const frameCentre = off + centre;
+    // Indexed from bin 1, as the engine writes from `lo`.
+    spectra.frame(samples, off, {
+      ok: cur.ok.subarray(1),
+      t: cur.t.subarray(1),
+      f: cur.f.subarray(1),
+      run: run.subarray(1),
+      rise: rise.subarray(1),
+      p: power.subarray(1),
+    });
 
     for (let b = 1; b < bins; b++) {
-      cur.ok[b] = 0;
-
-      const j = fftSize - b;
-
-      const xr = (re[b] + re[j]) * 0.5;
-      const xi = (im[b] - im[j]) * 0.5;
-      const tr = (im[b] + im[j]) * 0.5;
-      const ti = (re[j] - re[b]) * 0.5;
-
-      const power = xr * xr + xi * xi;
-
-      if (power < 1e-20) {
+      if (!cur.ok[b]) {
         continue;
       }
 
-      let dt = (tr * xr + ti * xi) / power;
-
-      if (dt > centre) {
-        dt = centre;
-      } else if (dt < -centre) {
-        dt = -centre;
-      }
-
-      const df = -((dIm[b] * xr - dRe[b] * xi) / power) * hzPerRad;
-      const run = (ti * xr - tr * xi) / power;
-      const rise = ((dRe[b] * xr + dIm[b] * xi) / power) * hzPerRad;
-
-      cur.t[b] = frameCentre + dt;
-      cur.f[b] = b * binHz + df;
-      cur.dx[b] = run / tau;
-      cur.dy[b] = rise / phi;
+      cur.dx[b] = run[b] / tau;
+      cur.dy[b] = rise[b] / phi;
       cur.dl[b] = Math.sqrt(cur.dx[b] * cur.dx[b] + cur.dy[b] * cur.dy[b]);
-      cur.ok[b] = 1;
 
       pw[frame * bins + b] = Math.min(
         255,
-        Math.max(0, Math.round(10 * Math.log10(power) + DB_OFFSET)),
+        Math.max(0, Math.round(10 * Math.log10(power[b]) + DB_OFFSET)),
       );
     }
 

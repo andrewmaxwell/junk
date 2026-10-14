@@ -46,7 +46,8 @@ stays because it costs nothing and a trackpad uses some of it.
 | -------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `main.js`                                                      | app state, gestures to viewports, the readout, save and playback |
 | `render.js`                                                    | picks the grids, runs the pool, owns every budget                |
-| `reassign.js`                                                  | the STFT and the reassignment — one region of one scale          |
+| `spectra.js`                                                   | one frame's reassigned STFT, by FFT or chirp-z; shared by both   |
+| `reassign.js`                                                  | cells: coherence, support, share — one region of one scale       |
 | `ridge.js`                                                     | ridge chains, the support gate, the share arena                  |
 | `glview.js`                                                    | WebGL2: strokes, accumulation, exposure, colour, tiled export    |
 | `zoom.js`                                                      | viewport model (samples x Hz), wheel, drag and pinch             |
@@ -57,7 +58,8 @@ stays because it costs nothing and a trackpad uses some of it.
 | `fft.js`, `recorder.js`, `playback.js`, `capture-processor.js` | as named                                                         |
 
 Dependency direction: `main -> {recorder, render, zoom, playback}`,
-`render -> {ridge, glview}`, workers -> `{reassign, ridge}`. Nothing points back.
+`render -> {ridge, glview}`, workers -> `{reassign, ridge}`, both of which
+compute their transforms through `spectra.js`. Nothing points back.
 
 ## What a single drawn segment means
 

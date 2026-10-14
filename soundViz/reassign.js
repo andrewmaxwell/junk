@@ -1,5 +1,4 @@
-import {FFT} from './fft.js';
-import {BandDFT} from './czt.js';
+import {Spectra} from './spectra.js';
 import {REACH, SHARE_ROWS} from './ridge.js';
 
 // Reassigned spectrogram, as a cloud of cells rather than a grid.
@@ -104,45 +103,9 @@ export function analyzeCells({
   out,
   chirp = false,
 }) {
-  const centre = (winLen - 1) / 2;
   const align = -(winLen >> 1);
 
-  const w = new Float32Array(winLen);
-  const tw = new Float32Array(winLen);
-  const dw = new Float32Array(winLen);
-
-  let winSum = 0;
-
-  for (let n = 0; n < winLen; n++) {
-    const phase = (2 * Math.PI * n) / winLen;
-
-    w[n] = 0.5 - 0.5 * Math.cos(phase);
-
-    // Time-ramped window.
-    tw[n] = (n - centre) * w[n];
-
-    // Derivative of the Hann window.
-    dw[n] = (Math.PI / winLen) * Math.sin(phase);
-
-    winSum += w[n];
-  }
-
-  // Coherent gain, then one correction: zero padding samples the same spectrum
-  // more finely, so the main lobe of a partial is spread over `fftSize/winLen`
-  // times as many bins, all of which reassign onto the same ridge. Without
-  // dividing it out, padding would make the picture brighter rather than finer.
-  //
-  // Nothing here depends on the hop, and that is deliberate. Halving the hop
-  // doubles the cells along a ridge but also halves the gap between them, and
-  // the renderer divides by how many strokes cover a pixel — so the brightness
-  // already comes out the same, and dividing again here would make a ridge fade
-  // every time it was sampled more finely. That is what used to make the
-  // picture change colour on zoom.
-  const scale = (2 / winSum) ** 2 / (fftSize / winLen);
-
   const nyq = fftSize / 2;
-  const binHz = sampleRate / fftSize;
-  const hzPerRad = sampleRate / (2 * Math.PI);
 
   // Normalising scales for the coherence residual, fixed by the window alone
   // so no pass can recolour cells another pass emitted.
@@ -229,50 +192,29 @@ export function analyzeCells({
     });
   }
 
-  // Two ways to get the band's spectra, and `render.js` picks whichever is
-  // cheaper for the grid — see `bandCost` there.
+  // The band's spectra, computed `step` beyond each end — by the FFT or by the
+  // chirp-z, whichever `render.js` found cheaper for this grid.
+  const spectra = new Spectra({
+    winLen,
+    fftSize,
+    sampleRate,
+    lo: cLo,
+    hi: cHi,
+    chirp,
+  });
+
+  // Coherent gain, then one correction: zero padding samples the same spectrum
+  // more finely, so the main lobe of a partial is spread over `fftSize/winLen`
+  // times as many bins, all of which reassign onto the same ridge. Without
+  // dividing it out, padding would make the picture brighter rather than finer.
   //
-  // The FFT computes the whole zero-padded spectrum and keeps the band: two
-  // real windows packed into one transform, the derivative window in another.
-  // This is what every full view uses, and it is unchanged to the bit.
-  //
-  // The chirp-z computes only the band, which at a deep zoom is a few hundred
-  // bins of a quarter-million. And it needs two transforms rather than three,
-  // because a periodic Hann window is three complex exponentials: w = 1/2 -
-  // e^{iθn}/4 - e^{-iθn}/4 with θ = 2π/winLen, and multiplying by e^{iθn} shifts
-  // a spectrum by exactly `step` padded bins. So with X the spectrum of the
-  // bare frame and Q that of the frame times (n - centre),
-  //
-  //   X_w[k]  = X[k]/2 - (X[k-step] + X[k+step])/4
-  //   X_tw[k] = the same of Q
-  //   X_dw[k] = (π/winLen) (X[k-step] - X[k+step]) / 2i
-  //
-  // which is exact, not an approximation: it is the same three windows. So the
-  // band is computed `step` wider on each side and the windows applied after.
-  const fft = chirp ? null : new FFT(fftSize);
-
-  const re = chirp ? null : new Float32Array(fftSize);
-  const im = chirp ? null : new Float32Array(fftSize);
-
-  const dRe = chirp ? null : new Float32Array(fftSize);
-  const dIm = chirp ? null : new Float32Array(fftSize);
-
-  const k0 = cLo - step;
-  const kw = width + 2 * step;
-  const dft = chirp ? new BandDFT(winLen, fftSize, k0, kw) : null;
-
-  const bRe = chirp ? new Float64Array(kw) : null;
-  const bIm = chirp ? new Float64Array(kw) : null;
-  const qRe = chirp ? new Float64Array(kw) : null;
-  const qIm = chirp ? new Float64Array(kw) : null;
-
-  const ramp = new Float64Array(winLen);
-
-  for (let n = 0; n < winLen; n++) {
-    ramp[n] = n - centre;
-  }
-
-  const dwGain = Math.PI / winLen / 2;
+  // Nothing here depends on the hop, and that is deliberate. Halving the hop
+  // doubles the cells along a ridge but also halves the gap between them, and
+  // the renderer divides by how many strokes cover a pixel — so the brightness
+  // already comes out the same, and dividing again here would make a ridge fade
+  // every time it was sampled more finely. That is what used to make the
+  // picture change colour on zoom.
+  const scale = (2 / spectra.winSum) ** 2 / (fftSize / winLen);
 
   // The ridge map is indexed by absolute instant and by the unpadded bins every
   // pass shares, so a cell asks it the same question however finely it was
@@ -469,106 +411,15 @@ export function analyzeCells({
     // power of two, floored at 1), so this rounding is only defensive.
     const off = tStart + Math.round(frame * hop) + align;
 
-    if (chirp) {
-      dft.transform(samples, off, null, bRe, bIm);
-      dft.transform(samples, off, ramp, qRe, qIm);
-    } else {
-      for (let n = 0; n < winLen; n++) {
-        const s = off + n;
-
-        const v = s >= 0 && s < samples.length ? samples[s] : 0;
-
-        re[n] = v * w[n];
-        im[n] = v * tw[n];
-        dRe[n] = v * dw[n];
-      }
-
-      // Only the imaginary half of the derivative transform needs clearing:
-      // everything past `winLen` is zero padding the transform is told about
-      // rather than made to read, and every other input slot below it was just
-      // written.
-      dIm.fill(0, 0, winLen);
-
-      // Two real sequences packed into one complex transform, unpacked per bin
-      // below; the derivative window needs a transform of its own.
-      fft.transform(re, im, winLen);
-      fft.transform(dRe, dIm, winLen);
-    }
-
-    const frameCentre = off + centre;
     const cur = slot[frame % R];
     const hot = heavy[frame % H];
 
-    for (let b = cLo; b < cHi; b++) {
-      const bi = b - cLo;
-
-      cur.ok[bi] = 0;
-
-      // The ordinary windowed transform, the time-ramped one, and the
-      // derivative one.
-      let xr, xi, tr, ti, dr, di;
-
-      if (chirp) {
-        const m = b - k0;
-        const lo = m - step;
-        const hi = m + step;
-
-        xr = 0.5 * bRe[m] - 0.25 * (bRe[lo] + bRe[hi]);
-        xi = 0.5 * bIm[m] - 0.25 * (bIm[lo] + bIm[hi]);
-        tr = 0.5 * qRe[m] - 0.25 * (qRe[lo] + qRe[hi]);
-        ti = 0.5 * qIm[m] - 0.25 * (qIm[lo] + qIm[hi]);
-        dr = dwGain * (bIm[lo] - bIm[hi]);
-        di = -dwGain * (bRe[lo] - bRe[hi]);
-      } else {
-        const j = fftSize - b;
-
-        xr = (re[b] + re[j]) * 0.5;
-        xi = (im[b] - im[j]) * 0.5;
-        tr = (im[b] + im[j]) * 0.5;
-        ti = (re[j] - re[b]) * 0.5;
-        dr = dRe[b];
-        di = dIm[b];
-      }
-
-      const power = xr * xr + xi * xi;
-
-      if (power < 1e-20) {
-        continue;
-      }
-
-      // Re{X_tw / X} — displacement in samples from the window centre.
-      let dt = (tr * xr + ti * xi) / power;
-
-      // Numerical noise must not fling a cell outside its own window.
-      if (dt > centre) {
-        dt = centre;
-      } else if (dt < -centre) {
-        dt = -centre;
-      }
-
-      // -Im{X_dw / X} — displacement in Hz from the bin centre.
-      const df = -((di * xr - dr * xi) / power) * hzPerRad;
-
-      // Ridge direction. For a signal that is locally a linear chirp,
-      //
-      //   X_dw / X = -i(wi - w) - i*q*(X_tw / X)
-      //
-      // where q is the chirp rate. The first term is purely imaginary, so
-      // taking real parts leaves Re{X_dw/X} = q * Im{X_tw/X}: the chirp rate is
-      // a ratio of two quantities already in hand, at the cost of no extra
-      // transform. Carrying them as a *pair* rather than dividing keeps the
-      // degenerate cases finite — a steady tone has zero rise and a click has
-      // zero run, and a ratio would blow up on one or the other.
-      const run = (ti * xr - tr * xi) / power; // Im{X_tw / X}, samples
-      const rise = (dr * xr + di * xi) / power; // Re{X_dw / X}, rad/sample
-
-      cur.t[bi] = frameCentre + dt;
-      cur.f[bi] = b * binHz + df;
-      hot.run[bi] = run;
-      hot.rise[bi] = rise * hzPerRad;
-      hot.p[bi] = power * scale;
-      cur.ok[bi] = 1;
-    }
+    spectra.frame(
+      samples,
+      off,
+      {ok: cur.ok, t: cur.t, f: cur.f, run: hot.run, rise: hot.rise, p: hot.p},
+      scale,
+    );
 
     const e = frame - D;
 
