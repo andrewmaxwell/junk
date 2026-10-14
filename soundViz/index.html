@@ -26,6 +26,22 @@
         width: 100%;
         height: 100%;
       }
+      /* The live preview while recording, and the axis ticks: both laid over
+         the picture, and neither takes a click. */
+      #live,
+      #axes {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+      #live {
+        display: none;
+      }
+      #live.show {
+        display: block;
+      }
       #ui {
         position: fixed;
         left: max(16px, env(safe-area-inset-left));
@@ -261,6 +277,8 @@
   </head>
   <body>
     <canvas id="view"></canvas>
+    <canvas id="live"></canvas>
+    <canvas id="axes"></canvas>
     <div id="hint">Record, or open or drop an audio file</div>
     <div id="ui">
       <div id="controls">

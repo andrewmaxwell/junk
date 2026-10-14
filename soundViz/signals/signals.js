@@ -23,7 +23,125 @@ const HARMONICS = Array.from({length: 12}, (_, k) => 180 * (k + 1));
 
 const CLICK_TIMES = Array.from({length: 8}, (_, k) => 0.125 + 0.25 * k);
 
+// The demo: what the page opens with. Not a test so much as something worth
+// looking at, built from what the picture is good at — a voice-like harmonic
+// series with a melodic contour and vibrato, sung as two vowels whose formants
+// light different harmonics; two bird-like trills of fast falling whistles;
+// and two clicks. Its partials are known exactly all the same.
+
+// Pitch: a slow rise and fall between 110 and 190 Hz, with 5.5 Hz vibrato.
+const f0 = (t) =>
+  150 + 40 * Math.sin(TAU * 0.2 * t) + 3 * Math.sin(TAU * 5.5 * t);
+const phase0 = (t) =>
+  150 * t -
+  (40 / (TAU * 0.2)) * Math.cos(TAU * 0.2 * t) -
+  (3 / (TAU * 5.5)) * Math.cos(TAU * 5.5 * t);
+
+// Two vowels, each a span of time and its formants: [centre Hz, width Hz, gain].
+const VOWELS = [
+  {
+    from: 0.15,
+    to: 1.75,
+    formants: [
+      [700, 130, 1],
+      [1200, 160, 0.6],
+      [2600, 260, 0.25],
+      [3500, 300, 0.12],
+    ],
+  },
+  {
+    from: 2.05,
+    to: 3.75,
+    formants: [
+      [300, 90, 1],
+      [2300, 220, 0.5],
+      [3000, 280, 0.3],
+      [3700, 300, 0.12],
+    ],
+  },
+];
+
+const HARMONIC_MAX = 8000;
+
+// Raised-cosine edges, so a vowel starts and stops without a click.
+function gate(t, from, to, edge = 0.06) {
+  if (t <= from || t >= to) return 0;
+  const a = Math.min(1, (t - from) / edge, (to - t) / edge);
+  return 0.5 - 0.5 * Math.cos(Math.PI * a);
+}
+
+function voiced(t) {
+  const v = VOWELS.find((w) => t > w.from && t < w.to);
+  return v ? {v, g: gate(t, v.from, v.to)} : null;
+}
+
+// Falling whistles, 7 kHz to 3.5 kHz in 60 ms, exponentially.
+const CHIRP_LEN = 0.06;
+const CHIRP_F0 = 7000;
+const CHIRP_F1 = 3500;
+const CHIRP_AT = [0.45, 0.58, 0.71, 2.55, 2.68];
+const CHIRP_K = Math.log(CHIRP_F1 / CHIRP_F0);
+
+const chirpAt = (t) => CHIRP_AT.find((c) => t >= c && t < c + CHIRP_LEN);
+const chirpF = (tau) => CHIRP_F0 * Math.exp((CHIRP_K * tau) / CHIRP_LEN);
+
+const DEMO_CLICKS = [1.9, 3.9];
+
 export const SIGNALS = {
+  demo: {
+    seconds: 4,
+    wave: (t) => {
+      let out = 0;
+
+      const on = voiced(t);
+
+      if (on) {
+        const f = f0(t);
+        const ph = TAU * phase0(t);
+
+        for (let k = 1; k * f < HARMONIC_MAX; k++) {
+          const fk = k * f;
+          const env = on.v.formants.reduce(
+            (s, [c, w, g]) => s + g * Math.exp(-(((fk - c) / w) ** 2)),
+            0.03,
+          );
+          out += (env / Math.sqrt(k)) * Math.sin(k * ph);
+        }
+
+        out *= 0.16 * on.g;
+      }
+
+      const c = chirpAt(t);
+
+      if (c !== undefined) {
+        const tau = t - c;
+        const ph =
+          (TAU *
+            CHIRP_F0 *
+            CHIRP_LEN *
+            (Math.exp((CHIRP_K * tau) / CHIRP_LEN) - 1)) /
+          CHIRP_K;
+        out += 0.15 * Math.sin(Math.PI * (tau / CHIRP_LEN)) ** 2 * Math.sin(ph);
+      }
+
+      if (DEMO_CLICKS.some((k) => Math.abs(t - k) < 0.5 / SAMPLE_RATE)) {
+        out += 0.6;
+      }
+
+      return out;
+    },
+    partials: (t) => {
+      const out = [];
+      if (voiced(t)) {
+        const f = f0(t);
+        for (let k = 1; k * f < HARMONIC_MAX; k++) out.push(k * f);
+      }
+      const c = chirpAt(t);
+      if (c !== undefined) out.push(chirpF(t - c));
+      return out;
+    },
+  },
+
   // Three steady tones, far apart: the simplest case there is.
   tones: {
     seconds: 2,

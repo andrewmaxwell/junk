@@ -5,6 +5,8 @@ import {
   isArming,
   audioContext,
   fadeEnds,
+  position,
+  read,
   RING_SECONDS,
 } from './recorder.js';
 import * as audio from './playback.js';
@@ -22,6 +24,8 @@ import {
 } from './render.js';
 import {fullView, isFullView, zoomFactor, attachGestures} from './zoom.js';
 import {measure} from './probe.js';
+import {drawAxes} from './axes.js';
+import {createLive} from './live.js';
 
 const MIN_SAMPLES = 4096; // ~85 ms; shorter than this there is nothing to transform
 
@@ -92,6 +96,13 @@ const openBtn = document.getElementById('open-btn');
 const playBtn = document.getElementById('play-btn');
 const saveBtn = document.getElementById('save-btn');
 const fileInput = document.getElementById('file');
+const axesEl = document.getElementById('axes');
+
+const live = createLive(document.getElementById('live'), {
+  read,
+  position,
+  fMin: F_MIN,
+});
 const inspectEl = document.getElementById('inspect');
 const inspectHead = document.getElementById('inspect-head');
 const inspectRows = document.getElementById('inspect-rows');
@@ -260,7 +271,7 @@ closeBtn.addEventListener('pointerdown', (e) => {
 // instead of doing nothing with it. Available at every zoom, full view
 // included — the numbers are as meaningful there as anywhere.
 function inspect(x, y) {
-  if (!rec) return;
+  if (!rec || live.visible()) return;
 
   const rect = canvas.getBoundingClientRect();
   const u = (x - rect.left) / rect.width;
@@ -440,6 +451,18 @@ async function startRecording(pressedAt) {
   sawArming = isArming();
   syncButtons();
 
+  hideInspect();
+  live.start(take, audioContext().sampleRate, RING_SECONDS);
+
+  const feed = () => {
+    if (take === null) return;
+    live.update();
+    paintAxes();
+    requestAnimationFrame(feed);
+  };
+
+  feed();
+
   const started = performance.now();
 
   ticker = setInterval(() => {
@@ -465,6 +488,9 @@ function stopRecording(pressedAt) {
 
   const result = endTake(from, since(pressedAt));
 
+  // The preview stays up until the real picture replaces it.
+  live.stop();
+
   if (result.samples.length < MIN_SAMPLES) {
     // Distinguish "too short" from "the mic had not finished opening yet",
     // which is only ever the first take and is not the user's fault.
@@ -473,6 +499,8 @@ function stopRecording(pressedAt) {
       false,
     );
     nagTimer = setTimeout(showZoom, 1600);
+    live.hide();
+    paintAxes();
     syncButtons();
     return;
   }
@@ -515,11 +543,18 @@ function show(result) {
   showZoom();
   syncButtons();
 
+  // The live preview, if a take just ended, comes down once the picture that
+  // replaces it is on screen — or once it is clear none is coming.
   return track(
-    analyze(canvas, rec, viewport, true).then(() => {
-      draw(canvas, viewport);
-      showZoom();
-    }),
+    analyze(canvas, rec, viewport, true)
+      .then(() => {
+        paint();
+        showZoom();
+      })
+      .finally(() => {
+        live.hide();
+        paintAxes();
+      }),
   );
 }
 
@@ -598,6 +633,31 @@ function loadFile(file) {
   return file.arrayBuffer().then((buf) => loadAudio(buf, file.name));
 }
 
+// The axes describe whatever is on screen: the live preview while there is
+// one, otherwise the picture.
+function paintAxes() {
+  if (live.visible()) {
+    drawAxes(axesEl, live.view());
+  } else if (rec) {
+    drawAxes(axesEl, {
+      t0: viewport.t0 / rec.sampleRate,
+      t1: viewport.t1 / rec.sampleRate,
+      f0: viewport.f0,
+      f1: viewport.f1,
+    });
+  } else {
+    drawAxes(axesEl, null);
+  }
+}
+
+function paint() {
+  if (rec) {
+    draw(canvas, viewport);
+  }
+
+  paintAxes();
+}
+
 let framePending = false;
 
 function requestFrame() {
@@ -605,7 +665,7 @@ function requestFrame() {
   framePending = true;
   requestAnimationFrame(() => {
     framePending = false;
-    draw(canvas, viewport);
+    paint();
     showZoom();
   });
 }
@@ -654,7 +714,7 @@ async function save() {
   } finally {
     saving = false;
     syncButtons();
-    draw(canvas, viewport);
+    paint();
   }
 }
 
@@ -671,11 +731,11 @@ attachGestures(canvas, {
   // The cloud in hand covers the whole recording until the zoom outruns the
   // budget, so most gestures never reach this at all.
   onSettle: () => {
-    if (!rec || saving) return;
+    if (!rec || saving || live.visible()) return;
 
     track(
       analyze(canvas, rec, viewport, false).then(() => {
-        draw(canvas, viewport);
+        paint();
         showZoom();
       }),
     );
@@ -842,7 +902,7 @@ window.addEventListener('resize', () => {
 
     track(
       analyze(canvas, rec, viewport, true).then(() => {
-        draw(canvas, viewport);
+        paint();
         showZoom();
       }),
     );
@@ -872,7 +932,7 @@ function setView(v) {
   requestFrame();
   track(
     analyze(canvas, rec, viewport, false).then(() => {
-      draw(canvas, viewport);
+      paint();
       showZoom();
     }),
   );
@@ -912,9 +972,14 @@ window.soundViz = {
     }),
 };
 
-// `?file=signals/chirp.wav` opens a file on load — a test signal, usually,
-// so a browser driver needs no microphone.
-const startFile = new URLSearchParams(location.search).get('file');
+// The page opens on the demo, so there is something to look at before
+// anything is recorded. `?file=signals/chirp.wav` opens another file instead —
+// a test signal, usually, so a browser driver needs no microphone — and
+// `?nofile` opens on nothing at all.
+const params = new URLSearchParams(location.search);
+const startFile = params.has('nofile')
+  ? null
+  : (params.get('file') ?? 'signals/demo.wav');
 
 if (startFile && accelerated) {
   loadUrl(startFile);

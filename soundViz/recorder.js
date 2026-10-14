@@ -117,6 +117,25 @@ export function releaseMic() {
   stream = source = node = null;
 }
 
+// How many samples have been written so far — a position, in the same terms
+// as a take's start — and a copy of `out.length` of them from `at`. For the
+// live picture drawn while a take is still going.
+export function position() {
+  return written;
+}
+
+export function read(at, out) {
+  const n = out.length;
+  const pos = ((at % ringSize) + ringSize) % ringSize;
+  const firstRun = Math.min(n, ringSize - pos);
+
+  out.set(ring.subarray(pos, pos + firstRun), 0);
+
+  if (firstRun < n) {
+    out.set(ring.subarray(0, n - firstRun), firstRun);
+  }
+}
+
 // Where a take should start. On a warm mic this sits *ahead* of the current
 // write position: pressing makes a noise, and capture latency means that noise
 // has not been written yet when the event fires. On a mic that just opened the

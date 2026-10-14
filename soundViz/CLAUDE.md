@@ -8,6 +8,13 @@ are looking at, `S` to save it as a large PNG. Served from
 `http://localhost:3000/soundViz/`. No build step, no dependencies — plain ES
 modules loaded by `index.html`.
 
+The page opens on `signals/demo.wav` (a synthesised voice, bird trills and two
+clicks) so it is never blank; `?file=` opens another file and `?nofile` opens
+on nothing. While a take is recording, `live.js` draws a plain scrolling
+spectrogram as a preview, which the real picture replaces when its analysis
+lands. Faint ticks on the left and bottom edges (`axes.js`) label frequency and
+time for whatever is on screen.
+
 The controls are four small buttons in the top-left corner and nothing else;
 Andrew asked for them to stay minimal so they do not obscure the picture.
 Recording used to be "hold anywhere", and was removed because it made
@@ -52,6 +59,8 @@ stays because it costs nothing and a trackpad uses some of it.
 | `glview.js`                                                    | WebGL2: strokes, accumulation, exposure, colour, tiled export    |
 | `zoom.js`                                                      | viewport model (samples x Hz), wheel, drag and pinch             |
 | `probe.js`                                                     | `window.soundViz`: drive the page and score it against the truth |
+| `live.js`                                                      | the preview while recording: plain STFT on a 2D canvas           |
+| `axes.js`                                                      | the faint frequency and time ticks, on a canvas over the picture |
 | `signals/`                                                     | test signals with known answers, and `make.mjs` to render them   |
 | `analysis-worker.js`                                           | one pool thread; owns nothing, decides nothing                   |
 | `czt.js`                                                       | chirp-z: the DFT at just a band's bins, for zoomed grids         |
@@ -460,7 +469,8 @@ each signal as a formula with its right answer — every partial's frequency at
 every instant, every click's instant — and `node soundViz/signals/make.mjs`
 renders them to the WAVs beside it. Open one with `?file=signals/<name>.wav`
 and the page needs no mic, gives the same samples on every run, and can be
-scored against the truth:
+scored against the truth. (Use `?nofile` for a page that starts empty; without
+it the demo is loaded first.)
 
 ```js
 await soundViz.load('signals/chirp.wav');        // resolves once analysed

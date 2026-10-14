@@ -188,7 +188,9 @@ const STOPS = [
 const BLACK_FADE = 0.11;
 const LUT_SIZE = 256;
 
-function buildLut() {
+// Exported for the live picture drawn while recording, so the two share one
+// palette.
+export function buildLut() {
   const lut = new Uint8Array(LUT_SIZE * 4);
 
   for (let i = 0; i < LUT_SIZE; i++) {
