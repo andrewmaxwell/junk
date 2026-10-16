@@ -1,7 +1,7 @@
 {
   "name": "Walk Comfort",
   "short_name": "Comfort",
-  "description": "How good the weather is for a 30 minute walk, right now and over the next week.",
+  "description": "How good the weather is for a 30 minute walk or an hour sitting outside, right now and over the next week.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -30,6 +30,7 @@ import {
 } from './comfort.js';
 import {renderComfortChart} from './chart.js';
 import {thermalStress} from './thermal.js';
+import {UNITS, defaultUnits} from './units.js';
 
 // Open-Meteo's current block only advances every 15 minutes, so the old
 // once-a-minute poll re-downloaded four days of hourly data to learn nothing.
@@ -43,6 +44,8 @@ const RETURN_REFRESH_MS = 60 * 1000;
 const CHART_PAST_HOURS = 3 * 24;
 const CHART_FUTURE_HOURS = 7 * 24;
 const COORDS_KEY = 'comfort:coords';
+const ACTIVITY_KEY = 'comfort:activity';
+const UNITS_KEY = 'comfort:units';
 // Offline, the service worker replays the last good response and the card looks
 // exactly as confident as it did live. Comparing the observation timestamp in
 // the payload to the wall clock is the one check that catches that, whatever
@@ -80,6 +83,8 @@ const els = Object.fromEntries(
     'factor-rows',
     'why-note',
     'temp',
+    'temp-number',
+    'temp-unit',
     'feels-like',
     'sky-label',
     'sky-icon',
@@ -243,7 +248,10 @@ function renderWhy(score, penalties) {
 }
 
 function renderConditions(current, activity) {
-  els.temp.textContent = `${Math.round(current.temperature_2m)}°F`;
+  els.tempNumber.textContent = String(units.temp(current.temperature_2m));
+  els.tempUnit.textContent = units.symbol;
+  const other = units === UNITS.us ? UNITS.metric : UNITS.us;
+  els.temp.setAttribute('aria-label', `Show in ${other.name}`);
   // "Feels like 96°" is a number; "strong heat stress" is UTCI's own published
   // reading of that number, and it is the half that tells you what to do. It is
   // omitted inside the no-stress band so a pleasant day stays quiet.
@@ -255,18 +263,18 @@ function renderConditions(current, activity) {
   els.feelsLike.textContent =
     felt === null
       ? 'Feels like –'
-      : `Feels like ${Math.round(felt)}°${stress ? ` · ${stress}` : ''}`;
+      : `Feels like ${units.temp(felt)}°${stress ? ` · ${stress}` : ''}`;
   els.skyLabel.textContent = describeWeatherCode(current.weather_code);
   // The icon used to be a hardcoded sun-behind-cloud, which sat next to labels
   // like "Clear sky" and "Heavy snow" without ever changing.
   els.skyIcon.innerHTML = weatherIcon(current.weather_code, current.is_day);
 
-  els.wind.textContent = `${Math.round(current.wind_speed_10m)} mph`;
+  els.wind.textContent = units.speed(current.wind_speed_10m);
   // Gusts only earn their space when they're meaningfully above sustained wind.
   const gusts = current.wind_gusts_10m;
   els.windLabel.textContent =
     gusts >= current.wind_speed_10m + 8
-      ? `Gusts ${Math.round(gusts)} mph`
+      ? `Gusts ${units.speed(gusts)}`
       : 'Wind';
 
   // Tiles read as "what it means" over the raw measurement, with the number
@@ -278,7 +286,7 @@ function renderConditions(current, activity) {
     els.humidityLabel,
     describeHumidity(current.dew_point_2m),
     current.dew_point_2m,
-    (v) => `${Math.round(v)}° dew point`,
+    (v) => `${units.temp(v)}° dew point`,
     'Humidity',
   );
   setTile(
@@ -386,6 +394,7 @@ function renderChart(bundle, spread, now, bestWindow, activity, otherActivity) {
         limiter: selected.limiter,
         otherScore: comfortScore(row, {activity: otherActivity}),
         rate: precipitationRate(row),
+        tempLabel: `${units.temp(row.temperature_2m)}°`,
         band: scoreBand(row, spread.get(row.key), activity),
       };
     });
@@ -463,7 +472,27 @@ async function renderPercentile(current, now, activity) {
 let coords = null;
 let refreshTimer = null;
 let lastUpdate = 0;
-let activity = ACTIVITIES.walk;
+// Storage can throw outright (private windows, blocked site data), and losing a
+// preference is never worth losing the page over.
+function store(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Not remembered, then.
+  }
+}
+
+function recall(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+// Someone who always sits out should not have to say so on every visit.
+let activity = ACTIVITIES[recall(ACTIVITY_KEY)] ?? ACTIVITIES.walk;
+let units = UNITS[recall(UNITS_KEY)] ?? defaultUnits();
 // The last good fetch, kept so switching activity is a re-render rather than a
 // round trip: every number on the card is derivable from data already in hand.
 let latest = null;
@@ -546,6 +575,7 @@ function buildActivityToggle() {
     const key = event.target.closest('[data-activity]')?.dataset.activity;
     if (!key || ACTIVITIES[key] === activity) return;
     activity = ACTIVITIES[key];
+    store(ACTIVITY_KEY, key);
     for (const button of els.activityToggle.children) {
       button.setAttribute(
         'aria-pressed',
@@ -606,8 +636,9 @@ function wireRefreshOnReturn() {
 }
 
 function useCoords({lat, lon, name = null}, {remember = true} = {}) {
-  coords = {lat, lon, name};
-  if (remember) localStorage.setItem(COORDS_KEY, JSON.stringify(coords));
+  const asked = {lat, lon, name};
+  coords = asked;
+  if (remember) store(COORDS_KEY, JSON.stringify(coords));
 
   // A place picked by name is already named. Running it back through the
   // reverse geocoder only risks answering with a different one, which reads as
@@ -616,7 +647,8 @@ function useCoords({lat, lon, name = null}, {remember = true} = {}) {
     els.locationName.textContent = name;
   } else {
     fetchLocationName(lat, lon).then((resolved) => {
-      els.locationName.textContent = resolved;
+      // A place searched for while this was in flight must keep its own name.
+      if (coords === asked) els.locationName.textContent = resolved;
     });
   }
 
@@ -630,7 +662,7 @@ function useCoords({lat, lon, name = null}, {remember = true} = {}) {
 
 function readCachedCoords() {
   try {
-    const cached = JSON.parse(localStorage.getItem(COORDS_KEY) ?? 'null');
+    const cached = JSON.parse(recall(COORDS_KEY) ?? 'null');
     return Number.isFinite(cached?.lat) && Number.isFinite(cached?.lon)
       ? cached
       : null;
@@ -690,14 +722,25 @@ async function runPlaceSearch(query) {
     // overwrite the results for what is in the box now.
     if (els.placeInput.value !== query) return;
     searchResults = places;
-    els.placeResults.innerHTML = places
-      .map(
-        (place, i) =>
-          `<li><button type="button" class="place-option" data-place="${i}">` +
-          `<span>${place.name}</span><span class="detail">${place.detail}</span>` +
-          '</button></li>',
-      )
-      .join('');
+    // Built from nodes rather than a string, because these names come from the
+    // geocoder and a place called "<img onerror=…>" would otherwise run.
+    els.placeResults.replaceChildren(
+      ...places.map((place, i) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'place-option';
+        button.dataset.place = String(i);
+        const name = document.createElement('span');
+        name.textContent = place.name;
+        const detail = document.createElement('span');
+        detail.className = 'detail';
+        detail.textContent = place.detail;
+        button.append(name, detail);
+        const item = document.createElement('li');
+        item.append(button);
+        return item;
+      }),
+    );
     renderPlaceNote(places.length ? '' : 'No places found.');
   } catch {
     if (els.placeInput.value !== query) return;
@@ -772,6 +815,14 @@ function init() {
   wirePlaceSearch();
   // Before the early returns below, both of which are ordinary paths.
   wireRefreshOnReturn();
+
+  // The reading names its own unit, so the unit is the switch: no settings
+  // panel for the one setting there is.
+  els.temp.addEventListener('click', () => {
+    units = units === UNITS.us ? UNITS.metric : UNITS.us;
+    store(UNITS_KEY, units.key);
+    render();
+  });
 
   els.whyToggle.addEventListener('click', () => {
     const open = els.whyPanel.hidden;

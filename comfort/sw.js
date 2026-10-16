@@ -1,7 +1,7 @@
 // Cache version. Bumping it retires every previous cache on the next activate,
 // which is the whole update mechanism: no cache entry ever has to be reasoned
 // about across versions.
-const VERSION = 'walk-comfort-v7';
+const VERSION = 'walk-comfort-v9';
 const SHELL_CACHE = `${VERSION}-shell`;
 const DATA_CACHE = `${VERSION}-data`;
 
@@ -14,20 +14,41 @@ const SHELL = [
   './js/comfort.js',
   './js/thermal.js',
   './js/chart.js',
+  './js/units.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];
 
 // Weather is worth showing stale when there is no network, but never worth
 // preferring stale when there is one.
+//
+// Place search is left off: every keystroke is its own URL, and an offline
+// answer to "Springf" is no use to anyone.
 const DATA_HOSTS = [
   'api.open-meteo.com',
   'air-quality-api.open-meteo.com',
   'ensemble-api.open-meteo.com',
   'archive-api.open-meteo.com',
-  'geocoding-api.open-meteo.com',
   'api.bigdatacloud.net',
 ];
+
+// The data cache is keyed by full URL and only a version bump used to empty it,
+// so it grew for as long as a version lived: the archive requests carry today's
+// date and miss the cache every morning, and every place ever viewed left its
+// own set behind. One load is about ten requests, so this keeps the last few
+// places' worth — plenty to replay offline.
+const MAX_DATA_ENTRIES = 40;
+
+// `put` replaces a matching entry by appending the new one, so `keys()` runs
+// least recently written first and the front of it is what nobody has needed.
+async function trimCache(cache) {
+  const keys = await cache.keys();
+  await Promise.all(
+    keys
+      .slice(0, Math.max(0, keys.length - MAX_DATA_ENTRIES))
+      .map((key) => cache.delete(key)),
+  );
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -58,7 +79,9 @@ async function networkFirst(request) {
   const cache = await caches.open(DATA_CACHE);
   try {
     const response = await fetch(request);
-    if (response.ok) cache.put(request, response.clone());
+    if (response.ok) {
+      cache.put(request, response.clone()).then(() => trimCache(cache));
+    }
     return response;
   } catch (err) {
     const cached = await cache.match(request);

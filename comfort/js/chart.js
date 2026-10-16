@@ -365,7 +365,7 @@ function attachHover(svgEl, tipEl, points, xScale, activity, otherActivity) {
       : '';
     tipEl.textContent =
       `${when} · ${activity.key} ${nearest.score}${spread}${other} · ` +
-      `${Math.round(nearest.temperature_2m)}°${because}`;
+      `${nearest.tempLabel}${because}`;
     tipEl.hidden = false;
     // Centred on the cursor, but held inside the chart: at either end of the
     // ten days a centred tip hangs half its width off the card.
