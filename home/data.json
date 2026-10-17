@@ -138,6 +138,12 @@
     "desc": "A simple simulation of the Belousov-Zhabotinsky reaction."
   },
   {
+    "filePath": "particle-life",
+    "title": "Particle Life",
+    "year": 2023,
+    "desc": "Eight colors of particles, each attracted to or repelled by the others by a random rule. They clump into cells, rings, and chasers."
+  },
+  {
     "filePath": "peopleNetwork3D",
     "title": "People Network 3D",
     "year": 2023,
