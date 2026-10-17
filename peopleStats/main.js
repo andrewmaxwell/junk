@@ -299,7 +299,7 @@ const factorPanel = (data, traits, factors) => {
 };
 
 const peopleGraph = () => `
-  <p>Everyone is placed on the two strongest patterns in the answers (see <a href="#factors">Trait Factors</a> below). Left to right is how highly people rated themselves overall, and top to bottom is the second pattern. Both axes are stretched to fill the space.</p>
+  <p>Everyone is placed on the two strongest patterns in the answers (see <a href="#factors">Trait Factors</a> below). Left to right is how highly people rated themselves overall, top to bottom is the second pattern, and color is the third (orange and blue ends are named in the corner). Both axes are stretched to fill the space.</p>
   <p>A flat picture can't show 36 traits faithfully, so being close here doesn't always mean being similar. Names that don't fit are shown as dots. Hover over or tap a dot to see who it is and draw lines to the people most consistently similar to them. Brighter lines are more consistent.</p>
   <canvas id="peopleGraph"></canvas>`;
 

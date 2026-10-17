@@ -1,6 +1,11 @@
-const height = 600;
 const pad = 40;
+const padTop = 64; // Room for the axis label and color legend.
 const numLines = 5;
+
+const neutral = [200, 200, 200];
+const orange = [255, 150, 70];
+const blue = [80, 160, 255];
+const mix = (a, b, t) => a.map((x, k) => Math.round(x + (b[k] - x) * t));
 
 const scale = (values, from, to) => {
   const min = Math.min(...values);
@@ -8,27 +13,42 @@ const scale = (values, from, to) => {
   return values.map((v) => from + ((to - from) * (v - min)) / (max - min));
 };
 
-// Everyone placed on the first two trait factors. Hovering over or tapping a
-// person draws lines to the people most consistently similar to them (near[i][j]
-// is how often j is among i's most similar). Returns a function that highlights
-// one person by name, whose lines show when nobody is hovered.
+// Everyone placed on the first two trait factors and colored by the third.
+// Hovering over or tapping a person draws lines to the people most consistently
+// similar to them (near[i][j] is how often j is among i's most similar).
+// Returns a function that highlights one person by name, whose lines show when
+// nobody is hovered.
 export const makePeopleGraph = (canvasId, data, factors, traitKeys, near) => {
   const canvas = document.querySelector('#' + canvasId);
-  const width = canvas.parentElement.clientWidth;
-  canvas.width = width;
-  canvas.height = height;
+  canvas.style.display = 'block';
   const ctx = canvas.getContext('2d');
 
-  const xs = scale(factors[0].scores, pad, width - pad);
-  const ys = scale(factors[1].scores, height - pad, pad);
+  // The three traits at each end of a factor.
+  const ends = ({loadings}) => {
+    const keys = traitKeys
+      .map((key, j) => ({key, loading: loadings[j]}))
+      .sort((a, b) => b.loading - a.loading)
+      .map(({key}) => key);
+    return [keys.slice(0, 3).join(', '), keys.slice(-3).reverse().join(', ')];
+  };
+  const [upTraits, downTraits] = ends(factors[1]);
+  const [orangeTraits, blueTraits] = ends(factors[2]);
 
-  const byLoading = traitKeys
-    .map((key, j) => ({key, loading: factors[1].loadings[j]}))
-    .sort((a, b) => b.loading - a.loading)
-    .map(({key}) => key);
-  const top = byLoading.slice(0, 3).join(', ');
-  const bottom = byLoading.slice(-3).reverse().join(', ');
+  // Scores have mean 0, so this is their standard deviation. Two of them out
+  // gets the full color.
+  const colorScores = factors[2].scores;
+  const sd = Math.sqrt(
+    colorScores.reduce((sum, x) => sum + x * x, 0) / colorScores.length,
+  );
+  const colors = colorScores.map((score) => {
+    const t = Math.max(-1, Math.min(1, score / (2 * sd)));
+    return `rgb(${mix(neutral, t > 0 ? orange : blue, Math.abs(t))})`;
+  });
 
+  let width;
+  let height;
+  let xs;
+  let ys;
   let highlighted;
   let hovered = -1;
 
@@ -39,11 +59,16 @@ export const makePeopleGraph = (canvasId, data, factors, traitKeys, near) => {
     ctx.fillStyle = '#888';
     ctx.textBaseline = 'alphabetic';
     ctx.textAlign = 'left';
-    ctx.fillText(`↑ ${top}`, 4, 14);
-    ctx.fillText(`↓ ${bottom}`, 4, height - 22);
+    ctx.fillText(`↑ ${upTraits}`, 4, 14);
+    ctx.fillText(`↓ ${downTraits}`, 4, height - 22);
     ctx.fillText('← Lower self-ratings', 4, height - 6);
     ctx.textAlign = 'right';
     ctx.fillText('Higher self-ratings →', width - 4, height - 6);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = `rgb(${orange})`;
+    ctx.fillText(`● ${orangeTraits}`, 4, 32);
+    ctx.fillStyle = `rgb(${blue})`;
+    ctx.fillText(`● ${blueTraits}`, 4, 48);
 
     const focus =
       hovered >= 0 ? hovered : data.findIndex((d) => d.name === highlighted);
@@ -58,7 +83,7 @@ export const makePeopleGraph = (canvasId, data, factors, traitKeys, near) => {
 
     ctx.lineWidth = 2;
     for (const {freq, j} of neighbors) {
-      ctx.strokeStyle = `rgba(255,204,68,${freq})`;
+      ctx.strokeStyle = `rgba(255,255,255,${freq})`;
       ctx.beginPath();
       ctx.moveTo(xs[focus], ys[focus]);
       ctx.lineTo(xs[j], ys[j]);
@@ -66,11 +91,14 @@ export const makePeopleGraph = (canvasId, data, factors, traitKeys, near) => {
     }
 
     const isNeighbor = new Set(neighbors.map(({j}) => j));
-    const color = (i) =>
-      i === focus ? '#FC4' : focus < 0 || isNeighbor.has(i) ? 'white' : '#777';
+    // The focused person is white, and everyone but their matches fades.
+    const setColor = (i) => {
+      ctx.fillStyle = i === focus ? 'white' : colors[i];
+      ctx.globalAlpha = focus < 0 || i === focus || isNeighbor.has(i) ? 1 : 0.3;
+    };
 
     for (let i = 0; i < data.length; i++) {
-      ctx.fillStyle = color(i);
+      setColor(i);
       ctx.beginPath();
       ctx.arc(xs[i], ys[i], i === focus ? 4 : 2.5, 0, 2 * Math.PI);
       ctx.fill();
@@ -128,10 +156,28 @@ export const makePeopleGraph = (canvasId, data, factors, traitKeys, near) => {
         (mustShow && (candidates.find((b) => fits(b, true)) || candidates[0]));
       if (!box) continue;
       taken.push(box);
-      ctx.fillStyle = color(i);
+      setColor(i);
       ctx.fillText(data[i].name, box.x0, (box.y0 + box.y1) / 2);
     }
+    ctx.globalAlpha = 1;
   };
+
+  // Fill the page width and most of the window height, at full resolution on
+  // high-density screens.
+  const resize = () => {
+    width = canvas.parentElement.clientWidth;
+    height = Math.max(400, Math.min(800, innerHeight - 80));
+    const dpr = devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    xs = scale(factors[0].scores, pad, width - pad);
+    ys = scale(factors[1].scores, height - pad, padTop);
+    draw();
+  };
+  addEventListener('resize', resize);
 
   const hover = (x, y) => {
     let closest = 20;
@@ -153,7 +199,7 @@ export const makePeopleGraph = (canvasId, data, factors, traitKeys, near) => {
     hover(clientX - left, clientY - top);
   });
 
-  draw();
+  resize();
 
   return (name) => {
     highlighted = name;
