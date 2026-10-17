@@ -54,6 +54,12 @@
     "desc": "How efficiently can copies of a shape be packed into a container?"
   },
   {
+    "filePath": "particle-life",
+    "title": "Particle Life",
+    "year": 2026,
+    "desc": "200,000 particles in eight colors, each attracted to or repelled by the others by a random rule. They gather into worms, cells, and swimmers. Runs on WebGPU."
+  },
+  {
     "filePath": "primordial",
     "title": "Primordial",
     "year": 2026,
@@ -136,12 +142,6 @@
     "title": "Oscillating Reaction",
     "year": 2023,
     "desc": "A simple simulation of the Belousov-Zhabotinsky reaction."
-  },
-  {
-    "filePath": "particle-life",
-    "title": "Particle Life",
-    "year": 2023,
-    "desc": "Eight colors of particles, each attracted to or repelled by the others by a random rule. They clump into cells, rings, and chasers."
   },
   {
     "filePath": "peopleNetwork3D",
