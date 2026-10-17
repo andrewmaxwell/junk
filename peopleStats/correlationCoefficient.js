@@ -15,7 +15,7 @@ export const correlationCoefficient = (arr1, arr2) => {
   }
 
   const denominator = Math.sqrt(
-    (sum1Sq - (sum1 * sum1) / n) * (sum2Sq - (sum2 * sum2) / n)
+    (sum1Sq - (sum1 * sum1) / n) * (sum2Sq - (sum2 * sum2) / n),
   );
 
   return denominator ? (pSum - (sum1 * sum2) / n) / denominator : 0;

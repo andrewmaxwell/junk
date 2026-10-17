@@ -14,6 +14,19 @@
       .paren {opacity: 0.5;}
       button {padding: 0 4px; border: 0; background: #444; color: #AAA; cursor: pointer; margin: 0 0 0 5px}
       button:hover {background: #888}
+      .cols {display: flex; flex-wrap: wrap; gap: 0 48px}
+      .hists {display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px 24px}
+      .hists h4 {margin: 0 0 4px; font-weight: normal; font-size: 13px}
+      .bars {display: flex; align-items: flex-end; height: 50px; gap: 2px}
+      .bars div {flex: 1; background: #468; min-height: 1px}
+      .bars div:hover {background: #8AC}
+      .bars div.mine {background: #FC4}
+      .axis {display: flex; font-size: 10px; opacity: 0.5}
+      .axis span {flex: 1; text-align: center}
+      .me-traits {display: grid; grid-template-columns: max-content minmax(80px, 300px) max-content; gap: 3px 8px; align-items: center; font-size: 13px}
+      .track {position: relative; height: 10px; background: #333}
+      .track .bar {position: absolute; left: 0; top: 0; bottom: 0; background: #FC4}
+      .track .avg {position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: #FFF}
     </style>
   </head>
   <body style="font-family: sans-serif; background:#111;color:#EEE">
