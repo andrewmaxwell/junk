@@ -1,9 +1,13 @@
-// Diffusion cartogram (Gastner & Newman 2004). The map's density (target area
-// over current area, with the sea set to the average) is rasterized onto a grid
-// and allowed to diffuse until it is flat. Every point rides along with the
-// flow v = -∇ρ/ρ, so dense regions spread out and sparse ones shrink. The flow
-// is smooth, so neighbors stay neighbors and borders never cross. One run
-// doesn't hit the targets exactly, so it's repeated on its own output.
+// Flow-based cartogram (Gastner, Seguy & More 2018). The map's density
+// (target area over current area, with the sea set to the average) is
+// rasterized onto a grid. Picture the density sliding linearly from that
+// starting map to perfectly even as t goes from 0 to 1: ρ(t) = (1-t)ρ0 + tρ̄.
+// Mass is conserved if ρv = -∇Φ with ∇²Φ = ρ̄ - ρ0, which doesn't depend on t,
+// so one Poisson solve gives the whole flow, v = -∇Φ / ρ(t). Every point
+// rides it from t = 0 to 1, so dense regions spread out and sparse ones
+// shrink. The flow is smooth, so neighbors stay neighbors and borders never
+// cross. One run doesn't hit the targets exactly, so it's repeated on its
+// own output.
 
 // In-place radix-2 FFT. `inverse` includes the 1/n scaling.
 const fft = (re, im, inverse) => {
@@ -199,41 +203,47 @@ const rasterize = (pts, features, masses, w, h, S) => {
   return rho;
 };
 
-// One diffusion cartogram on points already in grid coordinates. Calls
-// onStep(t) now and then so the caller can show progress.
-// Starting at t0 > 0 blurs the density first, which keeps the flow gentle
-// around features smaller than a cell. Later passes use less blur.
-const diffuse = (pts, rho, w, h, t0, onStep) => {
+// One flow-based cartogram on points already in grid coordinates. Calls
+// onStep() now and then so the caller can show progress. `blur` smooths the
+// density first (like diffusing for that long), which keeps the flow gentle
+// around features smaller than a cell. Later passes use less.
+const flow = (pts, rho, w, h, blur, onStep) => {
   const dct = makeDct2(w, h);
   const coef = Float64Array.from(rho);
   dct.forward(coef);
   const kx = Float64Array.from({length: w}, (_, k) => (Math.PI * k) / w);
   const ky = Float64Array.from({length: h}, (_, k) => (Math.PI * k) / h);
-  const field = new Float64Array(w * h);
+  const mean = coef[0] / (w * h);
 
-  // Velocity at cell centers for time t: -∇ρ/ρ by central differences, zero
-  // on the boundary (the sides reflect).
-  const velocityAt = (t) => {
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        field[y * w + x] =
-          coef[y * w + x] * Math.exp(-(kx[x] * kx[x] + ky[y] * ky[y]) * t);
-      }
+  // The blurred starting density, and Φ from ∇²Φ = ρ̄ - ρ0 (the mean term
+  // drops out, and the cosine basis gives the sides a no-flow boundary).
+  const rho0 = new Float64Array(w * h);
+  const phi = new Float64Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const k2 = kx[x] * kx[x] + ky[y] * ky[y];
+      rho0[i] = coef[i] * Math.exp(-k2 * blur);
+      phi[i] = i ? rho0[i] / k2 : 0;
     }
-    dct.inverse(field);
-    const vx = new Float64Array(w * h);
-    const vy = new Float64Array(w * h);
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        const i = y * w + x;
-        vx[i] = -(field[i + 1] - field[i - 1]) / (2 * field[i]);
-        vy[i] = -(field[i + w] - field[i - w]) / (2 * field[i]);
-      }
-    }
-    return {vx, vy};
-  };
+  }
+  dct.inverse(rho0);
+  dct.inverse(phi);
 
-  const sample = ({vx, vy}, x, y, out, o) => {
+  // ∇Φ at cell centers by central differences, zero on the boundary.
+  const gx = new Float64Array(w * h);
+  const gy = new Float64Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      gx[i] = (phi[i + 1] - phi[i - 1]) / 2;
+      gy[i] = (phi[i + w] - phi[i - w]) / 2;
+    }
+  }
+
+  // Interpolating ∇Φ and ρ0 separately, then dividing, stays accurate where
+  // the density changes sharply within a cell.
+  const velocity = (x, y, t, out, o) => {
     const u = Math.min(w - 1.0001, Math.max(0, x - 0.5));
     const v = Math.min(h - 1.0001, Math.max(0, y - 0.5));
     const i = u | 0;
@@ -244,53 +254,47 @@ const diffuse = (pts, rho, w, h, t0, onStep) => {
     const lerp = (g) =>
       (g[a] * (1 - fx) + g[a + 1] * fx) * (1 - fy) +
       (g[a + w] * (1 - fx) + g[a + w + 1] * fx) * fy;
-    out[o] = lerp(vx);
-    out[o + 1] = lerp(vy);
+    const r = (1 - t) * lerp(rho0) + t * mean;
+    out[o] = -lerp(gx) / r;
+    out[o + 1] = -lerp(gy) / r;
   };
 
   const n = pts.length;
   const v1 = new Float64Array(n);
   const v2 = new Float64Array(n);
   const mid = new Float64Array(n);
-  let t = t0;
-  let vel = velocityAt(t);
-  let maxV = 0;
-  for (let p = 0; p < n; p += 2) {
-    sample(vel, pts[p], pts[p + 1], v1, p);
-    maxV = Math.max(maxV, Math.hypot(v1[p], v1[p + 1]));
-  }
-  let dt = 0.2 / Math.max(maxV, 1e-9);
+  let t = 0;
+  let dt = 0.01;
+  for (let p = 0; p < n; p += 2) velocity(pts[p], pts[p + 1], t, v1, p);
 
   // Heun's method with step-size control: halve dt when the predictor and
   // corrector disagree by more than a small fraction of a cell.
-  for (let step = 0; step < 2000; step++) {
-    for (let p = 0; p < n; p++) mid[p] = pts[p] + dt * v1[p];
-    const next = velocityAt(t + dt);
+  while (t < 1) {
+    dt = Math.min(dt, 1 - t);
     let err = 0;
     for (let p = 0; p < n; p += 2) {
-      sample(next, mid[p], mid[p + 1], v2, p);
+      mid[p] = pts[p] + dt * v1[p];
+      mid[p + 1] = pts[p + 1] + dt * v1[p + 1];
+      velocity(mid[p], mid[p + 1], t + dt, v2, p);
       err = Math.max(
         err,
         (dt / 2) * Math.hypot(v2[p] - v1[p], v2[p + 1] - v1[p + 1]),
       );
     }
-    if (err > 0.02 && dt > 1e-6) {
+    if (err > 0.02 && dt > 1e-7) {
       dt /= 2;
       continue;
     }
-    let move = 0;
     for (let p = 0; p < n; p += 2) {
-      const dx = (dt / 2) * (v1[p] + v2[p]);
-      const dy = (dt / 2) * (v1[p + 1] + v2[p + 1]);
-      pts[p] = Math.min(w, Math.max(0, pts[p] + dx));
-      pts[p + 1] = Math.min(h, Math.max(0, pts[p + 1] + dy));
-      move = Math.max(move, Math.hypot(dx, dy));
+      pts[p] = Math.min(w, Math.max(0, pts[p] + (dt / 2) * (v1[p] + v2[p])));
+      pts[p + 1] = Math.min(
+        h,
+        Math.max(0, pts[p + 1] + (dt / 2) * (v1[p + 1] + v2[p + 1])),
+      );
     }
     t += dt;
-    vel = next;
-    for (let p = 0; p < n; p += 2) sample(vel, pts[p], pts[p + 1], v1, p);
-    onStep(t);
-    if (move < 1e-3) break;
+    for (let p = 0; p < n; p += 2) velocity(pts[p], pts[p + 1], t, v1, p);
+    onStep();
     dt *= 1.5;
   }
 };
@@ -355,7 +359,7 @@ export const makeCartogram = (
     const rho = rasterize(pts, features, masses, w, h, 4);
 
     let last = performance.now();
-    diffuse(pts, rho, w, h, 1 / (pass + 1) ** 2, () => {
+    flow(pts, rho, w, h, 1 / (pass + 1) ** 2, () => {
       const now = performance.now();
       if (now - last < 100) return;
       last = now;

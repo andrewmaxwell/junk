@@ -75,7 +75,7 @@
     "filePath": "cartogram",
     "title": "Stretchy Maps",
     "year": 2026,
-    "desc": "World and US county maps stretched so each area is proportional to a statistic"
+    "desc": "The world by country and the US by county, stretched so each area is proportional to a statistic"
   },
   {
     "filePath": "perf",

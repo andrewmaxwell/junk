@@ -42,6 +42,7 @@ const regions = {
       noun: 'country',
     };
   },
+  // Albers USA moves Alaska and Hawaii into insets off the lower left.
   'United States': () => {
     const projection = geo
       .geoAlbersUsa()
@@ -58,36 +59,9 @@ const regions = {
     };
   },
 };
-for (const [fips, name] of Object.entries(stateNames)) {
-  regions[name] = () => {
-    const outline = topojson.feature(
-      usTopo,
-      usTopo.objects.states.geometries.find((g) => g.id === fips),
-    );
-    // An equal-area conic centered on the state keeps the starting areas true.
-    const [[x0, y0], [x1, y1]] = geo.geoBounds(outline);
-    const lon = x1 < x0 ? -150 : (x0 + x1) / 2; // Alaska crosses the antimeridian
-    const projection = geo
-      .geoConicEqualArea()
-      .parallels([y0 + (y1 - y0) / 6, y1 - (y1 - y0) / 6])
-      .rotate([-lon, 0])
-      .center([0, (y0 + y1) / 2])
-      .fitSize([1000, 1000], outline);
-    const geoms = usTopo.objects.counties.geometries.filter((g) =>
-      g.id.startsWith(fips),
-    );
-    return {
-      ...buildMap(usTopo, geoms, projection, (g) => g.properties.name),
-      data: countyData,
-      noun: 'county',
-    };
-  };
-}
-const regionNames = [
-  'World',
-  'United States',
-  ...Object.values(stateNames).sort(),
-];
+// Default "skip" thresholds. Tiny urban counties like Manhattan matter a lot
+// by population, so the US skips none.
+const defaultTiny = {World: 0.01, 'United States': 0};
 
 // Settings, also kept in the URL hash so a map can be shared.
 const params = {
@@ -100,7 +74,7 @@ const params = {
   labels: true,
   resolution: 512,
   passes: 10,
-  tiny: 0.01,
+  tiny: null,
 };
 const hash = new URLSearchParams(location.hash.slice(1));
 for (const key of ['region', 'metric', 'colors'])
@@ -109,6 +83,7 @@ if (hash.has('perPerson')) params.perPerson = hash.get('perPerson') === '1';
 if (hash.has('power')) params.power = +hash.get('power');
 if (hash.has('tiny')) params.tiny = +hash.get('tiny');
 if (!regions[params.region]) params.region = 'World';
+params.tiny ??= defaultTiny[params.region];
 
 let map; // current region: points, features, data
 let base; // original projected points
@@ -488,9 +463,11 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener(
 // Controls
 const gui = new GUI({title: 'Stretchy Maps'});
 gui
-  .add(params, 'region', regionNames)
+  .add(params, 'region', Object.keys(regions))
   .name('Map')
   .onChange(() => {
+    params.tiny = defaultTiny[params.region];
+    tinyCtrl.updateDisplay();
     loadRegion();
     run();
   });
@@ -500,7 +477,7 @@ const metricCtrl = gui
   .onFinishChange(run);
 gui.add(params, 'perPerson').name('× population').onChange(run);
 gui.add(params, 'power', 0, 2, 0.05).name('Area ∝ value ^').onFinishChange(run);
-gui
+const tinyCtrl = gui
   .add(params, 'tiny', 0, 0.2, 0.001)
   .name('Skip under % of map')
   .onFinishChange(run);
