@@ -59,7 +59,7 @@ function anyPerpendicular(u) {
   const ey = ex === 0 && ay <= az ? 1 : 0;
   const ez = ex === 0 && ey === 0 ? 1 : 0;
   const d = u.x * ex + u.y * ey + u.z * ez;
-  return normalize({ x: ex - u.x * d, y: ey - u.y * d, z: ez - u.z * d });
+  return normalize({x: ex - u.x * d, y: ey - u.y * d, z: ez - u.z * d});
 }
 
 // Rodrigues rotation of `v` about unit axis `k`, in place.
@@ -79,7 +79,7 @@ function rotateVec(v, k, angle) {
 // Move an item by a rotation of the sphere: position and facing together.
 function rotateItem(item, axis, angle) {
   rotateVec(item, axis, angle);
-  const t = { x: item.tx, y: item.ty, z: item.tz };
+  const t = {x: item.tx, y: item.ty, z: item.tz};
   rotateVec(t, axis, angle);
   item.tx = t.x;
   item.ty = t.y;
@@ -97,7 +97,7 @@ function slideItem(item, dir, arc, R) {
 
 // Turn an item in place. The position is the axis, so only the facing moves.
 function spinItem(item, angle) {
-  const t = { x: item.tx, y: item.ty, z: item.tz };
+  const t = {x: item.tx, y: item.ty, z: item.tz};
   rotateVec(t, item, angle);
   item.tx = t.x;
   item.ty = t.y;
@@ -109,7 +109,11 @@ function spinItem(item, angle) {
 function reorthonormalize(item) {
   normalize(item);
   const d = item.tx * item.x + item.ty * item.y + item.tz * item.z;
-  const t = normalize({ x: item.tx - item.x * d, y: item.ty - item.y * d, z: item.tz - item.z * d });
+  const t = normalize({
+    x: item.tx - item.x * d,
+    y: item.ty - item.y * d,
+    z: item.tz - item.z * d,
+  });
   item.tx = t.x;
   item.ty = t.y;
   item.tz = t.z;
@@ -128,7 +132,9 @@ function polygonSolidAngle(sides, rho) {
   const cosSide = cosRho * cosRho + sinRho * sinRho * Math.cos(gamma);
   const sinSide = Math.sqrt(Math.max(0, 1 - cosSide * cosSide));
   if (sinSide < 1e-12 || sinRho < 1e-12) return 0;
-  const beta = Math.acos(clampCos((cosRho * (1 - cosSide)) / (sinRho * sinSide)));
+  const beta = Math.acos(
+    clampCos((cosRho * (1 - cosSide)) / (sinRho * sinSide)),
+  );
   return sides * (gamma + 2 * beta - Math.PI);
 }
 
@@ -150,7 +156,8 @@ const MAX_POLYGON_RHO = Math.PI / 2 - 1e-6;
 export function shapeAngle(shape, R) {
   if (shape.type === 'circle') return capAngleFor(shape.area, R);
   const target = shape.area / (R * R);
-  if (target >= polygonSolidAngle(shape.sides, MAX_POLYGON_RHO)) return MAX_POLYGON_RHO;
+  if (target >= polygonSolidAngle(shape.sides, MAX_POLYGON_RHO))
+    return MAX_POLYGON_RHO;
   let lo = 0;
   let hi = MAX_POLYGON_RHO;
   for (let i = 0; i < 52; i++) {
@@ -182,7 +189,7 @@ export function sphereGeometry(shape, R) {
 // `count` unit vectors evenly spaced on the circle at angular radius `angle`
 // around an item, starting from its facing and wound counter-clockwise.
 function ringAround(item, angle, count) {
-  const t = { x: item.tx, y: item.ty, z: item.tz };
+  const t = {x: item.tx, y: item.ty, z: item.tz};
   const s = cross(item, t);
   const c = Math.cos(angle);
   const r = Math.sin(angle);
@@ -213,6 +220,12 @@ const polygonVerts = (item, g) => ringAround(item, g.angle, g.shape.sides);
 // planar one: a half-space through the origin has no interval to compare, only
 // a sign. `dot(v, n)` against a unit edge-plane normal is the sine of the
 // angular distance from that great circle, so it doubles as the depth.
+//
+// The contact point is the single deepest vertex, not the planar solver's
+// average over near-equally-deep ones. That looks like an inconsistency but
+// measured better: with averaging, the Platonic tilings went from closing in a
+// few hundred iterations to not closing at all in six attempts (six seeds), and
+// every non-tiling case finished slightly looser.
 function satPolygons(va, vb) {
   let best = null;
   // `sign` orients the result so that b always moves along +n and a along -n,
@@ -242,7 +255,11 @@ function satPolygons(va, vb) {
       }
       if (depth <= 0) return false; // a separating plane: done, they are apart
       if (!best || depth < best.depth) {
-        best = { depth, n: { x: n.x * sign, y: n.y * sign, z: n.z * sign }, p: deepest };
+        best = {
+          depth,
+          n: {x: n.x * sign, y: n.y * sign, z: n.z * sign},
+          p: deepest,
+        };
       }
     }
     return true;
@@ -259,13 +276,13 @@ export function overlapPair(g, a, b) {
     const sep = Math.acos(clampCos(dot(a, b)));
     const gap = 2 * g.angle - sep;
     if (gap <= 0) return null;
-    let n = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
+    let n = {x: b.x - a.x, y: b.y - a.y, z: b.z - a.z};
     if (Math.hypot(n.x, n.y, n.z) < 1e-9) n = anyPerpendicular(a);
     else normalize(n);
-    let p = { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
-    if (Math.hypot(p.x, p.y, p.z) < 1e-9) p = { x: a.x, y: a.y, z: a.z };
+    let p = {x: a.x + b.x, y: a.y + b.y, z: a.z + b.z};
+    if (Math.hypot(p.x, p.y, p.z) < 1e-9) p = {x: a.x, y: a.y, z: a.z};
     else normalize(p);
-    return { depth: gap * g.R, n, p };
+    return {depth: gap * g.R, n, p};
   }
   // This reject is load-bearing, and must stay ahead of the scan below.
   //
@@ -283,7 +300,7 @@ export function overlapPair(g, a, b) {
   if (dot(a, b) < g.cosReach) return null;
   const hit = satPolygons(polygonVerts(a, g), polygonVerts(b, g));
   if (!hit) return null;
-  return { depth: Math.asin(clampCos(hit.depth)) * g.R, n: hit.n, p: hit.p };
+  return {depth: Math.asin(clampCos(hit.depth)) * g.R, n: hit.n, p: hit.p};
 }
 
 // --- contact resolution -----------------------------------------------------
@@ -299,18 +316,27 @@ export function overlapPair(g, a, b) {
 // how fast a contact is corrected, though, not in whether one is detected.
 function contactTerms(item, res, R, useInertia) {
   const nd = dot(item, res.n);
-  const nt = { x: res.n.x - item.x * nd, y: res.n.y - item.y * nd, z: res.n.z - item.z * nd };
+  const nt = {
+    x: res.n.x - item.x * nd,
+    y: res.n.y - item.y * nd,
+    z: res.n.z - item.z * nd,
+  };
   if (Math.hypot(nt.x, nt.y, nt.z) < 1e-12) return null;
   normalize(nt);
 
   const pd = clampCos(dot(item, res.p));
-  const rd = { x: res.p.x - item.x * pd, y: res.p.y - item.y * pd, z: res.p.z - item.z * pd };
+  const rd = {
+    x: res.p.x - item.x * pd,
+    y: res.p.y - item.y * pd,
+    z: res.p.z - item.z * pd,
+  };
   const rlen = Math.hypot(rd.x, rd.y, rd.z);
   // Scalar r x n in the tangent plane is the triple product with the centre.
-  const c = rlen < 1e-12 ? 0 : Math.acos(pd) * R * dot(cross(normalize(rd), nt), item);
+  const c =
+    rlen < 1e-12 ? 0 : Math.acos(pd) * R * dot(cross(normalize(rd), nt), item);
 
   const inertia = useInertia ? item.shape.invInertia : 0;
-  return { nt, c, inertia, k: item.shape.invMass + c * c * inertia };
+  return {nt, c, inertia, k: item.shape.invMass + c * c * inertia};
 }
 
 const clampMag = (v, limit) => (v > limit ? limit : v < -limit ? -limit : v);
@@ -337,7 +363,11 @@ function resolveSphereContact(a, b, res, R, bias, maxAngular) {
 // solver, with great-circle motion in place of straight-line motion and no wall
 // pass at all. Returns the deepest violation this sweep had to correct, so an
 // easy probe can stop after a pass or two.
-export function relaxOnSphere(items, R, { relaxIterations, correctionBias, limit, maxAngular = 0 }) {
+export function relaxOnSphere(
+  items,
+  R,
+  {relaxIterations, correctionBias, limit, maxAngular = 0},
+) {
   if (!items.length) return 0;
   const g = sphereGeometry(items[0].shape, R);
   let worst = 0;
@@ -348,7 +378,14 @@ export function relaxOnSphere(items, R, { relaxIterations, correctionBias, limit
         const res = overlapPair(g, items[i], items[j]);
         if (!res) continue;
         if (res.depth > worst) worst = res.depth;
-        resolveSphereContact(items[i], items[j], res, R, correctionBias, maxAngular);
+        resolveSphereContact(
+          items[i],
+          items[j],
+          res,
+          R,
+          correctionBias,
+          maxAngular,
+        );
       }
     }
     for (const item of items) reorthonormalize(item);
@@ -360,7 +397,7 @@ export function relaxOnSphere(items, R, { relaxIterations, correctionBias, limit
 // Both violation measures in one sweep, matching the planar solver's contract:
 // `total` is the continuous energy, `worst` the per-pair feasibility gate.
 export function measureOnSphere(items, R) {
-  if (!items.length) return { total: 0, worst: 0 };
+  if (!items.length) return {total: 0, worst: 0};
   const g = sphereGeometry(items[0].shape, R);
   let total = 0;
   let worst = 0;
@@ -372,7 +409,7 @@ export function measureOnSphere(items, R) {
       if (res.depth > worst) worst = res.depth;
     }
   }
-  return { total, worst };
+  return {total, worst};
 }
 
 export function settledOnSphere(items, item, R, tol) {
@@ -388,7 +425,7 @@ export function settledOnSphere(items, item, R, tol) {
 // --- seeding ----------------------------------------------------------------
 
 const seed = (x, y, z, shape, facing) => {
-  const item = { x, y, z, tx: 0, ty: 0, tz: 0, shape };
+  const item = {x, y, z, tx: 0, ty: 0, tz: 0, shape};
   const t = facing ?? anyPerpendicular(item);
   item.tx = t.x;
   item.ty = t.y;
@@ -442,16 +479,16 @@ export function hopOnSphere(items, rand, heat, R, moveScales) {
   // Nearest by dot product: on a sphere a larger dot *is* a smaller angle, so
   // no arccos is needed just to rank neighbours.
   const cluster = items
-    .map((item, index) => ({ index, near: dot(item, anchor) }))
+    .map((item, index) => ({index, near: dot(item, anchor)}))
     .sort((a, b) => b.near - a.near)
     .slice(0, count);
 
   const amplitude = moveScales[Math.floor(rand() * moveScales.length)] * heat;
-  const drift = normalize({ x: rand() - 0.5, y: rand() - 0.5, z: rand() - 0.5 });
+  const drift = normalize({x: rand() - 0.5, y: rand() - 0.5, z: rand() - 0.5});
   const driftAngle = (rand() - 0.5) * 2 * g.angle * amplitude;
-  const turnAxis = { x: anchor.x, y: anchor.y, z: anchor.z };
+  const turnAxis = {x: anchor.x, y: anchor.y, z: anchor.z};
   const turnAngle = (rand() - 0.5) * Math.PI * amplitude;
-  for (const { index } of cluster) {
+  for (const {index} of cluster) {
     rotateItem(items[index], drift, driftAngle);
     rotateItem(items[index], turnAxis, turnAngle);
     reorthonormalize(items[index]);
@@ -470,7 +507,7 @@ export function looseOnSphere(items, R, play, tol) {
   const directions = 16;
   const step = play * g.angle * R;
   return items.map((item) => {
-    const t = { x: item.tx, y: item.ty, z: item.tz };
+    const t = {x: item.tx, y: item.ty, z: item.tz};
     const s = cross(item, t);
     for (let k = 0; k < directions; k++) {
       const a = (k * TWO_PI) / directions;
@@ -479,14 +516,14 @@ export function looseOnSphere(items, R, play, tol) {
         y: t.y * Math.cos(a) + s.y * Math.sin(a),
         z: t.z * Math.cos(a) + s.z * Math.sin(a),
       });
-      const probe = { ...item };
+      const probe = {...item};
       slideItem(probe, dir, step, R);
       if (clearOnSphere(g, items, item, probe, tol)) return true;
     }
     // A piece can be caged against sliding and still be free to turn.
     if (g.isCircle) return false;
     for (const spin of [play, -play]) {
-      const probe = { ...item };
+      const probe = {...item};
       spinItem(probe, spin);
       if (clearOnSphere(g, items, item, probe, tol)) return true;
     }
@@ -520,13 +557,17 @@ export function itemOutline(item, g, segments) {
     for (let k = 0; k < per; k++) {
       const f = k / per;
       if (sinOmega < 1e-9) {
-        out.push({ x: a.x, y: a.y, z: a.z });
+        out.push({x: a.x, y: a.y, z: a.z});
         continue;
       }
       // Slerp: the great-circle arc between consecutive vertices.
       const w0 = Math.sin((1 - f) * omega) / sinOmega;
       const w1 = Math.sin(f * omega) / sinOmega;
-      out.push({ x: a.x * w0 + b.x * w1, y: a.y * w0 + b.y * w1, z: a.z * w0 + b.z * w1 });
+      out.push({
+        x: a.x * w0 + b.x * w1,
+        y: a.y * w0 + b.y * w1,
+        z: a.z * w0 + b.z * w1,
+      });
     }
   }
   return out;

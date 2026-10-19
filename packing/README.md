@@ -11,14 +11,14 @@ One container is curved. "Sphere (surface)" packs pieces onto a sphere's surface
 rather than into an outline: spherical caps for the circle -- the Tammes problem
 -- and regular spherical polygons for the rest.
 
-Serve the directory over HTTP (module workers cannot reliably run from file URLs):
+It has to be served over HTTP, since module workers cannot reliably run from
+file URLs. From the repo root:
 
 ```sh
-cd /Users/andrew/junk/packing
-python3 -m http.server 8765 --bind 127.0.0.1
+npm run dev
 ```
 
-Open <http://127.0.0.1:8765>. The search starts as soon as the page loads and
+Open <http://localhost:3000/packing/>. The search starts as soon as the page loads and
 restarts whenever a control changes. Pause/Resume controls the worker; Reset
 restarts with a new random seed, as does Run again once a search has finished.
 The actual seed is shown below the attempt log and can be passed to
@@ -275,20 +275,27 @@ constructions, not proved optima; see the discussion in
 
 The feasible tolerance is a worst penetration of `1e-4 × item circumradius`.
 Tiny negative gaps can result from accepting this numerical contact tolerance;
-they do not beat a theorem. Saved results are rechecked with `validateLayout`,
-which rejects nonfinite data (and, on a sphere, positions off the surface or
+they do not beat a theorem. Every new best is rechecked with `validateLayout`
+before the worker shows it (one that fails is dropped and the previous best
+stays up), and the tests and benchmarks recheck theirs too. The check rejects nonfinite data (and, on a sphere, positions off the surface or
 facings that are not unit tangents) but shares the collision routines with the solver.
 It is a consistency check, not an independent proof of geometry correctness.
 
 The basin-hopping approach is informed by
 [Grosso et al.](https://optimization-online.org/2008/06/1999/); this small
 browser implementation uses its own bounded contact relaxation and group moves.
-Further contact improvements worth comparing are clipped edge contact manifolds
-and simultaneous position/orientation optimization. The current single support
-midpoint can approximate edge contacts poorly. See
-[Box2D's contact manifolds](https://box2d.org/documentation/md_collision.html)
-for the geometry approach; changing it requires separate packing benchmarks,
-since more physical contact handling is not automatically better optimization.
+Two polygons in contact are resolved at a point found by clipping one's edge
+against the other's, as in
+[Box2D's contact manifolds](https://box2d.org/documentation/md_collision.html):
+the depth-weighted centre of the incident edge's points that lie inside the
+reference face. It replaced the midpoint of the two bodies' support points,
+which put a corner pressing into a face halfway towards that face's centre and
+so turned pieces by the wrong amount. Over ten polygon cases at equal wall time
+clipping raised the median efficiency in seven, by up to 0.6 points on squares,
+and was within noise on the rest. Its 3D cousin on the sphere went the other
+way (see the comment above `satPolygons` in `sphere.js`), so more physical
+contact handling is not automatically better optimization; measure each change.
+Simultaneous position/orientation optimization is still untried.
 
 ## Files
 
@@ -298,8 +305,8 @@ since more physical contact handling is not automatically better optimization.
 - `freedom.js`: loose-piece (rattler) detection for the highlighted colouring.
 - `solver.js`: search, feasibility repair, and saved results; no DOM dependencies.
 - `worker.js`: owns one solver, yields between ~8 ms compute batches, and sends
-  display snapshots at up to ~30 Hz when watched, ~4 Hz otherwise. Reset/pause
-  cancel queued work.
+  display snapshots at up to ~30 Hz when watched, ~4 Hz otherwise. Each new
+  best is validated before it is sent. Reset/pause cancel queued work.
 - `pool.js`: runs one worker per core, seeds them apart, merges their reports,
   and hands the live view between them; command IDs discard stale messages.
 - `main.js`: controls, URL state, and rendering.

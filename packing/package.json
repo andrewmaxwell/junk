@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test solver.test.mjs worker.test.mjs",
+    "test": "node --test solver.test.mjs worker.test.mjs params.test.mjs",
     "benchmark": "node benchmark.mjs",
     "benchmark:time": "node benchmark-time.mjs"
   },

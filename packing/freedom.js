@@ -20,19 +20,28 @@
 // Each of those would report as pinned. The test never reports a pinned piece
 // as loose, so a highlighted piece really does have somewhere to go.
 
-import { testOverlap } from './geometry.js';
-import { containmentExcess } from './shapes.js';
-import { looseOnSphere } from './sphere.js';
+import {testOverlap} from './geometry.js';
+import {containmentExcess} from './shapes.js';
+import {looseOnSphere} from './sphere.js';
 
 const DIRECTIONS = 16;
 
 // `play` is the free movement a piece must have to count as loose, as a
 // fraction of its radius; `tolerance` matches the solver's feasibility limit so
 // that pieces resting in contact are not read as overlapping.
-export function findLoose(items, container, { play = 0.02, tolerance = 1e-4 } = {}) {
+export function findLoose(
+  items,
+  container,
+  {play = 0.02, tolerance = 1e-4} = {},
+) {
   if (!Array.isArray(items) || !items.length || !container) return [];
   if (container.type === 'sphere') {
-    return looseOnSphere(items, container.R, play, tolerance * items[0].shape.radius);
+    return looseOnSphere(
+      items,
+      container.R,
+      play,
+      tolerance * items[0].shape.radius,
+    );
   }
   return items.map((_, i) => isLoose(items, i, container, play, tolerance));
 }
@@ -43,7 +52,7 @@ function isLoose(items, i, container, play, tolerance) {
   if (!Number.isFinite(radius) || radius <= 0) return false;
   const limit = tolerance * radius;
   const step = play * radius;
-  const probe = { x: item.x, y: item.y, theta: item.theta, shape: item.shape };
+  const probe = {x: item.x, y: item.y, theta: item.theta, shape: item.shape};
 
   for (let k = 0; k < DIRECTIONS; k++) {
     const angle = (k * 2 * Math.PI) / DIRECTIONS;

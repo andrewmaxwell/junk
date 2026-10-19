@@ -22,7 +22,7 @@
 //
 // `benchmark.mjs` checks the result against packings whose optimum is known.
 
-import { testOverlap } from './geometry.js';
+import {testOverlap} from './geometry.js';
 import {
   ITEM_SHAPES,
   CONTAINER_SHAPES,
@@ -185,7 +185,7 @@ function mulberry32(seed) {
 
 export class PackingSolver {
   constructor(config = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = {...DEFAULT_CONFIG, ...config};
     this.reset();
   }
 
@@ -232,7 +232,7 @@ export class PackingSolver {
   }
 
   get efficiency() {
-    return this.best ? this.totalItemArea / (this.best.scale ** 2) : null;
+    return this.best ? this.totalItemArea / this.best.scale ** 2 : null;
   }
 
   get temperatureFraction() {
@@ -294,8 +294,8 @@ export class PackingSolver {
     const pitch = boundingWidth(shape, theta) * 1.02;
     const cols = Math.ceil(Math.sqrt(count));
     const rows = Math.ceil(count / cols);
-    return Array.from({ length: count }, (_, i) => ({
-      x: (i % cols - (cols - 1) / 2) * pitch,
+    return Array.from({length: count}, (_, i) => ({
+      x: ((i % cols) - (cols - 1) / 2) * pitch,
       y: (Math.floor(i / cols) - (rows - 1) / 2) * pitch,
       theta,
       shape,
@@ -334,7 +334,9 @@ export class PackingSolver {
     // different one. The incumbent is still held in `attemptBest`, so an
     // exploration that goes nowhere costs one probe and no ground. Polishing is
     // exempt: there the incumbent is the whole point.
-    const reseed = !this.polishing && cfg.reseedAfterFailures > 0 &&
+    const reseed =
+      !this.polishing &&
+      cfg.reseedAfterFailures > 0 &&
       this.probeFailures >= cfg.reseedAfterFailures;
     if (reseed) {
       this.items = this.scatterFor(scale);
@@ -357,8 +359,12 @@ export class PackingSolver {
     // rotation on a plateau; scattered restarts use all degrees of freedom.
     // On a sphere there is no rigid lattice to protect, so orientation is free
     // from the start; the staged sliding warm-up is a planar concern.
-    this.rotationActive = cfg.rotationPolicy === 'free' || this.onSphere
-      || this.stagedFinished || !this.latticeAttempt || this.itemShape.type === 'circle';
+    this.rotationActive =
+      cfg.rotationPolicy === 'free' ||
+      this.onSphere ||
+      this.stagedFinished ||
+      !this.latticeAttempt ||
+      this.itemShape.type === 'circle';
     this.T = Math.min(
       cfg.maxTemperature,
       cfg.startTemperature * cfg.reheatFactor ** this.probeFailures,
@@ -371,7 +377,8 @@ export class PackingSolver {
   // instead of relying on random jolts to find a good orientation.
   relax(container) {
     if (container.type === 'sphere') {
-      const { relaxIterations, correctionBias, maxAngularCorrection } = this.config;
+      const {relaxIterations, correctionBias, maxAngularCorrection} =
+        this.config;
       relaxOnSphere(this.items, container.R, {
         relaxIterations,
         correctionBias,
@@ -381,7 +388,7 @@ export class PackingSolver {
       return;
     }
     const items = this.items;
-    const { relaxIterations, correctionBias, maxAngularCorrection } = this.config;
+    const {relaxIterations, correctionBias, maxAngularCorrection} = this.config;
     const contacts = this._contacts || (this._contacts = []);
     const limit = this.violationLimit;
     const angularLimit = this.rotationActive ? maxAngularCorrection : 0;
@@ -393,7 +400,9 @@ export class PackingSolver {
       // so `relaxIterations` can be a generous cap rather than a fixed price.
       let worst = 0;
       // Reverse each sweep to avoid always privileging the same pieces.
-      const reverse = this.config.relaxationOrder === 'alternating' && this.sweepIndex++ % 2 === 1;
+      const reverse =
+        this.config.relaxationOrder === 'alternating' &&
+        this.sweepIndex++ % 2 === 1;
       for (let ii = 0; ii < items.length; ii++) {
         const i = reverse ? items.length - 1 - ii : ii;
         for (let jj = ii + 1; jj < items.length; jj++) {
@@ -402,9 +411,15 @@ export class PackingSolver {
           if (!res) continue;
           if (res.overlap > worst) worst = res.overlap;
           resolveContact(
-            items[i], items[j],
-            res.axis[0], res.axis[1], res.overlap, res.px, res.py,
-            correctionBias, angularLimit,
+            items[i],
+            items[j],
+            res.axis[0],
+            res.axis[1],
+            res.overlap,
+            res.px,
+            res.py,
+            correctionBias,
+            angularLimit,
           );
         }
       }
@@ -415,9 +430,15 @@ export class PackingSolver {
         for (const c of contacts) {
           if (c.ex > worst) worst = c.ex;
           resolveContact(
-            item, null,
-            c.nx, c.ny, c.ex, c.px, c.py,
-            correctionBias, angularLimit,
+            item,
+            null,
+            c.nx,
+            c.ny,
+            c.ex,
+            c.px,
+            c.py,
+            correctionBias,
+            angularLimit,
           );
         }
       }
@@ -432,8 +453,8 @@ export class PackingSolver {
   measureViolation(container) {
     const items = this.items;
     if (container.type === 'sphere') {
-      const { total, worst } = measureOnSphere(items, container.R);
-      return { total, worst, energy: total / this.itemShape.radius };
+      const {total, worst} = measureOnSphere(items, container.R);
+      return {total, worst, energy: total / this.itemShape.radius};
     }
     let total = 0;
     let worst = 0;
@@ -450,7 +471,7 @@ export class PackingSolver {
       total += ex;
       if (ex > worst) worst = ex;
     }
-    return { total, worst, energy: total / this.itemShape.radius };
+    return {total, worst, energy: total / this.itemShape.radius};
   }
 
   // Absolute form of `feasibleTolerance`, which is stored relative to item size.
@@ -480,9 +501,11 @@ export class PackingSolver {
   basinHop(container) {
     // Each space saves exactly its own degrees of freedom, so a rollback
     // restores the incumbent without inventing coordinates it does not have.
-    const before = this.items.map(container.type === 'sphere'
-      ? ({ x, y, z, tx, ty, tz }) => ({ x, y, z, tx, ty, tz })
-      : ({ x, y, theta }) => ({ x, y, theta }));
+    const before = this.items.map(
+      container.type === 'sphere'
+        ? ({x, y, z, tx, ty, tz}) => ({x, y, z, tx, ty, tz})
+        : ({x, y, theta}) => ({x, y, theta}),
+    );
     const initialEnergy = this.measureViolation(container).energy;
     // Each space draws its own move, including the amplitude, so neither
     // disturbs the other's random sequence.
@@ -501,12 +524,18 @@ export class PackingSolver {
   planarHop(heat) {
     const anchor = Math.floor(this.rand() * this.items.length);
     const center = this.items[anchor];
-    const count = 1 + Math.floor(this.rand() * Math.max(1, this.items.length * 0.35));
-    const neighbours = this.items.map((it, index) => ({
-      index, distance: Math.hypot(it.x - center.x, it.y - center.y),
-    })).sort((a, b) => a.distance - b.distance).slice(0, count);
+    const count =
+      1 + Math.floor(this.rand() * Math.max(1, this.items.length * 0.35));
+    const neighbours = this.items
+      .map((it, index) => ({
+        index,
+        distance: Math.hypot(it.x - center.x, it.y - center.y),
+      }))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, count);
     const radius = this.itemShape.radius;
-    const amplitude = MOVE_SCALES[Math.floor(this.rand() * MOVE_SCALES.length)] * heat;
+    const amplitude =
+      MOVE_SCALES[Math.floor(this.rand() * MOVE_SCALES.length)] * heat;
     const dx = (this.rand() - 0.5) * 2 * radius * amplitude;
     const dy = (this.rand() - 0.5) * 2 * radius * amplitude;
     const angle = (this.rand() - 0.5) * Math.PI * amplitude;
@@ -514,7 +543,7 @@ export class PackingSolver {
     const cy = center.y;
     const c = Math.cos(angle);
     const s = Math.sin(angle);
-    for (const { index } of neighbours) {
+    for (const {index} of neighbours) {
       const item = this.items[index];
       const x = item.x - cx;
       const y = item.y - cy;
@@ -542,7 +571,10 @@ export class PackingSolver {
       previous = violation.energy;
     }
     this.hops++;
-    if (violation.worst < this.violationLimit || violation.energy < initialEnergy) {
+    if (
+      violation.worst < this.violationLimit ||
+      violation.energy < initialEnergy
+    ) {
       this.acceptedHops++;
       return true;
     }
@@ -563,7 +595,10 @@ export class PackingSolver {
     let violation = this.measureViolation(container);
     if (violation.worst >= this.violationLimit) {
       // Small improvements accumulate relative to the last meaningful progress.
-      if (violation.energy < this.progressEnergy * (1 - cfg.plateauRelativeImprovement)) {
+      if (
+        violation.energy <
+        this.progressEnergy * (1 - cfg.plateauRelativeImprovement)
+      ) {
         this.progressEnergy = violation.energy;
         this.stuckCounter = 0;
       } else {
@@ -597,7 +632,9 @@ export class PackingSolver {
       if (this.probeIteration >= cfg.probeIterations) this.probeFailed();
     }
 
-    const budget = this.polishing ? cfg.polishIterations : cfg.iterationsPerAttempt;
+    const budget = this.polishing
+      ? cfg.polishIterations
+      : cfg.iterationsPerAttempt;
     if (this.attemptConverged || this.iteration >= budget) {
       this.finishAttempt();
     }
@@ -606,10 +643,17 @@ export class PackingSolver {
 
   probeSucceeded() {
     const cfg = this.config;
-    this.attemptBest = { scale: this.scale, items: this.items.map((it) => ({ ...it })) };
-    if (!this.attemptRecord || this.scale < this.attemptRecord.scale) this.attemptRecord = this.attemptBest;
+    this.attemptBest = {
+      scale: this.scale,
+      items: this.items.map((it) => ({...it})),
+    };
+    if (!this.attemptRecord || this.scale < this.attemptRecord.scale)
+      this.attemptRecord = this.attemptBest;
     if (!this.best || this.scale < this.best.scale) {
-      this.best = { ...this.attemptBest, container: this.makeContainer(this.scale) };
+      this.best = {
+        ...this.attemptBest,
+        container: this.makeContainer(this.scale),
+      };
     }
     this.probeFailures = 0;
     if (this.scale <= this.scaleLowerBound) {
@@ -676,7 +720,7 @@ export class PackingSolver {
     this.shrinkStep = cfg.polishStep;
     this.attemptBest = {
       scale: this.best.scale,
-      items: this.best.items.map((it) => ({ ...it })),
+      items: this.best.items.map((it) => ({...it})),
     };
     this.attemptRecord = this.attemptBest;
     this.beginProbe(this.best.scale * (1 - cfg.polishStep));
@@ -685,8 +729,16 @@ export class PackingSolver {
   // What the view should draw right now.
   snapshot() {
     if (this.done && this.best) {
-      return { container: this.best.container, items: this.best.items, final: true };
+      return {
+        container: this.best.container,
+        items: this.best.items,
+        final: true,
+      };
     }
-    return { container: this.makeContainer(this.scale), items: this.items, final: false };
+    return {
+      container: this.makeContainer(this.scale),
+      items: this.items,
+      final: false,
+    };
   }
 }

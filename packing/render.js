@@ -1,9 +1,9 @@
 // Canvas rendering. World coordinates are y-up; the canvas is y-down, so every
 // draw flips y. The view is scaled so the container fills most of the canvas.
 
-import { worldVerts } from './geometry.js';
-import { containerRadius } from './shapes.js';
-import { sphereGeometry, itemOutline } from './sphere.js';
+import {worldVerts} from './geometry.js';
+import {containerRadius} from './shapes.js';
+import {sphereGeometry, itemOutline} from './sphere.js';
 
 // The sphere's surface is drawn as a cylindrical equal-area map: longitude
 // across, sine of latitude down. Every cap is visible at once, nothing hides
@@ -20,25 +20,38 @@ const MAP_SEGMENTS = 96;
 const MERIDIANS = [-0.5, 0, 0.5]; // as a fraction of a half-turn
 const PARALLELS = [-0.5, 0, 0.5]; // in sine-of-latitude, so equal-area bands
 
-const COLOR_KEYS = { ok: '--ok', bad: '--bad', loose: '--loose', border: '--text-dim' };
-const FALLBACKS = { ok: '#2f7d5c', bad: '#b1492f', loose: '#2f6f9d', border: '#888888' };
+const COLOR_KEYS = {
+  ok: '--ok',
+  bad: '--bad',
+  loose: '--loose',
+  border: '--text-dim',
+};
+const FALLBACKS = {
+  ok: '#2f7d5c',
+  bad: '#b1492f',
+  loose: '#2f6f9d',
+  border: '#888888',
+};
 
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.colors = { ...FALLBACKS };
+    this.colors = {...FALLBACKS};
     this.refreshColors();
     // Theme can flip while the page is open; re-read the palette when it does.
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      this.refreshColors();
-    });
+    window
+      .matchMedia('(prefers-color-scheme: dark)')
+      .addEventListener('change', () => {
+        this.refreshColors();
+      });
   }
 
   refreshColors() {
     const styles = getComputedStyle(document.documentElement);
     for (const [name, prop] of Object.entries(COLOR_KEYS)) {
-      this.colors[name] = styles.getPropertyValue(prop).trim() || FALLBACKS[name];
+      this.colors[name] =
+        styles.getPropertyValue(prop).trim() || FALLBACKS[name];
     }
   }
 
@@ -54,13 +67,13 @@ export class Renderer {
   }
 
   draw(snapshot) {
-    const { ctx, canvas } = this;
+    const {ctx, canvas} = this;
     const w = canvas.width;
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
     if (!snapshot) return;
-    const { container, items, settled, loose } = snapshot;
+    const {container, items, settled, loose} = snapshot;
     if (container.type === 'sphere') {
       this.drawSphereMap(snapshot, w, h);
       return;
@@ -68,7 +81,7 @@ export class Renderer {
 
     const cx = w / 2;
     const cy = h / 2;
-    const s = (Math.min(w, h) / 2) * 0.92 / containerRadius(container);
+    const s = ((Math.min(w, h) / 2) * 0.92) / containerRadius(container);
     this.drawContainer(container, cx, cy, s);
     for (let i = 0; i < items.length; i++) {
       this.drawItem(items[i], cx, cy, s, this.itemColor(i, settled, loose));
@@ -84,7 +97,7 @@ export class Renderer {
   }
 
   drawContainer(container, cx, cy, s) {
-    const { ctx } = this;
+    const {ctx} = this;
     ctx.strokeStyle = this.colors.border;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -97,14 +110,20 @@ export class Renderer {
   }
 
   drawItem(item, cx, cy, s, color) {
-    const { ctx } = this;
+    const {ctx} = this;
     ctx.fillStyle = color;
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.globalAlpha = 0.85;
     ctx.beginPath();
     if (item.shape.type === 'circle') {
-      ctx.arc(cx + item.x * s, cy - item.y * s, item.shape.radius * s, 0, Math.PI * 2);
+      ctx.arc(
+        cx + item.x * s,
+        cy - item.y * s,
+        item.shape.radius * s,
+        0,
+        Math.PI * 2,
+      );
     } else {
       traceVerts(ctx, worldVerts(item), cx, cy, s);
     }
@@ -115,8 +134,8 @@ export class Renderer {
 
   // Equal-area map of a packing that lives on a sphere's surface.
   drawSphereMap(snapshot, w, h) {
-    const { ctx } = this;
-    const { container, items, settled, loose } = snapshot;
+    const {ctx} = this;
+    const {container, items, settled, loose} = snapshot;
     if (!items.length) return;
     const g = sphereGeometry(items[0].shape, container.R);
 
@@ -151,7 +170,7 @@ export class Renderer {
   }
 
   drawGraticule(x0, y0, mw, mh, sx, sy) {
-    const { ctx } = this;
+    const {ctx} = this;
     ctx.strokeStyle = this.colors.border;
     ctx.globalAlpha = 0.22;
     ctx.lineWidth = 1;
@@ -173,13 +192,14 @@ export class Renderer {
   // A piece on the sphere becomes whatever its outline projects to -- including,
   // near a pole, a band that reaches the top edge.
   drawPieceOnMap(item, g, sx, sy, color) {
-    const { ctx } = this;
+    const {ctx} = this;
     const outline = pieceOutline(item, g);
     // The outline lives in unwrapped longitude, which can sit outside
     // [-pi, pi]. Shifting it by a whole turn each way puts the piece that
     // belongs on the far edge back on the map.
     const shifts = [-2 * Math.PI, 0, 2 * Math.PI].filter(
-      (shift) => outline.min + shift <= Math.PI && outline.max + shift >= -Math.PI,
+      (shift) =>
+        outline.min + shift <= Math.PI && outline.max + shift >= -Math.PI,
     );
     if (!shifts.length) return;
 
@@ -196,7 +216,8 @@ export class Renderer {
     // Stroke the cap's own boundary only: the edges added to close it along a
     // pole are not edges of anything and should not be drawn.
     ctx.beginPath();
-    for (const shift of shifts) trace(ctx, outline.boundary, shift, sx, sy, !outline.encirclesPole);
+    for (const shift of shifts)
+      trace(ctx, outline.boundary, shift, sx, sy, !outline.encirclesPole);
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.stroke();
@@ -223,7 +244,7 @@ function pieceOutline(item, g) {
       winding += lon - previous;
     }
     previous = lon;
-    boundary.push({ lon, z: p.z });
+    boundary.push({lon, z: p.z});
   }
 
   const encirclesPole = Math.abs(winding) > Math.PI;
@@ -234,22 +255,26 @@ function pieceOutline(item, g) {
     // a turn along. Without it the span is 2*pi minus a step and the two tiled
     // copies leave a gap at the seam.
     const turn = winding > 0 ? 2 * Math.PI : -2 * Math.PI;
-    edge = [...boundary, { lon: boundary[0].lon + turn, z: boundary[0].z }];
+    edge = [...boundary, {lon: boundary[0].lon + turn, z: boundary[0].z}];
     const pole = item.z > 0 ? 1 : -1;
-    points = [...edge, { lon: boundary[0].lon + turn, z: pole }, { lon: boundary[0].lon, z: pole }];
+    points = [
+      ...edge,
+      {lon: boundary[0].lon + turn, z: pole},
+      {lon: boundary[0].lon, z: pole},
+    ];
   }
 
   let min = Infinity;
   let max = -Infinity;
-  for (const { lon } of points) {
+  for (const {lon} of points) {
     if (lon < min) min = lon;
     if (lon > max) max = lon;
   }
-  return { points, boundary: edge, encirclesPole, min, max };
+  return {points, boundary: edge, encirclesPole, min, max};
 }
 
 function trace(ctx, points, shift, sx, sy, close) {
-  points.forEach(({ lon, z }, k) => {
+  points.forEach(({lon, z}, k) => {
     const x = sx(lon + shift);
     const y = sy(z);
     if (k === 0) ctx.moveTo(x, y);

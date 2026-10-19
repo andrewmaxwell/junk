@@ -19,11 +19,13 @@
 // grow faster than the chance of a better packing.
 export const poolSize = (cores = 2) => Math.max(1, Math.min(8, cores - 1));
 
-const WORKER_FAILED = 'The search worker could not run. Serve this folder over HTTP and press Reset to retry.';
-const MESSAGE_FAILED = 'The search update could not be read. Press Reset to retry.';
+const WORKER_FAILED =
+  'The search worker could not run. Serve this folder over HTTP and press Reset to retry.';
+const MESSAGE_FAILED =
+  'The search update could not be read. Press Reset to retry.';
 
 export class SearchPool {
-  constructor({ size, createWorker, onUpdate, onError }) {
+  constructor({size, createWorker, onUpdate, onError}) {
     this.size = size;
     this.createWorker = createWorker;
     this.onUpdate = onUpdate;
@@ -44,9 +46,9 @@ export class SearchPool {
   }
 
   spawn() {
-    this.workers = Array.from({ length: this.size }, (_, index) => {
+    this.workers = Array.from({length: this.size}, (_, index) => {
       const worker = this.createWorker();
-      worker.onmessage = ({ data }) => this.receive(index, data);
+      worker.onmessage = ({data}) => this.receive(index, data);
       worker.onerror = (event) => {
         event.preventDefault?.();
         this.onError(WORKER_FAILED);
@@ -61,19 +63,29 @@ export class SearchPool {
     this.clear();
     this.seed = seed >>> 0;
     this.commandId++;
-    this.workers.forEach((worker, i) => worker.postMessage({
-      type: 'reset', commandId: this.commandId, start: true, watched: i === 0,
-      config: { ...config, seed: (this.seed + i) >>> 0, latticeStart: i === 0 },
-    }));
+    this.workers.forEach((worker, i) =>
+      worker.postMessage({
+        type: 'reset',
+        commandId: this.commandId,
+        start: true,
+        watched: i === 0,
+        config: {...config, seed: (this.seed + i) >>> 0, latticeStart: i === 0},
+      }),
+    );
   }
 
-  play() { this.send('play'); }
+  play() {
+    this.send('play');
+  }
 
-  pause() { this.send('pause'); }
+  pause() {
+    this.send('pause');
+  }
 
   send(type) {
     this.commandId++;
-    for (const worker of this.workers) worker.postMessage({ type, commandId: this.commandId });
+    for (const worker of this.workers)
+      worker.postMessage({type, commandId: this.commandId});
   }
 
   terminate() {
@@ -90,7 +102,8 @@ export class SearchPool {
     }
     this.states[index] = data;
     // Attempts are logged in the order they are heard about, across workers.
-    for (const entry of data.history.slice(this.seen[index])) this.log.push({ ...entry, worker: index });
+    for (const entry of data.history.slice(this.seen[index]))
+      this.log.push({...entry, worker: index});
     this.seen[index] = data.history.length;
     // A worker that has just been handed off may still have a live frame in flight.
     if (index === this.watched && data.live) this.live = data.live;
@@ -108,7 +121,11 @@ export class SearchPool {
     const next = this.states.findIndex((s) => !s?.done);
     if (next < 0) return;
     this.watched = next;
-    this.workers[next].postMessage({ type: 'watch', commandId: this.commandId, on: true });
+    this.workers[next].postMessage({
+      type: 'watch',
+      commandId: this.commandId,
+      on: true,
+    });
   }
 
   // Everything the page shows, in one object. Progress counters are summed over
@@ -122,7 +139,9 @@ export class SearchPool {
       if (s.best && (!holder || s.best.scale < holder.best.scale)) holder = s;
     }
     const best = holder?.best ?? null;
-    const done = this.perfect || (reported.length === this.size && reported.every((s) => s.done));
+    const done =
+      this.perfect ||
+      (reported.length === this.size && reported.every((s) => s.done));
     const watched = this.states[this.watched] ?? reported[0];
     return {
       done,

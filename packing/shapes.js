@@ -9,7 +9,7 @@
 // makes `scale` directly comparable across containers, and makes the packing
 // efficiency simply (total item area) / scale^2.
 
-import { SPHERE_R0 } from './sphere.js';
+import {SPHERE_R0} from './sphere.js';
 import {
   shoelaceArea,
   regularPolygonVerts,
@@ -75,9 +75,9 @@ function convexContainer(verts) {
     const len = Math.hypot(nx, ny) || 1;
     nx /= len;
     ny /= len;
-    return { nx, ny, d: nx * x1 + ny * y1 };
+    return {nx, ny, d: nx * x1 + ny * y1};
   });
-  return { type: 'convex', verts, planes, area: shoelaceArea(verts) };
+  return {type: 'convex', verts, planes, area: shoelaceArea(verts)};
 }
 
 // Circumradius of a regular k-gon whose area is exactly 1.
@@ -90,7 +90,8 @@ function regularContainer(name, sides) {
   return {
     name,
     usesAspect: false,
-    build: (scale) => convexContainer(regularPolygonVerts(sides, scale * r0, Math.PI / 2)),
+    build: (scale) =>
+      convexContainer(regularPolygonVerts(sides, scale * r0, Math.PI / 2)),
   };
 }
 
@@ -100,7 +101,11 @@ export const CONTAINER_SHAPES = {
   circle: {
     name: 'Circle',
     usesAspect: false,
-    build: (scale) => ({ type: 'circle', R: scale * CIRCLE_R0, area: scale * scale }),
+    build: (scale) => ({
+      type: 'circle',
+      R: scale * CIRCLE_R0,
+      area: scale * scale,
+    }),
   },
   rect: {
     name: 'Rectangle',
@@ -119,7 +124,11 @@ export const CONTAINER_SHAPES = {
     name: 'Sphere (surface)',
     usesAspect: false,
     space: 'sphere',
-    build: (scale) => ({ type: 'sphere', R: scale * SPHERE_R0, area: scale * scale }),
+    build: (scale) => ({
+      type: 'sphere',
+      R: scale * SPHERE_R0,
+      area: scale * scale,
+    }),
   },
 };
 
@@ -127,7 +136,8 @@ export const CONTAINER_SHAPES = {
 export function containerRadius(container) {
   if (container.type === 'circle') return container.R;
   let m = 0;
-  for (const [x, y] of container.verts) m = Math.max(m, Math.abs(x), Math.abs(y));
+  for (const [x, y] of container.verts)
+    m = Math.max(m, Math.abs(x), Math.abs(y));
   return m;
 }
 
@@ -148,7 +158,7 @@ function farthestVertex(verts) {
       y = vy;
     }
   }
-  return { d, x, y };
+  return {d, x, y};
 }
 
 // How far an item (with world `verts`, or null for a circle) pokes through one
@@ -179,14 +189,20 @@ export function containerContacts(item, container, out) {
       // At the centre every direction is equally bad; pick one arbitrarily.
       const nx = d < 1e-9 ? 1 : item.x / d;
       const ny = d < 1e-9 ? 0 : item.y / d;
-      out.push({ nx, ny, ex, px: item.x + nx * item.shape.radius, py: item.y + ny * item.shape.radius });
+      out.push({
+        nx,
+        ny,
+        ex,
+        px: item.x + nx * item.shape.radius,
+        py: item.y + ny * item.shape.radius,
+      });
       return out;
     }
     // Polygon in a circle: the most distant vertex defines the contact.
     const far = farthestVertex(verts);
     const ex = far.d - container.R;
     if (ex <= 0) return out;
-    out.push({ nx: far.x / far.d, ny: far.y / far.d, ex, px: far.x, py: far.y });
+    out.push({nx: far.x / far.d, ny: far.y / far.d, ex, px: far.x, py: far.y});
     return out;
   }
 
@@ -196,7 +212,7 @@ export function containerContacts(item, container, out) {
     const ex = planeExcess(item, verts, p);
     if (ex <= 0) continue;
     const sp = supportPoint(item, p.nx, p.ny, verts, SCRATCH);
-    out.push({ nx: p.nx, ny: p.ny, ex, px: sp[0], py: sp[1] });
+    out.push({nx: p.nx, ny: p.ny, ex, px: sp[0], py: sp[1]});
   }
   return out;
 }
@@ -206,10 +222,13 @@ export function containerContacts(item, container, out) {
 export function containmentExcess(item, container) {
   const verts = worldVerts(item);
   if (container.type === 'circle') {
-    const reach = verts ? farthestVertex(verts).d : Math.hypot(item.x, item.y) + item.shape.radius;
+    const reach = verts
+      ? farthestVertex(verts).d
+      : Math.hypot(item.x, item.y) + item.shape.radius;
     return Math.max(0, reach - container.R);
   }
   let worst = 0;
-  for (const p of container.planes) worst = Math.max(worst, planeExcess(item, verts, p));
+  for (const p of container.planes)
+    worst = Math.max(worst, planeExcess(item, verts, p));
   return worst;
 }

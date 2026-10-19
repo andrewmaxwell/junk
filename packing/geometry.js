@@ -19,7 +19,11 @@ export function shoelaceArea(verts) {
 
 // Counter-clockwise regular polygon, first vertex pointing "down" (-y) so that
 // triangles render point-up once the canvas flips the y axis.
-export function regularPolygonVerts(sides, circumradius, rotation = -Math.PI / 2) {
+export function regularPolygonVerts(
+  sides,
+  circumradius,
+  rotation = -Math.PI / 2,
+) {
   const verts = [];
   for (let k = 0; k < sides; k++) {
     const ang = rotation + (k * 2 * Math.PI) / sides;
@@ -29,7 +33,12 @@ export function regularPolygonVerts(sides, circumradius, rotation = -Math.PI / 2
 }
 
 export function rectVerts(hw, hh) {
-  return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]];
+  return [
+    [-hw, -hh],
+    [hw, -hh],
+    [hw, hh],
+    [-hw, hh],
+  ];
 }
 
 // Transform a shape's local vertices into world space.
@@ -46,80 +55,152 @@ export function worldVerts(item) {
   return out;
 }
 
-// Separating-axis candidates. `count` lets callers skip edges whose normals
-// duplicate an earlier one (a k-gon with even k has only k/2 distinct normals).
-export function edgeAxes(verts, count = verts.length) {
-  const axes = [];
-  for (let i = 0; i < count; i++) {
-    const [x1, y1] = verts[i];
-    const [x2, y2] = verts[(i + 1) % verts.length];
-    let nx = -(y2 - y1);
-    let ny = x2 - x1;
-    const len = Math.hypot(nx, ny) || 1;
-    axes.push([nx / len, ny / len]);
+// World-space vertices and separating-axis candidates of a placed polygon,
+// kept on the item and rebuilt only when its pose or shape changes. Inside the
+// O(n^2) contact loops each item is tested against every other one, so without
+// this its vertices would be rebuilt n-1 times per pass. The arithmetic is the
+// same as worldVerts(), so cached and fresh results agree bit for bit.
+//
+// `axisCount` skips edges whose normals duplicate an earlier one (a k-gon with
+// even k has only k/2 distinct normals). The cache is a non-enumerable symbol
+// property, so spreading or posting an item never copies it.
+const POLY = Symbol('poly');
+
+function polyCache(item) {
+  const shape = item.shape;
+  let p = item[POLY];
+  if (!p || p.shape !== shape) {
+    const n = shape.verts.length;
+    p = {
+      shape,
+      x: NaN,
+      y: NaN,
+      theta: NaN,
+      n,
+      axisCount: shape.axisCount ?? n,
+      vx: new Float64Array(n),
+      vy: new Float64Array(n),
+      ax: new Float64Array(n),
+      ay: new Float64Array(n),
+    };
+    Object.defineProperty(item, POLY, {value: p, writable: true});
   }
-  return axes;
+  if (p.x === item.x && p.y === item.y && p.theta === item.theta) return p;
+  p.x = item.x;
+  p.y = item.y;
+  p.theta = item.theta;
+  const local = shape.verts;
+  const c = Math.cos(item.theta);
+  const s = Math.sin(item.theta);
+  const {n, vx, vy, ax, ay} = p;
+  for (let i = 0; i < n; i++) {
+    const lx = local[i][0];
+    const ly = local[i][1];
+    vx[i] = item.x + lx * c - ly * s;
+    vy[i] = item.y + lx * s + ly * c;
+  }
+  // Every edge's normal is kept, for contact clipping; SAT reads only the
+  // first `axisCount`.
+  for (let i = 0; i < n; i++) {
+    const k = i + 1 === n ? 0 : i + 1;
+    const nx = -(vy[k] - vy[i]);
+    const ny = vx[k] - vx[i];
+    const len = Math.hypot(nx, ny) || 1;
+    ax[i] = nx / len;
+    ay[i] = ny / len;
+  }
+  return p;
 }
 
-export function projectPoly(verts, ax, ay) {
+// Projection interval of a cached polygon onto (ax, ay), returned through
+// PROJ_A / PROJ_B so the hot loops allocate nothing.
+const PROJ_A = [0, 0];
+const PROJ_B = [0, 0];
+function project(p, ax, ay, out) {
   let min = Infinity;
   let max = -Infinity;
-  for (const [x, y] of verts) {
-    const p = x * ax + y * ay;
-    if (p < min) min = p;
-    if (p > max) max = p;
+  for (let i = 0; i < p.n; i++) {
+    const d = p.vx[i] * ax + p.vy[i] * ay;
+    if (d < min) min = d;
+    if (d > max) max = d;
   }
-  return [min, max];
+  out[0] = min;
+  out[1] = max;
 }
 
-export function satPolyPoly(vertsA, axisCountA, vertsB, axisCountB) {
-  const axes = [...edgeAxes(vertsA, axisCountA), ...edgeAxes(vertsB, axisCountB)];
+// Smallest overlap of `a` and `b` along `p`'s axes, or 0 if one separates
+// them. The axis index lands in AXIS_HIT[0].
+const AXIS_HIT = [0];
+function minOverlapOnAxes(p, a, b, best) {
+  for (let i = 0; i < p.axisCount; i++) {
+    project(a, p.ax[i], p.ay[i], PROJ_A);
+    project(b, p.ax[i], p.ay[i], PROJ_B);
+    const overlap =
+      Math.min(PROJ_A[1], PROJ_B[1]) - Math.max(PROJ_A[0], PROJ_B[0]);
+    if (overlap <= 0) return 0;
+    if (overlap < best) {
+      best = overlap;
+      AXIS_HIT[0] = i;
+    }
+  }
+  return best;
+}
+
+function satPolyPoly(pa, pb) {
+  const overA = minOverlapOnAxes(pa, pa, pb, Infinity);
+  if (overA === 0) return null;
+  const iA = AXIS_HIT[0];
+  AXIS_HIT[0] = -1;
+  const over = minOverlapOnAxes(pb, pa, pb, overA);
+  if (over === 0) return null;
+  // Ties keep the earlier axis, which is A's.
+  const iB = AXIS_HIT[0];
+  const axis = iB < 0 ? [pa.ax[iA], pa.ay[iA]] : [pb.ax[iB], pb.ay[iB]];
+  return {axis, overlap: over, refIsA: iB < 0};
+}
+
+function satCirclePoly(cx, cy, r, p) {
   let minOverlap = Infinity;
-  let minAxis = null;
-  for (const axis of axes) {
-    const [aMin, aMax] = projectPoly(vertsA, axis[0], axis[1]);
-    const [bMin, bMax] = projectPoly(vertsB, axis[0], axis[1]);
-    const overlap = Math.min(aMax, bMax) - Math.max(aMin, bMin);
+  let minAxis = -1;
+  for (let i = 0; i < p.axisCount; i++) {
+    const cProj = cx * p.ax[i] + cy * p.ay[i];
+    project(p, p.ax[i], p.ay[i], PROJ_A);
+    const overlap =
+      Math.min(cProj + r, PROJ_A[1]) - Math.max(cProj - r, PROJ_A[0]);
     if (overlap <= 0) return null;
     if (overlap < minOverlap) {
       minOverlap = overlap;
-      minAxis = axis;
+      minAxis = i;
     }
   }
-  return { axis: minAxis, overlap: minOverlap };
-}
-
-export function satCirclePoly(cx, cy, r, poly, axisCount) {
-  const axes = edgeAxes(poly, axisCount);
   // The circle contributes one axis: towards the closest polygon vertex.
-  let nearest = null;
+  let nearest = -1;
   let nd = Infinity;
-  for (const v of poly) {
-    const d = Math.hypot(v[0] - cx, v[1] - cy);
+  for (let i = 0; i < p.n; i++) {
+    const d = Math.hypot(p.vx[i] - cx, p.vy[i] - cy);
     if (d < nd) {
       nd = d;
-      nearest = v;
+      nearest = i;
     }
   }
-  if (nearest) {
-    const ax = nearest[0] - cx;
-    const ay = nearest[1] - cy;
+  let axis = minAxis < 0 ? null : [p.ax[minAxis], p.ay[minAxis]];
+  if (nearest >= 0) {
+    const ax = p.vx[nearest] - cx;
+    const ay = p.vy[nearest] - cy;
     const len = Math.hypot(ax, ay) || 1;
-    axes.push([ax / len, ay / len]);
-  }
-  let minOverlap = Infinity;
-  let minAxis = null;
-  for (const axis of axes) {
-    const cProj = cx * axis[0] + cy * axis[1];
-    const [pMin, pMax] = projectPoly(poly, axis[0], axis[1]);
-    const overlap = Math.min(cProj + r, pMax) - Math.max(cProj - r, pMin);
+    const nx = ax / len;
+    const ny = ay / len;
+    const cProj = cx * nx + cy * ny;
+    project(p, nx, ny, PROJ_A);
+    const overlap =
+      Math.min(cProj + r, PROJ_A[1]) - Math.max(cProj - r, PROJ_A[0]);
     if (overlap <= 0) return null;
     if (overlap < minOverlap) {
       minOverlap = overlap;
-      minAxis = axis;
+      axis = [nx, ny];
     }
   }
-  return { axis: minAxis, overlap: minOverlap };
+  return {axis, overlap: minOverlap};
 }
 
 export function circleCircle(ax, ay, ar, bx, by, br) {
@@ -130,9 +211,9 @@ export function circleCircle(ax, ay, ar, bx, by, br) {
   if (overlap <= 0) return null;
   if (d < 1e-9) {
     // Coincident centres: any direction separates them.
-    return { axis: [1, 0], overlap };
+    return {axis: [1, 0], overlap};
   }
-  return { axis: [dx / d, dy / d], overlap };
+  return {axis: [dx / d, dy / d], overlap};
 }
 
 // Second moment of area about the centroid (assumed to be the origin),
@@ -186,23 +267,109 @@ export function supportPoint(item, nx, ny, worldV, out) {
   return out;
 }
 
+// supportPoint() for a cached polygon.
+function cachedSupport(p, radius, nx, ny, out) {
+  let best = -Infinity;
+  for (let i = 0; i < p.n; i++) {
+    const d = p.vx[i] * nx + p.vy[i] * ny;
+    if (d > best) best = d;
+  }
+  const cutoff = best - SUPPORT_EPS * radius;
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (let i = 0; i < p.n; i++) {
+    if (p.vx[i] * nx + p.vy[i] * ny >= cutoff) {
+      sx += p.vx[i];
+      sy += p.vy[i];
+      n++;
+    }
+  }
+  out[0] = sx / n;
+  out[1] = sy / n;
+  return out;
+}
+
 const SUPPORT_A = [0, 0];
 const SUPPORT_B = [0, 0];
 
-// The MTV axis from SAT is sign-agnostic. Orient it from a towards b so callers
-// can always push a backwards and b forwards.
-function orientAwayFrom(res, a, b) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  if (res.axis[0] * dx + res.axis[1] * dy < 0) {
-    res.axis = [-res.axis[0], -res.axis[1]];
+// The edge of `p` whose outward normal is most aligned with (nx, ny). The
+// cached axes point inward -- SAT does not care about sign -- hence the minus.
+function bestEdge(p, nx, ny) {
+  let best = 0;
+  let bestDot = -Infinity;
+  for (let i = 0; i < p.n; i++) {
+    const d = -(p.ax[i] * nx + p.ay[i] * ny);
+    if (d > bestDot) {
+      bestDot = d;
+      best = i;
+    }
   }
-  return res;
+  return best;
 }
+
+// Contact point of two overlapping polygons by edge clipping, as in Box2D's
+// contact manifolds. The reference face is the one the SAT axis came from; the
+// incident face is the other body's edge facing it most squarely. Clipping the
+// incident edge to the reference edge's extent leaves the points of the
+// incident body that actually sit inside the reference body, and each one
+// contributes the midpoint between it and the reference face, weighted by how
+// deep it is.
+//
+// The midpoint of the two support points, used before this, lands halfway
+// between a corner and the centre of the face it pokes into, so the lever arm
+// -- and with it the turn the contact applies -- comes out wrong whenever a
+// corner meets a face off-centre. Returns false if clipping leaves nothing,
+// so the caller can fall back.
+function clippedContact(ref, inc, nx, ny, out) {
+  const r = bestEdge(ref, nx, ny);
+  const i = bestEdge(inc, -nx, -ny);
+  const r2 = r + 1 === ref.n ? 0 : r + 1;
+  const i2 = i + 1 === inc.n ? 0 : i + 1;
+  const rx = ref.vx[r];
+  const ry = ref.vy[r];
+  let tx = ref.vx[r2] - rx;
+  let ty = ref.vy[r2] - ry;
+  const len = Math.hypot(tx, ty) || 1;
+  tx /= len;
+  ty /= len;
+  // Clip the incident edge to the reference edge's extent along its tangent.
+  const ax = inc.vx[i];
+  const ay = inc.vy[i];
+  const dx = inc.vx[i2] - ax;
+  const dy = inc.vy[i2] - ay;
+  const sa = (ax - rx) * tx + (ay - ry) * ty;
+  const sb = sa + dx * tx + dy * ty;
+  if ((sa < 0 && sb < 0) || (sa > len && sb > len)) return false;
+  // Parameters of the clipped ends along the incident edge.
+  const span = sb - sa;
+  const fa = span === 0 ? 0 : (Math.min(len, Math.max(0, sa)) - sa) / span;
+  const fb = span === 0 ? 1 : (Math.min(len, Math.max(0, sb)) - sa) / span;
+  const face = rx * nx + ry * ny;
+  let wx = 0;
+  let wy = 0;
+  let w = 0;
+  for (const f of [fa, fb]) {
+    const x = ax + dx * f;
+    const y = ay + dy * f;
+    const depth = face - (x * nx + y * ny);
+    if (depth <= 0) continue;
+    wx += (x + (nx * depth) / 2) * depth;
+    wy += (y + (ny * depth) / 2) * depth;
+    w += depth;
+  }
+  if (w <= 0) return false;
+  out[0] = wx / w;
+  out[1] = wy / w;
+  return true;
+}
+const CLIPPED = [0, 0];
 
 // Overlap between two placed items. Returns null when they are disjoint,
 // otherwise {axis, overlap, px, py} where (px, py) is the contact point: the
-// midpoint of each body's deepest point along the separation axis.
+// clipped edge contact for two polygons, otherwise the midpoint of each body's
+// deepest point along the separation axis. The axis is a unit vector pointing
+// from a towards b.
 export function testOverlap(a, b) {
   // Broad phase: bounding circles of the two shapes.
   const dx = b.x - a.x;
@@ -212,28 +379,44 @@ export function testOverlap(a, b) {
 
   const aCircle = a.shape.type === 'circle';
   const bCircle = b.shape.type === 'circle';
-  let vertsA = null;
-  let vertsB = null;
+  const pa = aCircle ? null : polyCache(a);
+  const pb = bCircle ? null : polyCache(b);
   let res;
   if (aCircle && bCircle) {
     res = circleCircle(a.x, a.y, a.shape.radius, b.x, b.y, b.shape.radius);
   } else if (aCircle) {
-    vertsB = worldVerts(b);
-    res = satCirclePoly(a.x, a.y, a.shape.radius, vertsB, b.shape.axisCount);
+    res = satCirclePoly(a.x, a.y, a.shape.radius, pb);
   } else if (bCircle) {
-    vertsA = worldVerts(a);
-    res = satCirclePoly(b.x, b.y, b.shape.radius, vertsA, a.shape.axisCount);
+    res = satCirclePoly(b.x, b.y, b.shape.radius, pa);
   } else {
-    vertsA = worldVerts(a);
-    vertsB = worldVerts(b);
-    res = satPolyPoly(vertsA, a.shape.axisCount, vertsB, b.shape.axisCount);
+    res = satPolyPoly(pa, pb);
   }
   if (!res) return null;
-  orientAwayFrom(res, a, b);
 
-  const [nx, ny] = res.axis;
-  supportPoint(a, nx, ny, vertsA, SUPPORT_A);
-  supportPoint(b, -nx, -ny, vertsB, SUPPORT_B);
+  // The SAT axis is sign-agnostic; orient it from a towards b.
+  const axis = res.axis;
+  if (axis[0] * dx + axis[1] * dy < 0) {
+    axis[0] = -axis[0];
+    axis[1] = -axis[1];
+  }
+  const nx = axis[0];
+  const ny = axis[1];
+  if (pa && pb) {
+    // The reference face's outward normal points at the other body: +n from
+    // a, -n from b.
+    const ok = res.refIsA
+      ? clippedContact(pa, pb, nx, ny, CLIPPED)
+      : clippedContact(pb, pa, -nx, -ny, CLIPPED);
+    if (ok) {
+      res.px = CLIPPED[0];
+      res.py = CLIPPED[1];
+      return res;
+    }
+  }
+  if (pa) cachedSupport(pa, a.shape.radius, nx, ny, SUPPORT_A);
+  else supportPoint(a, nx, ny, null, SUPPORT_A);
+  if (pb) cachedSupport(pb, b.shape.radius, -nx, -ny, SUPPORT_B);
+  else supportPoint(b, -nx, -ny, null, SUPPORT_B);
   res.px = (SUPPORT_A[0] + SUPPORT_B[0]) / 2;
   res.py = (SUPPORT_A[1] + SUPPORT_B[1]) / 2;
   return res;

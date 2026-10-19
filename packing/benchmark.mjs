@@ -19,10 +19,10 @@
 //
 // Exits non-zero if anything fails, so it can gate a commit.
 
-import { PackingSolver } from './solver.js';
-import { validateLayout } from './validate.js';
+import {PackingSolver} from './solver.js';
+import {validateLayout} from './validate.js';
 
-import { CASES } from './benchmark-cases.js';
+import {CASES} from './benchmark-cases.js';
 
 const args = process.argv.slice(2);
 const flag = (k, d) => {
@@ -39,7 +39,14 @@ const only = flag('only', null);
 const tolScale = quick ? 6 : 1;
 
 const pad = (s, n) => String(s).padEnd(n);
-console.log(pad('case', 24), pad('source', 12), pad('target', 9), pad('found', 9), pad('gap %', 8), 'ms');
+console.log(
+  pad('case', 24),
+  pad('source', 12),
+  pad('target', 9),
+  pad('found', 9),
+  pad('gap %', 8),
+  'ms',
+);
 
 let failures = 0;
 let gapSum = 0;
@@ -51,8 +58,12 @@ for (const c of CASES) {
   const notes = [];
   for (let s = 1; s <= seeds; s++) {
     const solver = new PackingSolver({
-      itemShape: c.item, containerShape: c.container, count: c.count,
-      attempts, seed: s, ...(c.config || {}),
+      itemShape: c.item,
+      containerShape: c.container,
+      count: c.count,
+      attempts,
+      seed: s,
+      ...(c.config || {}),
     });
     while (solver.step());
     if (!solver.best) {
@@ -60,25 +71,42 @@ for (const c of CASES) {
       continue;
     }
     const check = validateLayout(
-      solver.best.items, solver.best.container, solver.config.feasibleTolerance,
+      solver.best.items,
+      solver.best.container,
+      solver.config.feasibleTolerance,
     );
-    if (!check.ok) notes.push(`seed ${s} infeasible: ${check.problems.join('; ')}`);
+    if (!check.ok)
+      notes.push(`seed ${s} infeasible: ${check.problems.join('; ')}`);
     if (!best || solver.best.scale < best) best = solver.best.scale;
   }
   const gap = best === null ? Infinity : (best / c.target - 1) * 100;
   if (best === null) notes.push('no layout at all');
-  else if (gap > c.tol * tolScale) notes.push(`gap ${gap.toFixed(2)}% exceeds ${(c.tol * tolScale).toFixed(2)}%`);
-  else if (gap < -0.05 && c.source === 'proven') notes.push(`beat a proven optimum by ${(-gap).toFixed(2)}% -- check the geometry`);
+  else if (gap > c.tol * tolScale)
+    notes.push(
+      `gap ${gap.toFixed(2)}% exceeds ${(c.tol * tolScale).toFixed(2)}%`,
+    );
+  else if (gap < -0.05 && c.source === 'proven')
+    notes.push(
+      `beat a proven optimum by ${(-gap).toFixed(2)}% -- check the geometry`,
+    );
 
   console.log(
-    pad(c.name, 24), pad(c.source, 12), pad(c.target.toFixed(4), 9),
+    pad(c.name, 24),
+    pad(c.source, 12),
+    pad(c.target.toFixed(4), 9),
     pad(best === null ? '-' : best.toFixed(4), 9),
-    pad(Number.isFinite(gap) ? gap.toFixed(2) : '-', 8), Date.now() - t0,
+    pad(Number.isFinite(gap) ? gap.toFixed(2) : '-', 8),
+    Date.now() - t0,
     notes.length ? `\n    FAIL  ${notes.join('\n    FAIL  ')}` : '',
   );
   if (notes.length) failures++;
-  if (Number.isFinite(gap)) { gapSum += gap; counted++; }
+  if (Number.isFinite(gap)) {
+    gapSum += gap;
+    counted++;
+  }
 }
 
-console.log(`\nmean gap ${(gapSum / counted).toFixed(3)}%   ${failures} failing case(s)`);
+console.log(
+  `\nmean gap ${(gapSum / counted).toFixed(3)}%   ${failures} failing case(s)`,
+);
 process.exit(failures ? 1 : 0);
