@@ -323,7 +323,10 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     // strip rewrapping), and a stale constant would frame content under it.
     const top = ioEl ? ioEl.getBoundingClientRect().bottom + 14 : TOP_INSET;
     const vw = Math.max(cssW - (cssW >= RAIL_MIN_W ? RIGHT_INSET : 0), 1);
-    const vh = Math.max(cssH - top - BOTTOM_INSET, 1);
+    // narrow screens: the lens rail docks above the stage rail instead
+    const bottom = cssW < RAIL_MIN_W && railEl && railEl.offsetHeight
+      ? cssH - railEl.getBoundingClientRect().top + 8 : BOTTOM_INSET;
+    const vh = Math.max(cssH - top - bottom, 1);
     const w = (rect.x1 - rect.x0) * pad, h = (rect.y1 - rect.y0) * pad;
     const scale = clamp(Math.min(vw / w, vh / h), 0.05, 8);
     const cx = (rect.x0 + rect.x1) / 2, cy = (rect.y0 + rect.y1) / 2;
@@ -412,39 +415,104 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   const overlaps = (bb, vr) => !(bb.x1 < vr.x0 || bb.x0 > vr.x1 || bb.y1 < vr.y0 || bb.y0 > vr.y1);
 
   // -------------------------------------------------------------- pointer ----
-  let dragging = false, lastPX = 0, lastPY = 0;
+  // One pointer drags, two pinch-zoom (touch), and a press that doesn't move is
+  // a click: on a branch or a head's attention row it toggles that knockout.
+  const pointers = new Map(); // pointerId -> {x, y} (canvas px)
+  let press = null;           // {x, y, moved} for the current single-pointer press
+  let pinchPrev = null;       // {d, cx, cy} for the current two-pointer gesture
+  const localXY = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  function zoomAt(mx, my, f) {
+    const before = toWorld(mx, my);
+    view.scale = clamp(view.scale * f, 0.05, 8);
+    view.tx = mx - before.x * view.scale;
+    view.ty = my - before.y * view.scale;
+  }
+  function pinchState() {
+    const [a, b] = [...pointers.values()];
+    return { d: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+  }
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     const r = canvas.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
     freeLook();
-    const before = toWorld(mx, my);
-    const f = Math.exp(-e.deltaY * 0.0015);
-    view.scale = clamp(view.scale * f, 0.05, 8);
-    view.tx = mx - before.x * view.scale;
-    view.ty = my - before.y * view.scale;
+    zoomAt(mx, my, Math.exp(-e.deltaY * 0.0015));
   }, { passive: false });
   canvas.addEventListener('pointerdown', (e) => {
-    const r = canvas.getBoundingClientRect();
-    dragging = true; lastPX = e.clientX - r.left; lastPY = e.clientY - r.top;
+    const p = localXY(e);
+    pointers.set(e.pointerId, p);
     canvas.setPointerCapture(e.pointerId);
+    if (pointers.size === 1) press = { x: p.x, y: p.y, moved: false };
+    else { press = null; pinchPrev = pinchState(); }
   });
   canvas.addEventListener('pointermove', (e) => {
-    const r = canvas.getBoundingClientRect();
-    const mx = e.clientX - r.left, my = e.clientY - r.top;
-    if (dragging) {
-      if (mx !== lastPX || my !== lastPY) freeLook();
-      view.tx += mx - lastPX; view.ty += my - lastPY; lastPX = mx; lastPY = my;
-      hideNeuronTip();
+    const p = localXY(e);
+    const prev = pointers.get(e.pointerId);
+    if (!prev) { updateHover(p.x, p.y, e.clientX, e.clientY); return; }
+    pointers.set(e.pointerId, p);
+    hideNeuronTip();
+    if (pointers.size >= 2) {
+      const cur = pinchState();
+      freeLook();
+      zoomAt(cur.cx, cur.cy, cur.d / Math.max(pinchPrev.d, 1));
+      view.tx += cur.cx - pinchPrev.cx; view.ty += cur.cy - pinchPrev.cy;
+      pinchPrev = cur;
       return;
     }
-    updateHover(mx, my, e.clientX, e.clientY);
+    if (press && Math.hypot(p.x - press.x, p.y - press.y) > 6) press.moved = true;
+    if (press && !press.moved) return; // don't nudge the view on a tap
+    freeLook();
+    view.tx += p.x - prev.x; view.ty += p.y - prev.y;
   });
-  const endDrag = () => { dragging = false; };
-  canvas.addEventListener('dblclick', () => resetView(true));
-  canvas.addEventListener('pointerup', endDrag);
-  canvas.addEventListener('pointercancel', endDrag);
-  canvas.addEventListener('pointerleave', () => { hoverNeuron = null; hideNeuronTip(); });
+  function endPointer(e, isClick) {
+    if (!pointers.has(e.pointerId)) return;
+    if (isClick && press && !press.moved && pointers.size === 1) {
+      const hit = hitTarget(toWorld(press.x, press.y));
+      if (hit && onToggle) onToggle(hit.key);
+      if (e.pointerType === 'mouse') updateHover(press.x, press.y, e.clientX, e.clientY);
+    }
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinchPrev = null;
+    if (pointers.size === 1) press = { ...[...pointers.values()][0], moved: true };
+    if (pointers.size === 0) press = null;
+  }
+  canvas.addEventListener('dblclick', (e) => {
+    // a double-click on a knockout target is two toggles, not a refit
+    if (!hitTarget(toWorld(localXY(e).x, localXY(e).y))) resetView(true);
+  });
+  canvas.addEventListener('pointerup', (e) => endPointer(e, true));
+  canvas.addEventListener('pointercancel', (e) => endPointer(e, false));
+  canvas.addEventListener('pointerleave', () => { hoverNeuron = null; hoverTarget = null; hideNeuronTip(); });
+
+  // ---- knockouts: switch a branch or a head off and watch what changes ----
+  // The host owns the set (it reruns the model); the renderer only draws it and
+  // reports clicks. Keys match model.forward: a{b}, m{b}, a{b}h{h}.
+  let offSet = new Set();
+  let onToggle = null;
+  let hoverTarget = null;
+  const koName = (key) => {
+    const m = /^([am])(\d+)(?:h(\d+))?$/.exec(key);
+    if (!m) return key;
+    return m[3] != null ? `b${m[2]} head ${m[3]}` : `b${m[2]} ${m[1] === 'a' ? 'attn' : 'MLP'}`;
+  };
+  function hitTarget(w) {
+    for (const bx of blockBoxes) {
+      const a = bx.attn, mm = bx.mlp;
+      if (w.x >= a.x0 && w.x <= a.x1) {
+        for (let h = 0; h < H; h++) {
+          const yc = attnRowY(h);
+          if (Math.abs(w.y - yc) <= attnRowStep / 2) return { key: `a${bx.b}h${h}` };
+        }
+        if (Math.abs(w.y - a.yc) <= a.h / 2) return { key: `a${bx.b}` };
+      }
+      if (w.x >= mm.x0 && w.x <= mm.x1 && Math.abs(w.y - mm.yc) <= mm.h / 2) return { key: `m${bx.b}` };
+    }
+    return null;
+  }
+  function setKnockouts(set) { offSet = new Set(set); updateKoPanel(); }
 
   // ---- neuron inspector: hover an MLP/GELU node to see what it fires on ----
   let neuronTip = null;
@@ -456,9 +524,32 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   }
   function hideNeuronTip() { if (neuronTip) neuronTip.style.display = 'none'; }
 
+  function placeTip(clientX, clientY) {
+    neuronTip.style.display = 'block';
+    // place near the cursor, flipping if it would run off the right/bottom edge
+    const pad = 14, tw = neuronTip.offsetWidth, th = neuronTip.offsetHeight;
+    let px = clientX + pad, py = clientY + pad;
+    if (px + tw > window.innerWidth - 4) px = clientX - pad - tw;
+    if (py + th > window.innerHeight - 4) py = clientY - pad - th;
+    neuronTip.style.left = `${Math.max(4, px)}px`;
+    neuronTip.style.top = `${Math.max(4, py)}px`;
+  }
   function updateHover(mx, my, clientX, clientY) {
-    if (!neuronLabels) return;
     const wpt = toWorld(mx, my);
+    const tgt = hitTarget(wpt);
+    hoverTarget = tgt ? tgt.key : null;
+    canvas.style.cursor = tgt ? 'pointer' : '';
+    const koLine = tgt
+      ? `<div class="nt-ko">click: ${offSet.has(tgt.key) ? 'switch' : 'knock'} <b>${koName(tgt.key)}</b> ${offSet.has(tgt.key) ? 'back on' : 'out'}</div>`
+      : '';
+    if (!neuronLabels) {
+      neuronTip = neuronTip || Object.assign(document.createElement('div'), { id: 'neuronTip' });
+      if (!neuronTip.isConnected) document.body.appendChild(neuronTip);
+      if (!tgt) { hideNeuronTip(); return; }
+      neuronTip.innerHTML = koLine;
+      placeTip(clientX, clientY);
+      return;
+    }
     let hit = null, bestDx = CX * 0.42;
     for (const c of neuronCols) {
       if (wpt.y < c.yc - c.h / 2 || wpt.y > c.yc + c.h / 2) continue;
@@ -470,8 +561,13 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       hit = { block: c.block, j: i, x: c.x, y: c.ys[i] };
     }
     hoverNeuron = hit;
-    if (!hit) { hideNeuronTip(); return; }
     ensureTip();
+    if (!hit) {
+      if (!tgt) { hideNeuronTip(); return; }
+      neuronTip.innerHTML = koLine;
+      placeTip(clientX, clientY);
+      return;
+    }
     const lay = neuronLabels.layers[hit.block];
     const n = lay && lay[hit.j];
     const triggers = n && n.t && n.t.length
@@ -484,15 +580,8 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     } else {
       html += `<div class="nt-dim">this unit rarely fires</div>`;
     }
-    neuronTip.innerHTML = html;
-    neuronTip.style.display = 'block';
-    // place near the cursor, flipping if it would run off the right/bottom edge
-    const pad = 14, tw = neuronTip.offsetWidth, th = neuronTip.offsetHeight;
-    let px = clientX + pad, py = clientY + pad;
-    if (px + tw > window.innerWidth - 4) px = clientX - pad - tw;
-    if (py + th > window.innerHeight - 4) py = clientY - pad - th;
-    neuronTip.style.left = `${Math.max(4, px)}px`;
-    neuronTip.style.top = `${Math.max(4, py)}px`;
+    neuronTip.innerHTML = html + koLine;
+    placeTip(clientX, clientY);
   }
   const escapeHtml = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
@@ -531,7 +620,9 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     attnTokens = snap.windowTokens || [];
     attnLastPos = snap.lastPos || 0;
     lensData = (snap.activations && snap.activations.lens) || null;
+    koIntact = snap.intact || null;
     setAttribution(snap.attribution || null, snap.token);
+    updateKoPanel();
     computeGhosts();
     updateLensDom();
     updateAttnDom();
@@ -548,6 +639,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     attnData = null; attnTokens = []; attnLastPos = 0;
     lensData = null;
     attribData = null; attribBy = [];
+    koIntact = null;
     if (railEl) railEl.classList.remove('on');
     ghostList = []; ghostBlockW = [];
     waveActive = false;
@@ -657,6 +749,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     drawNodes(vr, sc);
     drawHoverRing(sc);
     drawAttention(sc);
+    drawKnockouts(sc);
     drawOutputBloom();
     drawOutput(sc);
 
@@ -720,7 +813,11 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     return clamp(s / Math.max(n, 1), 0, 1);
   }
 
+  // the matrix that writes a branch's result back into the stream
+  const writesOff = (m) => (m.name === 'W_O' && offSet.has(`a${m.block}`))
+    || (m.name === 'W_down' && offSet.has(`m${m.block}`));
   function drawMatrixEdges(m, edgeF, sc) {
+    if (writesOff(m)) edgeF *= 0.25;
     const glow = 0.5 + 0.5 * m.activity + 1.8 * waveGlow(m.midX) * (0.4 + m.activity);
     ctx.lineWidth = 0.5 / sc;
     // Only the stronger weights are drawn (quadratic emphasis), so a matrix reads
@@ -737,7 +834,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
 
   // The bright layer: true per-edge, true sign, thickness by contribution.
   function drawLiveEdges(m, sc) {
-    if (!m.live.length) return;
+    if (!m.live.length || writesOff(m)) return;
     const pass = waveFront === Infinity ? 1
       : clamp((waveFront - m.midX) / (CX * 0.8) + 0.5, 0, 1);
     if (pass <= 0.02) return;
@@ -980,6 +1077,56 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
         ctx.strokeRect(x0 + attnLastPos * cellW, yTop, minW, ATTN_ROW_H);
       }
     }
+  }
+
+  // Switched-off parts: a dark veil, a dashed red outline and "OFF", so the
+  // branch still shows what it computed but plainly isn't adding it anywhere.
+  // The hover outline previews what a click will toggle.
+  const C_OFF = [232, 92, 80];
+  function drawKnockouts(sc) {
+    const pulse = 0.75 + 0.25 * Math.sin(nowT / 380);
+    for (const bx of blockBoxes) {
+      for (const kind of ['a', 'm']) {
+        const key = `${kind}${bx.b}`;
+        const r = kind === 'a' ? bx.attn : bx.mlp;
+        const off = offSet.has(key);
+        if (!off && hoverTarget !== key) continue;
+        roundRect(r.x0, r.yc - r.h / 2, r.x1 - r.x0, r.h, 26);
+        ctx.lineWidth = 2.5 / sc;
+        if (off) {
+          ctx.fillStyle = 'rgba(8,6,5,0.62)'; ctx.fill();
+          ctx.setLineDash([14 / sc, 9 / sc]);
+          ctx.strokeStyle = rgba(C_OFF, 0.85 * pulse); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = `600 ${Math.max(44, 13 / sc)}px ui-monospace, Menlo, monospace`;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = rgba(C_OFF, 0.95);
+          ctx.fillText('OFF', r.x0 + CX * 2, r.yc); // clear of the branch watermark
+        } else {
+          ctx.strokeStyle = 'rgba(255,236,190,0.55)'; ctx.stroke();
+        }
+      }
+      for (let h = 0; h < H; h++) {
+        const key = `a${bx.b}h${h}`;
+        const off = offSet.has(key);
+        if (!off && hoverTarget !== key) continue;
+        const yTop = attnRowY(h) - ATTN_ROW_H / 2, w = bx.attn.x1 - bx.attn.x0;
+        ctx.lineWidth = 1.5 / sc;
+        if (off) {
+          ctx.fillStyle = 'rgba(8,6,5,0.7)';
+          ctx.fillRect(bx.attn.x0, yTop, w, ATTN_ROW_H);
+          ctx.strokeStyle = rgba(C_OFF, 0.9);
+          ctx.beginPath(); ctx.moveTo(bx.attn.x0, yTop + ATTN_ROW_H / 2); ctx.lineTo(bx.attn.x1, yTop + ATTN_ROW_H / 2); ctx.stroke();
+          ctx.font = `600 ${Math.max(12, 10 / sc)}px ui-monospace, Menlo, monospace`;
+          ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = rgba(C_OFF, 0.95);
+          ctx.fillText('off', bx.attn.x1 + 8, yTop + ATTN_ROW_H / 2);
+        }
+        ctx.strokeStyle = off ? rgba(C_OFF, 0.9) : 'rgba(255,236,190,0.7)';
+        ctx.strokeRect(bx.attn.x0 - 2, yTop - 2, w + 4, ATTN_ROW_H + 4);
+      }
+    }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   }
 
   // ring around the neuron currently under the cursor (paired across ↑proj/GELU)
@@ -1296,9 +1443,9 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   const railEl = document.getElementById('lensRail');
   const railCells = [];
   let railFoot = null;
-  const RAIL_BAR_W = 196;
   function buildLensRail() {
     if (!railEl || railCells.length) return;
+    buildKoPanel();
     const cap = document.createElement('div');
     cap.className = 'lr-cap';
     cap.textContent = 'next-token guess by depth ↓';
@@ -1309,7 +1456,9 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       const hdr = document.createElement('div');
       hdr.className = 'lr-h';
       const name = document.createElement('span');
-      name.textContent = i === 0 ? 'embedding' : `after block ${i - 1}`;
+      // the phone layout squeezes five cells into one row and uses the short name
+      name.innerHTML = i === 0 ? '<span class="long">embedding</span><span class="short">emb</span>'
+        : `<span class="long">after block ${i - 1}</span><span class="short">b${i - 1}</span>`;
       const tag = document.createElement('span');
       tag.className = 'lr-tag';
       hdr.append(name, tag);
@@ -1361,7 +1510,9 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       const val = document.createElement('span'); val.className = 'at-val';
       row.append(name, track, val);
       railEl.appendChild(row);
-      attribRows.push({ row, name, bar, val });
+      const r = { row, name, bar, val, key: null };
+      row.addEventListener('click', () => { if (r.key && onToggle) onToggle(r.key); });
+      attribRows.push(r);
     }
     attribFoot = document.createElement('div');
     attribFoot.className = 'at-foot';
@@ -1390,6 +1541,9 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       const p = ranked[i], r = attribRows[i];
       if (!p) { r.row.style.display = 'none'; continue; }
       r.row.style.display = '';
+      r.key = p.kind === 'emb' ? null : `${p.kind === 'attn' ? 'a' : 'm'}${p.block}`;
+      r.row.classList.toggle('ko-able', !!r.key);
+      r.row.title = r.key ? `click to knock out ${koName(r.key)}` : '';
       r.name.textContent = p.label.replace('block ', 'b');
       const t = clamp(Math.abs(p.value) / maxAbs, 0, 1);
       const half = t * 50; // percent of the track's half-width
@@ -1400,8 +1554,60 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
       r.val.style.color = rgba(attribColor(p.value), 0.95);
     }
     if (attribFoot) {
-      attribFoot.textContent = 'signed logit terms · not causal effects';
+      attribFoot.textContent = offSet.size
+        ? 'signed logit terms · knocked-out parts add 0'
+        : 'signed logit terms, not causal effects · click a row to knock it out';
     }
+  }
+
+  // ---- knockout panel (top of the rail, only while something is off) ----
+  // Attribution is correlational bookkeeping; a knockout is the experiment. So
+  // this sits beside it: what is off, what the intact model would say on this
+  // exact window, and what the knocked-out one says instead.
+  let koEl = null, koChips = null, koCmp = null, koIntact = null;
+  function buildKoPanel() {
+    koEl = document.createElement('div');
+    koEl.className = 'ko';
+    const head = document.createElement('div');
+    head.className = 'ko-h';
+    const title = document.createElement('span');
+    title.textContent = 'knocked out';
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.textContent = 'restore all';
+    reset.addEventListener('click', () => onToggle && onToggle(null));
+    head.append(title, reset);
+    koChips = document.createElement('div');
+    koChips.className = 'ko-chips';
+    koCmp = document.createElement('div');
+    koCmp.className = 'ko-cmp';
+    koEl.append(head, koChips, koCmp);
+    railEl.appendChild(koEl);
+  }
+  function updateKoPanel() {
+    if (!koEl) return;
+    koEl.style.display = offSet.size ? '' : 'none';
+    railEl.classList.toggle('has-ko', offSet.size > 0);
+    koChips.textContent = '';
+    for (const key of [...offSet].sort()) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ko-chip';
+      b.textContent = `${koName(key)} ✕`;
+      b.title = 'switch it back on';
+      b.addEventListener('click', () => onToggle && onToggle(key));
+      koChips.appendChild(b);
+    }
+    const it = koIntact;
+    if (!offSet.size || !it || !topOutputs.length) { koCmp.innerHTML = ''; return; }
+    const want = it.top[0];
+    const nowP = it.now[want.id];
+    const top = topOutputs[0];
+    const tok = (id) => `<b>${escapeHtml(dispToken(vocab[id]))}</b>`;
+    const row = (label, id, p) => `<div><span>${label}</span><em>${tok(id)}</em><i>${fmtPct(p)}</i></div>`;
+    koCmp.innerHTML = row('intact model', want.id, want.prob)
+      + row('knocked out', want.id, nowP)
+      + (top.id !== want.id ? row('now says', top.id, top.prob) : '');
   }
 
   // Retrospective agreement of the lens top-1 with the final top-1.
@@ -1427,7 +1633,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
         rows[r].row.classList.toggle('locked', o.id === finalId);
         rows[r].tok.textContent = dispToken(vocab[o.id]);
         rows[r].pct.textContent = fmtPct(o.prob);
-        rows[r].bar.style.width = `${clamp(o.prob / maxP, 0, 1) * RAIL_BAR_W}px`;
+        rows[r].bar.style.width = `calc(${(clamp(o.prob / maxP, 0, 1) * 100).toFixed(1)}% - 6px)`;
       }
     }
     if (railFoot) {
@@ -1552,6 +1758,7 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
   // Small, unintrusive key (bottom-left, screen space): node activation colormap,
   // edge sign colors, and the per-head attention swatches.
   function drawLegend() {
+    if (cssW < RAIL_MIN_W) return; // no room on a phone; the docked rail sits there
     const w = 152, h = 94, x = 16, y = cssH - h - 52; // clear of the stage rail
     ctx.fillStyle = 'rgba(12,10,8,0.6)';
     roundRectScreen(x, y, w, h, 7); ctx.fill();
@@ -1627,6 +1834,9 @@ export function makeRenderer(canvas, { config, tensors }, neuronLabels = null) {
     // stage navigation (the app is explorable, not just ambient)
     stages, gotoStage, nextStage, prevStage,
     get stageIndex() { return stageIndex; },
+    // knockouts: the host owns the set and reruns the model
+    setKnockouts, koName,
+    set onToggle(fn) { onToggle = fn; },
     set onStageChange(fn) { onStageChange = fn; },
   };
 }

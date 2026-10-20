@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>langViz</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="A tiny GPT running in your browser, drawn as it thinks. Knock out its parts, see what it expected, rewrite what it says." />
+<meta property="og:title" content="langViz — watch a tiny GPT think" />
+<meta property="og:description" content="A 1.2M-parameter KJV-trained transformer running in your browser. Knock out its parts, see what it expected, rewrite what it says." />
+<meta property="og:image" content="https://andrewmaxwell.github.io/junk/langViz/image.png" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary_large_image" />
 <style>
   html, body { margin: 0; height: 100%; background: #0a0806; overflow: hidden; }
   #viz {
@@ -13,17 +20,20 @@
   #viz:active { cursor: grabbing; }
   /* tiny unobtrusive hint, fades after a few seconds */
   #hint {
-    position: fixed; left: 14px; bottom: 12px;
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(58px + env(safe-area-inset-bottom));
+    width: max-content; max-width: calc(100vw - 32px); text-align: center; z-index: 7;
+    background: rgba(10,8,6,0.85); padding: 3px 8px; border-radius: 6px;
     color: rgba(180,168,148,0.45); font: 12px ui-monospace, Menlo, monospace;
     pointer-events: none; transition: opacity 1s ease; opacity: 1;
   }
   #hint.gone { opacity: 0; }
+  @media (max-width: 759px) { #hint { bottom: auto; top: 60%; } } /* clear of the docked rail */
   /* ---- stage rail: named stops along the spine the camera can fly to ----
      Fitting the whole ~6500-unit-wide network on screen forces a ~0.25 scale, so
      the overview can only ever be an establishing shot. The rail is how you get
      to a framing that actually fills the screen. */
   #stages {
-    position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px;
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom));
     z-index: 6; display: flex; gap: 5px; align-items: center;
     max-width: 92vw; overflow-x: auto; scrollbar-width: none;
     padding: 5px 7px; border-radius: 9px;
@@ -116,8 +126,57 @@
   #lensRail .at-tick { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: rgba(210,200,180,0.5); }
   #lensRail .at-val { flex: 0 0 38px; text-align: right; font-variant-numeric: tabular-nums; }
   #lensRail .at-foot { color: rgba(160,150,132,0.75); font-size: 9.5px; text-align: center; padding-top: 3px; }
-  /* no room for the rail on a narrow window — renderer.js reclaims the space */
-  @media (max-width: 759px) { #lensRail { display: none; } }
+  /* attribution rows double as knockout buttons */
+  #lensRail .at-row.ko-able { pointer-events: auto; cursor: pointer; border-radius: 3px; }
+  #lensRail .at-row.ko-able:hover { background: rgba(232,92,80,0.14); }
+  /* ---- knockout panel: what is switched off, and what that changed ---- */
+  #lensRail .ko {
+    pointer-events: auto; padding: 5px 7px 6px; border-radius: 6px;
+    background: rgba(40,14,10,0.6); border: 1px solid rgba(232,92,80,0.45);
+  }
+  #lensRail .ko-h {
+    display: flex; justify-content: space-between; align-items: center;
+    color: rgba(240,140,120,0.95); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  #lensRail .ko button {
+    cursor: pointer; font: 10px ui-monospace, Menlo, monospace; border-radius: 4px;
+    background: rgba(0,0,0,0.35); color: rgba(230,214,190,0.9);
+    border: 1px solid rgba(232,92,80,0.4); padding: 2px 6px;
+  }
+  #lensRail .ko button:hover { background: rgba(232,92,80,0.25); }
+  #lensRail .ko-h button { text-transform: none; letter-spacing: 0; }
+  #lensRail .ko-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 4px; }
+  #lensRail .ko-cmp div { display: flex; gap: 6px; font-size: 11px; line-height: 1.5; color: rgba(214,200,172,0.9); }
+  #lensRail .ko-cmp span { flex: 0 0 82px; color: rgba(168,158,138,0.8); }
+  #lensRail .ko-cmp b { color: rgba(255,236,196,1); }
+  #lensRail .ko-cmp em { flex: 1 1 auto; font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #lensRail .ko-cmp i { font-style: normal; font-variant-numeric: tabular-nums; }
+  #neuronTip .nt-ko { color: rgba(240,150,130,0.95); margin-top: 3px; }
+  #neuronTip .nt-ko:first-child { margin-top: 0; }
+  #neuronTip .nt-ko b { color: rgba(255,220,200,1); }
+  /* short screens: two guesses per depth instead of three */
+  @media (max-height: 760px) { #lensRail .lr-row:nth-child(4) { display: none; } }
+  #lensRail { max-height: calc(100vh - 150px); overflow-y: auto; scrollbar-width: none; }
+  #lensRail .short { display: none; }
+  /* phones: the rail docks above the stage rail as one row of top guesses
+     (plus the knockout panel when something is off); fitRect measures it */
+  @media (max-width: 759px) {
+    #lensRail {
+      top: auto; bottom: calc(56px + env(safe-area-inset-bottom)); left: 8px; right: 8px;
+      transform: none; width: auto; max-height: none; flex-flow: row wrap; gap: 3px; padding: 5px;
+    }
+    #lensRail .lr-cap { flex: 1 0 100%; padding: 0; }
+    #lensRail .lr-cell { flex: 1 1 0; min-width: 0; padding: 2px 0 3px; }
+    #lensRail .lr-row:nth-child(n+3), #lensRail .lr-tag, #lensRail .lr-foot, #lensRail .lr-div,
+    #lensRail .at-cap, #lensRail .at-row, #lensRail .at-foot, #lensRail .long { display: none; }
+    #lensRail .short { display: inline; }
+    #lensRail .lr-h { padding: 0 4px 1px; }
+    #lensRail .lr-row { flex-direction: column; font-size: 11.5px; padding: 0 4px; line-height: 1.2; }
+    #lensRail .lr-pct { padding-left: 0; font-size: 10px; color: rgba(190,178,156,0.85); }
+    #lensRail .ko { flex: 1 0 100%; box-sizing: border-box; }
+    #lensRail .ko button { padding: 5px 9px; font-size: 11px; }
+    #lensRail .ko-chips { margin: 4px 0 2px; }
+  }
   /* neuron inspector tooltip: what an MLP/GELU unit fires on, on hover */
   #neuronTip {
     position: fixed; z-index: 5; pointer-events: none; max-width: 290px;
@@ -199,8 +258,42 @@
     #promptBar { flex-wrap: wrap; }
     #prompt { flex-basis: 65%; }
     #promptHint { margin-right: auto; }
-    #strip { font-size: 12px; }
+    #strip { font-size: 13px; }
+    #io .tag { display: none; }
+    #io { padding-bottom: 46px; top: calc(8px + env(safe-area-inset-top)); }
+    #promptBar button { padding: 7px 12px; }
+    #prompt { font-size: 16px; } /* < 16px makes iOS zoom the page on focus */
   }
+  /* every word is inspectable; its tint is how surprised the model was (--s) */
+  #strip [data-a] {
+    pointer-events: auto; cursor: pointer; border-radius: 3px;
+    background: rgba(232,92,80,calc(var(--s, 0) * 0.55));
+    box-shadow: 0 2px 0 rgba(255,120,100,calc(var(--s, 0) * 0.9));
+  }
+  #strip [data-a]:hover, #strip .inspected { outline: 1px solid rgba(255,236,190,0.7); outline-offset: 1px; }
+  #strip .chosen { text-decoration: underline dotted rgba(140,210,190,0.95); text-underline-offset: 4px; }
+  #io .tag .sur { color: rgba(255,150,130,0.95); }
+  /* word inspector popover */
+  #tokTip {
+    position: fixed; z-index: 8; display: none; max-width: min(340px, calc(100vw - 12px));
+    box-sizing: border-box; padding: 8px 10px; border-radius: 8px;
+    font: 12px/1.45 ui-monospace, Menlo, monospace; color: rgba(214,202,180,0.95);
+    background: rgba(12,10,8,0.97); border: 1px solid rgba(150,135,105,0.4);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.6); pointer-events: none;
+  }
+  #tokTip.pinned { pointer-events: auto; border-color: rgba(245,200,120,0.6); }
+  #tokTip .tt-h b { color: rgba(255,236,196,1); font-size: 13px; }
+  #tokTip .tt-dim { color: rgba(160,150,132,0.85); font-size: 11px; }
+  #tokTip .tt-sub { color: rgba(168,158,138,0.8); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 6px; }
+  #tokTip .tt-alts { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 5px; }
+  #tokTip button {
+    font: 12px ui-monospace, Menlo, monospace; padding: 3px 7px; border-radius: 5px; cursor: pointer;
+    background: rgba(0,0,0,0.4); color: rgba(238,226,204,0.95); border: 1px solid rgba(150,135,105,0.35);
+  }
+  #tokTip button span { color: rgba(168,158,138,0.85); font-size: 10.5px; }
+  #tokTip button.same { border-color: rgba(245,200,120,0.75); }
+  #tokTip.pinned button:hover { background: rgba(245,200,120,0.2); border-color: rgba(245,200,120,0.8); }
+  @media (pointer: coarse) { #tokTip button { padding: 7px 10px; } }
   #strip .p { color: rgba(245,200,120,0.95); }   /* prompt — the input seed */
   #strip .g { color: rgba(206,196,176,0.92); }   /* generated so far */
   /* pointer-events:auto so the query token's title tooltip actually fires —
@@ -288,14 +381,14 @@
       <button id="btnPlay" disabled type="button" title="pause / resume (space)">pause</button>
       <button id="btnStep" disabled type="button" title="generate one token (.)">step</button>
     </div>
-    <span class="tag"><b>prompt</b> + generated · underlined = query · highlighted = next token</span>
+    <span class="tag"><b>prompt</b> + generated · highlighted = next token · <span class="sur">red</span> = surprised the model · click any word</span>
     <div id="strip"></div>
     <span class="model-note"><span id="samplingNote">64-token context · KJV-trained</span><br>Arcs: last input token’s final-layer attention</span>
     <canvas id="arcs"></canvas>
   </div>
   <aside id="lensRail" aria-label="logit lens by depth"></aside>
   <nav id="stages" aria-label="network stages"></nav>
-  <div id="hint">space pause · . step one token · ← → walk the network · drag to pan · scroll to zoom · hover an MLP neuron</div>
+  <div id="hint">click any word to see what the model expected · click a branch to knock it out · space pause · ← → walk the network</div>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

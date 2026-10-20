@@ -1,5 +1,9 @@
 // Autoregressive generation with a sliding window, plus sampling (temperature,
 // min-p / top-k, frequency penalty) and a next-token distribution readout.
+// Also keeps, for every token in the text, what the model predicted at that
+// spot — the strip's surprise tint and token inspector read it.
+
+import { topOf } from './model.js';
 
 function softmax(logits, temperature) {
   const t = temperature > 0 ? temperature : 1;
@@ -50,6 +54,11 @@ export function makeGenerator(model, tokenizer) {
 
   let promptLength = 0;
   let ids = []; // full running sequence (prompt + generated), for display
+  // records[i] = what the model predicted for position i before seeing ids[i]:
+  // { top: [{id, prob}], p, rank, chosen }. null where it had no context (the
+  // first token) or the window has slid past it.
+  let records = [];
+  const RECORD_K = 8;
 
   // Character-fallback pieces: a "##x" continuation or a bare single character.
   // Cached because the repetition penalty asks about every id in the window.
@@ -64,11 +73,33 @@ export function makeGenerator(model, tokenizer) {
     return v;
   }
 
-  function reset(promptText) {
+  // Re-score every token in the current window under the current model (e.g.
+  // after a knockout changes it). ~40-80ms for a full window.
+  function rescore(off = null) {
+    if (!model.predictions) return;
+    const start = Math.max(0, ids.length - blockSize);
+    const preds = model.predictions(ids.slice(start), off, RECORD_K);
+    for (let t = 0; t < preds.length; t++) {
+      const old = records[start + t + 1];
+      records[start + t + 1] = { ...preds[t], chosen: !!(old && old.chosen) };
+    }
+  }
+
+  function reset(promptText, off = null) {
     ids = tokenizer.encode(promptText);
     if (ids.length === 0) ids = [0]; // never feed an empty window
     promptLength = ids.length;
+    records = new Array(ids.length).fill(null);
+    rescore(off);
     return ids.slice();
+  }
+
+  // Cut the text back to its first `n` tokens (to rewrite it from there).
+  function truncate(n) {
+    n = Math.max(1, Math.min(n, ids.length));
+    ids.length = n;
+    records.length = n;
+    promptLength = Math.min(promptLength, n);
   }
 
   // Produce the next token. Returns the sampled token plus the full viz payload.
@@ -78,9 +109,15 @@ export function makeGenerator(model, tokenizer) {
   // `repWindow` tokens — it deliberately exempts the character-fallback pieces,
   // since spelling "Melchizedek" needs to reuse letters and penalising them
   // would push the model away from rare names one letter at a time.
-  function step({ temperature, topk, minp = 0, repPenalty = 0, repWindow = 48 }) {
+  //
+  // `off` is the knockout set passed to model.forward. While anything is off,
+  // the intact model also runs on the same window so the two can be compared.
+  // `force` skips sampling and produces that token instead (the reader picked
+  // it); `chosen` marks it as theirs in the record.
+  function step({ temperature, topk, minp = 0, repPenalty = 0, repWindow = 48,
+    off = null, force = null, chosen = force != null }) {
     const window = ids.slice(-blockSize);
-    const fwd = model.forward(window);
+    const fwd = model.forward(window, off);
     const logits = fwd.logits;
 
     // The model's true (temperature-1) distribution, shown in the output column
@@ -100,7 +137,10 @@ export function makeGenerator(model, tokenizer) {
     // softmax(shaped/T).
     let sampled;
     let candidates;
-    if (temperature <= 0) {
+    if (force != null) {
+      sampled = force;
+      candidates = null;
+    } else if (temperature <= 0) {
       sampled = argmax(shaped);
       candidates = 1;
     } else {
@@ -115,6 +155,18 @@ export function makeGenerator(model, tokenizer) {
     }
 
     ids.push(sampled);
+    let rank = 1;
+    for (let i = 0; i < trueProbs.length; i++) if (trueProbs[i] > trueProbs[sampled]) rank++;
+    records[ids.length - 1] = {
+      top: topOf(trueProbs, 1, RECORD_K), p: trueProbs[sampled], rank, chosen,
+    };
+
+    // What the unmodified model would have said here, for the knockout readout.
+    let intact = null;
+    if (off && off.size) {
+      const ip = softmax(model.forward(window).logits, 1);
+      intact = { top: topOf(ip, 1, 3), probs: ip, now: trueProbs };
+    }
 
     // top-25 by the true distribution, for the viz output column
     const order = topkIndices(trueProbs, 0);
@@ -144,13 +196,29 @@ export function makeGenerator(model, tokenizer) {
       windowTokens: window.map((id) => tokenizer.idToToken(id)),
       lastPos: window.length - 1,
       topOutputs,
+      intact,
     };
+  }
+
+  // Recompute the current step under a different knockout set without
+  // resampling: the same window, the same produced token, the new model.
+  function restep({ rescore: rescoreToo = true, ...opts }) {
+    if (ids.length <= promptLength) { if (rescoreToo) rescore(opts.off); return null; }
+    const last = ids.pop();
+    const rec = records.pop();
+    if (rescoreToo) rescore(opts.off);
+    return step({ ...opts, force: last, chosen: !!(rec && rec.chosen) });
   }
 
   return {
     reset,
     step,
+    restep,
+    truncate,
+    rescore,
     get ids() { return ids; },
+    get records() { return records; },
+    get promptLength() { return promptLength; },
     get length() { return ids.length; },
     get generatedCount() { return ids.length - promptLength; },
   };

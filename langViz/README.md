@@ -16,6 +16,46 @@ spelled out as a first character plus `##`-continuation pieces. So every word is
 is effectively no `<UNK>` — the model can even invent plausible proper nouns
 letter by letter.
 
+## Ask it questions
+
+Two interactions turn it from a thing you watch into a thing you experiment on:
+
+- **Knock parts out.** Click any attention or MLP branch in the network, a
+  single head's row in an attention panel, or a row of the attribution panel,
+  and that component stops writing to the residual stream (zero-ablation: it
+  still computes, so you still see its activations, but its output, bias
+  included, is dropped; a knocked-out head zeroes its slice before `W_O`). The
+  current step is recomputed at once on the same window with the same produced
+  token, even while paused, and generation carries on with the broken model. A
+  panel at the top of the right rail shows what the **intact model** would say
+  on that exact window next to what the knocked-out one gives the same token and
+  what it now says instead. Attribution says *what wrote toward the token*; this
+  is the causal experiment it can't be. Knockouts are kept in the URL
+  (`?off=m0,a1h2`), as is a custom prompt (`?p=…`).
+
+  What you find, measured on 5 prompts (prob. of the intact top-1 after a
+  single knockout): **block 0's MLP is the one that matters.** Without it the
+  model mostly echoes the current token (the lens reads `Israel 100%` from
+  the embedding on) and the text falls apart into `I I will have., saith is
+  was?`. Other whole branches typically move the answer 5 to 25 points. Single
+  heads almost never change the top guess (≤5 points, often less): the
+  four heads are largely redundant at this scale, so expect head knockouts to
+  look like they do nothing. That is the real result, not a bug.
+- **Inspect any word.** Every word in the strip is tinted by how much it
+  **surprised** the model (`-log2 p`, red from 5 bits, full at 17). Hover or
+  tap one to see the probability the model gave it, its rank, and the eight
+  words it expected instead; click to pin the popover (this pauses generation),
+  then pick an alternative to **rewrite the text from that word on**. Words you
+  chose get a dotted underline. Type `Thus saith the dog` and `dog` comes out at
+  about 1 in 8 million (23 bits) while the model expected `LORD` 64%.
+
+  Generated words are scored with the distribution they were sampled from;
+  prompt words are scored by one extra pass that keeps the logits at every
+  position (`model.predictions`). A knockout re-scores the whole window, so the
+  tint shows how the broken model reads the same text. Scores are always
+  relative to the model's 64-token window, which is why a word whose context has
+  scrolled out reads "scrolled out of the model's window".
+
 ## The visualization
 
 The network is laid out left-to-right around a horizontal **residual-stream
@@ -203,6 +243,10 @@ Generation starts on load and loops on its own.
   The counter shows how many tokens your text encodes — a quick way to see the
   tokenizer at work, since a rare word costs one token per letter. The counter also identifies unsupported characters and prompts longer than
   the 64-token context. The fallback covers English letters, not arbitrary Unicode.
+- **Click a branch, head row or attribution row** to knock it out; **click a
+  word** to see what the model expected and rewrite from there (see *Ask it
+  questions*). On a phone, tap, and pinch to zoom; the lens rail docks above the
+  stage rail as one row of top guesses.
 - **`space`** stops and restarts generation, **`.`** generates exactly one more
   token (and stops the clock if it was running). Everything else in the piece —
   the lens rail, the attribution panel, the neuron inspector — is worth reading
@@ -253,6 +297,7 @@ js/generate.js    autoregressive loop, sliding 64-token window, temperature/top-
 js/renderer.js    the visualization: canvas net + DOM world-layer (labels, lens chips, output, attn), pan/zoom, arcs
 js/main.js        generation loop + builds the text strip + window.__viz / __parityCheck
 tools/shot.mjs    self-contained headless screenshot / parity / perf harness
+tools/*.test.mjs  node --test: sampling (mock model) + knockout/prediction invariants (real weights)
 parity.py         Python/numpy reference forward pass (see below)
 train.py          trains the model and exports the weights (npm run langviz:train)
 neuron_labels.py  offline pass: label each MLP neuron by its top activators
@@ -545,4 +590,9 @@ to ~5 decimal places, e.g. for `"Thus saith the LORD"` (ids `[235, 96, 2, 24]`):
 Regression checks: `node --test tools/generate.test.mjs` — covers the sliding
 window and rank-25 display, plus min-p's data-dependent cut, that the repetition
 penalty never alters the *displayed* temperature-1 distribution, and that it
-exempts character-fallback pieces.
+exempts character-fallback pieces. `node --test tools/model.test.mjs` runs the real
+weights: an empty knockout set is the intact model; with every branch off the
+output equals the embedding-only lens; a knocked-out branch gets exactly 0
+attribution while the parts still sum to the logit; all heads off leaves only
+`b_O`; per-position predictions match a forward pass on each prefix; `restep`
+keeps the token and window; rewriting truncates and forces the pick.

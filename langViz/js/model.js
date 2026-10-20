@@ -54,7 +54,15 @@ export function makeModel({ config, tensors }) {
 
   // Forward pass over a sequence of token ids (length T, must be <= block_size).
   // Returns last-position logits plus all intermediates + attention weights.
-  function forward(ids) {
+  //
+  // `off` is a set of knocked-out components: `a2` (block 2's attention branch),
+  // `m2` (its MLP), `a2h1` (one head). A knocked-out branch still computes —
+  // so the viz has activations to show — but writes NOTHING to the residual
+  // stream, bias included. A knocked-out head contributes zeros to the
+  // concatenated head outputs before W_O; the other heads and b_O are kept.
+  // This is zero-ablation: blunt, but exactly what the label says.
+  function forward(ids, off = null) {
+    const isOff = (k) => !!off && off.has(k);
     const T = ids.length;
     const tokEmb = g('tok_emb');
     const posEmb = g('pos_emb');
@@ -111,9 +119,14 @@ export function makeModel({ config, tensors }) {
         layerAtt.push(headAtt);
       }
       attention.push(layerAtt);
+      for (let h = 0; h < H; h++) {
+        if (!isOff(`a${l}h${h}`)) continue;
+        for (let t = 0; t < T; t++) attnOut.fill(0, t * D + h * HD, t * D + (h + 1) * HD);
+      }
 
       // output projection + residual
-      const proj = matmul(attnOut, T, D, g(`${p}.attn.W_O`), D, g(`${p}.attn.b_O`));
+      const proj = isOff(`a${l}`) ? new Float32Array(T * D)
+        : matmul(attnOut, T, D, g(`${p}.attn.W_O`), D, g(`${p}.attn.b_O`));
       for (let i = 0; i < T * D; i++) x[i] += proj[i];
       const residual_mid = x.slice(); // residual after the attention add (for the viz)
 
@@ -122,7 +135,8 @@ export function makeModel({ config, tensors }) {
       const up = matmul(ln2, T, D, g(`${p}.mlp.up.w`), FF, g(`${p}.mlp.up.b`));
       const mlp_pre = up.slice(); // pre-GELU up-projection (for the viz)
       for (let i = 0; i < up.length; i++) up[i] = gelu(up[i]);
-      const down = matmul(up, T, FF, g(`${p}.mlp.down.w`), D, g(`${p}.mlp.down.b`));
+      const down = isOff(`m${l}`) ? new Float32Array(T * D)
+        : matmul(up, T, FF, g(`${p}.mlp.down.w`), D, g(`${p}.mlp.down.b`));
       for (let i = 0; i < T * D; i++) x[i] += down[i];
 
       activations.layers.push({
@@ -263,5 +277,53 @@ export function makeModel({ config, tensors }) {
     return { tokenId, parts, bias, maxAbs, verify };
   }
 
-  return { forward, attribute, config };
+  // What the model predicted at EVERY position of `ids`: for t = 0..T-2, its
+  // top-k guesses for token t+1 and the probability it gave the token that is
+  // really there. One forward pass plus a V×D unembedding per position (~40ms
+  // for a full window), so it runs once per prompt, not per frame.
+  function predictions(ids, off = null, k = 8) {
+    const tokEmb = g('tok_emb');
+    const { activations } = forward(ids, off);
+    const xf = activations.final;
+    const N = ids.length - 1;
+    // vocab-outer so each embedding row is read once for all positions
+    const lg = new Float32Array(Math.max(N, 0) * V);
+    for (let vi = 0; vi < V; vi++) {
+      const e = vi * D;
+      for (let t = 0; t < N; t++) {
+        let s = 0; const o = t * D;
+        for (let kk = 0; kk < D; kk++) s += xf[o + kk] * tokEmb[e + kk];
+        lg[t * V + vi] = s;
+      }
+    }
+    const out = [];
+    for (let t = 0; t < N; t++) {
+      const row = lg.subarray(t * V, (t + 1) * V);
+      let max = -Infinity;
+      for (let vi = 0; vi < V; vi++) if (row[vi] > max) max = row[vi];
+      let sum = 0;
+      for (let vi = 0; vi < V; vi++) { const ex = Math.exp(row[vi] - max); row[vi] = ex; sum += ex; }
+      const actual = ids[t + 1];
+      let rank = 1;
+      for (let vi = 0; vi < V; vi++) if (row[vi] > row[actual]) rank++;
+      out.push({ top: topOf(row, sum, k), p: row[actual] / sum, rank });
+    }
+    return out;
+  }
+
+  return { forward, attribute, predictions, config };
+}
+
+// Top-k of an unnormalised probability array, as [{id, prob}] (descending).
+export function topOf(weights, sum, k) {
+  const top = [];
+  for (let i = 0; i < weights.length; i++) {
+    const w = weights[i];
+    if (top.length === k && w <= top[k - 1].w) continue;
+    let j = Math.min(top.length, k - 1);
+    while (j > 0 && top[j - 1].w < w) j--;
+    top.splice(j, 0, { id: i, w });
+    if (top.length > k) top.pop();
+  }
+  return top.map((o) => ({ id: o.id, prob: o.w / sum }));
 }

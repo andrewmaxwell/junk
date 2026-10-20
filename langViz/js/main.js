@@ -105,15 +105,43 @@ async function init() {
   renderer.start();
   renderer.setSpeed(WAVE_MS);
   buildStageRail(renderer);
-  let prompt = DEFAULT_PROMPT;
+
+  // URL state: ?p=<prompt>&off=<knockouts>, so a link reproduces the setup
+  // (not the exact text — sampling is random).
+  const params = new URLSearchParams(location.search);
+  const { n_layers: NL, n_heads: NH } = loaded.config;
+  const validKey = (k) => {
+    const m = /^([am])(\d+)(?:h(\d+))?$/.exec(k);
+    return !!m && +m[2] < NL && (m[3] == null || (m[1] === 'a' && +m[3] < NH));
+  };
+  const off = new Set((params.get('off') || '').split(',').filter(validKey));
+  renderer.setKnockouts(off);
+  function saveUrl() {
+    const q = new URLSearchParams();
+    if (prompt !== DEFAULT_PROMPT) q.set('p', prompt);
+    if (off.size) q.set('off', [...off].sort().join(','));
+    const qs = q.toString();
+    history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
+  }
+  const sampling = () => ({
+    temperature: TEMPERATURE, topk: TOP_K,
+    minp: MIN_P, repPenalty: REP_PENALTY, repWindow: REP_WINDOW, off,
+  });
+
+  let prompt = (params.get('p') || '').trim() || DEFAULT_PROMPT;
   let editing = false;     // the prompt box has focus
   let userPaused = false;  // the user asked it to stop
-  const isPaused = () => editing || userPaused;
-  let promptLen = gen.reset(prompt).length;
+  let inspecting = false;  // a word's popover is pinned open
+  const isPaused = () => editing || userPaused || inspecting;
+  let hasStep = false;     // the strip ends in a produced token (vs. bare prompt)
+  gen.reset(prompt, off);
 
-  // fade the hint out
+  // fade the hint out (touch screens get their own wording)
   const hint = document.getElementById('hint');
-  setTimeout(() => hint && hint.classList.add('gone'), 5000);
+  if (hint && matchMedia('(pointer: coarse)').matches) {
+    hint.textContent = 'tap a word to see what the model expected · tap a branch to knock it out · pinch to zoom';
+  }
+  setTimeout(() => hint && hint.classList.add('gone'), 7000);
 
   // The text strip shows the model's actual input WINDOW (what it can see) plus
   // the token it just produced, highlighted. Each window token span is tagged
@@ -131,7 +159,20 @@ async function init() {
   // windowTokens = the model's input; sampledTok = the token just produced (or
   // null on reset); windowStartAbs = absolute index of windowTokens[0], used to
   // colour the prompt (gold) vs generated tokens still inside the window.
+  //
+  // Every word is tinted by how SURPRISED the model was to see it there (bits
+  // = -log2 p, from gen.records), and carries its absolute index so clicking it
+  // can open the inspector.
+  const bits = (rec) => -Math.log2(Math.max(rec.p, 1e-12));
+  const SURPRISE_LO = 5, SURPRISE_HI = 17; // bits: tint starts / saturates
+  function surpriseAttr(a) {
+    const rec = gen.records[a];
+    if (!rec) return '';
+    const t = Math.min(Math.max((bits(rec) - SURPRISE_LO) / (SURPRISE_HI - SURPRISE_LO), 0), 1);
+    return t > 0 ? ` style="--s:${t.toFixed(2)}"` : '';
+  }
   function setStrip(windowTokens, sampledTok, windowStartAbs) {
+    const promptLen = gen.promptLength;
     let html = '';
     for (let i = 0; i < windowTokens.length; i++) {
       const tok = windowTokens[i];
@@ -141,26 +182,151 @@ async function init() {
       )
         ? ' '
         : '';
-      const cls = windowStartAbs + i < promptLen ? 'p' : 'g';
+      const a = windowStartAbs + i;
+      const rec = gen.records[a];
+      const cls = (a < promptLen ? 'p' : 'g') + (rec && rec.chosen ? ' chosen' : '');
       const origin = sampledTok != null && i === windowTokens.length - 1;
-      html += `${space}<span class="${cls}${origin ? ' query' : ''}" data-w="${i}"${origin ? ' data-origin="1" title="This input token attends to the context to predict the highlighted next token"' : ''}>${esc(glyph(tok))}</span>`;
+      html += `${space}<span class="${cls}${origin ? ' query' : ''}" data-w="${i}" data-a="${a}"${surpriseAttr(a)}${origin ? ' data-origin="1"' : ''}>${esc(glyph(tok))}</span>`;
     }
     if (sampledTok != null) {
       const prev = windowTokens.length
         ? windowTokens[windowTokens.length - 1]
         : null;
       const space = tokenizer.needsSpaceBefore(prev, sampledTok) ? ' ' : '';
-      html += `${space}<span class="n">${esc(glyph(sampledTok))}</span>`;
+      const a = windowStartAbs + windowTokens.length;
+      const rec = gen.records[a];
+      html += `${space}<span class="n${rec && rec.chosen ? ' chosen' : ''}" data-a="${a}">${esc(glyph(sampledTok))}</span>`;
     }
     strip.innerHTML = html;
+    syncInspector();
     // Let long windows wrap instead of shrinking or hiding the sampled token.
     renderer.updateArcs();
   }
-  function showInputWindow() {
-    const start = Math.max(0, gen.length - model.config.block_size);
-    setStrip(gen.ids.slice(start).map((id) => tokenizer.idToToken(id)), null, start);
+  // The strip shows the window the model last read, plus what it produced.
+  function renderStrip() {
+    const end = hasStep ? gen.length - 1 : gen.length;
+    const start = Math.max(0, end - model.config.block_size);
+    const tok = (id) => tokenizer.idToToken(id);
+    setStrip(gen.ids.slice(start, end).map(tok), hasStep ? tok(gen.ids[end]) : null, start);
   }
-  showInputWindow();
+
+  // ---- word inspector: what did the model expect here? ----
+  // Hover (or tap) a word for the probability the model gave it and what it
+  // expected instead. Click pins it, pauses generation, and makes the
+  // alternatives buttons: picking one rewrites the text from that word on.
+  const tip = Object.assign(document.createElement('div'), { id: 'tokTip' });
+  document.body.appendChild(tip);
+  let tipAbs = -1; // absolute index shown, -1 = hidden
+  // tiny probabilities read better as odds: "1 in 12k" rather than 0.008%
+  const fmtP = (p) => {
+    if (p >= 0.095) return `${(p * 100).toFixed(0)}%`;
+    if (p >= 0.001) return `${(p * 100).toFixed(1)}%`;
+    const n = 1 / p, big = n >= 1e6, v = big ? n / 1e6 : n / 1e3;
+    return `1 in ${v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString('en')}${big ? 'M' : 'k'}`;
+  };
+  function showInspector(a, pinned) {
+    const span = strip.querySelector(`[data-a="${a}"]`);
+    if (!span) { hideInspector(); return; }
+    tipAbs = a;
+    inspecting = pinned;
+    tip.classList.toggle('pinned', pinned);
+    const word = esc(glyph(tokenizer.idToToken(gen.ids[a])));
+    const rec = gen.records[a];
+    let html;
+    if (!rec) {
+      html = `<div class="tt-h"><b>${word}</b></div><div class="tt-dim">${a === 0
+        ? 'the first token — nothing came before it to predict it from'
+        : 'scrolled out of the model’s window'}</div>`;
+    } else {
+      const b = bits(rec);
+      const verdict = b < 2 ? 'expected' : b < SURPRISE_LO ? 'plausible' : b < 10 ? 'surprising' : 'very surprising';
+      html = `<div class="tt-h"><b>${word}</b> · ${fmtP(rec.p)} · rank ${rec.rank} · ${b.toFixed(1)} bits</div>`
+        + `<div class="tt-dim">${verdict} to the model${rec.chosen ? ' · you chose it' : ''}${off.size ? ' · with knockouts' : ''}</div>`
+        + `<div class="tt-sub">it expected</div><div class="tt-alts">`;
+      for (const o of rec.top) {
+        const same = o.id === gen.ids[a];
+        html += `<button type="button" data-id="${o.id}"${same ? ' class="same"' : ''}>${esc(glyph(tokenizer.idToToken(o.id)))} <span>${fmtP(o.prob)}</span></button>`;
+      }
+      html += `</div><div class="tt-dim">${pinned ? 'pick one to rewrite the text from here' : 'click to pin · then pick one to rewrite from here'}</div>`;
+    }
+    tip.innerHTML = html;
+    tip.style.display = 'block';
+    const r = span.getBoundingClientRect();
+    const tw = tip.offsetWidth;
+    tip.style.left = `${Math.min(Math.max(6, r.left + r.width / 2 - tw / 2), window.innerWidth - tw - 6)}px`;
+    tip.style.top = `${r.bottom + 8}px`;
+    for (const el of strip.querySelectorAll('.inspected')) el.classList.remove('inspected');
+    span.classList.add('inspected');
+  }
+  function hideInspector() {
+    tipAbs = -1;
+    inspecting = false;
+    tip.style.display = 'none';
+    for (const el of strip.querySelectorAll('.inspected')) el.classList.remove('inspected');
+  }
+  // after the strip re-renders: keep a pinned popover current, drop a hover one
+  function syncInspector() {
+    if (tipAbs < 0) return;
+    if (inspecting && tipAbs < gen.length) showInspector(tipAbs, true);
+    else hideInspector();
+  }
+  strip.addEventListener('pointerover', (e) => {
+    const span = e.target.closest('[data-a]');
+    if (span && e.pointerType === 'mouse' && !inspecting) showInspector(+span.dataset.a, false);
+  });
+  strip.addEventListener('pointerout', (e) => {
+    if (!inspecting && e.target.closest('[data-a]') && !e.relatedTarget?.closest?.('[data-a]')) hideInspector();
+  });
+  strip.addEventListener('click', (e) => {
+    const span = e.target.closest('[data-a]');
+    if (!span) return;
+    const a = +span.dataset.a;
+    if (inspecting && tipAbs === a) hideInspector();
+    else showInspector(a, true);
+  });
+  tip.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-id]');
+    if (!btn || !inspecting) return;
+    rewrite(tipAbs, +btn.dataset.id);
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if (inspecting && !e.target.closest('#tokTip, #strip [data-a]')) hideInspector();
+  });
+  // capture, so Esc closes the popover without also flying back to the overview
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && tipAbs >= 0) { hideInspector(); e.stopImmediatePropagation(); }
+  }, true);
+
+  // Replace the word at absolute index `a` with `id` and carry on from there.
+  function rewrite(a, id) {
+    hideInspector();
+    gen.truncate(a);
+    const snap = gen.step({ ...sampling(), force: id });
+    hasStep = true;
+    renderer.pushStep(snap);
+    renderStrip();
+  }
+
+  // ---- knockouts ----
+  // Clicking a branch, a head's attention row, an attribution row or a chip
+  // toggles it (null = restore everything). The current step is recomputed on
+  // the same window with the same produced token, so the effect shows at once
+  // even while paused; the whole window is re-scored so the surprise tint shows
+  // how the knocked-out model reads the text.
+  renderer.onToggle = (key) => {
+    if (key == null) off.clear();
+    else if (off.has(key)) off.delete(key);
+    else off.add(key);
+    renderer.setKnockouts(off);
+    // the network first; re-scoring the whole strip (~60ms) can land a frame later
+    const snap = gen.restep({ ...sampling(), rescore: false });
+    if (snap) renderer.pushStep(snap);
+    saveUrl();
+    clearTimeout(rescoreTimer);
+    rescoreTimer = setTimeout(() => { gen.rescore(off); renderStrip(); }, 30);
+  };
+  let rescoreTimer = 0;
+  renderStrip();
 
   // ---- prompt box ----
   // Start generating from whatever you type. Editing pauses the loop, so the
@@ -172,9 +338,11 @@ async function init() {
 
   function restart(text) {
     prompt = text;
-    promptLen = gen.reset(prompt).length;
+    gen.reset(prompt, off);
+    hasStep = false;
     renderer.reset();
-    showInputWindow();
+    renderStrip();
+    saveUrl();
   }
 
   function showTokenCount() {
@@ -254,14 +422,10 @@ async function init() {
     if (gen.generatedCount >= LOOP_AFTER) {
       restart(prompt);
     } else {
-      const snap = gen.step({
-        temperature: TEMPERATURE, topk: TOP_K,
-        minp: MIN_P, repPenalty: REP_PENALTY, repWindow: REP_WINDOW,
-      });
+      const snap = gen.step(sampling());
+      hasStep = true;
       renderer.pushStep(snap);
-      // gen.length now counts the just-pushed token; the window preceded it
-      const startAbs = gen.length - 1 - snap.windowTokens.length;
-      setStrip(snap.windowTokens, snap.token, startAbs);
+      renderStrip();
     }
   }
 
