@@ -30,7 +30,10 @@ function buildStageRail(renderer) {
   const nav = document.getElementById('stages');
   if (!nav) return;
   const buttons = renderer.stages.map((st, i) => {
-    if (i === 1) nav.appendChild(Object.assign(document.createElement('span'), {className: 'sep'}));
+    if (i === 1)
+      nav.appendChild(
+        Object.assign(document.createElement('span'), {className: 'sep'}),
+      );
     const b = document.createElement('button');
     b.type = 'button';
     // "block 2 · attention" -> "2 attn": the rail has to stay one short row
@@ -51,9 +54,16 @@ function buildStageRail(renderer) {
 
   window.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === 'ArrowRight') { renderer.nextStage(); e.preventDefault(); }
-    else if (e.key === 'ArrowLeft') { renderer.prevStage(); e.preventDefault(); }
-    else if (e.key === 'Escape' || e.key === '0') { renderer.gotoStage(0); e.preventDefault(); }
+    if (e.key === 'ArrowRight') {
+      renderer.nextStage();
+      e.preventDefault();
+    } else if (e.key === 'ArrowLeft') {
+      renderer.prevStage();
+      e.preventDefault();
+    } else if (e.key === 'Escape' || e.key === '0') {
+      renderer.gotoStage(0);
+      e.preventDefault();
+    }
   });
 }
 
@@ -62,8 +72,10 @@ function buildStageRail(renderer) {
 function describeSampling(config) {
   const cut = MIN_P > 0 ? `min-p ${MIN_P}` : `top ${TOP_K}`;
   const pen = REP_PENALTY > 0 ? ` \u00b7 rep ${REP_PENALTY}` : '';
-  return `${config.block_size}-token context \u00b7 KJV-trained \u00b7 `
-       + `sampling T=${TEMPERATURE} / ${cut}${pen}`;
+  return (
+    `${config.block_size}-token context \u00b7 KJV-trained \u00b7 ` +
+    `sampling T=${TEMPERATURE} / ${cut}${pen}`
+  );
 }
 
 async function init() {
@@ -85,11 +97,11 @@ async function init() {
     .catch(() => null)
     .then((n) => {
       if (!n) return null;
-      const { n_layers: nl, d_ff: ff } = loaded.config;
+      const {n_layers: nl, d_ff: ff} = loaded.config;
       if (n.n_layers === nl && n.d_ff === ff) return n;
       console.warn(
         `neuron_labels.json is for ${n.n_layers}x${n.d_ff}, model is ${nl}x${ff}` +
-        ' — ignoring it (re-run neuron_labels.py). Hover inspector disabled.',
+          ' — ignoring it (re-run neuron_labels.py). Hover inspector disabled.',
       );
       return null;
     });
@@ -109,7 +121,7 @@ async function init() {
   // URL state: ?p=<prompt>&off=<knockouts>, so a link reproduces the setup
   // (not the exact text — sampling is random).
   const params = new URLSearchParams(location.search);
-  const { n_layers: NL, n_heads: NH } = loaded.config;
+  const {n_layers: NL, n_heads: NH} = loaded.config;
   const validKey = (k) => {
     const m = /^([am])(\d+)(?:h(\d+))?$/.exec(k);
     return !!m && +m[2] < NL && (m[3] == null || (m[1] === 'a' && +m[3] < NH));
@@ -124,22 +136,27 @@ async function init() {
     history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
   }
   const sampling = () => ({
-    temperature: TEMPERATURE, topk: TOP_K,
-    minp: MIN_P, repPenalty: REP_PENALTY, repWindow: REP_WINDOW, off,
+    temperature: TEMPERATURE,
+    topk: TOP_K,
+    minp: MIN_P,
+    repPenalty: REP_PENALTY,
+    repWindow: REP_WINDOW,
+    off,
   });
 
   let prompt = (params.get('p') || '').trim() || DEFAULT_PROMPT;
-  let editing = false;     // the prompt box has focus
-  let userPaused = false;  // the user asked it to stop
-  let inspecting = false;  // a word's popover is pinned open
+  let editing = false; // the prompt box has focus
+  let userPaused = false; // the user asked it to stop
+  let inspecting = false; // a word's popover is pinned open
   const isPaused = () => editing || userPaused || inspecting;
-  let hasStep = false;     // the strip ends in a produced token (vs. bare prompt)
+  let hasStep = false; // the strip ends in a produced token (vs. bare prompt)
   gen.reset(prompt, off);
 
   // fade the hint out (touch screens get their own wording)
   const hint = document.getElementById('hint');
   if (hint && matchMedia('(pointer: coarse)').matches) {
-    hint.textContent = 'tap a word to see what the model expected · tap a branch to knock it out · pinch to zoom';
+    hint.textContent =
+      'tap a word to see what the model expected · tap a branch to knock it out · pinch to zoom';
   }
   setTimeout(() => hint && hint.classList.add('gone'), 7000);
 
@@ -164,11 +181,15 @@ async function init() {
   // = -log2 p, from gen.records), and carries its absolute index so clicking it
   // can open the inspector.
   const bits = (rec) => -Math.log2(Math.max(rec.p, 1e-12));
-  const SURPRISE_LO = 5, SURPRISE_HI = 17; // bits: tint starts / saturates
+  const SURPRISE_LO = 5,
+    SURPRISE_HI = 17; // bits: tint starts / saturates
   function surpriseAttr(a) {
     const rec = gen.records[a];
     if (!rec) return '';
-    const t = Math.min(Math.max((bits(rec) - SURPRISE_LO) / (SURPRISE_HI - SURPRISE_LO), 0), 1);
+    const t = Math.min(
+      Math.max((bits(rec) - SURPRISE_LO) / (SURPRISE_HI - SURPRISE_LO), 0),
+      1,
+    );
     return t > 0 ? ` style="--s:${t.toFixed(2)}"` : '';
   }
   function setStrip(windowTokens, sampledTok, windowStartAbs) {
@@ -184,7 +205,8 @@ async function init() {
         : '';
       const a = windowStartAbs + i;
       const rec = gen.records[a];
-      const cls = (a < promptLen ? 'p' : 'g') + (rec && rec.chosen ? ' chosen' : '');
+      const cls =
+        (a < promptLen ? 'p' : 'g') + (rec && rec.chosen ? ' chosen' : '');
       const origin = sampledTok != null && i === windowTokens.length - 1;
       html += `${space}<span class="${cls}${origin ? ' query' : ''}" data-w="${i}" data-a="${a}"${surpriseAttr(a)}${origin ? ' data-origin="1"' : ''}>${esc(glyph(tok))}</span>`;
     }
@@ -207,26 +229,35 @@ async function init() {
     const end = hasStep ? gen.length - 1 : gen.length;
     const start = Math.max(0, end - model.config.block_size);
     const tok = (id) => tokenizer.idToToken(id);
-    setStrip(gen.ids.slice(start, end).map(tok), hasStep ? tok(gen.ids[end]) : null, start);
+    setStrip(
+      gen.ids.slice(start, end).map(tok),
+      hasStep ? tok(gen.ids[end]) : null,
+      start,
+    );
   }
 
   // ---- word inspector: what did the model expect here? ----
   // Hover (or tap) a word for the probability the model gave it and what it
   // expected instead. Click pins it, pauses generation, and makes the
   // alternatives buttons: picking one rewrites the text from that word on.
-  const tip = Object.assign(document.createElement('div'), { id: 'tokTip' });
+  const tip = Object.assign(document.createElement('div'), {id: 'tokTip'});
   document.body.appendChild(tip);
   let tipAbs = -1; // absolute index shown, -1 = hidden
   // tiny probabilities read better as odds: "1 in 12k" rather than 0.008%
   const fmtP = (p) => {
     if (p >= 0.095) return `${(p * 100).toFixed(0)}%`;
     if (p >= 0.001) return `${(p * 100).toFixed(1)}%`;
-    const n = 1 / p, big = n >= 1e6, v = big ? n / 1e6 : n / 1e3;
+    const n = 1 / p,
+      big = n >= 1e6,
+      v = big ? n / 1e6 : n / 1e3;
     return `1 in ${v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString('en')}${big ? 'M' : 'k'}`;
   };
   function showInspector(a, pinned) {
     const span = strip.querySelector(`[data-a="${a}"]`);
-    if (!span) { hideInspector(); return; }
+    if (!span) {
+      hideInspector();
+      return;
+    }
     tipAbs = a;
     inspecting = pinned;
     tip.classList.toggle('pinned', pinned);
@@ -234,15 +265,25 @@ async function init() {
     const rec = gen.records[a];
     let html;
     if (!rec) {
-      html = `<div class="tt-h"><b>${word}</b></div><div class="tt-dim">${a === 0
-        ? 'the first token — nothing came before it to predict it from'
-        : 'scrolled out of the model’s window'}</div>`;
+      html = `<div class="tt-h"><b>${word}</b></div><div class="tt-dim">${
+        a === 0
+          ? 'the first token — nothing came before it to predict it from'
+          : 'scrolled out of the model’s window'
+      }</div>`;
     } else {
       const b = bits(rec);
-      const verdict = b < 2 ? 'expected' : b < SURPRISE_LO ? 'plausible' : b < 10 ? 'surprising' : 'very surprising';
-      html = `<div class="tt-h"><b>${word}</b> · ${fmtP(rec.p)} · rank ${rec.rank} · ${b.toFixed(1)} bits</div>`
-        + `<div class="tt-dim">${verdict} to the model${rec.chosen ? ' · you chose it' : ''}${off.size ? ' · with knockouts' : ''}</div>`
-        + `<div class="tt-sub">it expected</div><div class="tt-alts">`;
+      const verdict =
+        b < 2
+          ? 'expected'
+          : b < SURPRISE_LO
+            ? 'plausible'
+            : b < 10
+              ? 'surprising'
+              : 'very surprising';
+      html =
+        `<div class="tt-h"><b>${word}</b> · ${fmtP(rec.p)} · rank ${rec.rank} · ${b.toFixed(1)} bits</div>` +
+        `<div class="tt-dim">${verdict} to the model${rec.chosen ? ' · you chose it' : ''}${off.size ? ' · with knockouts' : ''}</div>` +
+        `<div class="tt-sub">it expected</div><div class="tt-alts">`;
       for (const o of rec.top) {
         const same = o.id === gen.ids[a];
         html += `<button type="button" data-id="${o.id}"${same ? ' class="same"' : ''}>${esc(glyph(tokenizer.idToToken(o.id)))} <span>${fmtP(o.prob)}</span></button>`;
@@ -255,14 +296,16 @@ async function init() {
     const tw = tip.offsetWidth;
     tip.style.left = `${Math.min(Math.max(6, r.left + r.width / 2 - tw / 2), window.innerWidth - tw - 6)}px`;
     tip.style.top = `${r.bottom + 8}px`;
-    for (const el of strip.querySelectorAll('.inspected')) el.classList.remove('inspected');
+    for (const el of strip.querySelectorAll('.inspected'))
+      el.classList.remove('inspected');
     span.classList.add('inspected');
   }
   function hideInspector() {
     tipAbs = -1;
     inspecting = false;
     tip.style.display = 'none';
-    for (const el of strip.querySelectorAll('.inspected')) el.classList.remove('inspected');
+    for (const el of strip.querySelectorAll('.inspected'))
+      el.classList.remove('inspected');
   }
   // after the strip re-renders: keep a pinned popover current, drop a hover one
   function syncInspector() {
@@ -272,10 +315,16 @@ async function init() {
   }
   strip.addEventListener('pointerover', (e) => {
     const span = e.target.closest('[data-a]');
-    if (span && e.pointerType === 'mouse' && !inspecting) showInspector(+span.dataset.a, false);
+    if (span && e.pointerType === 'mouse' && !inspecting)
+      showInspector(+span.dataset.a, false);
   });
   strip.addEventListener('pointerout', (e) => {
-    if (!inspecting && e.target.closest('[data-a]') && !e.relatedTarget?.closest?.('[data-a]')) hideInspector();
+    if (
+      !inspecting &&
+      e.target.closest('[data-a]') &&
+      !e.relatedTarget?.closest?.('[data-a]')
+    )
+      hideInspector();
   });
   strip.addEventListener('click', (e) => {
     const span = e.target.closest('[data-a]');
@@ -290,18 +339,26 @@ async function init() {
     rewrite(tipAbs, +btn.dataset.id);
   });
   document.addEventListener('pointerdown', (e) => {
-    if (inspecting && !e.target.closest('#tokTip, #strip [data-a]')) hideInspector();
+    if (inspecting && !e.target.closest('#tokTip, #strip [data-a]'))
+      hideInspector();
   });
   // capture, so Esc closes the popover without also flying back to the overview
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && tipAbs >= 0) { hideInspector(); e.stopImmediatePropagation(); }
-  }, true);
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Escape' && tipAbs >= 0) {
+        hideInspector();
+        e.stopImmediatePropagation();
+      }
+    },
+    true,
+  );
 
   // Replace the word at absolute index `a` with `id` and carry on from there.
   function rewrite(a, id) {
     hideInspector();
     gen.truncate(a);
-    const snap = gen.step({ ...sampling(), force: id });
+    const snap = gen.step({...sampling(), force: id});
     hasStep = true;
     renderer.pushStep(snap);
     renderStrip();
@@ -319,11 +376,14 @@ async function init() {
     else off.add(key);
     renderer.setKnockouts(off);
     // the network first; re-scoring the whole strip (~60ms) can land a frame later
-    const snap = gen.restep({ ...sampling(), rescore: false });
+    const snap = gen.restep({...sampling(), rescore: false});
     if (snap) renderer.pushStep(snap);
     saveUrl();
     clearTimeout(rescoreTimer);
-    rescoreTimer = setTimeout(() => { gen.rescore(off); renderStrip(); }, 30);
+    rescoreTimer = setTimeout(() => {
+      gen.rescore(off);
+      renderStrip();
+    }, 30);
   };
   let rescoreTimer = 0;
   renderStrip();
@@ -349,7 +409,7 @@ async function init() {
     if (!promptHintEl || !promptEl) return;
     const encoded = tokenizer.encode(promptEl.value.trim());
     const n = encoded.length;
-    const unknown = encoded.filter(id => id === 0).length;
+    const unknown = encoded.filter((id) => id === 0).length;
     const detail = `${n > model.config.block_size ? ` · last ${model.config.block_size} used` : ''}${unknown ? ` · ${unknown} unsupported` : ''}`;
     const dirty = promptEl.value.trim() !== prompt;
     promptHintEl.textContent = editing
@@ -372,7 +432,10 @@ async function init() {
     }
     showTokenCount();
   }
-  function setPaused(v) { userPaused = v; syncTransport(); }
+  function setPaused(v) {
+    userPaused = v;
+    syncTransport();
+  }
   function stepOnce() {
     if (editing) return;
     if (!userPaused) setPaused(true); // stepping implies stopping
@@ -385,14 +448,22 @@ async function init() {
   window.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === ' ' && e.target.closest?.('button')) return; // native button activation
-    if (e.key === ' ') { setPaused(!userPaused); e.preventDefault(); }
-    else if (e.key === '.') { stepOnce(); e.preventDefault(); }
+    if (e.key === ' ') {
+      setPaused(!userPaused);
+      e.preventDefault();
+    } else if (e.key === '.') {
+      stepOnce();
+      e.preventDefault();
+    }
   });
 
   if (promptEl) {
     promptEl.value = prompt;
     showTokenCount();
-    promptEl.addEventListener('focus', () => { editing = true; showTokenCount(); });
+    promptEl.addEventListener('focus', () => {
+      editing = true;
+      showTokenCount();
+    });
     promptEl.addEventListener('input', showTokenCount);
     promptEl.addEventListener('keydown', (e) => {
       e.stopPropagation(); // the stage rail listens for arrow keys on window
@@ -460,13 +531,14 @@ async function init() {
   };
   // Attribution is claimed to be EXACT, so make that checkable: the parts plus
   // the ln_f bias must reproduce the token's logit to float precision.
-  window.__attribCheck = function (text = 'Thus saith the LORD', tokenId = null) {
+  window.__attribCheck = function (
+    text = 'Thus saith the LORD',
+    tokenId = null,
+  ) {
     const ids = tokenizer.encode(text);
     const {logits, activations} = model.forward(ids);
     const target =
-      tokenId == null
-        ? logits.indexOf(Math.max(...logits))
-        : tokenId;
+      tokenId == null ? logits.indexOf(Math.max(...logits)) : tokenId;
     const a = model.attribute(activations, target);
     const err = Math.abs(a.verify - logits[target]);
     console.table(

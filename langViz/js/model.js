@@ -42,13 +42,21 @@ function layerNorm(X, T, d, w, b) {
     }
     varr /= d;
     const inv = 1 / Math.sqrt(varr + LN_EPS);
-    for (let i = 0; i < d; i++) out[o + i] = (X[o + i] - mean) * inv * w[i] + b[i];
+    for (let i = 0; i < d; i++)
+      out[o + i] = (X[o + i] - mean) * inv * w[i] + b[i];
   }
   return out;
 }
 
-export function makeModel({ config, tensors }) {
-  const { d_model: D, n_layers: L, n_heads: H, head_dim: HD, d_ff: FF, vocab_size: V } = config;
+export function makeModel({config, tensors}) {
+  const {
+    d_model: D,
+    n_layers: L,
+    n_heads: H,
+    head_dim: HD,
+    d_ff: FF,
+    vocab_size: V,
+  } = config;
   const scale = 1 / Math.sqrt(HD);
   const g = (name) => tensors.get(name);
 
@@ -71,10 +79,11 @@ export function makeModel({ config, tensors }) {
     let x = new Float32Array(T * D);
     for (let t = 0; t < T; t++) {
       const tk = ids[t];
-      for (let k = 0; k < D; k++) x[t * D + k] = tokEmb[tk * D + k] + posEmb[t * D + k];
+      for (let k = 0; k < D; k++)
+        x[t * D + k] = tokEmb[tk * D + k] + posEmb[t * D + k];
     }
 
-    const activations = { embeddings: x.slice(), layers: [] };
+    const activations = {embeddings: x.slice(), layers: []};
     const attention = []; // [layer][head][q][k]
 
     for (let l = 0; l < L; l++) {
@@ -95,7 +104,8 @@ export function makeModel({ config, tensors }) {
           let max = -Infinity;
           for (let kj = 0; kj <= qi; kj++) {
             let s = 0;
-            for (let dd = 0; dd < HD; dd++) s += q[qi * D + base + dd] * k[kj * D + base + dd];
+            for (let dd = 0; dd < HD; dd++)
+              s += q[qi * D + base + dd] * k[kj * D + base + dd];
             s *= scale;
             scores[kj] = s;
             if (s > max) max = s;
@@ -121,11 +131,13 @@ export function makeModel({ config, tensors }) {
       attention.push(layerAtt);
       for (let h = 0; h < H; h++) {
         if (!isOff(`a${l}h${h}`)) continue;
-        for (let t = 0; t < T; t++) attnOut.fill(0, t * D + h * HD, t * D + (h + 1) * HD);
+        for (let t = 0; t < T; t++)
+          attnOut.fill(0, t * D + h * HD, t * D + (h + 1) * HD);
       }
 
       // output projection + residual
-      const proj = isOff(`a${l}`) ? new Float32Array(T * D)
+      const proj = isOff(`a${l}`)
+        ? new Float32Array(T * D)
         : matmul(attnOut, T, D, g(`${p}.attn.W_O`), D, g(`${p}.attn.b_O`));
       for (let i = 0; i < T * D; i++) x[i] += proj[i];
       const residual_mid = x.slice(); // residual after the attention add (for the viz)
@@ -135,16 +147,26 @@ export function makeModel({ config, tensors }) {
       const up = matmul(ln2, T, D, g(`${p}.mlp.up.w`), FF, g(`${p}.mlp.up.b`));
       const mlp_pre = up.slice(); // pre-GELU up-projection (for the viz)
       for (let i = 0; i < up.length; i++) up[i] = gelu(up[i]);
-      const down = isOff(`m${l}`) ? new Float32Array(T * D)
+      const down = isOff(`m${l}`)
+        ? new Float32Array(T * D)
         : matmul(up, T, FF, g(`${p}.mlp.down.w`), D, g(`${p}.mlp.down.b`));
       for (let i = 0; i < T * D; i++) x[i] += down[i];
 
       activations.layers.push({
-        ln1, q, k, v, attnOut, residual_mid,
-        ln2, mlp_pre, mlp_post: up, residual: x.slice(),
+        ln1,
+        q,
+        k,
+        v,
+        attnOut,
+        residual_mid,
+        ln2,
+        mlp_pre,
+        mlp_post: up,
+        residual: x.slice(),
         // what this block actually WROTE to the stream — the two additive terms
         // direct logit attribution decomposes the final logit into.
-        attn_write: proj, mlp_write: down,
+        attn_write: proj,
+        mlp_write: down,
       });
     }
 
@@ -164,14 +186,18 @@ export function makeModel({ config, tensors }) {
       for (let i = 0; i < D; i++) mean += x[o + i];
       mean /= D;
       let varr = 0;
-      for (let i = 0; i < D; i++) { const dx = x[o + i] - mean; varr += dx * dx; }
+      for (let i = 0; i < D; i++) {
+        const dx = x[o + i] - mean;
+        varr += dx * dx;
+      }
       varr /= D;
       activations.lnfInv = 1 / Math.sqrt(varr + LN_EPS);
     }
     const logits = new Float32Array(V);
     for (let vi = 0; vi < V; vi++) {
       let s = 0;
-      for (let kk = 0; kk < D; kk++) s += xf[last * D + kk] * tokEmb[vi * D + kk];
+      for (let kk = 0; kk < D; kk++)
+        s += xf[last * D + kk] * tokEmb[vi * D + kk];
       logits[vi] = s;
     }
 
@@ -181,43 +207,60 @@ export function makeModel({ config, tensors }) {
     // then after each block). The top guess starts vague and sharpens with depth,
     // making "more layers = iterative refinement of the prediction" visible.
     // Cheap: a handful of extra V×D dot products per generated token.
-    const lnfW = g('ln_f.w'), lnfB = g('ln_f.b');
+    const lnfW = g('ln_f.w'),
+      lnfB = g('ln_f.b');
     function lensTopK(vecFull, lastPos, k) {
       const o = lastPos * D;
       let mean = 0;
       for (let i = 0; i < D; i++) mean += vecFull[o + i];
       mean /= D;
       let varr = 0;
-      for (let i = 0; i < D; i++) { const dx = vecFull[o + i] - mean; varr += dx * dx; }
+      for (let i = 0; i < D; i++) {
+        const dx = vecFull[o + i] - mean;
+        varr += dx * dx;
+      }
       varr /= D;
       const inv = 1 / Math.sqrt(varr + LN_EPS);
       const nrm = new Float32Array(D);
-      for (let i = 0; i < D; i++) nrm[i] = (vecFull[o + i] - mean) * inv * lnfW[i] + lnfB[i];
+      for (let i = 0; i < D; i++)
+        nrm[i] = (vecFull[o + i] - mean) * inv * lnfW[i] + lnfB[i];
       const lg = new Float32Array(V);
       let max = -Infinity;
       for (let vi = 0; vi < V; vi++) {
-        let s = 0; const e = vi * D;
+        let s = 0;
+        const e = vi * D;
         for (let kk = 0; kk < D; kk++) s += nrm[kk] * tokEmb[e + kk];
-        lg[vi] = s; if (s > max) max = s;
+        lg[vi] = s;
+        if (s > max) max = s;
       }
       let sum = 0;
-      for (let vi = 0; vi < V; vi++) { const ex = Math.exp(lg[vi] - max); lg[vi] = ex; sum += ex; }
+      for (let vi = 0; vi < V; vi++) {
+        const ex = Math.exp(lg[vi] - max);
+        lg[vi] = ex;
+        sum += ex;
+      }
       const top = [];
       for (let n = 0; n < k; n++) {
-        let bi = -1, bv = -1;
-        for (let vi = 0; vi < V; vi++) if (lg[vi] > bv) { bv = lg[vi]; bi = vi; }
+        let bi = -1,
+          bv = -1;
+        for (let vi = 0; vi < V; vi++)
+          if (lg[vi] > bv) {
+            bv = lg[vi];
+            bi = vi;
+          }
         if (bi < 0) break;
-        top.push({ id: bi, prob: bv / sum });
+        top.push({id: bi, prob: bv / sum});
         lg[bi] = -1; // exclude so the next pass finds the runner-up
       }
       return top;
     }
     const LENS_K = 3;
     const lens = [lensTopK(activations.embeddings, last, LENS_K)];
-    for (let l = 0; l < L; l++) lens.push(lensTopK(activations.layers[l].residual, last, LENS_K));
+    for (let l = 0; l < L; l++)
+      lens.push(lensTopK(activations.layers[l].residual, last, LENS_K));
     activations.lens = lens;
 
-    return { logits, attention, activations };
+    return {logits, attention, activations};
   }
 
   // ---- direct logit attribution: WHICH part of the model chose this token ----
@@ -239,8 +282,10 @@ export function makeModel({ config, tensors }) {
   // negative = pushed it away.
   function attribute(activations, tokenId) {
     const tokEmb = g('tok_emb');
-    const lnfW = g('ln_f.w'), lnfB = g('ln_f.b');
-    const last = activations.lastPos, inv = activations.lnfInv;
+    const lnfW = g('ln_f.w'),
+      lnfB = g('ln_f.b');
+    const last = activations.lastPos,
+      inv = activations.lnfInv;
     const e = tokenId * D;
 
     const dir = new Float32Array(D);
@@ -261,20 +306,38 @@ export function makeModel({ config, tensors }) {
       return s;
     };
 
-    const parts = [{ label: 'embedding', kind: 'emb', block: -1, value: contrib(activations.embeddings) }];
+    const parts = [
+      {
+        label: 'embedding',
+        kind: 'emb',
+        block: -1,
+        value: contrib(activations.embeddings),
+      },
+    ];
     for (let l = 0; l < L; l++) {
       const lay = activations.layers[l];
-      parts.push({ label: `block ${l} · attn`, kind: 'attn', block: l, value: contrib(lay.attn_write) });
-      parts.push({ label: `block ${l} · MLP`, kind: 'mlp', block: l, value: contrib(lay.mlp_write) });
+      parts.push({
+        label: `block ${l} · attn`,
+        kind: 'attn',
+        block: l,
+        value: contrib(lay.attn_write),
+      });
+      parts.push({
+        label: `block ${l} · MLP`,
+        kind: 'mlp',
+        block: l,
+        value: contrib(lay.mlp_write),
+      });
     }
 
-    let maxAbs = 1e-9, verify = bias;
+    let maxAbs = 1e-9,
+      verify = bias;
     for (const p of parts) {
       verify += p.value;
       const a = Math.abs(p.value);
       if (a > maxAbs) maxAbs = a;
     }
-    return { tokenId, parts, bias, maxAbs, verify };
+    return {tokenId, parts, bias, maxAbs, verify};
   }
 
   // What the model predicted at EVERY position of `ids`: for t = 0..T-2, its
@@ -283,7 +346,7 @@ export function makeModel({ config, tensors }) {
   // for a full window), so it runs once per prompt, not per frame.
   function predictions(ids, off = null, k = 8) {
     const tokEmb = g('tok_emb');
-    const { activations } = forward(ids, off);
+    const {activations} = forward(ids, off);
     const xf = activations.final;
     const N = ids.length - 1;
     // vocab-outer so each embedding row is read once for all positions
@@ -291,7 +354,8 @@ export function makeModel({ config, tensors }) {
     for (let vi = 0; vi < V; vi++) {
       const e = vi * D;
       for (let t = 0; t < N; t++) {
-        let s = 0; const o = t * D;
+        let s = 0;
+        const o = t * D;
         for (let kk = 0; kk < D; kk++) s += xf[o + kk] * tokEmb[e + kk];
         lg[t * V + vi] = s;
       }
@@ -302,16 +366,20 @@ export function makeModel({ config, tensors }) {
       let max = -Infinity;
       for (let vi = 0; vi < V; vi++) if (row[vi] > max) max = row[vi];
       let sum = 0;
-      for (let vi = 0; vi < V; vi++) { const ex = Math.exp(row[vi] - max); row[vi] = ex; sum += ex; }
+      for (let vi = 0; vi < V; vi++) {
+        const ex = Math.exp(row[vi] - max);
+        row[vi] = ex;
+        sum += ex;
+      }
       const actual = ids[t + 1];
       let rank = 1;
       for (let vi = 0; vi < V; vi++) if (row[vi] > row[actual]) rank++;
-      out.push({ top: topOf(row, sum, k), p: row[actual] / sum, rank });
+      out.push({top: topOf(row, sum, k), p: row[actual] / sum, rank});
     }
     return out;
   }
 
-  return { forward, attribute, predictions, config };
+  return {forward, attribute, predictions, config};
 }
 
 // Top-k of an unnormalised probability array, as [{id, prob}] (descending).
@@ -322,8 +390,8 @@ export function topOf(weights, sum, k) {
     if (top.length === k && w <= top[k - 1].w) continue;
     let j = Math.min(top.length, k - 1);
     while (j > 0 && top[j - 1].w < w) j--;
-    top.splice(j, 0, { id: i, w });
+    top.splice(j, 0, {id: i, w});
     if (top.length > k) top.pop();
   }
-  return top.map((o) => ({ id: o.id, prob: o.w / sum }));
+  return top.map((o) => ({id: o.id, prob: o.w / sum}));
 }

@@ -3,7 +3,7 @@
 // Also keeps, for every token in the text, what the model predicted at that
 // spot — the strip's surprise tint and token inspector read it.
 
-import { topOf } from './model.js';
+import {topOf} from './model.js';
 
 function softmax(logits, temperature) {
   const t = temperature > 0 ? temperature : 1;
@@ -23,7 +23,11 @@ function softmax(logits, temperature) {
 function argmax(arr) {
   let bi = 0;
   let bv = -Infinity;
-  for (let i = 0; i < arr.length; i++) if (arr[i] > bv) { bv = arr[i]; bi = i; }
+  for (let i = 0; i < arr.length; i++)
+    if (arr[i] > bv) {
+      bv = arr[i];
+      bi = i;
+    }
   return bi;
 }
 
@@ -81,7 +85,7 @@ export function makeGenerator(model, tokenizer) {
     const preds = model.predictions(ids.slice(start), off, RECORD_K);
     for (let t = 0; t < preds.length; t++) {
       const old = records[start + t + 1];
-      records[start + t + 1] = { ...preds[t], chosen: !!(old && old.chosen) };
+      records[start + t + 1] = {...preds[t], chosen: !!(old && old.chosen)};
     }
   }
 
@@ -114,8 +118,16 @@ export function makeGenerator(model, tokenizer) {
   // the intact model also runs on the same window so the two can be compared.
   // `force` skips sampling and produces that token instead (the reader picked
   // it); `chosen` marks it as theirs in the record.
-  function step({ temperature, topk, minp = 0, repPenalty = 0, repWindow = 48,
-    off = null, force = null, chosen = force != null }) {
+  function step({
+    temperature,
+    topk,
+    minp = 0,
+    repPenalty = 0,
+    repWindow = 48,
+    off = null,
+    force = null,
+    chosen = force != null,
+  }) {
     const window = ids.slice(-blockSize);
     const fwd = model.forward(window, off);
     const logits = fwd.logits;
@@ -151,21 +163,31 @@ export function makeGenerator(model, tokenizer) {
       for (const i of keep) sum += full[i];
       let r = Math.random() * sum;
       sampled = keep[keep.length - 1];
-      for (const i of keep) { r -= full[i]; if (r <= 0) { sampled = i; break; } }
+      for (const i of keep) {
+        r -= full[i];
+        if (r <= 0) {
+          sampled = i;
+          break;
+        }
+      }
     }
 
     ids.push(sampled);
     let rank = 1;
-    for (let i = 0; i < trueProbs.length; i++) if (trueProbs[i] > trueProbs[sampled]) rank++;
+    for (let i = 0; i < trueProbs.length; i++)
+      if (trueProbs[i] > trueProbs[sampled]) rank++;
     records[ids.length - 1] = {
-      top: topOf(trueProbs, 1, RECORD_K), p: trueProbs[sampled], rank, chosen,
+      top: topOf(trueProbs, 1, RECORD_K),
+      p: trueProbs[sampled],
+      rank,
+      chosen,
     };
 
     // What the unmodified model would have said here, for the knockout readout.
     let intact = null;
     if (off && off.size) {
       const ip = softmax(model.forward(window).logits, 1);
-      intact = { top: topOf(ip, 1, 3), probs: ip, now: trueProbs };
+      intact = {top: topOf(ip, 1, 3), probs: ip, now: trueProbs};
     }
 
     // top-25 by the true distribution, for the viz output column
@@ -202,12 +224,15 @@ export function makeGenerator(model, tokenizer) {
 
   // Recompute the current step under a different knockout set without
   // resampling: the same window, the same produced token, the new model.
-  function restep({ rescore: rescoreToo = true, ...opts }) {
-    if (ids.length <= promptLength) { if (rescoreToo) rescore(opts.off); return null; }
+  function restep({rescore: rescoreToo = true, ...opts}) {
+    if (ids.length <= promptLength) {
+      if (rescoreToo) rescore(opts.off);
+      return null;
+    }
     const last = ids.pop();
     const rec = records.pop();
     if (rescoreToo) rescore(opts.off);
-    return step({ ...opts, force: last, chosen: !!(rec && rec.chosen) });
+    return step({...opts, force: last, chosen: !!(rec && rec.chosen)});
   }
 
   return {
@@ -216,10 +241,20 @@ export function makeGenerator(model, tokenizer) {
     restep,
     truncate,
     rescore,
-    get ids() { return ids; },
-    get records() { return records; },
-    get promptLength() { return promptLength; },
-    get length() { return ids.length; },
-    get generatedCount() { return ids.length - promptLength; },
+    get ids() {
+      return ids;
+    },
+    get records() {
+      return records;
+    },
+    get promptLength() {
+      return promptLength;
+    },
+    get length() {
+      return ids.length;
+    },
+    get generatedCount() {
+      return ids.length - promptLength;
+    },
   };
 }

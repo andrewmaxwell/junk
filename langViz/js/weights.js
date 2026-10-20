@@ -3,7 +3,7 @@
 
 // IEEE-754 half-precision (float16) -> JS double.
 export function halfToFloat(h) {
-  const sign = (h & 0x8000) ? -1 : 1;
+  const sign = h & 0x8000 ? -1 : 1;
   const exp = (h & 0x7c00) >> 10;
   const frac = h & 0x03ff;
   if (exp === 0) {
@@ -46,8 +46,10 @@ export async function loadModel(base = '.') {
   const last = config.tensors[config.tensors.length - 1];
   const expected = last.offset + last.length * 2;
   if (buf.byteLength !== expected) {
-    console.warn(`weights.bin size ${buf.byteLength} != manifest end ${expected}`);
+    console.warn(
+      `weights.bin size ${buf.byteLength} != manifest end ${expected}`,
+    );
   }
 
-  return { config, tensors };
+  return {config, tensors};
 }

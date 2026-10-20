@@ -7,7 +7,19 @@
 const TOKEN_RE = /[A-Za-z]+|[^A-Za-z\s]/g;
 
 // Punctuation that should hug the previous token (no leading space).
-const NO_SPACE_BEFORE = new Set([',', '.', ';', ':', '!', '?', ')', ']', '}', "'", '"']);
+const NO_SPACE_BEFORE = new Set([
+  ',',
+  '.',
+  ';',
+  ':',
+  '!',
+  '?',
+  ')',
+  ']',
+  '}',
+  "'",
+  '"',
+]);
 // Opening brackets: the next token hugs them (no space after).
 const NO_SPACE_AFTER = new Set(['(', '[', '{']);
 
@@ -30,9 +42,13 @@ export function makeTokenizer(vocab) {
     for (let i = 0; i < t.length; i++) {
       const ch = t[i];
       const key = i === 0 ? ch : '##' + ch;
-      const id = stoi.has(key) ? stoi.get(key)
-        : stoi.has('##' + ch) ? stoi.get('##' + ch)
-          : stoi.has(ch) ? stoi.get(ch) : UNK;
+      const id = stoi.has(key)
+        ? stoi.get(key)
+        : stoi.has('##' + ch)
+          ? stoi.get('##' + ch)
+          : stoi.has(ch)
+            ? stoi.get(ch)
+            : UNK;
       ids.push(id);
     }
     return ids;
@@ -41,7 +57,8 @@ export function makeTokenizer(vocab) {
   // Encode raw text -> array of token ids.
   function encode(text) {
     const out = [];
-    for (const t of splitTokens(text)) for (const id of encodeToken(t)) out.push(id);
+    for (const t of splitTokens(text))
+      for (const id of encodeToken(t)) out.push(id);
     return out;
   }
 
