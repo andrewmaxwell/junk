@@ -116,7 +116,6 @@ export function makeRenderer(canvas, {config, tensors}, neuronLabels = null) {
   // World DOM layer: children positioned in world coords, transformed in lockstep
   // with the canvas so they pan/zoom together. Built once layout is known below.
   const worldInner = document.getElementById('worldInner');
-  const lensEls = []; // one chip per stage (embedding + each block)
   const D = config.d_model;
   const FF = config.d_ff;
   const L = config.n_layers;
@@ -1047,7 +1046,6 @@ export function makeRenderer(canvas, {config, tensors}, neuronLabels = null) {
     }
     drawConnectors(vr, sc);
     drawGhosts(sc);
-    drawAttribution();
     drawNodes(vr, sc);
     drawHoverRing(sc);
     drawAttention(sc);
@@ -1259,56 +1257,6 @@ export function makeRenderer(canvas, {config, tensors}, neuronLabels = null) {
   // signed contribution -> color: warm = pushed TOWARD the produced token,
   // cool = pushed away. Same blue/orange convention as the node colormap.
   const attribColor = (v) => (v >= 0 ? C_POS : C_NEG);
-
-  // Per-branch readout drawn in world space, under each branch's watermark: a
-  // bar diverging from a center tick (right = pushed toward the token the model
-  // produced, left = away) plus the signed logit contribution. This is the
-  // "which branch directly contributed to this logit" view the activations alone can't give.
-  function drawAttribution() {
-    if (!attribData || !attribBy.length) return;
-    const maxAbs = Math.max(attribData.maxAbs, 1e-6);
-    const FULL = CX * 0.8;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    for (const bx of blockBoxes) {
-      const per = attribBy[bx.b];
-      if (!per) continue;
-      // Both readouts sit just OUTSIDE their band, in free space: inside the
-      // band they landed on the node columns and the Q/K/V labels.
-      for (const kind of ['attn', 'mlp']) {
-        const v = per[kind];
-        const isAttn = kind === 'attn';
-        const x = (isAttn ? bx.attn.x0 : bx.mlp.x0) + CX * 0.4;
-        const y = isAttn ? yAttn + ATTN_H / 2 + 16 : yMlp + MLP_H / 2 + 14;
-        const passed =
-          waveFront === Infinity
-            ? 1
-            : clamp((waveFront - x) / (CX * 0.8) + 0.5, 0, 1);
-        if (passed <= 0.01) continue;
-        const t = clamp(Math.abs(v) / maxAbs, 0, 1);
-        const col = attribColor(v);
-        // track, then the signed bar out from a center tick
-        ctx.fillStyle = rgba([70, 64, 52], 0.5 * passed);
-        ctx.fillRect(x - FULL, y, FULL * 2, 10);
-        ctx.fillStyle = rgba(col, 0.9 * passed);
-        ctx.fillRect(v >= 0 ? x : x - t * FULL, y, t * FULL, 10);
-        ctx.fillStyle = rgba([210, 200, 180], 0.55 * passed);
-        ctx.fillRect(x - 0.8, y - 3, 1.6, 16);
-        // the attention label reads upward (the lens chips sit below it),
-        // the MLP label downward
-        ctx.font = '21px ui-monospace, Menlo, monospace';
-        ctx.fillStyle = rgba(col, 0.95 * passed);
-        ctx.textBaseline = isAttn ? 'bottom' : 'top';
-        ctx.fillText(
-          `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`,
-          x,
-          isAttn ? y - 4 : y + 14,
-        );
-      }
-    }
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-  }
 
   // Draw the ghost lanes (faint parallel streams = the other tokens) and, at each
   // block, the warm "value pull" curves fanning from those lanes up into that
@@ -1909,53 +1857,6 @@ export function makeRenderer(canvas, {config, tensors}, neuronLabels = null) {
     }
   }
 
-  // Logit lens (world-space DOM, in #worldInner): the model's running top-3 guess
-  // for the next token, read off the residual stream at each depth via the final
-  // LayerNorm + tied unembedding. One chip sits above the spine at each block
-  // boundary, so you watch the guess go from a vague/common word at the embedding
-  // to the real answer by the last block. A guess that already matches the FINAL
-  // top-1 is gold — retrospective agreement, not a causal decision point. As world DOM the chips
-  // pan/zoom with the network and CSS handles their layout.
-  const LENS_ANCHOR_Y = -SPINE_H / 2 - 16; // bottom-center anchor, just above the spine
-  function buildLensChips() {
-    if (!worldInner || lensEls.length) return;
-    for (let i = 0; i <= L; i++) {
-      const el = document.createElement('div');
-      el.className = 'lens';
-      el.style.left = `${slotX(i * 8)}px`;
-      el.style.top = `${LENS_ANCHOR_Y}px`;
-      el.style.transform = 'translate(-50%, -100%)';
-      el.style.opacity = '0';
-      const hdr = document.createElement('div');
-      hdr.className = 'lhdr';
-      hdr.textContent =
-        i === 0
-          ? 'guess · embedding'
-          : i === L
-            ? `guess · after block ${i - 1} · final`
-            : `guess · after block ${i - 1}`;
-      el.appendChild(hdr);
-      const rows = [];
-      for (let r = 0; r < 3; r++) {
-        const row = document.createElement('div');
-        row.className = 'lrow';
-        const bar = document.createElement('div');
-        bar.className = 'lbar';
-        const tok = document.createElement('span');
-        tok.className = 'ltok';
-        const pct = document.createElement('span');
-        pct.className = 'lpct';
-        row.append(bar, tok, pct);
-        el.appendChild(row);
-        rows.push({row, bar, tok, pct});
-      }
-      worldInner.appendChild(el);
-      lensEls.push({el, rows});
-    }
-  }
-
-  // Refresh chip text from the latest lensData (called once per generated token).
-  const LENS_BAR_W = 210 - 8;
   // 0.4% must not print as "0%" — at the embedding the top guess takes ~all the
   // mass and the runners-up are tiny but real.
   const fmtPct = (p) =>
@@ -1964,39 +1865,20 @@ export function makeRenderer(canvas, {config, tensors}, neuronLabels = null) {
       : p >= 0.001
         ? `${(p * 100).toFixed(1)}%`
         : '<0.1%';
+  // Refresh the lens rail from the latest lensData (once per generated token).
   function updateLensDom() {
-    if (!lensEls.length || !lensData) return;
+    if (!lensData) return;
     const finalTop = lensData[lensData.length - 1];
-    const finalId = finalTop && finalTop[0] ? finalTop[0].id : -1;
-    for (let i = 0; i < lensEls.length; i++) {
-      const top = lensData[i] || [];
-      const maxP = top[0] ? top[0].prob || 1 : 1;
-      const {rows} = lensEls[i];
-      for (let r = 0; r < rows.length; r++) {
-        const o = top[r];
-        if (!o) {
-          rows[r].row.style.display = 'none';
-          continue;
-        }
-        rows[r].row.style.display = '';
-        rows[r].row.classList.toggle('locked', o.id === finalId);
-        rows[r].tok.textContent = dispToken(vocab[o.id]);
-        rows[r].pct.textContent = fmtPct(o.prob);
-        rows[r].bar.style.width =
-          `${clamp(o.prob / maxP, 0, 1) * LENS_BAR_W}px`;
-      }
-    }
-    updateLensRail(finalId);
+    updateLensRail(finalTop && finalTop[0] ? finalTop[0].id : -1);
   }
 
   // ---- logit-lens rail (screen space, right edge) ----
-  // The in-world chips are contextual — they only read once you've zoomed to a
-  // block boundary. This is the same data as a permanent, always-legible column:
-  // the model's running next-token guess at every depth, so "more layers =
-  // iterative refinement of the prediction" is visible without touching the view.
+  // The model's running next-token guess at every depth, always legible, so
+  // "more layers = iterative refinement of the prediction" is visible without
+  // touching the view. (It used to be duplicated as chips in the network; the
+  // rail is always on screen, docked at the bottom on phones, so they went.)
   const railEl = document.getElementById('lensRail');
   const railCells = [];
-  let railFoot = null;
   function buildLensRail() {
     if (!railEl || railCells.length) return;
     buildKoPanel();
@@ -2036,20 +1918,18 @@ export function makeRenderer(canvas, {config, tensors}, neuronLabels = null) {
       railEl.appendChild(cell);
       railCells.push({cell, tag, rows});
     }
-    railFoot = document.createElement('div');
-    railFoot.className = 'lr-foot';
-    railEl.appendChild(railFoot);
+    // the gold "matches onward" tag says where the guess settles; this is the
+    // one caveat worth a line
     const note = document.createElement('div');
     note.className = 'lr-foot';
-    note.textContent =
-      'Intermediate readouts are probes, not calibrated confidence.';
+    note.textContent = 'earlier depths are probes, not confidence';
     railEl.appendChild(note);
     buildAttribPanel();
   }
 
   // ---- attribution panel (shares the right rail with the lens) ----
   // The lens answers "what is it guessing"; this answers "what made it guess
-  // that". Same data as the in-world bars, ranked, so the winner is readable at
+  // that". Ranked, so the winner is readable at
   // a glance without hunting across four blocks.
   const ATTRIB_ROWS = 5;
   const attribRows = [];
@@ -2132,9 +2012,11 @@ export function makeRenderer(canvas, {config, tensors}, neuronLabels = null) {
       r.val.style.color = rgba(attribColor(p.value), 0.95);
     }
     if (attribFoot) {
+      // The invitation to knock things out lives here, because this panel is
+      // what raises the question a knockout answers.
       attribFoot.textContent = offSet.size
-        ? 'signed logit terms · knocked-out parts add 0'
-        : 'signed logit terms, not causal effects · click a row to knock it out';
+        ? 'a knocked-out part shows what its average output adds'
+        : 'pushes toward the word, not proof it mattered · click a row to test it';
     }
   }
 
@@ -2162,7 +2044,12 @@ export function makeRenderer(canvas, {config, tensors}, neuronLabels = null) {
     koChips.className = 'ko-chips';
     koCmp = document.createElement('div');
     koCmp.className = 'ko-cmp';
-    koEl.append(head, koChips, koCmp);
+    // the one sentence of explanation, shown only once someone has clicked
+    const why = document.createElement('div');
+    why.className = 'ko-why';
+    why.textContent =
+      'These now give only their average output, whatever the text says. If the answer moves, the model needed them here.';
+    koEl.append(head, why, koChips, koCmp);
     railEl.appendChild(koEl);
   }
   function updateKoPanel() {
@@ -2226,37 +2113,16 @@ export function makeRenderer(canvas, {config, tensors}, neuronLabels = null) {
           `calc(${(clamp(o.prob / maxP, 0, 1) * 100).toFixed(1)}% - 6px)`;
       }
     }
-    if (railFoot) {
-      railFoot.innerHTML =
-        decidedAt <= 0
-          ? 'top guess matches from <b>embedding</b>'
-          : decidedAt >= lensData.length - 1
-            ? 'top guess matches at <b>last block</b>'
-            : `top guess matches from <b>block ${decidedAt - 1}</b>`;
-    }
     railEl.classList.add('on');
   }
 
-  // Keep the world DOM layer's transform identical to the canvas's, and fade the
-  // chips: hidden when there's no data or at extreme zoom-out, dim until the wave
-  // sweeps past each one. Called every frame (one transform + a few opacity sets).
+  // Keep the world DOM layer's transform identical to the canvas's. Called
+  // every frame (one transform + a few class/opacity sets).
   function syncWorld() {
     if (!worldInner) return;
     // the world DOM layer rides the exact same transform as the canvas. Nothing
-    // is hidden by zoom — everything just scales. The only modulation is the
-    // per-token wave brightening each lens chip as it sweeps past (never hides).
+    // is hidden by zoom — everything just scales.
     worldInner.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`;
-    for (let i = 0; i < lensEls.length; i++) {
-      if (!lensData) {
-        lensEls[i].el.style.opacity = '0';
-        continue;
-      }
-      const passed =
-        waveFront === Infinity
-          ? 1
-          : clamp((waveFront - slotX(i * 8)) / (CX * 0.8) + 0.5, 0, 1);
-      lensEls[i].el.style.opacity = (0.55 + 0.45 * passed).toFixed(3);
-    }
     // the rail is screen-space, but it still reads the same wave: each depth's
     // cell lights as the sweep reaches that point in the network
     for (let i = 0; i < railCells.length; i++) {
@@ -2454,7 +2320,6 @@ export function makeRenderer(canvas, {config, tensors}, neuronLabels = null) {
   function start() {
     resize();
     resetView();
-    buildLensChips();
     buildLensRail();
     buildWorldLabels();
     buildDescriptions();

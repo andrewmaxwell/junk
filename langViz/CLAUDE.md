@@ -6,3 +6,4 @@
 - `gen.restep()` recomputes the current step under a new knockout set by popping the last token and re-producing it with `force`, so toggling never resamples. `gen.records[i]` is what the model predicted at position i (null for the first token).
 - On toggle, the network updates first and the whole-window re-score (`gen.rescore`, one extra forward + per-position unembedding) runs in a later task.
 - The JS was never Prettier-formatted before the formatting-only commit; keep formatting changes in their own commits so feature diffs stay readable.
+- Keep it from becoming a firehose: each piece of information appears once. The logit lens lives only in the rail and attribution only in the rail panel plus branch tint (in-world duplicates were removed on purpose). Explanation goes where the question comes up (the knockout panel's sentence shows only after a click; the attribution footer invites knockouts), not in new always-on text.

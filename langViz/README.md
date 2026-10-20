@@ -109,9 +109,8 @@ Three overlays make the "what is it actually doing" legible at a glance:
   unembedding. You watch the guess go from a vague/common word at the raw
   embedding (which mostly just echoes the current token) to the real answer by
   the last block; a guess that already matches the **final** top-1 is drawn in
-  gold. It is shown twice:
-  - the **lens rail** (screen space, down the right edge) is the always-legible
-    copy — five cells, embedding → after each block, lit in turn by the wave. The
+  gold. It lives in the **lens rail** (screen space, down the right edge; docked
+  above the stage rail on phones): five cells, embedding → after each block, lit in turn by the wave. The
     shallowest cell from which the top guess is the final answer and never
     changes again is flagged `matches onward`. This is retrospective top-1
     agreement, not evidence of causal commitment: later blocks can still change
@@ -119,9 +118,9 @@ Three overlays make the "what is it actually doing" legible at a glance:
     calibrated confidence. It lives on the right because the per-stage camera
     framings are height-limited, so horizontal room is what's actually spare —
     and `fitRect` reserves its width so nothing is framed underneath it.
-  - the in-world **chips** above the spine at each block boundary are the same
-    data placed in the network, for when you've zoomed to a block. The last chip
-    equals the output column.
+    (A second copy used to sit in the network as chips above the spine at each
+    block boundary. It was removed to cut the firehose: the rail is always on
+    screen, so the chips only repeated it.)
 - **Direct logit attribution** — the lens says *what* the model is guessing;
   this says *what made it guess that*. The residual stream is a plain sum of
   what each part wrote to it:
@@ -135,12 +134,15 @@ Three overlays make the "what is it actually doing" legible at a glance:
   score", an actual decomposition that **sums back to the logit** (checkable:
   `__attribCheck()` in the console, or `node tools/shot.mjs attrib "…"`, prints
   the reconstruction error — it's ~1e-6, i.e. float32 rounding). It shows up in
-  three places:
+  two places:
   - each branch's **blob is tinted** by how much it moved the produced token, so
     from the overview you can see which blocks directly contributed to the sampled token’s logit glowing warm;
-  - a **bar + signed number** just outside each branch (right/orange = pushed
-    toward the token, left/blue = pushed away);
-  - a ranked **"logit contributions to X"** panel under the lens in the right rail.
+  - a ranked **"logit contributions to X"** panel under the lens in the right
+    rail. Its footer is where knockouts are offered: attribution says what
+    pushed, not whether the model needed it, and a click on a row tests that.
+
+  (Per-branch bars with signed numbers used to sit under every branch too; they
+  repeated the panel and were removed along with the lens chips.)
 
   Attribution is computed for the token the model *actually produced* — the
   sampled one, which under min-p sampling is often not the lens's top-1. That's
@@ -161,7 +163,7 @@ Three overlays make the "what is it actually doing" legible at a glance:
 
 The network's **nodes, weight edges, attention heat-strips and arcs** are drawn
 on `<canvas>` (thousands of primitives, redrawn each frame). Everything that is
-**text or a box** — the strip, the logit-lens chips, block titles, branch
+**text or a box** — the strip, block titles, branch
 watermarks, per-column names + glosses, input/output labels — lives in a DOM
 layer (`#worldInner`) that is given the _exact same_ `translate+scale` transform
 as the canvas, so it pans and zooms in lockstep while CSS handles the layout the
@@ -180,7 +182,7 @@ a small overlay canvas aligned to the strip's real word positions.
 - **Drag** to pan, **scroll** to zoom toward the cursor, **double-click** to
   refit. Any manual pan/zoom drops out of stage mode (the rail de-highlights)
   until you pick a stage again.
-- **Everything scales together:** all labels, glosses, the lens chips and the
+- **Everything scales together:** all labels, glosses and the
   output list live in world space and zoom with the network — nothing is hidden
   or faded by zoom level. Zoomed out you see the whole thing small; zoom in to
   read any part. Each column carries a one-line plain-English gloss (e.g. `Q` →
@@ -208,7 +210,11 @@ a small overlay canvas aligned to the strip's real word positions.
   generation runs past the window size the prompt scrolls out of view, which is
   itself honest: the model can no longer see it. The spine's left end is marked
   `input ▸`, the right end `output`. A continuation word-piece shows glued to its
-  predecessor; `◌` would be `<UNK>` but effectively never appears.
+  predecessor; `◌` would be `<UNK>` but effectively never appears. It carries
+  one line of key above (red = surprised the model, click any word) and one
+  caption below (what the arcs are); the sampling settings are a hover on that
+  caption. Gold prompt and highlighted next word are left to explain
+  themselves.
 
 ### Motion
 
@@ -324,7 +330,7 @@ js/weights.js     fetch weights.bin, decode float16 -> Float32Array per tensor
 js/tokenizer.js   word/punct tokenizer + char fallback (matches train.py exactly)
 js/model.js       full forward pass: matmul, LayerNorm, GELU, causal MHA, tied head, logit lens, attribution
 js/generate.js    autoregressive loop, sliding 64-token window, temperature/top-k
-js/renderer.js    the visualization: canvas net + DOM world-layer (labels, lens chips, output, attn), pan/zoom, arcs
+js/renderer.js    the visualization: canvas net + DOM world-layer (labels, output, attn), pan/zoom, arcs
 js/main.js        generation loop + builds the text strip + window.__viz / __parityCheck
 tools/shot.mjs    self-contained headless screenshot / parity / perf harness
 tools/*.test.mjs  node --test: sampling (mock model) + knockout/prediction invariants (real weights)
@@ -494,7 +500,7 @@ file with too few layers made the hover inspector report the extra blocks as
 ### Sampling
 
 `TEMPERATURE = 1.0`, `MIN_P = 0.08`, `REP_PENALTY = 0.6` in `js/main.js`
-(`MIN_P = 0` falls back to `TOP_K`). The strip caption is generated from these
+(`MIN_P = 0` falls back to `TOP_K`). The sampling note (hover the arcs caption under the strip) is generated from these
 constants rather than written out in `index.html`, so it cannot go stale.
 
 **Min-p** keeps every token within `MIN_P` x the top token's probability. Unlike

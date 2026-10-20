@@ -81,7 +81,8 @@ function describeSampling(config) {
 async function init() {
   const loaded = await loadModel('.');
   const note = document.getElementById('samplingNote');
-  if (note) note.textContent = describeSampling(loaded.config);
+  // the sampling details are for the curious: a hover, not a line of text
+  if (note) note.title = describeSampling(loaded.config);
   const tokenizer = makeTokenizer(loaded.config.vocab);
   // Mean component outputs for knockouts (tools/means.mjs). Shape-checked like
   // the neuron labels below: a file from another training run would ablate
@@ -177,8 +178,7 @@ async function init() {
   // fade the hint out (touch screens get their own wording)
   const hint = document.getElementById('hint');
   if (hint && matchMedia('(pointer: coarse)').matches) {
-    hint.textContent =
-      'tap a word to see what the model expected · tap a branch to knock it out · pinch to zoom';
+    hint.textContent = 'tap a branch to knock it out · pinch to zoom';
   }
   setTimeout(() => hint && hint.classList.add('gone'), 7000);
 
