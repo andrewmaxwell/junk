@@ -62,7 +62,14 @@ const regions = {
         usTopo,
         usTopo.objects.counties.geometries,
         projection,
-        (g) => `${g.properties.name}, ${stateNames[g.id.slice(0, 2)]}`,
+        (g) => {
+          // Independent cities share names with counties (St. Louis city and
+          // county, Richmond, Fairfax, ...).
+          const city =
+            ['24', '29', '51'].includes(g.id.slice(0, 2)) &&
+            g.id.slice(2) >= '510';
+          return `${g.properties.name}${city ? ' (city)' : ''}, ${stateNames[g.id.slice(0, 2)]}`;
+        },
       ),
       data: countyData,
       noun: 'county',
@@ -143,6 +150,7 @@ let target; // cartogram points (or partial progress)
 let display; // what's drawn, eased toward the mix of base and target
 let weights;
 let tiny; // features left at their true size for being so small
+let baseAreas; // each feature's area on the real map
 let values;
 let worker;
 const cache = new Map();
@@ -156,6 +164,26 @@ const fmt = (v) =>
           maximumSignificantDigits: 3,
         }).format(v)
       : Intl.NumberFormat('en', {maximumSignificantDigits: 3}).format(v);
+
+// "$81,600", "12% of adults 25-44", "83.3 years"
+const withUnit = (v, unit) =>
+  v === null
+    ? 'no data'
+    : unit.startsWith('$')
+      ? `$${fmt(v)}${unit.slice(1)}`
+      : unit.startsWith('%')
+        ? `${fmt(v)}${unit}`
+        : unit
+          ? `${fmt(v)} ${unit}`
+          : fmt(v);
+const ordinal = (n) => {
+  const suffix =
+    n % 100 >= 11 && n % 100 <= 13
+      ? 'th'
+      : ['th', 'st', 'nd', 'rd'][n % 10] || 'th';
+  return `${n.toLocaleString('en')}${suffix}`;
+};
+const times = (r) => `${r >= 10 ? Math.round(r) : r.toPrecision(2)}×`;
 
 const metricInfo = () => map.data.metrics.find((m) => m.name === params.metric);
 
@@ -171,10 +199,7 @@ const computeWeights = () => {
   });
   // Features without data, or too tiny to bother with, keep their true size
   // relative to the rest.
-  const areas = featureAreas(
-    base,
-    map.features.map((f) => f.polys),
-  );
+  const areas = baseAreas;
   const totalArea = areas.reduce((a, b) => a + b, 0);
   tiny = areas.map((a) => a / totalArea < params.tiny / 100);
   raw.forEach((w, i) => {
@@ -265,6 +290,10 @@ const run = () => {
 const loadRegion = () => {
   map = regions[params.region]();
   base = map.points;
+  baseAreas = featureAreas(
+    base,
+    map.features.map((f) => f.polys),
+  );
   target = base;
   display = Float64Array.from(base);
   const names = map.data.metrics.map((m) => m.name);
@@ -525,25 +554,34 @@ canvas.addEventListener('pointermove', (e) => {
     display,
     map.features.map((g) => g.polys),
   );
-  const total = areas.reduce((a, b) => a + b, 0);
-  const totalW = weights.reduce((a, b) => a + b, 0);
+  // Sizes relative to the whole map, so "1×" means drawn at its real size.
+  const share = (list, j) => list[j] / list.reduce((a, b) => a + b, 0);
+  const stretch = share(areas, i) / share(baseAreas, i);
+  const aim = share(weights, i) / share(baseAreas, i);
+  const sizeLine = tiny[i]
+    ? 'Too small to resize, so drawn at real size'
+    : values[i] === null
+      ? 'No data, so drawn at real size'
+      : `Drawn ${times(stretch)} its real size${
+          Math.abs(stretch / aim - 1) > 0.1 ? ` (aiming for ${times(aim)})` : ''
+        }`;
+  const line = (metric, vals) => {
+    const v = vals[i];
+    const rank =
+      v === null
+        ? ''
+        : `, ${ordinal(1 + vals.filter((w) => w > v).length)} highest of ${vals.filter((w) => w !== null).length.toLocaleString('en')}`;
+    return `${metric.name}: ${withUnit(v, metric.unit)}<span>${rank}</span>`;
+  };
   const m = metricInfo();
   const cm = colorMetric();
-  const colorLine =
-    cm && cm !== m
-      ? `<br>${cm.name}: ${fmt(colorValues()[i])} ${colorValues()[i] === null ? '' : cm.unit}`
-      : '';
-  tip.innerHTML = `<b></b>${m.name}: ${fmt(values[i])} ${values[i] === null ? '' : m.unit}${colorLine}<br>
-    <span>${
-      tiny[i]
-        ? 'Too small to resize'
-        : `${pct(areas[i] / total)} of the map (target ${pct(weights[i] / totalW)})`
-    }</span>`;
+  tip.innerHTML = `<b></b>${line(m, values)}${cm && cm !== m ? `<br>${line(cm, colorValues())}` : ''}
+    <br><span>${sizeLine}</span>`;
   tip.querySelector('b').textContent = f.name;
   tip.style.display = 'block';
   const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8);
   tip.style.left = `${x}px`;
-  tip.style.top = `${e.clientY + 14}px`;
+  tip.style.top = `${Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 8)}px`;
 });
 canvas.addEventListener('pointerleave', () => {
   hovered = -1;
