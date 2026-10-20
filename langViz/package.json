@@ -9,7 +9,9 @@
     "train:smoke": "MAX_STEPS=40 python3 -u train.py",
     "parity": "python3 parity.py",
     "labels": "python3 neuron_labels.py",
-    "shot": "node tools/shot.mjs"
+    "shot": "node tools/shot.mjs",
+    "means": "node tools/means.mjs",
+    "test": "node --test tools/"
   },
   "private": true
 }

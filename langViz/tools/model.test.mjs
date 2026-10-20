@@ -3,25 +3,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'fs/promises';
-import {fileURLToPath} from 'url';
+import {ROOT, loaded, tokenizer, makeWith} from './node-model.mjs';
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
-globalThis.fetch = async (u) => {
-  const buf = await readFile(ROOT + String(u).replace(/^(\.\/)+/, ''));
-  return {
-    ok: true,
-    json: async () => JSON.parse(buf),
-    arrayBuffer: async () =>
-      buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
-  };
-};
-const {loadModel} = await import('../js/weights.js');
-const {makeModel} = await import('../js/model.js');
-const {makeTokenizer} = await import('../js/tokenizer.js');
 const {makeGenerator} = await import('../js/generate.js');
-const loaded = await loadModel('.');
-const model = makeModel(loaded);
-const tok = makeTokenizer(loaded.config.vocab);
+const means = JSON.parse(await readFile(ROOT + 'ablation_means.json', 'utf8'));
+const model = makeWith(means); // what the page runs: mean-ablation
+const zeroModel = makeWith(null); // the fallback: zero-ablation
+const tok = tokenizer;
 const {n_layers: L, n_heads: H} = loaded.config;
 const ids = tok.encode('And it came to pass, when the king heard');
 const maxDiff = (a, b) =>
@@ -34,10 +22,42 @@ test('an empty knockout set is the intact model', () => {
   );
 });
 
-test('with every branch off, the output is the embedding-only logit lens', () => {
+test('a mean-ablated branch writes its corpus mean at every position', () => {
+  const {activations} = model.forward(ids, new Set(['m1', 'a2']));
+  const D = loaded.config.d_model;
+  for (const [w, m] of [
+    [activations.layers[1].mlp_write, means.mlp[1]],
+    [activations.layers[2].attn_write, means.attn[2]],
+  ]) {
+    for (let t = 0; t < ids.length; t++)
+      assert.ok(maxDiff(w.subarray(t * D, (t + 1) * D), m) < 1e-6);
+  }
+});
+
+test('attribution still sums to the logit with knockouts on', () => {
+  const {logits, activations} = model.forward(
+    ids,
+    new Set(['m1', 'a2', 'a0h3']),
+  );
+  const target = logits.indexOf(Math.max(...logits));
+  const a = model.attribute(activations, target);
+  assert.ok(Math.abs(a.verify - logits[target]) < 1e-3);
+});
+
+test('all heads mean-ablated equals the whole branch mean-ablated', () => {
+  // W_O is linear, so W_O·mean(heads) + b_O = mean(attn write), up to the
+  // 6-decimal rounding in the file
+  const heads = new Set(Array.from({length: H}, (_, h) => `a0h${h}`));
+  const a = model.forward(ids, heads).activations.layers[0].attn_write;
+  const b = model.forward(ids, new Set(['a0'])).activations.layers[0]
+    .attn_write;
+  assert.ok(maxDiff(a, b) < 1e-3, `max diff ${maxDiff(a, b)}`);
+});
+
+test('zero-ablation fallback: every branch off leaves only the embedding', () => {
   const all = new Set();
   for (let l = 0; l < L; l++) all.add(`a${l}`).add(`m${l}`);
-  const {activations} = model.forward(ids, all);
+  const {activations} = zeroModel.forward(ids, all);
   const final = activations.lens[L],
     emb = activations.lens[0];
   assert.deepEqual(
@@ -45,23 +65,6 @@ test('with every branch off, the output is the embedding-only logit lens', () =>
     emb.map((o) => o.id),
   );
   assert.ok(Math.abs(final[0].prob - emb[0].prob) < 1e-6);
-});
-
-test('a knocked-out branch writes exactly zero, so attribution gives it zero', () => {
-  const {logits, activations} = model.forward(ids, new Set(['m1', 'a2']));
-  const target = logits.indexOf(Math.max(...logits));
-  const a = model.attribute(activations, target);
-  const part = (label) => a.parts.find((p) => p.label === label).value;
-  assert.equal(part('block 1 · MLP'), 0);
-  assert.equal(part('block 2 · attn'), 0);
-  assert.ok(Math.abs(a.verify - logits[target]) < 1e-3); // still sums to the logit
-});
-
-test('all heads off differs from the branch off only by the b_O bias', () => {
-  const heads = new Set(Array.from({length: H}, (_, h) => `a0h${h}`));
-  const w = model.forward(ids, heads).activations.layers[0].attn_write;
-  const bO = loaded.tensors.get('block.0.attn.b_O');
-  assert.ok(maxDiff(w.subarray(0, bO.length), bO) < 1e-6);
 });
 
 test('per-position predictions match a forward pass on each prefix', () => {

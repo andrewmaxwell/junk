@@ -48,7 +48,7 @@ function layerNorm(X, T, d, w, b) {
   return out;
 }
 
-export function makeModel({config, tensors}) {
+export function makeModel({config, tensors, means = null}) {
   const {
     d_model: D,
     n_layers: L,
@@ -60,15 +60,30 @@ export function makeModel({config, tensors}) {
   const scale = 1 / Math.sqrt(HD);
   const g = (name) => tensors.get(name);
 
+  // a component's mean output (or a slice of it), null without means
+  const meanOf = (kind, l, from = 0, len = D) => {
+    const row = means && means[kind] && means[kind][l];
+    return row ? row.slice(from, from + len) : null;
+  };
+  // the same D-vector at each of T positions (zeros when `row` is null)
+  function constantWrite(row, T) {
+    const out = new Float32Array(T * D);
+    if (row) for (let t = 0; t < T; t++) out.set(row, t * D);
+    return out;
+  }
+
   // Forward pass over a sequence of token ids (length T, must be <= block_size).
   // Returns last-position logits plus all intermediates + attention weights.
   //
   // `off` is a set of knocked-out components: `a2` (block 2's attention branch),
-  // `m2` (its MLP), `a2h1` (one head). A knocked-out branch still computes —
-  // so the viz has activations to show — but writes NOTHING to the residual
-  // stream, bias included. A knocked-out head contributes zeros to the
-  // concatenated head outputs before W_O; the other heads and b_O are kept.
-  // This is zero-ablation: blunt, but exactly what the label says.
+  // `m2` (its MLP), `a2h1` (one head). This is MEAN-ablation: a knocked-out
+  // branch writes its average output over real KJV text (`means`, from
+  // tools/means.mjs) at every position, whatever the input says; a knocked-out
+  // head's slice of the concatenated head outputs is replaced by its average
+  // before W_O. The branch still computes, so the viz has activations to show.
+  // Mean rather than zero: zeros are an input the later layers never saw in
+  // training, so a big effect could be the model reacting to garbage rather
+  // than missing what the part knew. Without `means` it falls back to zeros.
   function forward(ids, off = null) {
     const isOff = (k) => !!off && off.has(k);
     const T = ids.length;
@@ -131,13 +146,16 @@ export function makeModel({config, tensors}) {
       attention.push(layerAtt);
       for (let h = 0; h < H; h++) {
         if (!isOff(`a${l}h${h}`)) continue;
-        for (let t = 0; t < T; t++)
-          attnOut.fill(0, t * D + h * HD, t * D + (h + 1) * HD);
+        const m = meanOf('heads', l, h * HD, HD);
+        for (let t = 0; t < T; t++) {
+          if (m) attnOut.set(m, t * D + h * HD);
+          else attnOut.fill(0, t * D + h * HD, t * D + (h + 1) * HD);
+        }
       }
 
       // output projection + residual
       const proj = isOff(`a${l}`)
-        ? new Float32Array(T * D)
+        ? constantWrite(meanOf('attn', l), T)
         : matmul(attnOut, T, D, g(`${p}.attn.W_O`), D, g(`${p}.attn.b_O`));
       for (let i = 0; i < T * D; i++) x[i] += proj[i];
       const residual_mid = x.slice(); // residual after the attention add (for the viz)
@@ -148,7 +166,7 @@ export function makeModel({config, tensors}) {
       const mlp_pre = up.slice(); // pre-GELU up-projection (for the viz)
       for (let i = 0; i < up.length; i++) up[i] = gelu(up[i]);
       const down = isOff(`m${l}`)
-        ? new Float32Array(T * D)
+        ? constantWrite(meanOf('mlp', l), T)
         : matmul(up, T, FF, g(`${p}.mlp.down.w`), D, g(`${p}.mlp.down.b`));
       for (let i = 0; i < T * D; i++) x[i] += down[i];
 

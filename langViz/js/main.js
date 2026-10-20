@@ -83,7 +83,29 @@ async function init() {
   const note = document.getElementById('samplingNote');
   if (note) note.textContent = describeSampling(loaded.config);
   const tokenizer = makeTokenizer(loaded.config.vocab);
-  const model = makeModel(loaded);
+  // Mean component outputs for knockouts (tools/means.mjs). Shape-checked like
+  // the neuron labels below: a file from another training run would ablate
+  // with the wrong vectors and nothing would look wrong. Missing or mismatched
+  // falls back to zero-ablation, and says so.
+  const means = await fetch('./ablation_means.json')
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null)
+    .then((m) => {
+      const {n_layers: nl, d_model: d} = loaded.config;
+      // the first few ln_f weights, as tools/means.mjs records them
+      const fp = Array.from(
+        loaded.tensors.get('ln_f.w').slice(0, 6),
+        (x) => +x.toFixed(4),
+      ).join(',');
+      if (m && m.n_layers === nl && m.d_model === d && m.fingerprint === fp)
+        return m;
+      console.warn(
+        'ablation_means.json missing or for another model — knockouts fall ' +
+          'back to zero-ablation (re-run tools/means.mjs).',
+      );
+      return null;
+    });
+  const model = makeModel({...loaded, means});
   const gen = makeGenerator(model, tokenizer);
   // optional: per-neuron max-activating labels (neuron_labels.py). Tolerate absence.
   //

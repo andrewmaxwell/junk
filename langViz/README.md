@@ -22,25 +22,48 @@ Two interactions turn it from a thing you watch into a thing you experiment on:
 
 - **Knock parts out.** Click any attention or MLP branch in the network, a
   single head's row in an attention panel, or a row of the attribution panel,
-  and that component stops writing to the residual stream (zero-ablation: it
-  still computes, so you still see its activations, but its output, bias
-  included, is dropped; a knocked-out head zeroes its slice before `W_O`). The
+  and that component stops responding to the text. It still computes, so you
+  still see its activations, but what it writes to the residual stream is
+  replaced by its **average output over real KJV text** (mean-ablation; a
+  knocked-out head has its slice replaced by its average before `W_O`). The
   current step is recomputed at once on the same window with the same produced
   token, even while paused, and generation carries on with the broken model. A
   panel at the top of the right rail shows what the **intact model** would say
   on that exact window next to what the knocked-out one gives the same token and
   what it now says instead. Attribution says *what wrote toward the token*; this
-  is the causal experiment it can't be. Knockouts are kept in the URL
-  (`?off=m0,a1h2`), as is a custom prompt (`?p=…`).
+  is the experiment that says whether the model needed it. Knockouts are kept in
+  the URL (`?off=m0,a1h2`), as is a custom prompt (`?p=…`).
 
-  What you find, measured on 5 prompts (prob. of the intact top-1 after a
-  single knockout): **block 0's MLP is the one that matters.** Without it the
-  model mostly echoes the current token (the lens reads `Israel 100%` from
-  the embedding on) and the text falls apart into `I I will have., saith is
-  was?`. Other whole branches typically move the answer 5 to 25 points. Single
-  heads almost never change the top guess (≤5 points, often less): the
-  four heads are largely redundant at this scale, so expect head knockouts to
-  look like they do nothing. That is the real result, not a bug.
+  **Why the mean, not zero.** Zeroing a part hands the later layers a value they
+  never saw in training, so a big effect might be the model reacting to garbage
+  rather than missing what the part knew. Mean-ablation removes only the
+  information. The means live in `ablation_means.json` (11KB, from
+  `node tools/means.mjs`: 600 seeded random 64-token windows of the corpus,
+  38,400 positions). It carries a fingerprint of the weights; a stale or
+  missing file makes the page fall back to zero-ablation with a console warning.
+
+  **What you find.** Measured on 40 windows from the held-out tail (2,520
+  next-word predictions), as the extra bits per token the knocked-out model
+  needs to predict the real text (intact: 6.04 bits, top-1 right 25.8% of the
+  time):
+
+  | knock out | mean-ablation | zero-ablation | top-1 right (mean) |
+  |---|---:|---:|---:|
+  | block 0 MLP | **+1.87** | +1.86 | 10.0% |
+  | block 0 attn | +0.23 | +0.26 | 22.3% |
+  | blocks 1-3 MLP | +0.14 to +0.16 | +0.18 to +0.23 | 23.7-24.3% |
+  | blocks 1-3 attn | +0.06 to +0.10 | +0.11 to +0.16 | 24.1-24.8% |
+  | one head | +0.02 or less (b0 head 0: +0.07) | +0.06 or less | ~25% |
+
+  **Block 0's MLP is the one that matters**, and that survives the switch to
+  mean-ablation unchanged, so it is not an artifact of zeros. Without it the
+  model stutters: `Thus saith the LORD; that I will will will put my my my
+  Israel`. Zero-ablation overstated everything else by roughly
+  20-100%: the later blocks refine the guess more gently than zeros suggested.
+  Single heads barely matter (differences under ~0.01 bits, including the small
+  negative ones, are noise at this sample size): the four heads overlap enough
+  that expect head knockouts to look like they do nothing. That is the result,
+  not a bug.
 - **Inspect any word.** Every word in the strip is tinted by how much it
   **surprised** the model (`-log2 p`, red from 5 bits, full at 17). Hover or
   tap one to see the probability the model gave it, its rank, and the eight
@@ -263,13 +286,20 @@ Temperature (1.0), min-p (0.08), the repetition penalty (0.6) and pacing are
 constants at the top of
 `js/main.js`. `window.__setPrompt(text)` does the same thing from the console.
 
-There are also npm scripts (run from the repo root) for development:
+There are also npm scripts, run from this directory:
 
 ```bash
-npm run langviz:serve    # static server on :8765
-npm run langviz:train    # retrain + re-export weights.bin / model_config.json
-npm run langviz:parity -- "Thus saith the LORD"           # python reference logits
-npm run langviz:labels                                    # rebuild neuron_labels.json (REQUIRED after any retrain)
+npm run serve                     # static server on :8765
+npm run train                     # retrain + re-export weights.bin / model_config.json
+npm run parity -- "Thus saith the LORD"   # python reference logits
+npm run labels                    # rebuild neuron_labels.json (REQUIRED after any retrain)
+npm run means                     # rebuild ablation_means.json (REQUIRED after any retrain)
+npm test                          # node --test tools/
+```
+
+From the repo root:
+
+```bash
 node langViz/tools/shot.mjs /tmp/x.png 6000               # headless screenshot
 node langViz/tools/shot.mjs /tmp/x.png 6000 stage:2      # ... framing a named stage
 node langViz/tools/shot.mjs parity "Thus saith the LORD"  # browser-side logits
@@ -299,15 +329,17 @@ js/main.js        generation loop + builds the text strip + window.__viz / __par
 tools/shot.mjs    self-contained headless screenshot / parity / perf harness
 tools/*.test.mjs  node --test: sampling (mock model) + knockout/prediction invariants (real weights)
 parity.py         Python/numpy reference forward pass (see below)
-train.py          trains the model and exports the weights (npm run langviz:train)
+train.py          trains the model and exports the weights (npm run train)
 neuron_labels.py  offline pass: label each MLP neuron by its top activators
 neuron_labels.json  per-neuron triggers/contexts for the hover inspector (generated)
+ablation_means.json mean component outputs over the corpus, for knockouts (tools/means.mjs)
+tools/node-model.mjs loads the shipped model in Node for the tests and tools/means.mjs
 weights.bin       float16 params, model_config.json = hyperparams + vocab + manifest
 ```
 
 ## Training
 
-`npm run langviz:train` (or `python3 train.py`). Requires `torch` + `numpy`.
+`npm run train` (or `python3 train.py`). Requires `torch` + `numpy`.
 Environment overrides: `MAX_STEPS`, `N_WORDS`, `N_LAYERS`, `DROPOUT`,
 `LR_DECAY_STEPS`, `DECAY_EMB`, `EXTRA_CORPUS`, `EXTRA_WEIGHT`, and
 `OUT_TAG`/`OUT_DIR` (which redirect the exported artifacts so a sweep cannot
@@ -319,7 +351,7 @@ clobber the `weights.bin` the page loads).
 > last one. The default is now 40000 and a fresh run reproduces the shipped
 > `weights.bin` to a mean absolute difference of 1e-6.
 
-The corpus is ~890k surface tokens of KJV → ~1.06M ids after the character
+The corpus is ~890k surface tokens of KJV → ~933k ids after the character
 fallback. The last **5%** is held out as one *contiguous* block (not random
 windows, so no validation context can appear inside a training window), and
 training early-stops on validation loss with the best weights restored.
@@ -546,8 +578,10 @@ to ~5 decimal places, e.g. for `"Thus saith the LORD"` (ids `[235, 96, 2, 24]`):
    ...
 ```
 
-> Both `weights.bin` and `neuron_labels.json` are **generated artifacts tied to a
-> particular training run**. Re-run `neuron_labels.py` after every retrain: the
+> `weights.bin`, `neuron_labels.json` and `ablation_means.json` are **generated
+> artifacts tied to a particular training run**. Re-run `npm run means` after
+> every retrain (the page rejects a stale file by fingerprint and falls back to
+> zero-ablation), and re-run `neuron_labels.py`: the
 > JSON is keyed only by layer/unit index, so a stale one still loads and the
 > hover inspector then reports confident, wrong features. (After the last
 > retrain, 1,536 of 1,536 neurons had different top activators.) The parity
