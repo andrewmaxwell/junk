@@ -369,7 +369,7 @@ export const makeCartogram = (
     const out = toMap();
     pts.set(out);
     errors = areaErrors(featureAreas(pts, features), weights);
-    onProgress({points: out, pass, error: errors});
+    onProgress({points: out, pass, error: errors, passDone: true});
   }
   return {points: pts, error: errors, converged: errors.misplaced <= tolerance};
 };

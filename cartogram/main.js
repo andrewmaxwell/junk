@@ -245,10 +245,12 @@ const run = () => {
   ].join('|');
   worker?.terminate();
   worker = null;
-  // With a cartogram already showing, hold it until the new one is done and
-  // then glide straight across, rather than snapping back toward the real
-  // map while the passes run.
+  // With a cartogram already showing, glide straight to the new one rather
+  // than snapping back toward the real map while the passes run: first to a
+  // quick coarse preview, then to the end of each full pass, which only get
+  // closer.
   const glide = target !== base;
+  dirty = true; // new colors right away
   easeRate = glide ? 0.08 : 0.25;
   if (cache.has(key)) {
     target = cache.get(key).points;
@@ -265,9 +267,13 @@ const run = () => {
     worker = null;
   };
   worker.onmessage = ({data}) => {
-    if (!glide || data.type === 'done') target = data.points;
+    if (!glide || data.type !== 'progress' || data.passDone) {
+      target = data.points;
+    }
     const err = `${pct(data.error.misplaced)} of the area is misplaced`;
-    if (data.type === 'progress') {
+    if (data.type === 'preview') {
+      setStatus('Stretching…');
+    } else if (data.type === 'progress') {
       setStatus(
         `Stretching… pass ${data.pass + 1} of up to ${params.passes}, ${err}`,
       );
@@ -284,6 +290,7 @@ const run = () => {
     weights,
     passes: params.passes,
     res: params.resolution,
+    preview: glide,
   });
 };
 
