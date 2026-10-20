@@ -588,10 +588,6 @@ canvas.addEventListener('pointerleave', () => {
   tip.style.display = 'none';
   dirty = true;
 });
-matchMedia('(prefers-color-scheme: dark)').addEventListener(
-  'change',
-  () => (dirty = true),
-);
 
 // Controls
 const gui = new GUI({title: 'Stretchy Maps'});
