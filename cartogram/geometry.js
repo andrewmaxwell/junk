@@ -92,14 +92,36 @@ export const buildMap = (topology, geometries, projection, nameOf) => {
     if (r.length > 1 && r[0] === r[r.length - 1]) r.pop();
     return r;
   };
-  const features = [];
+  // Rings that simplification collapsed to a line (Falls Church, VA) have no
+  // area to stretch, so they're dropped.
+  const hasArea = (r) => {
+    let a = 0;
+    for (let k = 0, j = r.length - 1; k < r.length; j = k++) {
+      a +=
+        points[r[j] * 2] * points[r[k] * 2 + 1] -
+        points[r[k] * 2] * points[r[j] * 2 + 1];
+    }
+    return Math.abs(a) > 1e-9;
+  };
+  // Shapes sharing an ID (Australia and its Ashmore and Cartier Islands) are
+  // one statistical region, so they become one feature, named for the
+  // biggest piece.
+  const byId = new Map();
   for (const g of geometries) {
     const polys = polyArcsOf(g)
-      .map((rings) => rings.map(ring).filter((r) => r.length > 2))
+      .map((rings) => rings.map(ring).filter((r) => r.length > 2 && hasArea(r)))
       .filter((p) => p.length);
-    if (polys.length)
-      features.push({id: g.id ?? g.properties.name, name: nameOf(g), polys});
+    if (!polys.length) continue;
+    const id = g.id ?? g.properties.name;
+    const size = polys.flat(2).length;
+    const f = byId.get(id);
+    if (!f) byId.set(id, {id, name: nameOf(g), polys, size});
+    else {
+      f.polys.push(...polys);
+      if (size > f.size) Object.assign(f, {name: nameOf(g), size});
+    }
   }
+  const features = [...byId.values()];
 
   // Greedy coloring so neighbors (features sharing a point) differ.
   const firstOwner = new Map();

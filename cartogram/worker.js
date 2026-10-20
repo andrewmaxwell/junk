@@ -9,5 +9,6 @@ onmessage = ({data}) => {
     type: 'done',
     points: result.points,
     error: summary(result.error),
+    converged: result.converged,
   });
 };

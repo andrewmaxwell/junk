@@ -10,13 +10,23 @@ const ctx = canvas.getContext('2d');
 const tip = document.getElementById('tip');
 const statusEl = document.getElementById('status');
 
-const loadJson = (url) => fetch(url).then((r) => r.json());
-const [worldTopo, usTopo, worldData, countyData] = await Promise.all([
-  loadJson('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json'),
-  loadJson('https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json'),
-  loadJson('./data/world.json'),
-  loadJson('./data/counties.json'),
-]);
+const loadJson = async (url) => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status} loading ${url}`);
+  return res.json();
+};
+let worldTopo, usTopo, worldData, countyData;
+try {
+  [worldTopo, usTopo, worldData, countyData] = await Promise.all([
+    loadJson('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json'),
+    loadJson('https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json'),
+    loadJson('./data/world.json'),
+    loadJson('./data/counties.json'),
+  ]);
+} catch (e) {
+  statusEl.textContent = `Couldn't load the map data (${e.message}). Try reloading.`;
+  throw e;
+}
 
 const stateNames = Object.fromEntries(
   usTopo.objects.states.geometries.map((g) => [g.id, g.properties.name]),
@@ -63,7 +73,8 @@ const regions = {
 // by population, so the US skips none.
 const defaultTiny = {World: 0.01, 'United States': 0};
 
-// Settings, also kept in the URL hash so a map can be shared.
+// Settings, also kept in the URL hash so a map can be shared. Values from a
+// link skip the controls' limits, so they're checked here.
 const params = {
   region: 'World',
   metric: 'Median income',
@@ -76,14 +87,53 @@ const params = {
   passes: 10,
   tiny: null,
 };
+const ranges = {power: [0, 2], tiny: [0, 0.2], passes: [1, 20]};
+const colorModes = ['By value', 'Map colors'];
+const resolutions = [256, 512, 1024];
 const hash = new URLSearchParams(location.hash.slice(1));
-for (const key of ['region', 'metric', 'colors'])
-  if (hash.has(key)) params[key] = hash.get(key);
-if (hash.has('perPerson')) params.perPerson = hash.get('perPerson') === '1';
-if (hash.has('power')) params.power = +hash.get('power');
-if (hash.has('tiny')) params.tiny = +hash.get('tiny');
-if (!regions[params.region]) params.region = 'World';
+if (Object.hasOwn(regions, hash.get('region')))
+  params.region = hash.get('region');
+if (hash.has('metric')) params.metric = hash.get('metric'); // checked in loadRegion
+if (colorModes.includes(hash.get('colors'))) params.colors = hash.get('colors');
+if (resolutions.includes(+hash.get('resolution')))
+  params.resolution = +hash.get('resolution');
+for (const key of ['perPerson', 'labels']) {
+  if (hash.has(key)) params[key] = hash.get(key) === '1';
+}
+for (const [key, [min, max]] of Object.entries(ranges)) {
+  const v = parseFloat(hash.get(key));
+  if (Number.isFinite(v)) params[key] = Math.min(max, Math.max(min, v));
+}
+params.passes = Math.round(params.passes);
 params.tiny ??= defaultTiny[params.region];
+
+const saveSettings = () => {
+  const {
+    region,
+    metric,
+    perPerson,
+    power,
+    tiny,
+    colors,
+    labels,
+    resolution,
+    passes,
+  } = params;
+  const settings = {
+    region,
+    metric,
+    perPerson: +perPerson,
+    power,
+    tiny,
+    colors,
+    labels: +labels,
+    resolution,
+    passes,
+  };
+  history.replaceState(null, '', `#${new URLSearchParams(settings)}`);
+};
+// replaceState doesn't fire this, so it only catches pasted or edited links.
+addEventListener('hashchange', () => location.reload());
 
 let map; // current region: points, features, data
 let base; // original projected points
@@ -93,12 +143,6 @@ let weights;
 let tiny; // features left at their true size for being so small
 let values;
 let worker;
-let lastHash;
-// A pasted or edited link changes the hash without reloading.
-addEventListener(
-  'hashchange',
-  () => location.hash.slice(1) !== lastHash && location.reload(),
-);
 const cache = new Map();
 
 const fmt = (v) =>
@@ -141,23 +185,27 @@ const computeWeights = () => {
     sumW += w;
     sumA += areas[i];
   });
-  const floor = Math.max(...raw) * 1e-3;
-  weights = raw.map((w, i) => Math.max(floor, w ?? (areas[i] * sumW) / sumA));
+  // A region can't shrink to nothing, so a true zero gets a sliver instead.
+  // Positive values keep their exact ratios.
+  const sliver = Math.max(...raw) * 1e-6;
+  weights = raw.map((w, i) =>
+    w === null ? (sumA ? (areas[i] * sumW) / sumA : areas[i]) : w || sliver,
+  );
 };
 
 const setStatus = (text) => (statusEl.textContent = text);
 const pct = (x) => `${(x * 100).toFixed(1)}%`;
 
+const doneText = ({error, converged, seconds}) => {
+  const err = `${pct(error.misplaced)} of the area is misplaced`;
+  return converged
+    ? `Done in ${seconds.toFixed(1)}s, ${err}`
+    : `Stopped at the ${params.passes}-pass limit after ${seconds.toFixed(1)}s, ${err}. A bigger grid under Accuracy gets closer.`;
+};
+
 const run = () => {
   computeWeights();
-  location.hash = lastHash = new URLSearchParams({
-    region: params.region,
-    metric: params.metric,
-    perPerson: params.perPerson ? 1 : 0,
-    power: params.power,
-    tiny: params.tiny,
-    colors: params.colors,
-  }).toString();
+  saveSettings();
   updateHeader();
   const key = [
     params.region,
@@ -172,9 +220,7 @@ const run = () => {
   worker = null;
   if (cache.has(key)) {
     target = cache.get(key).points;
-    setStatus(
-      `${pct(cache.get(key).error.misplaced)} of the area is misplaced`,
-    );
+    setStatus(doneText(cache.get(key)));
     return;
   }
   const start = performance.now();
@@ -182,6 +228,10 @@ const run = () => {
   worker = new Worker(new URL('./worker.js', import.meta.url), {
     type: 'module',
   });
+  worker.onerror = (e) => {
+    setStatus(`Stretching failed: ${e.message}`);
+    worker = null;
+  };
   worker.onmessage = ({data}) => {
     target = data.points;
     const err = `${pct(data.error.misplaced)} of the area is misplaced`;
@@ -190,10 +240,9 @@ const run = () => {
         `Stretching… pass ${data.pass + 1} of up to ${params.passes}, ${err}`,
       );
     } else {
+      data.seconds = (performance.now() - start) / 1000;
       cache.set(key, data);
-      setStatus(
-        `Done in ${((performance.now() - start) / 1000).toFixed(1)}s, ${err}`,
-      );
+      setStatus(doneText(data));
       worker = null;
     }
   };
@@ -392,6 +441,10 @@ const draw = () => {
   }
 };
 
+let easedTarget;
+let easedMorph;
+let settled = false;
+
 const frame = () => {
   requestAnimationFrame(frame);
   if (anim) {
@@ -400,15 +453,22 @@ const frame = () => {
     morphCtrl.updateDisplay();
   }
   // Ease toward the target so progress updates and morphs look like rubber.
-  let moved = 0;
+  // Once it settles, skip the work until the target or stretch changes.
   const m = params.morph;
-  if (target.length === display.length) {
+  if (target !== easedTarget || m !== easedMorph) {
+    easedTarget = target;
+    easedMorph = m;
+    settled = false;
+  }
+  let moved = 0;
+  if (!settled && target.length === display.length) {
     for (let p = 0; p < display.length; p++) {
       const goal = base[p] + (target[p] - base[p]) * m;
       const d = (goal - display[p]) * 0.25;
       display[p] += d;
       moved = Math.max(moved, Math.abs(d));
     }
+    settled = moved < 0.001;
   }
   if (moved > 0.01 || dirty) {
     dirty = false;
@@ -476,9 +536,12 @@ const metricCtrl = gui
   .name('Metric')
   .onFinishChange(run);
 gui.add(params, 'perPerson').name('× population').onChange(run);
-gui.add(params, 'power', 0, 2, 0.05).name('Area ∝ value ^').onFinishChange(run);
+gui
+  .add(params, 'power', ...ranges.power, 0.05)
+  .name('Area ∝ value ^')
+  .onFinishChange(run);
 const tinyCtrl = gui
-  .add(params, 'tiny', 0, 0.2, 0.001)
+  .add(params, 'tiny', ...ranges.tiny, 0.001)
   .name('Skip under % of map')
   .onFinishChange(run);
 const morphCtrl = gui
@@ -489,19 +552,26 @@ gui
   .add({play: () => (anim = params.morph > 0.5 ? -1 : 1)}, 'play')
   .name('Animate stretch');
 gui
-  .add(params, 'colors', ['By value', 'Map colors'])
+  .add(params, 'colors', colorModes)
   .name('Colors')
   .onChange(() => {
+    saveSettings();
     updateHeader();
     dirty = true;
   });
 gui
   .add(params, 'labels')
   .name('Labels')
-  .onChange(() => (dirty = true));
+  .onChange(() => {
+    saveSettings();
+    dirty = true;
+  });
 const adv = gui.addFolder('Accuracy').close();
-adv.add(params, 'resolution', [256, 512, 1024]).name('Grid size').onChange(run);
-adv.add(params, 'passes', 1, 20, 1).name('Max passes').onFinishChange(run);
+adv.add(params, 'resolution', resolutions).name('Grid size').onChange(run);
+adv
+  .add(params, 'passes', ...ranges.passes, 1)
+  .name('Max passes')
+  .onFinishChange(run);
 if (innerWidth < 600) gui.close();
 
 loadRegion();

@@ -323,7 +323,8 @@ export const makeCartogram = (
     aspect > 1 ? res : res / 2 ** Math.min(2, Math.round(-Math.log2(aspect)));
 
   let errors = areaErrors(featureAreas(pts, features), weights);
-  for (let pass = 0; pass < passes && errors.misplaced > 0.005; pass++) {
+  const tolerance = 0.005;
+  for (let pass = 0; pass < passes && errors.misplaced > tolerance; pass++) {
     // Fit the current map into the middle of the grid, leaving sea around it
     // for features to grow into, which they mostly do in the first pass. A
     // uniform scale keeps the area ratios.
@@ -370,5 +371,5 @@ export const makeCartogram = (
     errors = areaErrors(featureAreas(pts, features), weights);
     onProgress({points: out, pass, error: errors});
   }
-  return {points: pts, error: errors};
+  return {points: pts, error: errors, converged: errors.misplaced <= tolerance};
 };
