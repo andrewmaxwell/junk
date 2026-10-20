@@ -5,9 +5,10 @@
 // Mass is conserved if ρv = -∇Φ with ∇²Φ = ρ̄ - ρ0, which doesn't depend on t,
 // so one Poisson solve gives the whole flow, v = -∇Φ / ρ(t). Every point
 // rides it from t = 0 to 1, so dense regions spread out and sparse ones
-// shrink. The flow is smooth, so neighbors stay neighbors and borders never
-// cross. One run doesn't hit the targets exactly, so it's repeated on its
-// own output.
+// shrink. The flow itself never folds, so neighbors stay neighbors, but
+// borders are straight segments between moving points, so where it's extreme
+// a few can cross. One run doesn't hit the targets exactly, so it's repeated
+// on its own output.
 
 // In-place radix-2 FFT. `inverse` includes the 1/n scaling.
 const fft = (re, im, inverse) => {
@@ -121,19 +122,20 @@ export const featureAreas = (pts, features) =>
     ),
   );
 
-// How far the areas are from `weights` (scaled to the same total): `misplaced`
-// is the share of the total area that's in the wrong feature, and `errs` holds
-// each feature's |area / target - 1|. Features far smaller than a grid cell
-// can't be fixed by the grid, so the area-weighted measure ignores them.
-export const areaErrors = (areas, weights) => {
+// How far the areas are from `weights` (scaled to the same total): the share
+// of the total area that's in the wrong feature. Features far smaller than a
+// grid cell can't be fixed by the grid, and this area-weighted measure barely
+// notices them.
+const misplacedShare = (areas, weights) => {
   const totalA = areas.reduce((a, b) => a + b, 0);
   const totalW = weights.reduce((a, b) => a + b, 0);
-  const targets = weights.map((wt) => (wt / totalW) * totalA);
-  return {
-    misplaced:
-      areas.reduce((s, a, i) => s + Math.abs(a - targets[i]), 0) / (2 * totalA),
-    errs: areas.map((a, i) => Math.abs(a / targets[i] - 1)),
-  };
+  return (
+    areas.reduce(
+      (s, a, i) => s + Math.abs(a - (weights[i] / totalW) * totalA),
+      0,
+    ) /
+    (2 * totalA)
+  );
 };
 
 // Mass per grid cell. Each feature's target mass is spread evenly over the
@@ -322,9 +324,9 @@ export const makeCartogram = (
   const h =
     aspect > 1 ? res : res / 2 ** Math.min(2, Math.round(-Math.log2(aspect)));
 
-  let errors = areaErrors(featureAreas(pts, features), weights);
+  let misplaced = misplacedShare(featureAreas(pts, features), weights);
   const tolerance = 0.005;
-  for (let pass = 0; pass < passes && errors.misplaced > tolerance; pass++) {
+  for (let pass = 0; pass < passes && misplaced > tolerance; pass++) {
     // Fit the current map into the middle of the grid, leaving sea around it
     // for features to grow into, which they mostly do in the first pass. A
     // uniform scale keeps the area ratios.
@@ -364,12 +366,12 @@ export const makeCartogram = (
       const now = performance.now();
       if (now - last < 100) return;
       last = now;
-      onProgress({points: toMap(), pass, error: errors});
+      onProgress({points: toMap(), pass, misplaced});
     });
     const out = toMap();
     pts.set(out);
-    errors = areaErrors(featureAreas(pts, features), weights);
-    onProgress({points: out, pass, error: errors, passDone: true});
+    misplaced = misplacedShare(featureAreas(pts, features), weights);
+    onProgress({points: out, pass, misplaced, passDone: true});
   }
-  return {points: pts, error: errors, converged: errors.misplaced <= tolerance};
+  return {points: pts, misplaced, converged: misplaced <= tolerance};
 };

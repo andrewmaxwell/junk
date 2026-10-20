@@ -224,6 +224,20 @@ const buildCounties = async () => {
   for (const m of countyMetrics) {
     if (!(m.col in rows[0])) throw new Error(`missing column ${m.col}`);
   }
+  // us-atlas still has Valdez-Cordova (02261), which split in 2019 into
+  // Chugach (02063) and Copper River (02066). Merge them back: populations
+  // add, everything else is averaged by population.
+  const pi = countyMetrics.findIndex((m) => m.key === 'population');
+  const parts = [values['02063'], values['02066']];
+  values['02261'] = countyMetrics.map((_, i) => {
+    if (i === pi) return parts[0][pi] + parts[1][pi];
+    const known = parts.filter((p) => p[i] !== null);
+    if (!known.length) return null;
+    const pop = known.reduce((s, p) => s + p[pi], 0);
+    return +known.reduce((s, p) => s + (p[i] * p[pi]) / pop, 0).toPrecision(4);
+  });
+  delete values['02063'];
+  delete values['02066'];
   const metrics = countyMetrics.map(({key, name, unit}) => ({
     key,
     name,

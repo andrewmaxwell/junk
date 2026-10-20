@@ -76,25 +76,24 @@ const regions = {
     };
   },
 };
-// Default "skip" thresholds. Tiny urban counties like Manhattan matter a lot
-// by population, so the US skips none.
-const defaultTiny = {World: 0.01, 'United States': 0};
 
 // Settings, also kept in the URL hash so a map can be shared. Values from a
 // link skip the controls' limits, so they're checked here.
 const params = {
   region: 'World',
   metric: 'Median income',
-  perPerson: false,
+  // Area reads as an amount, so rates and averages default to totals.
+  perPerson: true,
   power: 1,
   morph: 1,
   colors: 'Size metric',
   labels: true,
   resolution: 512,
-  passes: 10,
-  tiny: null,
 };
-const ranges = {power: [0, 2], tiny: [0, 0.2], passes: [1, 20]};
+const ranges = {power: [0, 2]};
+// Passes per cartogram, unless it's within 0.5% sooner. More rarely helps; a
+// finer grid does.
+const passes = 10;
 // Besides any metric, colors can follow the size metric or just tell
 // neighbors apart.
 const colorModes = ['Size metric', 'Map colors'];
@@ -113,31 +112,17 @@ for (const [key, [min, max]] of Object.entries(ranges)) {
   const v = parseFloat(hash.get(key));
   if (Number.isFinite(v)) params[key] = Math.min(max, Math.max(min, v));
 }
-params.passes = Math.round(params.passes);
-params.tiny ??= defaultTiny[params.region];
 
 const saveSettings = () => {
-  const {
-    region,
-    metric,
-    perPerson,
-    power,
-    tiny,
-    colors,
-    labels,
-    resolution,
-    passes,
-  } = params;
+  const {region, metric, perPerson, power, colors, labels, resolution} = params;
   const settings = {
     region,
     metric,
     perPerson: +perPerson,
     power,
-    tiny,
     colors,
     labels: +labels,
     resolution,
-    passes,
   };
   history.replaceState(null, '', `#${new URLSearchParams(settings)}`);
 };
@@ -149,21 +134,18 @@ let base; // original projected points
 let target; // cartogram points (or partial progress)
 let display; // what's drawn, eased toward the mix of base and target
 let weights;
-let tiny; // features left at their true size for being so small
 let baseAreas; // each feature's area on the real map
 let values;
 let worker;
 const cache = new Map();
 
 const fmt = (v) =>
-  v === null
-    ? 'no data'
-    : v >= 1e5
-      ? Intl.NumberFormat('en', {
-          notation: 'compact',
-          maximumSignificantDigits: 3,
-        }).format(v)
-      : Intl.NumberFormat('en', {maximumSignificantDigits: 3}).format(v);
+  v >= 1e5
+    ? Intl.NumberFormat('en', {
+        notation: 'compact',
+        maximumSignificantDigits: 3,
+      }).format(v)
+    : Intl.NumberFormat('en', {maximumSignificantDigits: 3}).format(v);
 
 // "$81,600", "12% of adults 25-44", "83.3 years"
 const withUnit = (v, unit) =>
@@ -197,14 +179,8 @@ const computeWeights = () => {
     if (values[i] === null || (usePop && !pop)) return null;
     return Math.max(0, (usePop ? values[i] * pop : values[i]) ** params.power);
   });
-  // Features without data, or too tiny to bother with, keep their true size
-  // relative to the rest.
+  // Features without data keep their true size relative to the rest.
   const areas = baseAreas;
-  const totalArea = areas.reduce((a, b) => a + b, 0);
-  tiny = areas.map((a) => a / totalArea < params.tiny / 100);
-  raw.forEach((w, i) => {
-    if (tiny[i]) raw[i] = null;
-  });
   let sumW = 0;
   let sumA = 0;
   raw.forEach((w, i) => {
@@ -223,11 +199,11 @@ const computeWeights = () => {
 const setStatus = (text) => (statusEl.textContent = text);
 const pct = (x) => `${(x * 100).toFixed(1)}%`;
 
-const doneText = ({error, converged, seconds}) => {
-  const err = `${pct(error.misplaced)} of the area is misplaced`;
+const doneText = ({misplaced, converged, seconds}) => {
+  const err = `${pct(misplaced)} of the area is misplaced`;
   return converged
     ? `Done in ${seconds.toFixed(1)}s, ${err}`
-    : `Stopped at the ${params.passes}-pass limit after ${seconds.toFixed(1)}s, ${err}. A bigger grid under Accuracy gets closer.`;
+    : `Stopped at the ${passes}-pass limit after ${seconds.toFixed(1)}s, ${err}. A bigger grid under Accuracy gets closer.`;
 };
 
 const run = () => {
@@ -239,9 +215,7 @@ const run = () => {
     params.metric,
     params.perPerson,
     params.power,
-    params.tiny,
     params.resolution,
-    params.passes,
   ].join('|');
   worker?.terminate();
   worker = null;
@@ -270,13 +244,11 @@ const run = () => {
     if (!glide || data.type !== 'progress' || data.passDone) {
       target = data.points;
     }
-    const err = `${pct(data.error.misplaced)} of the area is misplaced`;
+    const err = `${pct(data.misplaced)} of the area is misplaced`;
     if (data.type === 'preview') {
       setStatus('Stretching…');
     } else if (data.type === 'progress') {
-      setStatus(
-        `Stretching… pass ${data.pass + 1} of up to ${params.passes}, ${err}`,
-      );
+      setStatus(`Stretching… pass ${data.pass + 1} of up to ${passes}, ${err}`);
     } else {
       data.seconds = (performance.now() - start) / 1000;
       cache.set(key, data);
@@ -288,7 +260,7 @@ const run = () => {
     points: base,
     features: map.features.map((f) => f.polys),
     weights,
-    passes: params.passes,
+    passes,
     res: params.resolution,
     preview: glide,
   });
@@ -326,16 +298,17 @@ const colorValues = () => {
 // Header: title, subtitle, and color legend.
 const updateHeader = () => {
   const m = metricInfo();
-  const label =
-    params.perPerson && m.key !== 'population'
-      ? `${m.name} × population`
-      : m.name;
+  const total = params.perPerson && m.key !== 'population';
+  const label = total ? `${m.name} × population` : m.name;
   // Lowercase for mid-sentence use, but leave acronyms like GDP alone.
   const what = label.replace(/^[A-Z][a-z]/, (c) => c.toLowerCase());
   const power = params.power === 1 ? '' : ` ^ ${params.power}`;
   document.getElementById('title').textContent = `${params.region} by ${what}`;
   document.getElementById('subtitle').textContent =
-    `Area of each ${map.noun} ∝ ${what}${power}${m.unit ? ` (${m.unit})` : ''}. Source: ${m.source}`;
+    `Area of each ${map.noun} ∝ ${what}${power}${m.unit && !total ? ` (${m.unit})` : ''}${
+      // Rates of some group (children, adults 25-44) times everyone.
+      total ? ', a rough total' : ''
+    }. Source: ${m.source}`;
   const legend = document.getElementById('legend');
   const cm = colorMetric();
   const sorted =
@@ -395,7 +368,6 @@ let paths = [];
 let hovered = -1;
 let dirty = true;
 let anim = null;
-let view = {s: 1, ox: 0, oy: 0};
 
 const resize = () => {
   const dpr = devicePixelRatio;
@@ -437,12 +409,29 @@ const draw = () => {
     y0 = Math.min(y0, display[p + 1]);
     y1 = Math.max(y1, display[p + 1]);
   }
-  const top = W < 600 ? 20 : 110;
-  const s = Math.min((W - 40) / (x1 - x0), (H - top - 50) / (y1 - y0));
-  view = {
+  // Below the header and above the status line, and either beside the
+  // settings panel or below it, whichever leaves the map bigger. On phones the
+  // panel starts closed and floats over the map.
+  const panel = gui.domElement.getBoundingClientRect();
+  const top =
+    document.querySelector('.head').getBoundingClientRect().bottom + 10;
+  const boxes =
+    W < 600
+      ? [[20, 20, W - 20, H - 40]]
+      : [
+          [20, top, panel.left - 10, H - 40],
+          [20, Math.max(top, panel.bottom + 10), W - 20, H - 40],
+        ];
+  const [l, t, r, b, s] = boxes
+    .map((box) => [
+      ...box,
+      Math.min((box[2] - box[0]) / (x1 - x0), (box[3] - box[1]) / (y1 - y0)),
+    ])
+    .reduce((best, box) => (box[4] > best[4] ? box : best));
+  const view = {
     s,
-    ox: (W - s * (x1 + x0)) / 2,
-    oy: top + (H - top - 30 - s * (y1 - y0)) / 2 - s * y0,
+    ox: (l + r - s * (x1 + x0)) / 2,
+    oy: (t + b - s * (y1 + y0)) / 2,
   };
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -565,9 +554,8 @@ canvas.addEventListener('pointermove', (e) => {
   const share = (list, j) => list[j] / list.reduce((a, b) => a + b, 0);
   const stretch = share(areas, i) / share(baseAreas, i);
   const aim = share(weights, i) / share(baseAreas, i);
-  const sizeLine = tiny[i]
-    ? 'Too small to resize, so drawn at real size'
-    : values[i] === null
+  const sizeLine =
+    values[i] === null
       ? 'No data, so drawn at real size'
       : `Drawn ${times(stretch)} its real size${
           Math.abs(stretch / aim - 1) > 0.1 ? ` (aiming for ${times(aim)})` : ''
@@ -602,8 +590,6 @@ gui
   .add(params, 'region', Object.keys(regions))
   .name('Map')
   .onChange(() => {
-    params.tiny = defaultTiny[params.region];
-    tinyCtrl.updateDisplay();
     loadRegion();
     run();
   });
@@ -615,10 +601,6 @@ gui.add(params, 'perPerson').name('× population').onChange(run);
 gui
   .add(params, 'power', ...ranges.power, 0.05)
   .name('Area ∝ value ^')
-  .onFinishChange(run);
-const tinyCtrl = gui
-  .add(params, 'tiny', ...ranges.tiny, 0.001)
-  .name('Skip under % of map')
   .onFinishChange(run);
 const morphCtrl = gui
   .add(params, 'morph', 0, 1, 0.01)
@@ -644,11 +626,9 @@ gui
   });
 const adv = gui.addFolder('Accuracy').close();
 adv.add(params, 'resolution', resolutions).name('Grid size').onChange(run);
-adv
-  .add(params, 'passes', ...ranges.passes, 1)
-  .name('Max passes')
-  .onFinishChange(run);
 if (innerWidth < 600) gui.close();
+// Refit the map once the panel finishes opening or closing.
+gui.domElement.addEventListener('transitionend', () => (dirty = true));
 
 loadRegion();
 run();
