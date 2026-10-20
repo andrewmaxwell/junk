@@ -81,20 +81,22 @@ const params = {
   perPerson: false,
   power: 1,
   morph: 1,
-  colors: 'By value',
+  colors: 'Size metric',
   labels: true,
   resolution: 512,
   passes: 10,
   tiny: null,
 };
 const ranges = {power: [0, 2], tiny: [0, 0.2], passes: [1, 20]};
-const colorModes = ['By value', 'Map colors'];
+// Besides any metric, colors can follow the size metric or just tell
+// neighbors apart.
+const colorModes = ['Size metric', 'Map colors'];
 const resolutions = [256, 512, 1024];
 const hash = new URLSearchParams(location.hash.slice(1));
 if (Object.hasOwn(regions, hash.get('region')))
   params.region = hash.get('region');
 if (hash.has('metric')) params.metric = hash.get('metric'); // checked in loadRegion
-if (colorModes.includes(hash.get('colors'))) params.colors = hash.get('colors');
+if (hash.has('colors')) params.colors = hash.get('colors'); // checked in loadRegion
 if (resolutions.includes(+hash.get('resolution')))
   params.resolution = +hash.get('resolution');
 for (const key of ['perPerson', 'labels']) {
@@ -218,6 +220,11 @@ const run = () => {
   ].join('|');
   worker?.terminate();
   worker = null;
+  // With a cartogram already showing, hold it until the new one is done and
+  // then glide straight across, rather than snapping back toward the real
+  // map while the passes run.
+  const glide = target !== base;
+  easeRate = glide ? 0.08 : 0.25;
   if (cache.has(key)) {
     target = cache.get(key).points;
     setStatus(doneText(cache.get(key)));
@@ -233,7 +240,7 @@ const run = () => {
     worker = null;
   };
   worker.onmessage = ({data}) => {
-    target = data.points;
+    if (!glide || data.type === 'done') target = data.points;
     const err = `${pct(data.error.misplaced)} of the area is misplaced`;
     if (data.type === 'progress') {
       setStatus(
@@ -264,6 +271,20 @@ const loadRegion = () => {
   if (!names.includes(params.metric)) params.metric = names[0];
   metricCtrl.options(names);
   metricCtrl.updateDisplay();
+  if (![...colorModes, ...names].includes(params.colors))
+    params.colors = colorModes[0];
+  colorsCtrl.options([...colorModes, ...names]);
+  colorsCtrl.updateDisplay();
+};
+
+// The metric colors show, if any, and each feature's value of it.
+const colorMetric = () =>
+  params.colors === 'Size metric'
+    ? metricInfo()
+    : map.data.metrics.find((m) => m.name === params.colors);
+const colorValues = () => {
+  const mi = map.data.metrics.indexOf(colorMetric());
+  return map.features.map((f) => map.data.values[f.id]?.[mi] ?? null);
 };
 
 // Header: title, subtitle, and color legend.
@@ -280,22 +301,32 @@ const updateHeader = () => {
   document.getElementById('subtitle').textContent =
     `Area of each ${map.noun} ∝ ${what}${power}${m.unit ? ` (${m.unit})` : ''}. Source: ${m.source}`;
   const legend = document.getElementById('legend');
-  const sorted = values.filter((v) => v !== null).sort((a, b) => a - b);
-  if (params.colors !== 'By value' || !sorted.length) {
+  const cm = colorMetric();
+  const sorted =
+    cm &&
+    colorValues()
+      .filter((v) => v !== null)
+      .sort((a, b) => a - b);
+  if (!sorted?.length) {
     legend.innerHTML = '';
     return;
   }
   const stops = Array.from({length: 11}, (_, i) =>
     interpolateViridis(i / 10),
   ).join(',');
-  legend.innerHTML = `<div class="bar" style="background:linear-gradient(90deg,${stops})"></div>
-    <div class="ends"><span>${fmt(sorted[0])}</span><span>median ${fmt(sorted[sorted.length >> 1])}</span><span>${fmt(sorted[sorted.length - 1])}</span></div>`;
+  legend.innerHTML = `<div class="label"></div>
+    <div class="bar" style="background:linear-gradient(90deg,${stops})"></div>
+    <div class="ends"><span>${fmt(sorted[0])}</span><span>median ${fmt(sorted[sorted.length >> 1])}</span><span>${fmt(sorted[sorted.length - 1])}</span></div>
+    <div class="none"><i></i>no data</div>`;
+  legend.querySelector('.label').textContent =
+    `Color: ${cm.name}${cm.unit ? ` (${cm.unit})` : ''}, by percentile`;
 };
 
 // Colors by rank, so a few outliers don't wash out everyone else.
 const fillColors = () => {
   const css = getComputedStyle(document.documentElement);
   const missing = css.getPropertyValue('--missing');
+  const vals = colorValues();
   if (params.colors === 'Map colors') {
     const hues = [
       '#e8c07d',
@@ -309,7 +340,7 @@ const fillColors = () => {
       values[i] === null ? missing : hues[f.hue],
     );
   }
-  const sorted = values.filter((v) => v !== null).sort((a, b) => a - b);
+  const sorted = vals.filter((v) => v !== null).sort((a, b) => a - b);
   const rank = (v) => {
     let lo = 0;
     let hi = sorted.length;
@@ -320,9 +351,7 @@ const fillColors = () => {
     }
     return lo / Math.max(1, sorted.length - 1);
   };
-  return values.map((v) =>
-    v === null ? missing : interpolateViridis(rank(v)),
-  );
+  return vals.map((v) => (v === null ? missing : interpolateViridis(rank(v))));
 };
 
 // Rendering
@@ -444,6 +473,7 @@ const draw = () => {
 let easedTarget;
 let easedMorph;
 let settled = false;
+let easeRate = 0.25;
 
 const frame = () => {
   requestAnimationFrame(frame);
@@ -464,7 +494,7 @@ const frame = () => {
   if (!settled && target.length === display.length) {
     for (let p = 0; p < display.length; p++) {
       const goal = base[p] + (target[p] - base[p]) * m;
-      const d = (goal - display[p]) * 0.25;
+      const d = (goal - display[p]) * easeRate;
       display[p] += d;
       moved = Math.max(moved, Math.abs(d));
     }
@@ -498,7 +528,12 @@ canvas.addEventListener('pointermove', (e) => {
   const total = areas.reduce((a, b) => a + b, 0);
   const totalW = weights.reduce((a, b) => a + b, 0);
   const m = metricInfo();
-  tip.innerHTML = `<b></b>${fmt(values[i])} ${values[i] === null ? '' : m.unit}<br>
+  const cm = colorMetric();
+  const colorLine =
+    cm && cm !== m
+      ? `<br>${cm.name}: ${fmt(colorValues()[i])} ${colorValues()[i] === null ? '' : cm.unit}`
+      : '';
+  tip.innerHTML = `<b></b>${m.name}: ${fmt(values[i])} ${values[i] === null ? '' : m.unit}${colorLine}<br>
     <span>${
       tiny[i]
         ? 'Too small to resize'
@@ -551,9 +586,9 @@ const morphCtrl = gui
 gui
   .add({play: () => (anim = params.morph > 0.5 ? -1 : 1)}, 'play')
   .name('Animate stretch');
-gui
+const colorsCtrl = gui
   .add(params, 'colors', colorModes)
-  .name('Colors')
+  .name('Color by')
   .onChange(() => {
     saveSettings();
     updateHeader();

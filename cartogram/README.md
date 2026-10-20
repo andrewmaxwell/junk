@@ -5,8 +5,10 @@ Stretchy Maps - 2026 - The world by country and the US by county, stretched so e
 Contiguous cartograms of the world by country and the US by county: every
 region is resized so its area is proportional to a chosen metric, like median
 income or child mortality, while still touching the same neighbors. Alaska and
-Hawaii sit in insets off the lower left. Pick a map and a metric; the map stretches
-into shape as it's computed.
+Hawaii sit in insets off the lower left. Pick a map and a metric; the map
+stretches into shape as it's computed, and switching metrics glides from one
+shape to the next. Color can show a second metric, so you can size countries by
+population and color them by income.
 
 ## How it works
 
