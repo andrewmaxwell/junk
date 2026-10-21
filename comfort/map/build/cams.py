@@ -13,7 +13,8 @@ import argparse
 import os
 import re
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+import time
+import zipfile
 from datetime import date, timedelta
 
 import numpy as np
@@ -58,72 +59,113 @@ def client():
     return cdsapi.Client(url=ADS_URL, key=key, quiet=True, progress=False)
 
 
-def retrieve(first, last, request):
-    """One CAMS request as an hourly (time, lat, lon) array plus its axes.
+VARIABLES = {
+    'particulate_matter_2.5um': 'pm2p5',
+    'uv_biologically_effective_dose': 'uvbed',
+    'ozone': 'go3',  # model level 137, the one touching the ground
+}
 
-    Each day's 00 UTC run, hours 0 to 23, stitches into a continuous series.
+
+def retrieve(first, last):
+    """Every variable over the dates, as hourly (time, lat, lon) arrays.
+
+    One request per call: the Atmosphere Data Store queues only one request
+    per user for this dataset, and older months come off tape slowly, so
+    fewer, larger requests are what keeps a year's worth tolerable. Each day's
+    00 UTC run, hours 0 to 23, stitches into a continuous hourly series.
     """
     import xarray as xr
     with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, 'cams.nc')
+        path = os.path.join(tmp, 'cams.download')
         client().retrieve(DATASET, {
+            'variable': list(VARIABLES),
+            'model_level': ['137'],
             'date': [f'{first}/{last}'],
             'time': ['00:00'],
             'leadtime_hour': [str(h) for h in range(24)],
             'type': ['forecast'],
             'data_format': 'netcdf',
             'area': AREA,
-            **request,
         }, path)
-        data = xr.open_dataset(path).load()
-    name = list(data.data_vars)[0]
-    values = data[name]
-    if 'model_level' in values.dims:
-        values = values.isel(model_level=0)
-    # forecast_period × reference time, flattened in time order.
-    values = values.transpose('forecast_reference_time', 'forecast_period',
-                              'latitude', 'longitude')
-    times = data['valid_time'].transpose('forecast_reference_time', 'forecast_period')
-    series = values.values.reshape(-1, *values.shape[2:])
-    stamps = [np.datetime_as_string(t, unit='h').replace('-', '').replace('T', '')
-              for t in times.values.reshape(-1)]
-    return stamps, data['latitude'].values, data['longitude'].values, series
+        # Surface and model-level fields arrive as two files in a zip, and
+        # must not be merged as they are: the model-level file counts
+        # longitude 0-360 where the surface one uses ±180, and archived
+        # model-level ozone is only 3-hourly. Merging silently doubled the
+        # grid and left two hours in three without ozone.
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as archive:
+                archive.extractall(tmp)
+                files = [os.path.join(tmp, n) for n in archive.namelist()]
+        else:
+            files = [path]
+        datasets = [xr.open_dataset(p).load() for p in files]
+
+    def hourly(data, name):
+        values = data[name]
+        if 'model_level' in values.dims:
+            values = values.isel(model_level=0)
+        values = values.transpose('forecast_reference_time', 'forecast_period',
+                                  'latitude', 'longitude')
+        times = data['valid_time'].transpose('forecast_reference_time', 'forecast_period')
+        hours = times.values.reshape(-1).astype('datetime64[h]').astype(np.int64)
+        lons = data['longitude'].values
+        lons = np.where(lons > 180, lons - 360, lons)
+        return hours, data['latitude'].values, lons, values.values.reshape(-1, *values.shape[2:])
+
+    found = {name: hourly(d, name) for d in datasets for name in d.data_vars
+             if name in VARIABLES.values()}
+    # The surface fields are hourly, so they set the time axis and the grid.
+    hours, lats, lons, _ = found['pm2p5']
+    series = {}
+    for name, (own_hours, own_lats, own_lons, values) in found.items():
+        if not (np.allclose(own_lats, lats) and np.allclose(own_lons, lons)):
+            raise ValueError(f'{name} is on a different grid')
+        if not np.array_equal(own_hours, hours):
+            # Linear in time, per cell, onto the hourly axis.
+            position = np.interp(hours, own_hours, np.arange(len(own_hours)))
+            i0 = np.minimum(np.floor(position).astype(int), len(own_hours) - 2)
+            w = (position - i0)[:, None, None]
+            values = values[i0] * (1 - w) + values[i0 + 1] * w
+        series[name] = values
+    stamps = [np.datetime_as_string(np.datetime64(int(h), 'h'), unit='h')
+              .replace('-', '').replace('T', '') for h in hours]
+    return stamps, lats, lons, series
 
 
-def download_month(month, last_day):
-    """Writes cache/cams/<month>.npz covering the month up to `last_day`."""
+def download_month(month, first_day, last_day):
+    """Writes cache/cams/<month>.npz covering the month within the range."""
     year, mo = map(int, month.split('-'))
-    first = date(year, mo, 1)
-    month_end = (first + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-    last = min(month_end, last_day)
+    month_start = date(year, mo, 1)
+    month_end = (month_start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    first, last = max(month_start, first_day), min(month_end, last_day)
     path = os.path.join(CAMS_DIR, f'{month}.npz')
-    if os.path.exists(path) and str(np.load(path)['last_day']) >= str(last):
-        return
+    if os.path.exists(path):
+        cached = np.load(path)
+        cached_first = str(cached['first_day']) if 'first_day' in cached.files else f'{month}-01'
+        if cached_first <= str(first) and str(cached['last_day']) >= str(last):
+            return
+    print(f'{month}: requesting {first} to {last}', flush=True)
+    started = time.time()
     # A day early, so the 24-hour PM2.5 mean is complete from the first hour.
-    lead_in = first - timedelta(days=1)
-    stamps, lats, lons, pm = retrieve(lead_in, last, {
-        'variable': ['particulate_matter_2.5um']})
-    _, _, _, uv = retrieve(lead_in, last, {
-        'variable': ['uv_biologically_effective_dose']})
-    _, _, _, o3 = retrieve(lead_in, last, {
-        'variable': ['ozone'], 'model_level': ['137']})
+    stamps, lats, lons, s = retrieve(first - timedelta(days=1), last)
 
     aqi = np.maximum(
-        index_from(PM25_CURVE, rolling_mean(pm * 1e9, 24)),  # kg/m³ to µg/m³
-        index_from(O3_CURVE, rolling_mean(o3 * O3_KG_KG_TO_PPB, 8)),
+        index_from(PM25_CURVE, rolling_mean(s['pm2p5'] * 1e9, 24)),  # kg/m³ to µg/m³
+        index_from(O3_CURVE, rolling_mean(s['go3'] * O3_KG_KG_TO_PPB, 8)),
     )
-    keep = [i for i, s in enumerate(stamps) if s[:6] == f'{year}{mo:02d}']
+    keep = [i for i, t in enumerate(stamps) if t[:6] == f'{year}{mo:02d}']
     os.makedirs(CAMS_DIR, exist_ok=True)
     np.savez_compressed(
         path + '.part.npz',
         times=np.array([stamps[i] for i in keep]),
         lats=lats, lons=lons,
-        uv=(uv[keep] * UV_INDEX_PER_W).astype(np.float32),
+        uv=(s['uvbed'][keep] * UV_INDEX_PER_W).astype(np.float32),
         aqi=aqi[keep].astype(np.float32),
+        first_day=str(first),
         last_day=str(last),
     )
     os.replace(path + '.part.npz', path)
-    print(f'{month}: {len(keep)} hours', flush=True)
+    print(f'{month}: {len(keep)} hours in {(time.time() - started) / 60:.0f} min', flush=True)
 
 
 class CamsMonth:
@@ -179,10 +221,10 @@ def main():
     while cursor <= end_utc:
         months.append(f'{cursor:%Y-%m}')
         cursor = (cursor + timedelta(days=32)).replace(day=1)
-    # The ADS queues requests per user; a few at once keeps it busy without
-    # tripping its limits.
-    with ThreadPoolExecutor(4) as pool:
-        list(pool.map(lambda m: download_month(m, end_utc), months))
+    # Strictly one at a time and in calendar order: the store rejects a
+    # second queued request, and `hrrr.py` waits on each month in turn.
+    for month in months:
+        download_month(month, start - timedelta(days=1), end_utc)
 
 
 if __name__ == '__main__':

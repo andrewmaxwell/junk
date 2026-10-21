@@ -123,6 +123,7 @@ function readPixel(data, cell) {
 // --- Colour ----------------------------------------------------------------------
 
 const RAMP_STEPS = 256;
+const STRETCH_TAIL = 0.01; // share of cells left saturated at each end
 const ramp = Array.from({length: RAMP_STEPS}, (_, i) => {
   const c = d3color(interpolateViridis(i / (RAMP_STEPS - 1)));
   return [c.r, c.g, c.b];
@@ -218,13 +219,26 @@ async function render() {
   let low = 0;
   let high = encoding.goodScale;
   if (settings.stretch) {
-    low = Infinity;
-    high = -Infinity;
+    // Percentiles rather than the extremes: a handful of mountaintop and
+    // offshore cells otherwise set the range and flatten everything else
+    // into one colour.
+    const histogram = new Uint32Array(encoding.goodScale + 1);
+    let total = 0;
     for (let p = 0; p < data.length; p += 4) {
       if (data[p] === encoding.noData) continue;
-      low = Math.min(low, data[p]);
-      high = Math.max(high, data[p]);
+      histogram[data[p]]++;
+      total++;
     }
+    const percentile = (fraction) => {
+      let seen = 0;
+      for (let v = 0; v < histogram.length; v++) {
+        seen += histogram[v];
+        if (seen >= total * fraction) return v;
+      }
+      return encoding.goodScale;
+    };
+    low = percentile(STRETCH_TAIL);
+    high = percentile(1 - STRETCH_TAIL);
     if (high - low < 10) high = low + 10;
   }
   current = {

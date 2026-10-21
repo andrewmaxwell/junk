@@ -159,6 +159,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--start', required=True)
     parser.add_argument('--end', required=True)
+    parser.add_argument('--no-cams', action='store_true',
+                        help='score without UV and air quality instead of waiting for them')
     args = parser.parse_args()
 
     grid = load_grid()
@@ -183,6 +185,7 @@ def main():
     # Hours the scorer has checkpointed; anything else is still needed.
     done_path = os.path.join(run_dir, 'scored.txt')
     cams_cache = {}
+    waiting = set()
 
     def produce(when):
         name = f'{when:%Y%m%d%H}'
@@ -203,8 +206,17 @@ def main():
         # precipitation ending at `when`, which is what the app's rows hold.
         raw = fetch_fields(hrrr_file(when - timedelta(hours=1)), HRRR_FIELDS)
         month = f'{when:%Y-%m}'
-        if month not in cams_cache:
-            cams_cache[month] = CamsMonth.load(month, lat, lon)
+        # `cams.py` runs alongside, a month at a time; wait for this one
+        # rather than score it without UV and air quality.
+        while month not in cams_cache:
+            loaded = None if args.no_cams else CamsMonth.load(month, lat, lon)
+            if loaded or args.no_cams:
+                cams_cache[month] = loaded
+            else:
+                if month not in waiting:
+                    waiting.add(month)
+                    print(f'Waiting for CAMS {month}', flush=True)
+                time.sleep(30)
         rows = convert(raw, cells, lat, lon, when, cams_cache[month])
         rows.tofile(path + '.part')
         os.replace(path + '.part', path)
