@@ -1,13 +1,55 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <meta name="viewport" content="width=800, initial-scale=1" />
-    <title>3D Network</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>People Network 3D</title>
+    <meta name="description" content="70 people rated themselves on 36 traits. Here they are in 3D, closer together the more alike they answered." />
+    <meta property="og:title" content="People Network 3D" />
+    <meta property="og:description" content="70 people rated themselves on 36 traits. Here they are in 3D, closer together the more alike they answered." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://andrewmaxwell.github.io/junk/peopleNetwork3D/" />
+    <meta property="og:image" content="https://andrewmaxwell.github.io/junk/peopleNetwork3D/image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <style>
+      html, body {margin: 0; height: 100%; overflow: hidden; background: #05060a; color: #ddd; font: 14px/1.4 system-ui, sans-serif}
+      canvas {position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab}
+      canvas.dragging {cursor: grabbing}
+      canvas.pointing {cursor: pointer}
+      a {color: #9cf}
+      .box {position: fixed; left: max(16px, env(safe-area-inset-left)); max-width: 340px; background: rgba(10, 12, 20, 0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border-radius: 8px; padding: 10px 12px}
+      #header {top: max(12px, env(safe-area-inset-top))}
+      #header h1 {font-size: 17px; margin: 0 0 2px}
+      #header p {margin: 2px 0; opacity: 0.75; font-size: 13px}
+      .legend {display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px}
+      .legend .ramp {flex: 1; height: 8px; border-radius: 4px; min-width: 80px}
+      #panel {bottom: max(16px, env(safe-area-inset-bottom)); max-height: 42vh; overflow-y: auto}
+      #panel h2 {font-size: 16px; margin: 0 0 4px}
+      #panel p {margin: 4px 0}
+      #panel button {all: unset; cursor: pointer; color: #9cf; text-decoration: underline dotted; text-underline-offset: 2px}
+      #panel button:hover {color: #cef}
+      #panel .close {float: right; text-decoration: none; font-size: 18px; line-height: 1; padding: 0 2px 6px 10px; color: #888}
+      .dim {opacity: 0.55}
+      .same {color: #9f9} .diff {color: #f99}
+      #status {position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 16px; pointer-events: none}
+      @media (max-width: 600px) {
+        .box {right: max(16px, env(safe-area-inset-right)); max-width: none; font-size: 13px}
+        #header {top: calc(max(12px, env(safe-area-inset-top)) + 32px)}
+        .long {display: none}
+      }
+    </style>
   </head>
-  <body style="background:black;overflow:hidden;margin:0">
+  <body>
     <canvas></canvas>
+    <div id="header" class="box">
+      <h1>People Network 3D</h1>
+      <p class="long">Each dot is someone who rated themselves 1–10 on 36 traits. The more alike two people answered, the closer they are.</p>
+      <p><a href="https://forms.gle/jV1qtBsuJdsmL1AF9" target="_blank">Take the survey</a> · <a href="../peopleStats/">Full stats</a></p>
+      <div class="legend"></div>
+    </div>
+    <div id="panel" class="box"></div>
+    <div id="status">Loading survey answers…</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" integrity="sha512-SGWgwwRA8xZgEoKiex3UubkSkV1zSE1BS6O4pXcaxcNtUlQsOmOmhVnDwIvqGRfEmuz83tIGL13cXMZn6upPyg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js" integrity="sha512-WoO4Ih0CDOSLYafy22wZD/mcJ7k0ESLqtQsFa6zFKnEUrbtuGU+GkLtVhgt93xa2qewG5gKEC6CWlN8OaCTSVg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script type="module" src="main.js"></script>
   </body>
 </html>
