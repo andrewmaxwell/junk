@@ -7,7 +7,8 @@ A collection of standalone browser experiments. Each top-level directory is its 
 - A project is a directory with `index.html`, `main.js`, `README.md`, and `image.png`. The homepage only lists projects that have the README, index.html, and image.png.
 - The first line of the README must read `Title - Year - Short description`. `generateHome.js` parses it by splitting on ` - `.
 - `home/data.json` is generated from the READMEs by `generateHome.js`. Never edit it by hand. After changing any README, regenerate it with `npm run gen` (`npm run dev` does this too, but also starts the dev server).
-- `npm run gen` also shrinks any homepage `image.png` over 200KB (see `optimizeImages.js`, which uses the `sharp` dev dependency), so screenshots can be saved at any size. Commit the shrunken images along with the project.
+- `npm run gen` also shrinks any `image.png` over 200KB and makes the 800x500 WebP thumbnail the homepage shows (`home/thumbs/`, see `optimizeImages.js`, which uses the `sharp` dev dependency), so screenshots can be saved at any size. It also rebuilds the link preview collage `home/og.jpg` from the newest 12 projects. Commit the shrunken images, thumbnails and collage along with the project.
+- `npm run previews [project ...]` records a 4-second loop of each project (or just the named ones) into `home/previews/<project>.mp4` for the homepage to play on hover, then reruns `gen`. It drives the installed Google Chrome headlessly with the `playwright` dev dependency (WebGPU works there) and needs `ffmpeg`. Projects that barely move get no preview, and an existing one is deleted, because the screenshot already shows them. Projects that need a click or a longer warm-up to look like themselves get an entry in `setup` at the top of `recordPreviews.js`. Clips are capped at 700 kbit/s, about 350KB each.
 - Some projects have their own `CLAUDE.md`. Read it before working in that project.
 
 ## Running

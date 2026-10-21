@@ -1,6 +1,7 @@
-// Keeps the homepage screenshots (each project's image.png) small. The homepage shows them cropped
-// to 16:10 in cards at most about 460px wide, so with 2x screens and the hover zoom, an image never
-// needs to cover more than 1000x625. Images that are already small enough are left alone.
+// Keeps each project's screenshot (image.png) small, and makes the WebP thumbnail the homepage
+// actually shows. The homepage crops screenshots to 16:10 in cards at most about 360px wide, so
+// with 2x screens an 800x500 thumbnail is enough. Images that are already small enough are left
+// alone.
 import fs from 'fs';
 import sharp from 'sharp';
 
@@ -42,4 +43,24 @@ export const optimizeImage = async (path, destination = path) => {
   if (best.length > before * WORTH_IT) return {before};
   fs.writeFileSync(destination, best);
   return {before, after: best.length};
+};
+
+const THUMB_WIDTH = 800;
+const THUMB_HEIGHT = 500;
+
+// Writes a 16:10 WebP thumbnail of the image unless an up-to-date one already exists. Returns its
+// size in bytes if it wrote one.
+export const makeThumb = async (path, destination) => {
+  if (
+    fs.existsSync(destination) &&
+    fs.statSync(destination).mtimeMs >= fs.statSync(path).mtimeMs
+  ) {
+    return;
+  }
+  const thumb = await sharp(path)
+    .resize(THUMB_WIDTH, THUMB_HEIGHT, {fit: 'cover'})
+    .webp({quality: 78, effort: 6})
+    .toBuffer();
+  fs.writeFileSync(destination, thumb);
+  return thumb.length;
 };

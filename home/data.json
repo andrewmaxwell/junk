@@ -3,510 +3,680 @@
     "filePath": "anotherRaytracer",
     "title": "Another Raytracer",
     "year": 2026,
-    "desc": "A WebGPU path tracer with fog, rainbow glass, and depth of field."
+    "desc": "A WebGPU path tracer with fog, rainbow glass, and depth of field.",
+    "preview": false,
+    "text": "A progressive path tracer in a WebGPU compute shader: spheres and flat plates, with diffuse, glossy, mirror, brushed metal, glass and light materials. Drag to orbit, shift-drag or right-drag to pan, scroll to zoom, and click to focus. The panel switches scenes and changes everything else; settings that differ from the defaults are kept in the URL, so the address bar is a shareable link. save image downloads a PNG. Scenes: cornell : a Cornell-box hallway with a mirror ball, a glass ball, and glossy balls veach : the multiple importance sampling test scene from Eric Veach's thesis shafts : a foggy room lit through window blinds, with a glass ball and a brushed copper ball in the beams caustics : clear and colored glass balls on a pale floor, focusing light into their shadows mirrors : two facing mirrors reflecting glowing orbs and balls into the distance bokeh : balls on a polished black table, with fairy lights behind blurred into discs by depth of field sunset : balls on a plain with long shadows, a low sun, and hazy air that glows around it How it renders: Each bounce aims a shadow ray at one light, picked by how bright it looks from there, and also bounces at random. Multiple importance sampling weighs the two so each covers where the other is noisy. fog scatters light, so beams of light show up in it. fog scatters forward makes it scatter mostly onward, like real haze, so it glows brightest looking toward a light. fog blue makes it scatter blue more than red, like air, for a blue sky and an orange sun. On rays the camera sees directly, equiangular sampling also checks the fog closest to a light, where its glow is brightest, so halos around lights clear up quickly. Glossy coats reflect more toward grazing angles, like real gloss, so balls get bright rims. Mirrors can be rough, for brushed metal. Colored glass absorbs light as it goes through, so thick parts are deeper colored than thin edges. glass dispersion : the first time a path refracts, it follows one random wavelength, which bends by its own amount, so glass casts rainbow-edged caustics. depth of field traces rays from random points on a lens, focused at the distance you click. The first few random choices of each sample come from a scrambled Sobol sequence, which spreads samples more evenly than plain random numbers, so noise fades faster. Adaptive sampling: every 8×8 tile gets at least 32 samples, then stops once its estimated noise is below the noise target . show refining tiles highlights the ones still going. HDR screens show lights brighter than white (in Safari; Chrome on macOS clips them). On SDR screens, bright areas ease into white instead of clipping, keeping their color, so a bright orange light still looks orange. Out-of-focus lights spread into discs that stay as bright as they should. main.js – WebGPU setup, the frame loop, camera, controls, and the lil-gui panel shaders.js – the path tracer, adaptive sampling, and display shaders (WGSL) scenes.js – the scenes, and packing them for the GPU"
   },
   {
     "filePath": "drinks",
     "title": "Barista Bot",
     "year": 2026,
-    "desc": "A web app that helps you figure out what to drink at my house."
+    "desc": "A web app that helps you figure out what to drink at my house.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "lambdagator",
     "title": "Lambdagator",
     "year": 2026,
-    "desc": "Watch lambda calculus run, drawn as hungry alligators eating each other."
+    "desc": "Watch lambda calculus run, drawn as hungry alligators eating each other.",
+    "preview": true,
+    "text": "It's organized as 23 short lessons in four chapters, shown as a path across the top, each with a sentence on what to notice. Finished lessons get checked off, and when one ends, Next goes on to the next. To try your own expression, open \"Write your own\" ( \\ or λ for lambda, single-letter variables, λab.x is short for λa.λb.x ). It's drawn as Bret Victor's Alligator Eggs: each lambda is a hungry alligator guarding its family, each variable is an egg the color of the alligator it belongs to, and old gray alligators group things like parentheses. An alligator eats whatever is to its right, then dies, and each of its eggs hatches into a copy of what it ate. Nothing moves until you press Next. Before each step, the hungry alligator opens its mouth and the caption says what will happen; Next plays it: the meal shrinks into the mouth, then flies out to each of its eggs, growing back to full size as the eggs crack open and the alligator dies. \"⏩ Fast forward\" plays the rest quickly (or all of it again, if it's finished), speeding up through the middle of long runs and slowing down at the end. Underneath, the expression is written in the usual notation, colored to match the alligators, with the part about to change underlined. Reduction is normal order (leftmost, outermost first), so it finds a normal form whenever one exists. Between steps, click any hungry alligator with something to its right to have it eat next instead. Variables get renamed to avoid capture, but that isn't animated, since the colors already tell the alligators apart. Uppercase names like TRUE , ADD , and Y are built in, numbers are Church numerals, and you can define your own on separate lines ( TWICE = λfx.f(fx) ). Nothing is hidden behind the names: under each lesson's goal is every definition it depends on, built up from plain lambdas (factorial lists Y, TRUE, FALSE, ISZERO, MUL, PRED, the numbers, and FACT itself). Names show up as chips with a faint drawing of their alligators inside, and unfold only when they're applied, with a caption explaining what they mean. When part of the expression turns back into exactly something with a name, like the recursion in the factorial example becoming FACT again, it's folded back into a chip so big expressions stay readable. The final result is recognized if it matches a name or number. To see why names like TRUE = λab.a and MUL = λmnf.m(nf) are defined the way they are, each one has a \"Why?\" that works backward from what it needs to do to the lambda that does it, with a \"Try it\" button. The \"What the names do\" examples show each one in action on eggs with no alligator, which stand in for anything, like x and y in algebra: 3 f x hatches into f(f(f x)) . The \"What is this?\" dialog explains what lambda calculus is and why it matters, illustrates the rules, and says how the alligators map to the usual notation. Files: lambda.js : parsing, reduction steps, and writing terms out gatorLayout.js : where each alligator and egg goes stage.js : draws layouts and animates between them animate.js : the animation for each kind of step captions.js : what the captions say names.js : what each built-in name means and why it's built that way examples.js : the lessons help.js : the \"What is this?\" and \"Why?\" dialogs, and the list of built-in names main.js : the controls and stepping through test/lambda.test.js : tests for lambda.js . Run them with node test lambdagator/test/ .test.js The older text-based interpreter is in ../lambdaCalculus ."
   },
   {
     "filePath": "langViz",
     "title": "Language Model Visualizer",
     "year": 2026,
-    "desc": "Watch the inner workings of a tiny GPT doing inference"
+    "desc": "Watch the inner workings of a tiny GPT doing inference",
+    "preview": true,
+    "text": "langViz A tiny GPT (4 layers, d_model 96, 4 heads, 8.1k-token vocab, 1.2M params) trained on the KJV bible, running inference entirely in the browser in vanilla JS. The page is a near-chrome-free ambient piece: it auto-generates KJV-flavored text one token at a time from a fixed prompt (looping every 96 generated tokens) and renders a pannable/zoomable visualization of the whole network lighting up as it infers. On-screen controls are a prompt box and transport at the top and a stage rail along the bottom; the sampling constants are fixed in js/main.js . The tokenizer is word-level with a character fallback : the 8k most common words/punctuation are whole tokens (99.3% of the corpus), and any rarer word is spelled out as a first character plus -continuation pieces. So every word is representable and there is effectively no — the model can even invent plausible proper nouns letter by letter. Ask it questions Two interactions turn it from a thing you watch into a thing you experiment on: Knock parts out. Click any attention or MLP branch in the network, a single head's row in an attention panel, or a row of the attribution panel, and that component stops responding to the text. It still computes, so you still see its activations, but what it writes to the residual stream is replaced by its average output over real KJV text (mean-ablation; a knocked-out head has its slice replaced by its average before W_O ). The current step is recomputed at once on the same window with the same produced token, even while paused, and generation carries on with the broken model. A panel at the top of the right rail shows what the intact model would say on that exact window next to what the knocked-out one gives the same token and what it now says instead. Attribution says what wrote toward the token ; this is the experiment that says whether the model needed it. Knockouts are kept in the URL ( ?off=m0,a1h2 ), as is a custom prompt ( ?p=… ). Why the mean, not zero. Zeroing a part hands the later layers a value they never saw in training, so a big effect might be the model reacting to garbage rather than missing what the part knew. Mean-ablation removes only the information. The means live in ablation_means.json (11KB, from node tools/means.mjs : 600 seeded random 64-token windows of the corpus, 38,400 positions). It carries a fingerprint of the weights; a stale or missing file makes the page fall back to zero-ablation with a console warning. What you find. Measured on 40 windows from the held-out tail (2,520 next-word predictions), as the extra bits per token the knocked-out model needs to predict the real text (intact: 6.04 bits, top-1 right 25.8% of the time): knock out mean-ablation zero-ablation top-1 right (mean) : : : block 0 MLP +1.87 +1.86 10.0% block 0 attn +0.23 +0.26 22.3% blocks 1-3 MLP +0.14 to +0.16 +0.18 to +0.23 23.7-24.3% blocks 1-3 attn +0.06 to +0.10 +0.11 to +0.16 24.1-24.8% one head +0.02 or less (b0 head 0: +0.07) +0.06 or less 25% Block 0's MLP is the one that matters , and that survives the switch to mean-ablation unchanged, so it is not an artifact of zeros. Without it the model stutters: Thus saith the LORD; that I will will will put my my my Israel . Zero-ablation overstated everything else by roughly 20-100%: the later blocks refine the guess more gently than zeros suggested. Single heads barely matter (differences under 0.01 bits, including the small negative ones, are noise at this sample size): the four heads overlap enough that expect head knockouts to look like they do nothing. That is the result, not a bug. Inspect any word. Every word in the strip is tinted by how much it surprised the model ( -log2 p , red from 5 bits, full at 17). Hover or tap one to see the probability the model gave it, its rank, and the eight words it expected instead; click to pin the popover (this pauses generation), then pick an alternative to rewrite the text from that word on . Words you chose get a dotted underline. Type Thus saith the"
   },
   {
     "filePath": "mowFast",
     "title": "MowFast",
     "year": 2026,
-    "desc": "A game where you have to mow every patch in as few moves as you can."
+    "desc": "A game where you have to mow every patch in as few moves as you can.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "murmuration",
     "title": "Murmuration",
     "year": 2026,
-    "desc": "250,000 birds flocking over a roost at dusk, running on WebGPU"
+    "desc": "250,000 birds flocking over a roost at dusk, running on WebGPU",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "neuralNetwork",
     "title": "Neural Network",
     "year": 2026,
-    "desc": "A visualization of a network learning to separate two spirals of colored dots."
+    "desc": "A visualization of a network learning to separate two spirals of colored dots.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "optics",
     "title": "Optics Simulator",
     "year": 2026,
-    "desc": "Play with lenses"
+    "desc": "Drag lenses, prisms and droplets around and watch light bend, focus, and split into rainbows.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "packing",
     "title": "Packing Explorer",
     "year": 2026,
-    "desc": "How efficiently can copies of a shape be packed into a container?"
+    "desc": "How efficiently can copies of a shape be packed into a container?",
+    "preview": true,
+    "text": "Packing explorer A browser-only packing experiment, mostly 2D: how tightly do N copies of a shape fit inside a container? The live view shows the current search; the smaller view always keeps the best feasible packing found so far. No replay or server-side solving is required. One container is curved. \"Sphere (surface)\" packs pieces onto a sphere's surface rather than into an outline: spherical caps for the circle the Tammes problem and regular spherical polygons for the rest. It has to be served over HTTP, since module workers cannot reliably run from file URLs. From the repo root: Open . The search starts as soon as the page loads and restarts whenever a control changes. Pause/Resume controls the worker; Reset restarts with a new random seed, as does Run again once a search has finished. The actual seed is shown below the attempt log and can be passed to PackingSolver to reproduce a run. The search uses several CPU cores: one module worker per core, less one left for the page, up to eight. Restarts are already independent no attempt hands the next anything but the global best so the workers never talk to each other; each runs the full restart budget from its own seed, and the page keeps the best layout any of them finds. Worker i runs seed seed + i , and only worker 0 opens from the aligned lattice ( latticeStart ), because that opening is the same whatever the seed. One worker at a time streams its live layout to the current-search view; the others report progress a few times a second, and the view hands over when the watched one finishes. As soon as any worker reaches the area lower bound, the rest are stopped. \"s CPU\" below the log sums compute time over all workers. The controls are mirrored into the query string ( ?container=&item=&n=&aspect= ), so a refresh keeps the current problem and a URL can be shared or bookmarked. Search and contact handling The outer loop shrinks the container, then attempts to repair overlaps at that fixed size. Failed repairs are inconclusive; they reduce the next shrink step and increase exploration. A feasible result updates the global best immediately. Efficiency is based exclusively on that saved feasible result. The aligned first start initially settles by translation only. This prevents unnecessary torque from disrupting a grid that can already tile its container. If sliding stalls, the solver retains the best result and retries the aligned start with rotation enabled. That work remains inside the same attempt budget. Scattered restarts use translation and rotation from the beginning. A result matching the area lower bound terminates the search early. Both the ordinary feasibility tolerance and the limits of floating-point arithmetic still apply. Plateaux are escaped by basin hopping : displace/rotate nearby groups at several scales, run bounded local settling, accept a reduction in normalized overlap energy (or a feasible layout), otherwise restore every coordinate and rotation. Independent restarts provide further exploration. This is an approximate local-search heuristic, not a guarantee of reaching an exact local or global minimum. An annealed-repair baseline (Metropolis acceptance over randomly perturbed pieces) was measured alongside it and removed: once a failed probe re-seeds (below), basin hopping was better on every case, because its group moves are what turn one arrangement into a differently-shaped one. A failed probe means the incumbent arrangement could not absorb the compression. Compressing it again only re-poses the same question, so by default the next probe scatters a fresh layout instead ( reseedAfterFailures ). The incumbent is still held, so an exploration that goes nowhere costs one probe and no ground. When the restarts are done, one last fine-grained shrink runs from the global best ( polishIterations ), which no restart would otherwise revisit. Those two matter most together. On eleven unit squares in a square where the 4x4-grid-minus-one at side 4 is a very de"
   },
   {
     "filePath": "particle-life",
     "title": "Particle Life",
     "year": 2026,
-    "desc": "200,000 particles in eight colors, each attracted to or repelled by the others by a random rule. They gather into worms, cells, and swimmers. Runs on WebGPU."
+    "desc": "200,000 particles in eight colors, each attracted to or repelled by the others by a random rule. They gather into worms, cells, and swimmers. Runs on WebGPU.",
+    "preview": true,
+    "text": "Every pair of particles closer than core (a fraction of radius ) pushes apart, whatever their colors, and the push grows the closer they get (like 1/distance, capped). Past the core, out to the pair's reach, each pair of colors pulls together or pushes apart by its own random attraction (-1 to 1), strongest halfway out and fading to zero at both ends. The rules aren't symmetric, so red can chase blue while blue runs from red, and that's where the moving creatures come from. Reaches run from minReach to 1 times radius , so red might feel blue from far away but only notice other reds up close, which makes layered things like cells with insides. The core is what keeps blobs from collapsing. With a push that stays bounded, a blob of thousands of particles pulling inward always wins, and they pile into a single point; with one that grows as they get closer, packing them tighter always costs more than the pull can pay. repulsion and force are tuned together: weaker repulsion lets dense blobs come back, and too much of either (or very dense worlds, like a million particles with a small window) makes the steps overshoot and the whole world boil. If it boils, lower force or radius . The world wraps around at its edges, so nothing piles up against a wall and creatures can keep swimming. The attractions grid shows the rules: each row is a color, each column is the color it reacts to, green pulls and red pushes, and the size of the square is how far it reaches. Click a square to make it pull more, right-click or shift-click to make it push more, and scroll over it to change its reach. Hit new rules for a new random world. Changing the particle count scatters them again, changing the number of colors makes new rules, and the rest change the world live. The motion scales with radius , so a smaller radius with more particles gives the same behavior with more, smaller creatures. Scroll or pinch to zoom in where the pointer is, right-drag or shift-drag to pan, and double-click to see the whole world again. Dragging does whatever the tool is: stir drags particles along with the pointer. pull and push draw particles toward the pointer or blow them away. paint turns particles into the paint color. Click a color along the top of the grid to pick it. follow : click something and the camera stays on it. Each frame the GPU adds up where the particles near the middle of the screen are, and the camera drifts to their middle. pan drags the view. Particles are drawn as soft dots stretched back along their velocity ( streaks ), added into a float texture that fades by trails each frame, then tone mapped, so dense clusters glow toward white and moving ones leave tails. The URL hash holds the rules and any settings that differ from the defaults, so the address bar is always a link back to the current world (from a new random start). sim.js runs it on the GPU. Each step, particles are counted into grid cells one radius wide (atomic adds), a prefix sum turns the counts into where each cell starts, particles are copied into their cell's run, and then each one reads its 3x3 block of cells, adds up the forces, and moves. render.js draws the streaks, the trails, and the tone mapping. input.js handles the camera and the pointer tools. main.js has the settings, the rule grid, and the URL hash."
   },
   {
     "filePath": "primordial",
     "title": "Primordial",
     "year": 2026,
-    "desc": "Matter that gathers into bodies, forages for food, carries its own rules, and evolves: 3D Flow-Lenia on WebGPU"
+    "desc": "Matter that gathers into bodies, forages for food, carries its own rules, and evolves: 3D Flow-Lenia on WebGPU",
+    "preview": true,
+    "text": "A world of matter that only ever moves around, never appears or disappears. Every step, each of about ten kernels looks at the neighborhood of every cell (a few soft rings, out to some radius) and turns what it sees into \"growth\": a bump that's high when the neighborhood is just right. Matter then flows uphill on the summed growth, and away from crowding. That's the whole rule. Starting from an even haze, it gathers into bodies that wriggle, merge, split, stripe, and drift. There can be one, two, or three kinds of matter ( kinds of matter ). Each kernel looks at one kind and pushes another kind (or the same one) around, so one kind can wrap itself around another, push it along, or keep its distance. Crowding counts every kind, so they can't pile into the same place. The world is also covered in food. Dense matter eats it, matter is drawn toward where there's more ( hunger ), and it slowly grows back ( food regrows ). A body that drifts a little has fresh food ahead and eaten ground behind, so it keeps going: without food, many rules settle into bodies that sit still forever; with it, they keep swimming, turning, and changing shape. Too much hunger tears bodies apart, and how much is right depends on the rule. Eaten food shows as a faint blue glow, so bodies leave trails that fade as the food grows back. Shift-drag (or set drag to to stir) pushes matter along under the pointer, through the whole depth of the world. Matter also carries a genome: its own growth curve for each kernel (how strong it is, which neighborhood is just right, and how picky it is about that), its own hunger (how hard it's drawn to food, times hunger ), plus a lineage color. The rings each kernel looks through are shared by everyone, since they're what the FFTs use, but the growth curve is applied cell by cell afterward, so it costs nothing extra to let it differ. Each step, a cell takes on the genome from where its matter came from: it traces back along its flow, jittered by about as far as matter spreads, and copies the genome there. So the same matter can follow different rules in different places, and bodies carry their rules with them. With lineages above 1, the world starts split into regions, each with its own growth curves scattered around the rule's, colored by lineage: some gather into bodies, some stay a haze, and when bodies meet they mix cell by cell. Left alone, one lineage usually ends up owning nearly everything. mutations keeps it going: every so often a small ball of matter gets a new color and every kernel's growth curve nudged (stronger or weaker, centered higher or lower, pickier or more tolerant) and its hunger raised or lowered, and the new lineage either spreads or fades away. Since that changes what a good neighborhood is, a takeover can change the bodies' shape, not just their color: lumps can give way to one big body, then to a hollow tube. This is Flow-Lenia (Plantec et al. 2023), a mass-conserving version of Lenia, in 3D. Plain 3D Lenia mostly makes balls: its creatures live in narrow niches of rule space, and the stable ones are spheres. Because Flow-Lenia can't lose or make matter, nothing dies out or floods the world, and most random rules make something worth watching. sim.js runs it on the GPU. The neighborhoods are convolutions done with 3D FFTs ( fft.js ), two kernels per inverse FFT. Moving the matter uses reintegration tracking: each cell's matter lands as a small box wherever its flow sends it, and each cell sums the parts of its neighbors' boxes that overlap it, so nothing is lost. rule.js makes random rules (the ranges are from the paper; with several kinds of matter, each kind gets kernels pushing it from itself and from each other kind), nudges them, and packs them into the link. render.js raymarches the result: a lit surface where matter is dense, with soft shadows, ambient occlusion, and a glow from thinner matter. With lineages or mutations, matter shows its lineage color. Otherwise, with several kinds of matte"
   },
   {
     "filePath": "soundViz",
     "title": "SoundViz",
     "year": 2026,
-    "desc": "Record or load sound and see it"
+    "desc": "Record or load sound and see it",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "cartogram",
     "title": "Stretchy Maps",
     "year": 2026,
-    "desc": "The world by country and the US by county, stretched so each area is proportional to a statistic"
+    "desc": "The world by country and the US by county, stretched so each area is proportional to a statistic",
+    "preview": true,
+    "text": "Stretchy Maps Contiguous cartograms of the world by country and the US by county: every region is resized so its area is proportional to a chosen metric, like median income or child mortality, while still touching the same neighbors. Alaska and Hawaii sit in insets off the lower left. Pick a map and a metric; the map stretches into shape as it's computed, and switching metrics glides from one shape to the next. Since area reads as an amount, the metric is multiplied by population by default (median income × population is roughly total income); untick \"× population\" to size by the rate itself. Color can show a second metric, so you can size countries by population and color them by income. How it works cartogram.js implements the flow-based cartogram of Gastner, Seguy & More (2018). The map's density (target area over current area, with the sea at the average) is rasterized onto a grid. Let the density slide linearly from that to perfectly even as t goes from 0 to 1. Mass is conserved if ρv = -∇Φ with ∇²Φ = ρ̄ - ρ0 , which doesn't depend on t, so one Poisson solve (by cosine transform) gives the whole flow, v = -∇Φ / ρ(t) . Every border point rides it from t = 0 to 1, so crowded regions spread out and sparse ones shrink. The flow itself never folds, but borders are straight segments between moving points, so where it's extreme (the Great Plains in US population) a few segments can cross. One run gets most of the way, and it repeats on its own output (with less initial blur each time) until under 0.5% of the area is in the wrong place. It runs in a worker. geometry.js turns TopoJSON into shared points, so neighboring regions share border points and stay stitched together. Long edges are split so they can bend, and the rings that cross the antimeridian (Chukotka, Fiji) are unwrapped. Positive values keep their exact ratios; a true zero gets a sliver, since a region can't vanish. Regions with no data keep their projected size relative to everything else (Albers USA draws Alaska at about a third of its true scale). Regions smaller than a grid cell, like Singapore or Manhattan, still get their full share, since their target is spread over the fine samples they cover. Shapes that share an ID, like Australia and its Ashmore and Cartier Islands, count as one region, and rings the simplified atlas collapsed to lines (Falls Church, VA) are dropped. Data data/ .json are built by node cartogram/buildData.js : Countries: Our World in Data grapher CSVs, latest year per country since 2000 US counties: County Health Rankings & Roadmaps 2025 Geometry comes from world-atlas and us-atlas on jsdelivr at runtime."
   },
   {
     "filePath": "perf",
     "title": "Total Compute Estimator",
     "year": 2026,
-    "desc": "Measures your machine's power."
+    "desc": "Measures your machine's power.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "treeGame",
     "title": "Tree Game",
     "year": 2026,
-    "desc": "Build a tree and grow fruit."
+    "desc": "Build a tree and grow fruit.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "comfort",
     "title": "Walk Comfort",
     "year": 2026,
-    "desc": "How nice it is outside for a walk or a sit, right now and over the next week."
+    "desc": "How nice it is outside for a walk or a sit, right now and over the next week.",
+    "preview": false,
+    "text": "A single number for whether it's worth going outside, worked out from a proper thermal comfort model (UTCI, with sun and shade) plus rain, wind, UV, air quality and daylight. Switch between a 30 minute walk and an hour sitting in the shade, tap Why this score? to see what's costing it, and check the chart for the best window over the next seven days. Uses your location, or search for anywhere. Weather from Open-Meteo. Tests: node test comfort/test/ .test.js"
   },
   {
     "filePath": "slime",
     "title": "WebGPU Slime Mold",
     "year": 2026,
-    "desc": "Lots of parameters to play with."
+    "desc": "A million agents following each other's scent trails, in three species that chase or avoid each other. Paint food and walls.",
+    "preview": true,
+    "text": "Runs on the GPU with WebGPU compute shaders, spawned in a disc in the middle. At startup it times a few steps and picks the grid resolution (up to full device resolution) and agent count (0.2 per cell, so about 1M on a laptop screen) to suit the GPU; the chosen size is logged to the console. Three species each lay their own trail channel and have their own color and behavior. follow1 – follow3 set how much a species follows (+) or avoids (-) each species' trail, including its own, so species can chase, flee, or ignore each other. Drag (or touch) the canvas to paint with the brush tool : food (gold) attracts every species and is slowly eaten ( appetite ); walls (gray) block agents, who also steer away from them. The eraser tool, right-drag, or shift-drag erases. reset restarts the colony but keeps the drawing, with eaten food restored, so you can draw a maze and replay it; clear drawing wipes it. Resizing the window also clears it. Performance: the trail is stored as f16 where supported, deposits are packed per-species counts in one u32 per cell, the blur goes through workgroup shared memory, and agents are periodically sorted by screen tile so their trail reads are cache-friendly. About 2.6 ms per step for 1M agents on a 3024×1656 grid (Apple Silicon). The number of steps per frame adapts to the GPU and the display's refresh rate ( pacer.js ), so the frame rate stays smooth and fast machines evolve quicker. Rendering draws the trails plus a faint dot per agent to an HDR texture, then tone maps and dithers it to the screen. Pick a look from the preset menu or hit randomize . The URL hash always holds the current settings (only the ones that differ from the defaults), so the address bar is always a shareable link. main.js – wiring and the frame loop simulation.js – buffers, agent/diffuse passes, reset sorter.js – periodically sorts agents by screen tile, for cache-friendly memory reads ( 4x faster) renderer.js – scene and tone-mapping render passes ( shaders/render.wgsl , shaders/post.wgsl ) pacer.js – adaptive steps per frame params.js – tunable parameters, defaults and ranges gui.js – the lil-gui controls presets.js – named presets and randomize share.js – syncs params with the URL hash uniforms.js – packs params into the uniform buffer (mirrors shaders/params.wgsl ) gpu.js – WebGPU setup and small helpers input.js – pointer tracking shaders/ – WGSL"
   },
   {
     "filePath": "polygonPhysics",
     "title": "Polygon Physics",
     "year": 2025,
-    "desc": "2D physics with convex polygon collisions, gravity, friction, restitution, and spatial hash optimization"
+    "desc": "2D physics with convex polygon collisions, gravity, friction, restitution, and spatial hash optimization",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "survival",
     "title": "Survival of the Fittest",
     "year": 2025,
-    "desc": "Each agent has a neural network which decides how to move using info about its surroundings. The ones that find food survive and reproduce."
+    "desc": "Each agent has a neural network which decides how to move using info about its surroundings. The ones that find food survive and reproduce.",
+    "preview": true,
+    "text": "Agents start with random weights. A brain never changes during an agent's life; the only way the population improves is that better foragers eat more, reach energy 1, and reproduce with mutation, while worse ones hit energy 0 and die. node benchmark.js scores a brain in isolation (fixed food field, no death or reproduction). The live sim can't tell you whether brains are improving, since food intake there is capped by the spawn rate rather than by skill. getPretrainedNetwork.js is not used by the sim. It supervises a net on \"turn toward the food\" and is kept only as a reference point for the benchmark - it's what a brain that genuinely uses its senses looks like. Note on measuring: benchmark.js scatters food uniformly, which rewards reactive sweeping only. In the live sim (where food grows in clumps) it gets the ranking backwards - brains with memory scored 106 there vs 140 without, yet sustained 27% more population in the sim. Sustained population is the honest measure; the benchmark is for catching gross decay."
   },
   {
     "filePath": "birds",
     "title": "Birds",
     "year": 2024,
-    "desc": "10,000 birds following each other in 3D"
+    "desc": "10,000 birds following each other in 3D",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "fourierDrawing",
     "title": "Fourier Drawing",
     "year": 2024,
-    "desc": "Draw a shape and see what happens."
+    "desc": "Draw a shape and see what happens.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "fluid-maze",
     "title": "Particle Fluid Maze",
     "year": 2024,
-    "desc": "Watch the particles slowly flow through the maze. Drag to push them around, space to pause, C to clear."
+    "desc": "Watch the particles slowly flow through the maze. Drag to push them around, space to pause, C to clear.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "temperatureFluid",
     "title": "Temperature Fluid",
     "year": 2024,
-    "desc": "A fluid solver with temperatures"
+    "desc": "A fluid solver with temperatures",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "voxels",
     "title": "Langton's Ant in 3D",
     "year": 2023,
-    "desc": "Uses Three.js."
+    "desc": "Langton's ant on a cubic grid, building a sprawling sculpture of voxels. Uses Three.js.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "bz",
     "title": "Oscillating Reaction",
     "year": 2023,
-    "desc": "A simple simulation of the Belousov-Zhabotinsky reaction."
+    "desc": "A simple simulation of the Belousov-Zhabotinsky reaction.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "peopleNetwork3D",
     "title": "People Network 3D",
     "year": 2023,
-    "desc": "A 3D network showing how similarly people answered a survey."
+    "desc": "A 3D network showing how similarly people answered a survey.",
+    "preview": true,
+    "text": "Everyone who took the survey rated themselves 1 to 10 on 36 traits. Each person is a dot, placed so that the distances between dots match the distances between their answers as well as 3D allows. Tap someone to see who they answered most and least like, and color everyone by any trait to see how it runs through the crowd. The layout is classical MDS refined by SMACOF stress majorization (embed.js). The page reports how far off the 3D distances are (Kruskal's stress-1, about 21% for raw answers), since 36 dimensions can't fit in 3 exactly. Lines are drawn from the real distances over all 36 answers, not from the 3D positions, so a long line is a pair the layout had to pull apart. \"Compare by\" uses the same two measures as People Stats: raw answer distance, or 1 minus the correlation of the answers. The URL keeps who is selected and the settings, so a link shows what you saw. If you picked yourself in People Stats, you get a yellow ring. Test the layout math with node peopleNetwork3D/embed.test.js ."
   },
   {
     "filePath": "peopleStats",
     "title": "People Stats",
     "year": 2023,
-    "desc": "Who do I know is most similar and most different?"
+    "desc": "Who do I know is most similar and most different?",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "reactionDiffusion",
     "title": "Reaction Diffusion",
     "year": 2023,
-    "desc": "A work in progress."
+    "desc": "Two simulated chemicals feed on and spread through each other, forming spots and wandering stripes (the Gray-Scott model).",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "tinyc",
     "title": "Tiny Compiler",
     "year": 2023,
-    "desc": "Based on tinyc.c"
+    "desc": "A compiler for a tiny C, showing every stage: tokens, syntax tree, assembly, and the program running. Based on tinyc.c.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "triangularGameOfLife",
     "title": "Triangular Game of Life",
     "year": 2023,
-    "desc": "a variant of Conway's Game of Life on a triangular grid"
+    "desc": "a variant of Conway's Game of Life on a triangular grid",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "wave",
     "title": "3D Function Visualizer",
     "year": 2022,
-    "desc": "Visualize functions in 3D"
+    "desc": "Visualize functions in 3D",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "lambdaCalculus",
     "title": "Lambda Calculus",
     "year": 2022,
-    "desc": "An educational lambda calculus interpreter."
+    "desc": "An educational lambda calculus interpreter.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "looptap",
     "title": "Looptap",
     "year": 2022,
-    "desc": "My version of CoogyLoop. Click when the ball is in the arc."
+    "desc": "My version of CoogyLoop. Click when the ball is in the arc.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "multicolor-fluid",
     "title": "Multicolor Particle Fluid",
     "year": 2022,
-    "desc": "A partical fluid simulator with more options."
+    "desc": "A particle fluid simulator with more options.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "parser",
     "title": "Parser",
     "year": 2022,
-    "desc": "A general purpose parser that takes a grammar and input."
+    "desc": "A general purpose parser that takes a grammar and input.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "verlet",
     "title": "Simple Verlet Physics",
     "year": 2022,
-    "desc": "A quick proof of concept for a simple physics engine."
+    "desc": "A quick proof of concept for a simple physics engine.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "webgl-particles",
     "title": "WebGL Particles",
     "year": 2022,
-    "desc": "360,000 particles and three moving gravity wells. Simulated and rendered on the GPU."
+    "desc": "360,000 particles and three moving gravity wells. Simulated and rendered on the GPU.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "smallpt",
     "title": "Another Ray Tracer",
     "year": 2021,
-    "desc": "Based on smallpt by Kevin Beason"
+    "desc": "Based on smallpt by Kevin Beason",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "bezier",
     "title": "Bezier Screensaver",
     "year": 2021,
-    "desc": "Kinda fun to watch, took about an hour to make."
+    "desc": "Kinda fun to watch, took about an hour to make.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "dither",
     "title": "Dithering",
     "year": 2021,
-    "desc": "Convert images to pixel art using just a few colors."
+    "desc": "Convert images to pixel art using just a few colors.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "trebuchet",
     "title": "Trebuchet Evolution",
     "year": 2021,
-    "desc": "Slowly improving trebuchets using genetic algorithm and matter.js."
+    "desc": "Slowly improving trebuchets using genetic algorithm and matter.js.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "weather",
     "title": "Weather Graphs",
     "year": 2021,
-    "desc": "Uses location API and a weather API to create graphs from the forecast"
+    "desc": "Uses location API and a weather API to create graphs from the forecast",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "carcassonne",
     "title": "Carcassonne Simulator",
     "year": 2020,
-    "desc": "Builds a valid Carcassonne map."
+    "desc": "Builds a valid Carcassonne map.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "isometric",
     "title": "Isometric",
     "year": 2020,
-    "desc": "Experiment in making an isomorphic renderer."
+    "desc": "Experiment in making an isometric renderer.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "lasertank",
     "title": "LaserTank",
     "year": 2020,
-    "desc": "A clone of a game I played when I was a kid."
+    "desc": "A clone of a game I played when I was a kid.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "lisp",
     "title": "Lisp Interpreter",
     "year": 2020,
-    "desc": "A very basic implementation of Lisp"
+    "desc": "A very basic implementation of Lisp",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "program-in-html",
     "title": "Program in HTML",
     "year": 2020,
-    "desc": "BUT WHY?!"
+    "desc": "A programming language written in HTML tags, translated to JavaScript as you type. BUT WHY?!",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "cutting-corners",
     "title": "Cutting Corners",
     "year": 2019,
-    "desc": "An illustration of what happens when you slowly start to cut corners. Originally described and requested by Kieran Brown."
+    "desc": "An illustration of what happens when you slowly start to cut corners. Originally described and requested by Kieran Brown.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "raycast",
     "title": "First-Person Raycaster",
     "year": 2019,
-    "desc": "A very simple render that looks 3D but is actually just thin rectangles with different heights and shades drawn across the screen. Use arrows to move."
+    "desc": "A very simple render that looks 3D but is actually just thin rectangles with different heights and shades drawn across the screen. Use arrows to move.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "particle-fluid",
     "title": "Fluid Particle Simulator",
     "year": 2019,
-    "desc": "Cohesive particles that interact as particles of a fluid."
+    "desc": "Cohesive particles that interact as particles of a fluid.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "klisp",
     "title": "Klisp Transpiler",
     "year": 2019,
-    "desc": "A transpiler written primarily in Ramda to translate Klisp (written by Kieran Brown) into JavaScript."
+    "desc": "A transpiler written primarily in Ramda to translate Klisp (written by Kieran Brown) into JavaScript.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "path-finder",
     "title": "Path Finder",
     "year": 2019,
-    "desc": "An interactive illustration of a variant of Dijkstra's algorithm. The arrows point toward the shortest path to get the gold."
+    "desc": "An interactive illustration of a variant of Dijkstra's algorithm. The arrows point toward the shortest path to get the gold.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "ramda-compiler",
     "title": "Ramda Transpiler",
     "year": 2019,
-    "desc": "A work still in progress to transpile Ramda (and a subset of JS) into plain JavaScript."
+    "desc": "A work still in progress to transpile Ramda (and a subset of JS) into plain JavaScript.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "sudoku-solver",
     "title": "Sudoku Solver",
     "year": 2019,
-    "desc": "A simple brute-force sudoku solver. Does a depth-first search to find a solution."
+    "desc": "A simple brute-force sudoku solver. Does a depth-first search to find a solution.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "waveform",
     "title": "Waveform Visualizer",
     "year": 2019,
-    "desc": "A simple visualizer for sound coming through your microphone."
+    "desc": "A simple visualizer for sound coming through your microphone.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "space-filler",
     "title": "Artsy Space Filler",
     "year": 2018,
-    "desc": "A curve fills the space and back-tracks when it hits a dead end."
+    "desc": "A curve fills the space and back-tracks when it hits a dead end.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "react-clone",
     "title": "Functional UI Micro Framework",
     "year": 2018,
-    "desc": "A micro framework for defining a UI using simple JavaScript objects and mainting state in a state-box."
+    "desc": "A micro framework for defining a UI using simple JavaScript objects and maintaining state in a state-box.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "mandelbrot-webgl",
     "title": "Mandelbrot WebGL",
     "year": 2018,
-    "desc": "Interactive Mandelbrot explorer rendered using WebGL."
+    "desc": "Interactive Mandelbrot explorer rendered using WebGL.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "pumpkin-slasher",
     "title": "Pumpkin Slasher Game",
     "year": 2018,
-    "desc": "A game written for a code challenge. A Fruit Ninja knock-off."
+    "desc": "A game written for a code challenge. A Fruit Ninja knock-off.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "pixel-editor",
     "title": "React Pixel Graphic Editor",
     "year": 2018,
-    "desc": "A simple editor for creating pixel-graphics using React and a canvas for the UI, state maintained in the URL."
+    "desc": "A simple editor for creating pixel-graphics using React and a canvas for the UI, state maintained in the URL.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "raymarch-2d",
     "title": "2D Raymarcher",
     "year": 2017,
-    "desc": "A simple raymarcher in a dynamic scene."
+    "desc": "A simple raymarcher in a dynamic scene.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "raytracer",
     "title": "3D Raytracer with Workers",
     "year": 2017,
-    "desc": "Four webworkers render frames in parallel and the master thread buffers and shows them in order. No WebGL, just ImageData (makes computer very hot!)"
+    "desc": "Four webworkers render frames in parallel and the master thread buffers and shows them in order. No WebGL, just ImageData (makes computer very hot!)",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "double-pendulum",
     "title": "Double Pendulum Visualization",
     "year": 2017,
-    "desc": "Each pixel represents a different double-pendulum, each starting a similar position to its neighbors. Redness indicates how far the end is from the anchor, green is y coordinate, and blue is the x coordinate."
+    "desc": "Each pixel represents a different double-pendulum, each starting a similar position to its neighbors. Redness indicates how far the end is from the anchor, green is y coordinate, and blue is the x coordinate.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "expression-builder",
     "title": "Expression Builder",
     "year": 2017,
-    "desc": "an Angular.js component for creating SQL expressions."
+    "desc": "an Angular.js component for creating SQL expressions.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "fluid",
     "title": "Navier-Stokes Fluid Simulator",
     "year": 2017,
-    "desc": "A grid-based fluid similator."
+    "desc": "A grid-based fluid simulator.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "sheep",
     "title": "Sheep Simulator",
     "year": 2017,
-    "desc": "A sheep simulator. After 100 sheep are born, a Velociraptor is set loose."
+    "desc": "A sheep simulator. After 100 sheep are born, a Velociraptor is set loose.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "cellular-automata",
     "title": "Three Color Cellular Automata Generator",
     "year": 2017,
-    "desc": "Each pattern is generated by a random \"rule\". Each cell is determined using the rule given the three cells above it."
+    "desc": "Each pattern is generated by a random \"rule\". Each cell is determined using the rule given the three cells above it.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "wireworld",
     "title": "Wireworld Prime Calculator",
     "year": 2017,
-    "desc": "I didn't invent this, I just implemented it."
+    "desc": "I didn't invent this, I just implemented it.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "office-optimizer",
     "title": "Workspace Optimizer",
     "year": 2017,
-    "desc": "Uses simulated annealing to try to find optimal seating arrangements for multiple teams in an office by minimizing walking distance between each pair of teammates."
+    "desc": "Uses simulated annealing to try to find optimal seating arrangements for multiple teams in an office by minimizing walking distance between each pair of teammates.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "tsp-simulated-annealing",
     "title": "TSP Simulated Annealing",
     "year": 2016,
-    "desc": "Solves the traveling salesman problem for sets of points."
+    "desc": "Solves the traveling salesman problem for sets of points.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "stl-tsp",
     "title": "Traveling Salesman",
     "year": 2016,
-    "desc": "Finds the shortest path to visit all points and return to the start. On a real map of St. Louis."
+    "desc": "Finds the shortest path to visit all points and return to the start. On a real map of St. Louis.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "builder",
     "title": "Physics Builder",
     "year": 2015,
-    "desc": "Create and simulate contraptions using the JS port of Box2d."
+    "desc": "Create and simulate contraptions using the JS port of Box2d.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "particle-sim",
     "title": "Cohesive Particle Simulator",
     "year": 2014,
-    "desc": "My earliest cohesive particle simulator. Double-click to make a black hole, shift+drag it to change its strength."
+    "desc": "My earliest cohesive particle simulator. Double-click to make a black hole, shift+drag it to change its strength.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "mandelbrot",
     "title": "Mandelbrot",
     "year": 2014,
-    "desc": "Mandelbrot explorer without WebGL."
+    "desc": "Mandelbrot explorer without WebGL.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "raytracer-2d",
     "title": "2D Raytracer",
     "year": 2013,
-    "desc": "Drag to draw mirrors, click to calculate lighting."
+    "desc": "Drag to draw mirrors, click to calculate lighting.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "jibberjabber",
     "title": "Jibberjabber Generator",
     "year": 2013,
-    "desc": "Generates text similar to the input."
+    "desc": "Generates text similar to the input.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "maze",
     "title": "Maze Generator",
     "year": 2013,
-    "desc": "Generates mazes using a depth-first space filling algorithm."
+    "desc": "Generates mazes using a depth-first space filling algorithm.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "snake",
     "title": "Snake AI",
     "year": 2013,
-    "desc": "A snake game with a tough AI. Can you beat it?"
+    "desc": "A snake game with a tough AI. Can you beat it?",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "tootsie-rocket",
     "title": "Tootsie Rocket",
     "year": 2013,
-    "desc": "Collect the tootsie rolls without getting dead."
+    "desc": "Collect the tootsie rolls without getting dead.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "micro-conway",
     "title": "Micro Conway's Game of Life",
     "year": 2012,
-    "desc": "585 characters of HTML/JS/CSS. Click/drag to toggle cells, press space to iterate."
+    "desc": "585 characters of HTML/JS/CSS. Click/drag to toggle cells, press space to iterate.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "clock",
     "title": "Simple Clock",
     "year": 2012,
-    "desc": "It's a clock."
+    "desc": "It's a clock: rings of seconds, minutes, hours, and days turning around a line that marks now.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "splitter",
     "title": "Splitter",
     "year": 2012,
-    "desc": "Weird looking tree root things."
+    "desc": "Weird looking tree root things.",
+    "preview": true,
+    "text": ""
   },
   {
     "filePath": "gears",
     "title": "Gears",
     "year": 2011,
-    "desc": "Drag to create and move gears. Double-click to delete."
+    "desc": "Drag to create and move gears. Double-click to delete.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "bloxploder",
     "title": "Bloxploder",
     "year": 2010,
-    "desc": "A game I made for fun."
+    "desc": "Click groups of same-colored blocks to blow them up and clear the board against the clock.",
+    "preview": false,
+    "text": ""
   },
   {
     "filePath": "tree",
     "title": "Growing Tree",
     "year": 2010,
-    "desc": "It grows until it overloads the CPU. Wow."
+    "desc": "It grows until it overloads the CPU. Wow.",
+    "preview": false,
+    "text": ""
   }
 ]
