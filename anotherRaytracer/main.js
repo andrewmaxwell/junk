@@ -8,7 +8,7 @@ import {displayShader, tileShader, traceShader} from './shaders.js';
  */
 const defaults = {
   /** See `scenes` in scenes.js */
-  scene: 'cornell',
+  scene: 'shafts',
   /** 'mis', 'light' or 'bsdf'; see `sampling` in shaders.js */
   sampling: 'mis',
   /** Cap on bounced light per sample; 0 for none. See `maxIndirect` in shaders.js */
