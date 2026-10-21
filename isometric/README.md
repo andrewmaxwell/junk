@@ -1,1 +1,1 @@
-Isometric - 2020 - Experiment in making an isomorphic renderer.
+Isometric - 2020 - Experiment in making an isometric renderer.

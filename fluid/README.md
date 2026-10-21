@@ -1,1 +1,1 @@
-Navier-Stokes Fluid Simulator - 2017 - A grid-based fluid similator.
+Navier-Stokes Fluid Simulator - 2017 - A grid-based fluid simulator.

@@ -1,4 +1,4 @@
-WebGPU Slime Mold - 2026 - Lots of parameters to play with.
+WebGPU Slime Mold - 2026 - A million agents following each other's scent trails, in three species that chase or avoid each other. Paint food and walls.
 
 Runs on the GPU with WebGPU compute shaders, spawned in a disc in the middle. At startup it times a few steps and picks the grid resolution (up to full device resolution) and agent count (0.2 per cell, so about 1M on a laptop screen) to suit the GPU; the chosen size is logged to the console. Three species each lay their own trail channel and have their own color and behavior. `follow1`–`follow3` set how much a species follows (+) or avoids (-) each species' trail, including its own, so species can chase, flee, or ignore each other.
 

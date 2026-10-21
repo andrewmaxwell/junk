@@ -1,1 +1,1 @@
-Langton's Ant in 3D - 2023 - Uses Three.js.
+Langton's Ant in 3D - 2023 - Langton's ant on a cubic grid, building a sprawling sculpture of voxels. Uses Three.js.

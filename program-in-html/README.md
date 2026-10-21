@@ -1,1 +1,1 @@
-Program in HTML - 2020 - BUT WHY?!
+Program in HTML - 2020 - A programming language written in HTML tags, translated to JavaScript as you type. BUT WHY?!

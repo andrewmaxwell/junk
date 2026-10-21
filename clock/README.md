@@ -1,1 +1,1 @@
-Simple Clock - 2012 - It's a clock.
+Simple Clock - 2012 - It's a clock: rings of seconds, minutes, hours, and days turning around a line that marks now.

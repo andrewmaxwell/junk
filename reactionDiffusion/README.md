@@ -1,1 +1,1 @@
-Reaction Diffusion - 2023 - A work in progress.
+Reaction Diffusion - 2023 - Two simulated chemicals feed on and spread through each other, forming spots and wandering stripes (the Gray-Scott model).

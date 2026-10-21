@@ -1,1 +1,1 @@
-Tiny Compiler - 2023 - Based on tinyc.c
+Tiny Compiler - 2023 - A compiler for a tiny C, showing every stage: tokens, syntax tree, assembly, and the program running. Based on tinyc.c.

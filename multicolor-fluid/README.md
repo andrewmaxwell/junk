@@ -1,1 +1,1 @@
-Multicolor Particle Fluid - 2022 - A partical fluid simulator with more options.
+Multicolor Particle Fluid - 2022 - A particle fluid simulator with more options.
