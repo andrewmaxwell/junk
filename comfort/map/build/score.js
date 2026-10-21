@@ -1,5 +1,5 @@
-// Scores every waking hour at every 3 km HRRR cell and writes what the page
-// draws.
+// Scores every waking hour at every 3 km HRRR cell, then has `export.js` write
+// what the page draws.
 //
 //   node comfort/map/build/score.js --start 2025-10-15 --end 2026-10-14
 //
@@ -23,13 +23,10 @@ import {
 import {availableParallelism} from 'node:os';
 import {join} from 'node:path';
 import {Worker} from 'node:worker_threads';
-import sharp from 'sharp';
+import {exportData} from './export.js';
 import {
   ACTIVITY_KEYS,
   BUILD_DIR,
-  DATA_DIR,
-  FACTORS,
-  GOOD_SCORE,
   GRID_DIR,
   STAT_FIELDS,
   WAKING_END_HOUR,
@@ -57,9 +54,6 @@ const spool = join(run, 'spool');
 await mkdir(spool, {recursive: true});
 
 const grid = JSON.parse(await readFile(join(GRID_DIR, 'grid.json'), 'utf8'));
-const cells = new Uint32Array(
-  (await readFile(join(GRID_DIR, 'cells.u32'))).buffer,
-);
 const zoneBuffer = new SharedArrayBuffer(grid.count);
 new Uint8Array(zoneBuffer).set(await readFile(join(GRID_DIR, 'zone.u8')));
 
@@ -255,82 +249,4 @@ console.log();
 for (const worker of workers) worker.terminate();
 fetcher.kill();
 
-// --- Output --------------------------------------------------------------------
-
-// One RGB image per period and activity, the size of the HRRR grid, north up:
-//   R  share of waking hours at Good or better, 0-200 in half-percent steps
-//   G  mean score, 0-100
-//   B  index into FACTORS of what cost the most hours below Good, 254 if none
-// and 255 in every channel where there is no data. Lossless PNG keeps it exact
-// and lets the page fetch one period at a time.
-const NO_DATA = 255;
-const NO_FACTOR = 254;
-
-async function writeImage(path, activity, monthIndexes) {
-  const {nx, ny} = grid;
-  const pixels = Buffer.alloc(nx * ny * 3, NO_DATA);
-  const totals = new Float64Array(fieldCount);
-  for (let c = 0; c < grid.count; c++) {
-    totals.fill(0);
-    for (const m of monthIndexes) {
-      const base =
-        ((c * ACTIVITY_KEYS.length + activity) * months.length + m) *
-        fieldCount;
-      for (let f = 0; f < fieldCount; f++) totals[f] += stats[base + f];
-    }
-    const [total, good, scoreSum] = totals;
-    if (!total) continue;
-    let worst = -1;
-    for (let f = 3; f < fieldCount; f++)
-      if (totals[f] > 0 && (worst < 0 || totals[f] > totals[worst])) worst = f;
-
-    // HRRR's rows run south to north; images run top down.
-    const cell = cells[c];
-    const x = cell % nx;
-    const y = ny - 1 - Math.floor(cell / nx);
-    const p = (y * nx + x) * 3;
-    pixels[p] = Math.round((200 * good) / total);
-    pixels[p + 1] = Math.round(scoreSum / total);
-    pixels[p + 2] = worst < 0 ? NO_FACTOR : worst - 3;
-  }
-  await sharp(pixels, {raw: {width: nx, height: ny, channels: 3}})
-    .png({compressionLevel: 9})
-    .toFile(path);
-}
-
-await mkdir(DATA_DIR, {recursive: true});
-for (const file of await readdir(DATA_DIR)) await unlink(join(DATA_DIR, file));
-
-const periods = [{key: 'all', months: months.map((_, i) => i)}];
-months.forEach((month, i) => periods.push({key: month, months: [i]}));
-for (const period of periods) {
-  for (const [a, activity] of ACTIVITY_KEYS.entries()) {
-    await writeImage(
-      join(DATA_DIR, `${period.key}-${activity}.png`),
-      a,
-      period.months,
-    );
-  }
-}
-
-await writeFile(
-  join(DATA_DIR, 'meta.json'),
-  JSON.stringify(
-    {
-      start: args.start,
-      end: args.end,
-      nx: grid.nx,
-      ny: grid.ny,
-      projection: grid.projection,
-      periods: periods.map((p) => p.key),
-      activities: ACTIVITY_KEYS,
-      factors: FACTORS,
-      goodScore: GOOD_SCORE,
-      wakingHours: [WAKING_START_HOUR, WAKING_END_HOUR],
-      encoding: {goodScale: 200, noData: NO_DATA, noFactor: NO_FACTOR},
-    },
-    null,
-    2,
-  ),
-);
-console.log(`Wrote ${periods.length * ACTIVITY_KEYS.length} images to data/.`);
+await exportData(args.start, args.end);
