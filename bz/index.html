@@ -1,4 +1,30 @@
-<body style="margin: 0">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js" integrity="sha512-WoO4Ih0CDOSLYafy22wZD/mcJ7k0ESLqtQsFa6zFKnEUrbtuGU+GkLtVhgt93xa2qewG5gKEC6CWlN8OaCTSVg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script type="module" src="main.js"></script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Oscillating Reaction</title>
+<meta name="description" content="Spiral waves of the Belousov-Zhabotinsky reaction. Drag to break a wave and watch its ends curl into spirals.">
+<meta property="og:title" content="Oscillating Reaction">
+<meta property="og:description" content="Spiral waves of the Belousov-Zhabotinsky reaction. Drag to break a wave and watch its ends curl into spirals.">
+<meta property="og:image" content="https://andrewmaxwell.github.io/junk/bz/image.png">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#1a0d0a;color:#f4e6dc;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;}
+  #hint{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);
+    padding:8px 14px;border-radius:999px;background:rgba(0,0,0,.45);font-size:14px;white-space:nowrap;
+    pointer-events:none;transition:opacity 1s;}
+  #hint.gone{opacity:0;}
+  #error{position:fixed;inset:0;display:grid;place-content:center;text-align:center;padding:24px;line-height:1.5;}
+  #error[hidden]{display:none;}
+  .lil-gui.root{margin-top:env(safe-area-inset-top);margin-right:env(safe-area-inset-right);}
+</style>
+</head>
+<body>
+<canvas></canvas>
+<div id="hint"></div>
+<div id="error" hidden></div>
+<script type="module" src="main.js"></script>
 </body>
+</html>
