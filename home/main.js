@@ -88,8 +88,6 @@ const card = (p, words, index) =>
     </div>
   </a>`;
 
-const surpriseButton = `<button class="surprise" type="button">Surprise me</button>`;
-
 let results = data;
 function render() {
   const query = searchInput.value.trim().toLowerCase();
@@ -102,7 +100,7 @@ function render() {
       .map((r) => r.p);
     container.innerHTML = results.length
       ? `<section><h2>${results.length} match${results.length === 1 ? '' : 'es'}</h2><div class="grid">${results.map((p, i) => card(p, words, i)).join('')}</div></section>`
-      : `<p class="message">Nothing matched “${esc(searchInput.value.trim())}”. ${surpriseButton}</p>`;
+      : `<p class="message">Nothing matched “${esc(searchInput.value.trim())}”.</p>`;
   } else {
     results = data;
     const years = [...new Set(data.map((p) => p.year))];
@@ -110,18 +108,13 @@ function render() {
     container.innerHTML = years
       .map((year) => {
         const projects = data.filter((p) => p.year === year);
-        return `<section><h2>${year} <span>${projects.length}</span></h2><div class="grid">${projects.map((p) => card(p, words, index++)).join('')}</div></section>`;
+        return `<section><h2>${year}</h2><div class="grid">${projects.map((p) => card(p, words, index++)).join('')}</div></section>`;
       })
       .join('');
   }
   animate = false;
   watchPreviews();
 }
-
-const surprise = () => {
-  const p = data[Math.floor(Math.random() * data.length)];
-  location.href = `${p.filePath}/`;
-};
 
 searchInput.addEventListener('input', () => {
   const q = searchInput.value.trim();
@@ -147,10 +140,6 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     searchInput.focus();
   }
-});
-
-document.addEventListener('click', (e) => {
-  if (e.target.closest('.surprise')) surprise();
 });
 
 // Previews: short muted loops of each project running. With a mouse they play on hover; on a

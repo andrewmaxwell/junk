@@ -182,26 +182,6 @@
         kbd { display: none; }
       }
 
-      .surprise {
-        flex: none;
-        border: 1px solid var(--border-color);
-        border-radius: 100px;
-        background: rgba(26, 29, 36, 0.85);
-        color: var(--text-primary);
-        font: 500 0.95rem 'Inter', sans-serif;
-        padding: 0 20px;
-        min-height: 48px;
-        cursor: pointer;
-        transition: border-color 0.2s ease, background 0.2s ease;
-      }
-      .surprise:hover {
-        border-color: var(--accent-color);
-        background: rgba(59, 130, 246, 0.15);
-      }
-      .surprise::before {
-        content: '🎲 ';
-      }
-
       section {
         margin-top: 28px;
       }
@@ -211,12 +191,6 @@
         font-weight: 700;
         margin: 0 0 14px;
         letter-spacing: -0.01em;
-      }
-      h2 span {
-        font-size: 0.9rem;
-        font-weight: 500;
-        color: var(--text-secondary);
-        margin-left: 6px;
       }
 
       .grid {
@@ -229,9 +203,6 @@
         color: var(--text-secondary);
         font-size: 1.1rem;
         margin-top: 40px;
-      }
-      .message .surprise {
-        margin-left: 8px;
       }
 
       @keyframes fadeUp {
@@ -392,13 +363,6 @@
         #summary {
           font-size: 0.95rem;
         }
-        .surprise {
-          padding: 0 16px;
-          font-size: 0;
-        }
-        .surprise::before {
-          font-size: 1.2rem;
-        }
         .grid {
           grid-template-columns: repeat(2, 1fr);
           gap: 12px;
@@ -454,7 +418,6 @@
           <input type="search" id="searchInput" placeholder="Search, e.g. WebGPU, game, fluid" aria-label="Search projects" autocomplete="off" />
           <kbd>/</kbd>
         </div>
-        <button class="surprise" type="button" aria-label="Open a random project" title="Open a random project">Surprise me</button>
       </div>
       <div id="projectContainer"></div>
     </main>
