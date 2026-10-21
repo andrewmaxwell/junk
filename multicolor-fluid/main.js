@@ -1,6 +1,6 @@
 // Used some code from https://peeke.nl/simulating-blobs-of-fluid
 
-import Grid from '../particle-fluid/Grid.js';
+import Grid from './Grid.js';
 
 var ctx = document.querySelector('canvas').getContext('2d');
 

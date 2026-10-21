@@ -1,4 +1,4 @@
-import Grid from '../particle-fluid/Grid.js';
+import Grid from './Grid.js';
 
 class Ball {
   constructor(id, x, y, rad = 16, vx = 0, vy = 0) {
