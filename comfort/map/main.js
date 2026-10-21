@@ -1,6 +1,6 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {
-  geoAlbers,
+  geoConicConformal,
   geoPath,
 } from 'https://cdn.jsdelivr.net/npm/d3-geo@3.1.1/+esm';
 import {interpolateViridis} from 'https://cdn.jsdelivr.net/npm/d3-scale-chromatic@3.1.0/+esm';
@@ -42,11 +42,8 @@ const readout = document.getElementById('readout');
 const subtitle = document.getElementById('subtitle');
 const legend = document.getElementById('legend');
 
-const [meta, stats, us] = await Promise.all([
+const [meta, us] = await Promise.all([
   fetch('./data/meta.json').then((r) => r.json()),
-  fetch('./data/stats.bin')
-    .then((r) => r.arrayBuffer())
-    .then((buffer) => new Uint16Array(buffer)),
   fetch(STATES_URL).then((r) => r.json()),
 ]);
 
@@ -59,134 +56,85 @@ const states = {
 const lower48 = merge(us, states.geometries);
 const borders = mesh(us, states, (a, b) => a !== b);
 
-// --- Data --------------------------------------------------------------------
+// --- The HRRR grid -------------------------------------------------------------
+//
+// The data images are the model's own 3 km Lambert conformal grid, north up,
+// one pixel per cell. Rather than resample them, the page draws them as they
+// are and puts the borders on top in the same projection, configured so that
+// each cell's centre lands in the middle of its pixel.
 
-const {cols, rows, step, bounds, months, activities, fields} = meta;
-const fieldCount = fields.length;
-const factors = fields.slice(3);
-const pointCount = meta.cells.length / 2;
-const stride = activities.length * months.length * fieldCount;
+const {nx, ny, projection: grid, encoding} = meta;
+const gridProjection = geoConicConformal()
+  .parallels([grid.lat1, grid.lat2])
+  .rotate([-grid.lon0, 0])
+  .scale(grid.radius / grid.dx)
+  .translate([0, 0]);
+{
+  const [x0, y0] = gridProjection([grid.firstLon, grid.firstLat]);
+  gridProjection.translate([0.5 - x0, ny - 0.5 - y0]);
+}
+const gridPath = geoPath(gridProjection);
+const [[cropX0, cropY0], [cropX1, cropY1]] = gridPath.bounds(lower48);
+const outline = new Path2D(gridPath(lower48));
+const borderPath = new Path2D(gridPath(borders));
 
-// Sums each point's per-month counts over the selected months.
-function aggregate(point, activityKey, monthIndexes) {
-  const a = activities.indexOf(activityKey);
-  const totals = new Array(fieldCount).fill(0);
-  for (const m of monthIndexes) {
-    const base = point * stride + (a * months.length + m) * fieldCount;
-    for (let f = 0; f < fieldCount; f++) totals[f] += stats[base + f];
+// --- Data ------------------------------------------------------------------------
+
+// Each image decoded to raw RGBA, exactly as written: no colour management and
+// no premultiplication, since these are numbers rather than colours.
+const images = new Map();
+function loadImage(period, activity) {
+  const key = `${period}-${activity}`;
+  if (!images.has(key)) {
+    images.set(
+      key,
+      fetch(`./data/${key}.png`)
+        .then((r) => r.blob())
+        .then((blob) =>
+          createImageBitmap(blob, {
+            premultiplyAlpha: 'none',
+            colorSpaceConversion: 'none',
+          }),
+        )
+        .then((bitmap) => {
+          const scratch = new OffscreenCanvas(nx, ny);
+          const sctx = scratch.getContext('2d', {willReadFrequently: true});
+          sctx.drawImage(bitmap, 0, 0);
+          return sctx.getImageData(0, 0, nx, ny).data;
+        }),
+    );
   }
-  const [hours, good, scoreSum] = totals;
-  if (!hours) return null;
-  const lost = totals.slice(3);
-  const worst = lost.indexOf(Math.max(...lost));
+  return images.get(key);
+}
+
+// What a pixel says, or null where there is no data.
+function readPixel(data, cell) {
+  const p = cell * 4;
+  if (data[p] === encoding.noData && data[p + 1] === encoding.noData)
+    return null;
   return {
-    hours,
-    good: good / hours,
-    mean: scoreSum / hours,
-    lost: lost.map((n) => n / hours),
-    limiter: lost[worst] ? factors[worst] : null,
+    good: data[p] / encoding.goodScale,
+    mean: data[p + 1],
+    limiter:
+      data[p + 2] === encoding.noFactor ? null : meta.factors[data[p + 2]],
   };
 }
 
-// The selected view as a dense grid: comfort fraction for interpolation, and
-// the limiter index, which is categorical and so only ever read nearest.
-function gridFor(activityKey, monthIndexes) {
-  const value = new Float32Array(cols * rows).fill(NaN);
-  const limiter = new Int8Array(cols * rows).fill(-1);
-  const loss = new Float32Array(cols * rows);
-  for (let p = 0; p < pointCount; p++) {
-    const summary = aggregate(p, activityKey, monthIndexes);
-    if (!summary) continue;
-    const cell = meta.cells[p * 2] * cols + meta.cells[p * 2 + 1];
-    value[cell] = summary.good;
-    limiter[cell] = summary.limiter ? factors.indexOf(summary.limiter) : -1;
-    loss[cell] = 1 - summary.good;
-  }
-  return {value, limiter, loss};
-}
-
-const pointAt = new Map();
-for (let p = 0; p < pointCount; p++)
-  pointAt.set(meta.cells[p * 2] * cols + meta.cells[p * 2 + 1], p);
-
-// --- Projection and per-pixel lookup ----------------------------------------
-
-let projection;
-let outline; // the Lower 48 as a Path2D, for hit-testing the pointer
-let pixelGrid; // fractional grid coordinates of every canvas pixel, or NaN
-let width;
-let height;
-
-function layout() {
-  const dpr = window.devicePixelRatio || 1;
-  const cssWidth = canvas.parentElement.clientWidth;
-  projection = geoAlbers().fitWidth(cssWidth * dpr, lower48);
-  const [[, y0], [, y1]] = geoPath(projection).bounds(lower48);
-  width = Math.round(cssWidth * dpr);
-  height = Math.ceil(y1 + y0);
-  canvas.width = width;
-  canvas.height = height;
-  canvas.style.height = `${height / dpr}px`;
-  outline = new Path2D(geoPath(projection)(lower48));
-
-  pixelGrid = new Float32Array(width * height * 2);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = (y * width + x) * 2;
-      const lonLat = projection.invert([x + 0.5, y + 0.5]);
-      pixelGrid[i] = lonLat ? (lonLat[0] - bounds.west) / step : NaN;
-      pixelGrid[i + 1] = lonLat ? (lonLat[1] - bounds.south) / step : NaN;
-    }
-  }
-}
-
-// Bilinear, but over whichever corners have data, so the coast does not fade
-// into the missing cells offshore before the clip trims it.
-function sample(values, gx, gy) {
-  const x0 = Math.floor(gx);
-  const y0 = Math.floor(gy);
-  if (x0 < 0 || y0 < 0 || x0 >= cols - 1 || y0 >= rows - 1) return NaN;
-  const fx = gx - x0;
-  const fy = gy - y0;
-  let total = 0;
-  let weight = 0;
-  for (const [dx, dy, w] of [
-    [0, 0, (1 - fx) * (1 - fy)],
-    [1, 0, fx * (1 - fy)],
-    [0, 1, (1 - fx) * fy],
-    [1, 1, fx * fy],
-  ]) {
-    const v = values[(y0 + dy) * cols + x0 + dx];
-    if (!Number.isNaN(v)) {
-      total += v * w;
-      weight += w;
-    }
-  }
-  return weight > 1e-6 ? total / weight : NaN;
-}
-
-const nearestCell = (gx, gy) => {
-  const col = Math.round(gx);
-  const row = Math.round(gy);
-  return col < 0 || row < 0 || col >= cols || row >= rows
-    ? -1
-    : row * cols + col;
-};
-
-// --- Colour ----------------------------------------------------------------
+// --- Colour ----------------------------------------------------------------------
 
 const RAMP_STEPS = 256;
 const ramp = Array.from({length: RAMP_STEPS}, (_, i) => {
   const c = d3color(interpolateViridis(i / (RAMP_STEPS - 1)));
   return [c.r, c.g, c.b];
 });
-const factorRgb = factors.map((key) => {
+const factorRgb = meta.factors.map((key) => {
   const c = d3color(FACTOR_COLORS[key]);
   return [c.r, c.g, c.b];
 });
 
-// --- Controls ----------------------------------------------------------------
+// --- Controls --------------------------------------------------------------------
 
+const months = meta.periods.filter((p) => p !== 'all');
 const monthName = (key) =>
   new Date(`${key}-15T12:00:00`).toLocaleDateString(undefined, {
     month: 'long',
@@ -200,8 +148,8 @@ const settings = {
   stretch: true,
 };
 
-const selectedMonths = () =>
-  settings.month === 0 ? months.map((_, i) => i) : [settings.month - 1];
+const selectedPeriod = () =>
+  settings.month === 0 ? 'all' : months[settings.month - 1];
 
 const periodLabel = () => {
   if (settings.month !== 0) return monthName(months[settings.month - 1]);
@@ -236,77 +184,104 @@ const monthControl = gui
 if (months.length < 2) monthControl.disable();
 gui.add(settings, 'stretch').name('Stretch colours to data').onChange(render);
 
-// --- Rendering ---------------------------------------------------------------
+// --- Rendering -------------------------------------------------------------------
 
-let current;
-const raster = document.createElement('canvas');
+let scale; // canvas pixels per grid cell
+let current; // what is on screen, for the readout
+const raster = new OffscreenCanvas(nx, ny);
+const rasterCtx = raster.getContext('2d');
 
-function render() {
-  if (!width || !height) return; // laid out while hidden; the resize redraws
-  const grid = gridFor(settings.activity, selectedMonths());
+function layout() {
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.parentElement.clientWidth;
+  scale = (cssWidth * dpr) / (cropX1 - cropX0);
+  canvas.width = Math.round(cssWidth * dpr);
+  canvas.height = Math.ceil((cropY1 - cropY0) * scale);
+  canvas.style.height = `${canvas.height / dpr}px`;
+}
+
+// Canvas pixels to grid coordinates and back go through one transform.
+const toGrid = () =>
+  ctx.setTransform(scale, 0, 0, scale, -cropX0 * scale, -cropY0 * scale);
+
+let renderToken = 0;
+async function render() {
+  if (!canvas.width || !canvas.height) return; // laid out while hidden
+  const token = ++renderToken;
+  const period = selectedPeriod();
+  const [data, ...both] = await Promise.all([
+    loadImage(period, settings.activity),
+    ...meta.activities.map((a) => loadImage(period, a)),
+  ]);
+  if (token !== renderToken) return; // a newer render has started
+
   let low = 0;
-  let high = 1;
+  let high = encoding.goodScale;
   if (settings.stretch) {
-    const present = grid.value.filter((v) => !Number.isNaN(v));
-    low = Math.min(...present);
-    high = Math.max(...present);
-    if (high - low < 0.05) high = low + 0.05;
+    low = Infinity;
+    high = -Infinity;
+    for (let p = 0; p < data.length; p += 4) {
+      if (data[p] === encoding.noData) continue;
+      low = Math.min(low, data[p]);
+      high = Math.max(high, data[p]);
+    }
+    if (high - low < 10) high = low + 10;
   }
-  current = {grid, low, high};
+  current = {
+    byActivity: Object.fromEntries(meta.activities.map((a, i) => [a, both[i]])),
+    low: low / encoding.goodScale,
+    high: high / encoding.goodScale,
+  };
 
-  raster.width = width;
-  raster.height = height;
-  const rctx = raster.getContext('2d');
-  const image = rctx.createImageData(width, height);
+  const image = rasterCtx.createImageData(nx, ny);
   const px = image.data;
-  for (let i = 0, n = width * height; i < n; i++) {
-    const gx = pixelGrid[i * 2];
-    if (Number.isNaN(gx)) continue;
-    const gy = pixelGrid[i * 2 + 1];
+  const present = new Set();
+  for (let p = 0; p < data.length; p += 4) {
+    if (data[p] === encoding.noData && data[p + 1] === encoding.noData)
+      continue;
     let rgb;
     let alpha = 255;
     if (settings.view === 'comfort') {
-      const v = sample(grid.value, gx, gy);
-      if (Number.isNaN(v)) continue;
-      const t = Math.min(1, Math.max(0, (v - low) / (high - low)));
+      const t = Math.min(1, Math.max(0, (data[p] - low) / (high - low)));
       rgb = ramp[Math.round(t * (RAMP_STEPS - 1))];
     } else {
-      const cell = nearestCell(gx, gy);
-      if (cell < 0 || grid.limiter[cell] < 0) continue;
-      rgb = factorRgb[grid.limiter[cell]];
+      if (data[p + 2] === encoding.noFactor) continue;
+      rgb = factorRgb[data[p + 2]];
+      present.add(data[p + 2]);
       // Fainter where few hours were lost at all: a place that is Good nine
       // hours in ten should not shout its one complaint.
-      alpha = Math.round(255 * (0.25 + 0.75 * sample(grid.loss, gx, gy)));
+      alpha = Math.round(
+        255 * (0.25 + 0.75 * (1 - data[p] / encoding.goodScale)),
+      );
     }
-    px[i * 4] = rgb[0];
-    px[i * 4 + 1] = rgb[1];
-    px[i * 4 + 2] = rgb[2];
-    px[i * 4 + 3] = alpha;
+    px[p] = rgb[0];
+    px[p + 1] = rgb[1];
+    px[p + 2] = rgb[2];
+    px[p + 3] = alpha;
   }
-  rctx.putImageData(image, 0, 0);
+  rasterCtx.putImageData(image, 0, 0);
+  current.present = present;
 
-  const path = geoPath(projection, ctx);
-  ctx.clearRect(0, 0, width, height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  toGrid();
   ctx.save();
-  ctx.beginPath();
-  path(lower48);
-  ctx.clip();
+  ctx.clip(outline);
   ctx.fillStyle = 'oklch(0.25 0.015 250)';
-  ctx.fillRect(0, 0, width, height);
+  ctx.fillRect(cropX0, cropY0, cropX1 - cropX0, cropY1 - cropY0);
+  // Smooth when enlarging a continuous field; a categorical one must not blend
+  // two factors' colours into a third that means neither.
+  ctx.imageSmoothingEnabled = settings.view === 'comfort';
   ctx.drawImage(raster, 0, 0);
   ctx.restore();
 
   const dpr = window.devicePixelRatio || 1;
-  ctx.lineWidth = 0.6 * dpr;
+  ctx.lineWidth = (0.6 * dpr) / scale;
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-  ctx.beginPath();
-  path(borders);
-  ctx.stroke();
-  ctx.lineWidth = 1 * dpr;
+  ctx.stroke(borderPath);
+  ctx.lineWidth = (1 * dpr) / scale;
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-  ctx.beginPath();
-  path(lower48);
-  ctx.stroke();
+  ctx.stroke(outline);
 
   renderText();
 }
@@ -335,9 +310,8 @@ function renderText() {
         .map((t) => `<span>${percent(low + t * (high - low))}</span>`)
         .join('')}</div>`;
   } else {
-    const present = new Set(current.grid.limiter);
-    legend.innerHTML = `<div class="swatches">${factors
-      .filter((key, i) => present.has(i))
+    legend.innerHTML = `<div class="swatches">${meta.factors
+      .filter((key, i) => current.present.has(i))
       .map(
         (key) =>
           `<span class="swatch"><i style="background:${FACTOR_COLORS[key]}"></i>${FACTOR_LABELS[key]}</span>`,
@@ -346,39 +320,38 @@ function renderText() {
   }
 }
 
-// --- Readout -----------------------------------------------------------------
+// --- Readout -----------------------------------------------------------------------
 
 const placeNames = new Map();
 let placeTimer;
 
 function showReadout(event) {
+  if (!current) return;
   const rect = canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
-  const x = Math.floor((event.clientX - rect.left) * dpr);
-  const y = Math.floor((event.clientY - rect.top) * dpr);
-  if (x < 0 || y < 0 || x >= width || y >= height) return hideReadout();
+  const x = (event.clientX - rect.left) * dpr;
+  const y = (event.clientY - rect.top) * dpr;
+  toGrid();
+  if (!ctx.isPointInPath(outline, x, y)) return hideReadout();
 
-  const i = (y * width + x) * 2;
-  const point = pointAt.get(nearestCell(pixelGrid[i], pixelGrid[i + 1]));
-  if (point === undefined || !ctx.isPointInPath(outline, x, y))
-    return hideReadout();
+  const gx = Math.floor(x / scale + cropX0);
+  const gy = Math.floor(y / scale + cropY0);
+  if (gx < 0 || gy < 0 || gx >= nx || gy >= ny) return hideReadout();
+  const cell = gy * nx + gx;
+  const [lon, lat] = gridProjection.invert([gx + 0.5, gy + 0.5]);
 
-  const lat = bounds.south + meta.cells[point * 2] * step;
-  const lon = bounds.west + meta.cells[point * 2 + 1] * step;
-  const key = `${lat},${lon}`;
-  const monthIndexes = selectedMonths();
-  const rowsHtml = activities
+  // Names are looked up for a ~10 km square, not per 3 km cell, so moving the
+  // pointer across a town does not fire a request per pixel.
+  const key = `${lat.toFixed(1)},${lon.toFixed(1)}`;
+  const rowsHtml = meta.activities
     .map((activityKey) => {
-      const summary = aggregate(point, activityKey, monthIndexes);
+      const summary = readPixel(current.byActivity[activityKey], cell);
       if (!summary) return '';
       const active = activityKey === settings.activity;
-      const why = summary.limiter
-        ? `${FACTOR_LABELS[summary.limiter]} ${percent(summary.lost[factors.indexOf(summary.limiter)])}`
-        : 'none';
       return (
         `<tr class="${active ? 'active' : 'dim'}"><td>${ACTIVITIES[activityKey].short}</td>` +
-        `<td>${percent(summary.good)} Good+</td><td>avg ${Math.round(summary.mean)}</td></tr>` +
-        `<tr class="dim"><td colspan="3">Main cost: ${why} of hours</td></tr>`
+        `<td>${percent(summary.good)} Good+</td><td>avg ${summary.mean}</td></tr>` +
+        `<tr class="dim"><td colspan="3">Main cost: ${summary.limiter ? FACTOR_LABELS[summary.limiter] : 'none'}</td></tr>`
       );
     })
     .join('');
