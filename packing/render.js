@@ -27,9 +27,9 @@ const COLOR_KEYS = {
   border: '--text-dim',
 };
 const FALLBACKS = {
-  ok: '#2f7d5c',
-  bad: '#b1492f',
-  loose: '#2f6f9d',
+  ok: '#4fb98a',
+  bad: '#e07357',
+  loose: '#6cb6e8',
   border: '#888888',
 };
 
@@ -39,12 +39,6 @@ export class Renderer {
     this.ctx = canvas.getContext('2d');
     this.colors = {...FALLBACKS};
     this.refreshColors();
-    // Theme can flip while the page is open; re-read the palette when it does.
-    window
-      .matchMedia('(prefers-color-scheme: dark)')
-      .addEventListener('change', () => {
-        this.refreshColors();
-      });
   }
 
   refreshColors() {

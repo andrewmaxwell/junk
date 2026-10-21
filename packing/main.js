@@ -218,9 +218,6 @@ function toggle() {
 }
 
 window.addEventListener('resize', queueRedraw);
-window
-  .matchMedia('(prefers-color-scheme: dark)')
-  .addEventListener('change', queueRedraw);
 window.addEventListener('pagehide', () => pool.terminate());
 window.addEventListener('pageshow', (event) => {
   if (event.persisted) restart();
