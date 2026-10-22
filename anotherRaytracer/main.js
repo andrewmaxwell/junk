@@ -437,7 +437,8 @@ const loadScene = () => {
   // From the scene's own camera, not the current one, so zooming doesn't
   // change the bumps
   const {position, target} = scene.camera;
-  sceneSize = Math.hypot(...position.map((p, i) => p - target[i]));
+  sceneSize =
+    scene.size ?? Math.hypot(...position.map((p, i) => p - target[i]));
   detailScale = sceneSize / 300;
   objects = scene.objects.map((o) => ({...o}));
   selected = -1;
@@ -1467,6 +1468,9 @@ new ResizeObserver(resize).observe(canvas);
 loadScene();
 const urlEdits = urlParams.get('edits');
 if (urlEdits) loadEdits(urlEdits);
+// Drop anything in the URL that matches the defaults
+saveSettings();
+saveEdits();
 showEdit();
 const urlCamera = urlParams.get('camera')?.split('_').map(Number);
 if (urlCamera?.length === 7 && urlCamera.every(isFinite)) {

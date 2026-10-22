@@ -130,6 +130,7 @@ const skyDome = (radius, center, brightness) => ({
  *   objects: Shape[],
  *   camera: {position: number[], target: number[], zoom: number, focus?: number},
  *   sky?: {sun: number[], haze?: number},
+ *   size?: number,
  *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number},
  * }} Scene
  * The camera orbits `target`, and starts focused on it, or `focus` away if
@@ -138,7 +139,9 @@ const skyDome = (radius, center, brightness) => ({
  * fog's density, the chance per unit of distance that light scatters off
  * it, and `dof` the lens size.
  * `sky` colors sky domes: as the real sky looks with the sun in direction
- * `sun`, and `haze` times as hazy as usual (see sky.js).
+ * `sun`, and `haze` times as hazy as usual (see sky.js). `size` scales the
+ * lens and surface detail; it defaults to the camera's distance from its
+ * target.
  */
 
 /** @type {() => Scene} */
@@ -181,7 +184,13 @@ function cornellScene() {
       sphere(10, [60, 65, 0], [0.5, 0.5, 0.5], DIFFUSE, 0.5, 30), // upper satin ball
       sphere(16, [20, 16, 160], [0.3, 0.3, 0.35], DIFFUSE, 0.6, 2000), // lower left polished ball
     ],
-    camera: {position: [50, 50, 350], target: [50, 33, 10], zoom: 0.5},
+    camera: {
+      position: [50, 50.014, 350],
+      target: [50, 33, 10],
+      zoom: 0.5,
+      focus: 262.872,
+    },
+    defaults: {dof: 0.004},
   };
 }
 
@@ -233,7 +242,13 @@ function veachScene() {
 
   return {
     objects,
-    camera: {position: eye, target: [0, 0.74, -1], zoom: 0.6},
+    camera: {
+      position: [0, 2.002, 20],
+      target: [0, 0.74, -1],
+      zoom: 0.6,
+      focus: 18.7,
+    },
+    defaults: {dof: 0.004},
   };
 }
 
@@ -276,15 +291,20 @@ function shaftsScene() {
     // Dim blue sky behind the camera, through the open front, so shadows
     // and fog outside the beams are cool
     sphere(30, [50, 60, 260], [0.8, 1.4, 3.2], LIGHT),
-    sphere(12, [45, 12, -20], [0.95, 0.95, 0.95], GLASS),
-    sphere(10, [75, 10, -60], [0.95, 0.64, 0.54], MIRROR, 0, 300), // brushed copper
+    sphere(12, [49.532, 12, -14.008], [0.95, 0.95, 0.95], GLASS),
+    sphere(10, [75.715, 10, -41.197], [0.95, 0.64, 0.54], MIRROR, 0, 300), // brushed copper
   ];
   // Blinds across the window, 5.5 tall with gaps of 2.5. Each gap lets in a
   // thin sheet of light, seen edge on from the front.
   for (let y = 40; y < 80; y += 8) objects.push(leftWall(y, y + 5.5, -50, 0));
   return {
     objects,
-    camera: {position: [60, 45, 110], target: [40, 35, -30], zoom: 0.8},
+    camera: {
+      position: [85.214, 26.04, 103.742],
+      target: [46.617, 32.276, -32.534],
+      zoom: 0.8,
+      focus: 149.874,
+    },
     defaults: {fog: 0.004},
   };
 }
@@ -312,7 +332,13 @@ function causticsScene() {
       sphere(3, [-22, 3, 18], [0.97, 0.97, 0.97], GLASS),
       sphere(6, [-32, 6, -10], [0.9, 0.9, 0.9], MIRROR),
     ],
-    camera: {position: [35, 45, 95], target: [0, 4, 10], zoom: 0.65},
+    camera: {
+      position: [35.026, 45.042, 94.969],
+      target: [0, 4, 10],
+      zoom: 0.65,
+      focus: 95.674,
+    },
+    defaults: {dof: 0.004},
   };
 }
 
@@ -352,8 +378,15 @@ function mirrorsScene() {
       sphere(7, [6, 7, 22], [0.97, 0.97, 0.97], GLASS),
       sphere(3, [-16, 3, 26], [0.2, 0.6, 0.3], DIFFUSE, 0.3, 500), // green
     ],
-    // Looking into the left mirror, orbiting a point inside the room
-    camera: {position: [20, 20, 55], target: [-5, 16, 27.5], zoom: 0.8},
+    // Orbiting a point inside the room
+    camera: {
+      position: [42.776, 20.835, 60.095],
+      target: [-5.472, 15.456, 28.498],
+      zoom: 0.8,
+    },
+    // The size of the first view the scene was tuned with, which sets the
+    // surface detail's scale
+    size: 37.4,
   };
 }
 
@@ -483,13 +516,17 @@ function rgbShadowsScene() {
       sphere(4, [16, 4, 14], [0.9, 0.9, 0.9], MIRROR),
     ],
     camera: {
-      position: [-82.95, 40.39, 47],
-      target: [7.507, 14.346, -9.059],
+      position: [-70.148, 23.137, 40.228],
+      target: [5.284, 14.904, -9.279],
       zoom: 0.6,
+      focus: 80.989,
     },
+    // The size of the first view the scene was tuned with, which sets the
+    // lens and surface detail's scale
+    size: 109.6,
     // The lights are each one primary color, so glass has no white light to
     // split into rainbows; dispersion would only add noise
-    defaults: {fog: 0.0004, dispersion: 0, exposure: -1.5, dof: 0.003},
+    defaults: {fog: 0.0004, dispersion: 0, exposure: -1.5, dof: 0.004},
   };
 }
 
