@@ -693,11 +693,27 @@ fn glassIndex(w: f32) -> f32 {
 // over a few sizes, varies them a little from point to point. It depends
 // only on position, so each point stays the same as samples add up.
 
+/**
+ * Three pseudorandom numbers from three, in one go: pcg3d, from "Hash
+ * Functions for GPU Rendering" (Jarzynski & Olano). The noise below hashes
+ * eight lattice points per octave, so this is about 4x quicker than chaining
+ * pcg for each coordinate and output.
+ */
+fn pcg3d(input: vec3u) -> vec3u {
+  var v = input * 1664525u + 1013904223u;
+  v.x += v.y * v.z;
+  v.y += v.z * v.x;
+  v.z += v.x * v.y;
+  v ^= v >> vec3u(16u);
+  v.x += v.y * v.z;
+  v.y += v.z * v.x;
+  v.z += v.x * v.y;
+  return v;
+}
+
 /** A pseudorandom gradient for a lattice point of the noise */
 fn latticeGradient(c: vec3i) -> vec3f {
-  let h = pcg(u32(c.x) + pcg(u32(c.y) + pcg(u32(c.z))));
-  let v = vec3u(h, pcg(h), pcg(h + 1u)) >> vec3u(8u);
-  return vec3f(v) / 8388608. - 1.;
+  return vec3f(pcg3d(vec3u(c)) >> vec3u(8u)) / 8388608. - 1.;
 }
 
 /**
@@ -768,10 +784,17 @@ fn bumpNormal(n: vec3f, p: vec3f) -> vec3f {
   return normalize(n - bumpiness * (slope - n * dot(slope, n)));
 }
 
-/** How smudged glass or a mirror is here, from 0 to 1 */
+/** How smudged glass or a mirror is here, from 0 to 1, fading in gently */
 fn smudge(p: vec3f) -> f32 {
-  return params.detail * smoothstep(0.15, 0.5, fbm(p / (6. * params.detailScale), 4));
+  return params.detail * smoothstep(0.1, 0.5, fbm(p / (6. * params.detailScale), 4));
 }
+/** The most light a smudge scatters, where it's thickest */
+const SMUDGE_HAZE = 0.35;
+/**
+ * How tightly it scatters: the tilt's spread is a Phong lobe this shiny,
+ * about 1 / sqrt(this) = 3° across
+ */
+const SMUDGE_SHININESS = 300.;
 
 ///////////////////////////////
 // Path tracing
@@ -1058,12 +1081,19 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // it colors light inside it, by glassTransmittance.
       if (material == MIRROR) { through *= sColor; }
       bouncePdf = 0.;
-      // Smudges blur reflection and refraction a little: each sample sees
-      // the surface tilted at random, more where it's more smudged
+      // A smudge is a thin greasy film. Most light still reflects or
+      // refracts sharply, but some scatters a little off course, so through
+      // a smudge things look hazy, and bright ones have a soft glow. So
+      // where it's smudged, some samples see the surface tilted at random,
+      // mostly by a little. Later bounces skip it, like bumps: the haze is
+      // too faint to see in a reflection of a reflection, and it's slow.
+      // The smudge is only worked out when the random number is low enough
+      // that it could be, since smudge() <= detail.
       var sn = n;
-      var m = 0.;
-      if (params.detail > 0.) { m = smudge(p); }
-      if (m > 0.) { sn = normalize(n + 0.1 * m * (vec3f(rand(), rand(), rand()) * 2. - 1.)); }
+      let hazy = rand();
+      if (depth < 3 && hazy < SMUDGE_HAZE * params.detail && hazy < SMUDGE_HAZE * smudge(p)) {
+        sn = directionAround(n, pow(rand(), 1. / (SMUDGE_SHININESS + 1.)), 2. * PI * rand());
+      }
       let snl = select(-sn, sn, into);
       var next = reflect(d, sn);
       var reflected = true;
