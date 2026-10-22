@@ -489,7 +489,7 @@ function resetCamera() {
   camera.distance = Math.hypot(...offset);
   camera.yaw = Math.atan2(offset[0], offset[2]);
   camera.pitch = Math.asin(offset[1] / camera.distance);
-  camera.focus = camera.distance;
+  camera.focus = scene.camera.focus ?? camera.distance;
   sceneCamera = cameraParam();
   cameraMoved();
 }

@@ -128,14 +128,15 @@ const skyDome = (radius, center, brightness) => ({
 /**
  * @typedef {{
  *   objects: Shape[],
- *   camera: {position: number[], target: number[], zoom: number},
+ *   camera: {position: number[], target: number[], zoom: number, focus?: number},
  *   sky?: {sun: number[], haze?: number},
  *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number},
  * }} Scene
- * The camera orbits `target`, and starts focused on it. `zoom` is the image
- * height at distance 1. `defaults` overrides the panel's defaults for this
- * scene (see `defaults` in main.js): `fog` is the fog's density, the chance
- * per unit of distance that light scatters off it, and `dof` the lens size.
+ * The camera orbits `target`, and starts focused on it, or `focus` away if
+ * given. `zoom` is the image height at distance 1. `defaults` overrides the
+ * panel's defaults for this scene (see `defaults` in main.js): `fog` is the
+ * fog's density, the chance per unit of distance that light scatters off
+ * it, and `dof` the lens size.
  * `sky` colors sky domes: as the real sky looks with the sun in direction
  * `sun`, and `haze` times as hazy as usual (see sky.js).
  */
@@ -422,11 +423,17 @@ function sunsetScene() {
       sphere(20, [0, 20, 0], [0.8, 0.8, 0.8], DIFFUSE, 0.2, 50),
       sphere(10, [35, 10, 20], [0.95, 0.95, 0.95], GLASS),
       sphere(12, [-40, 12, 30], [0.9, 0.9, 0.9], MIRROR),
-      sphere(6, [10, 6, 45], [0.15, 0.3, 0.6], DIFFUSE, 0.5, 500),
+      sphere(6, [1.9255, 6, 60.734], [0.15, 0.3, 0.6], DIFFUSE, 0.5, 500),
       sphere(40, [-150, 40, -250], [0.45, 0.35, 0.3], DIFFUSE),
       sphere(25, [120, 25, -180], [0.45, 0.35, 0.3], DIFFUSE),
     ],
-    camera: {position: [60, 18, 160], target: [-45, 25, 0], zoom: 0.75},
+    // Focused on the small blue ball
+    camera: {
+      position: [49.764, 18.299, 166.28],
+      target: [-45, 25, 0],
+      zoom: 0.75,
+      focus: 109.273,
+    },
     sky: {sun: [-2800, 250, -1200]},
     // Thin, since the sky has haze of its own
     defaults: {fog: 0.0001, fogForward: 0.7, fogBlue: 1, dof: 0.004},
