@@ -1,6 +1,12 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {LIGHT, hitDistance, packObjects, scenes} from './scenes.js';
-import {displayShader, glowShader, tileShader, traceShader} from './shaders.js';
+import {
+  denoiseShader,
+  displayShader,
+  glowShader,
+  tileShader,
+  traceShader,
+} from './shaders.js';
 import {skyTable} from './sky.js';
 
 /**
@@ -31,6 +37,8 @@ const defaults = {
   noise: 0.02,
   /** How strongly glass splits light into rainbows. See `dispersion` in shaders.js. Scenes can change this default. */
   dispersion: 1,
+  /** Show the image denoised; see denoiseShader in shaders.js */
+  denoise: true,
   /** Fog density; see `fogDensity` in shaders.js. Scenes can change this default. */
   fog: 0,
   /** Which way fog scatters, -1 to 1; see `fogForward` in shaders.js. Scenes can change this default. */
@@ -63,7 +71,12 @@ for (const [key, value] of Object.entries(defaults)) {
   const param = urlParams.get(key);
   if (param === null) continue;
   Object.assign(settings, {
-    [key]: typeof value === 'number' ? Number(param) : param,
+    [key]:
+      typeof value === 'number'
+        ? Number(param)
+        : typeof value === 'boolean'
+          ? param === 'true'
+          : param,
   });
 }
 if (!(settings.scene in scenes)) settings.scene = defaults.scene;
@@ -129,7 +142,16 @@ const device = await adapter.requestDevice({
     maxBufferSize: adapter.limits.maxBufferSize,
   },
 });
-device.lost.then((info) => console.error('WebGPU device lost:', info.message));
+/** Set once something has gone wrong for good */
+let failure = '';
+/** Shows a problem where people will see it, rather than a frozen image */
+const fail = (/** @type {string} */ message) => {
+  failure = message;
+  stats.textContent = message;
+};
+device.lost.then((info) =>
+  fail(`The GPU stopped (${info.message || info.reason}). Reload to try again.`),
+);
 
 const context = /** @type {GPUCanvasContext} */ (canvas.getContext('webgpu'));
 /** Settings that aren't kept in the URL */
@@ -163,9 +185,9 @@ const compile = (code) => {
   const module = device.createShaderModule({code});
   module.getCompilationInfo().then(({messages}) => {
     for (const m of messages) {
-      console[m.type === 'error' ? 'error' : 'warn'](
-        `${m.lineNum}:${m.linePos} ${m.message}`,
-      );
+      const text = `${m.lineNum}:${m.linePos} ${m.message}`;
+      if (m.type === 'error') fail(`Shader error: ${text}`);
+      console[m.type === 'error' ? 'error' : 'warn'](text);
     }
   });
   return module;
@@ -195,9 +217,27 @@ const glowPipelines = ['downsample', 'blurRows', 'blurColumns'].map(
     }),
 );
 
-// Params in shaders.js: 4 × (vec3f + u32), then 20 scalars, padded to a
+const denoiseModule = compile(denoiseShader);
+const [preparePipeline, blurPipeline] = ['prepare', 'blur'].map(
+  (entryPoint) =>
+    device.createComputePipeline({
+      layout: 'auto',
+      compute: {module: denoiseModule, entryPoint},
+    }),
+);
+// The denoiser's passes reach 1, 2, 4, 8 and 16 pixels apart
+const strideBuffers = [1, 2, 4, 8, 16].map((stride) => {
+  const buffer = device.createBuffer({
+    size: 16,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(buffer, 0, new Int32Array([stride, 0, 0, 0]));
+  return buffer;
+});
+
+// Params in shaders.js: 4 × (vec3f + u32), then 21 scalars, padded to a
 // multiple of 16 bytes
-const paramsData = new ArrayBuffer(144);
+const paramsData = new ArrayBuffer(160);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
 const paramsBuffer = device.createBuffer({
@@ -237,6 +277,9 @@ let tileBindGroup;
 let displayBindGroup;
 /** @type {GPUBindGroup[]} */
 let glowBindGroups = [];
+/** The denoiser's prepare pass, then its blur passes */
+/** @type {GPUBindGroup[]} */
+let denoiseBindGroups = [];
 let width = 0;
 let height = 0;
 let tileCount = 0;
@@ -260,7 +303,26 @@ const resize = () => {
   const small = storage(tileCount * 16);
   const rows = storage(tileCount * 32);
   const glow = storage(tileCount * 16);
-  pixelBuffers = [sums, sqSums, tiles, glowSums, small, rows, glow];
+  // The denoiser's guides, and two images it filters back and forth
+  const albedoSums = storage(width * height * 16);
+  const normalDepthSums = storage(width * height * 16);
+  const normalDepth = storage(width * height * 16);
+  const albedoSlope = storage(width * height * 16);
+  const filtered = [storage(width * height * 16), storage(width * height * 16)];
+  pixelBuffers = [
+    sums,
+    sqSums,
+    tiles,
+    glowSums,
+    small,
+    rows,
+    glow,
+    albedoSums,
+    normalDepthSums,
+    normalDepth,
+    albedoSlope,
+    ...filtered,
+  ];
   /**
    * Binds buffers in order, or each at the binding it's keyed by
    * @type {(pipeline: GPUPipelineBase, buffers: GPUBuffer[] | Record<number, GPUBuffer>) => GPUBindGroup}
@@ -281,6 +343,8 @@ const resize = () => {
     tiles,
     glowSums,
     skyBuffer,
+    albedoSums,
+    normalDepthSums,
   ]);
   tileBindGroup = bindGroup(tilePipeline, [
     paramsBuffer,
@@ -294,11 +358,32 @@ const resize = () => {
     {0: paramsBuffer, 3: small, 4: rows},
     {0: paramsBuffer, 4: rows, 5: glow},
   ].map((buffers, i) => bindGroup(glowPipelines[i], buffers));
+  const guides = {0: paramsBuffer, 5: normalDepth, 6: albedoSlope};
+  denoiseBindGroups = [
+    bindGroup(preparePipeline, {
+      ...guides,
+      1: sums,
+      2: sqSums,
+      3: albedoSums,
+      4: normalDepthSums,
+      9: filtered[0],
+    }),
+    // Back and forth, ending in filtered[1]
+    ...strideBuffers.map((stride, i) =>
+      bindGroup(blurPipeline, {
+        ...guides,
+        7: stride,
+        8: filtered[i % 2],
+        9: filtered[(i + 1) % 2],
+      }),
+    ),
+  ];
   displayBindGroup = bindGroup(displayPipeline, [
     paramsBuffer,
     sums,
     tiles,
     glow,
+    filtered[1],
   ]);
   restart();
 };
@@ -429,6 +514,10 @@ let framesInFlight = 0;
 // When the GPU last finished a frame
 let lastDone = 0;
 let startTime = performance.now();
+// When the denoiser last ran
+let lastDenoise = 0;
+// Whether sampling was done or paused as of the last frame
+let wasStopped = false;
 
 function restart() {
   frame = 0;
@@ -477,6 +566,7 @@ const render = (trace = true) => {
   paramsF32[33] = detailScale;
   paramsF32[34] = settings.glow;
   paramsF32[35] = settings.vignette;
+  paramsU32[36] = +settings.denoise;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -495,6 +585,23 @@ const render = (trace = true) => {
   const readActiveTiles = trace && !readingActiveTiles;
   if (readActiveTiles) {
     encoder.copyBufferToBuffer(activeTilesBuffer, 0, activeTilesRead, 0, 4);
+  }
+
+  // Every frame while the image changes fast; after that, a few times a
+  // second is plenty, and leaves the GPU to sampling
+  const now = performance.now();
+  if (
+    settings.denoise &&
+    (!trace || samplesPerPixel < 64 || now - lastDenoise > 150)
+  ) {
+    lastDenoise = now;
+    const pass = encoder.beginComputePass();
+    for (const [i, group] of denoiseBindGroups.entries()) {
+      pass.setPipeline(i ? blurPipeline : preparePipeline);
+      pass.setBindGroup(0, group);
+      pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+    }
+    pass.end();
   }
 
   if (settings.glow > 0) {
@@ -540,6 +647,11 @@ const render = (trace = true) => {
 
 const loop = () => {
   const done = samplesPerPixel >= settings.spp || activeTiles === 0;
+  // Once sampling stops, denoise the final samples, since it skips some
+  // frames while sampling
+  const stopped = done || view.paused;
+  if (stopped && !wasStopped) redraw = true;
+  wasStopped = stopped;
   if (framesInFlight < 2 && !view.paused && !done) {
     if (moving) samplesPerFrame = 1;
     samplesPerFrame = Math.min(samplesPerFrame, settings.spp - samplesPerPixel);
@@ -567,6 +679,7 @@ const loop = () => {
     redraw = false;
   }
 
+  if (failure) return;
   const status = done ? 'done' : view.paused ? 'paused' : 'rendering';
   const secs = (performance.now() - startTime) / 1000;
   const rate = secs ? samplesPerPixel / secs : 0;
@@ -696,6 +809,11 @@ gui.add(view, 'paused').name('pause (space)').listen();
 gui.add({reset: resetCamera}, 'reset').name('reset view (r)');
 gui.add({saveImage}, 'saveImage').name('save image');
 gui
+  .add(settings, 'denoise')
+  .name('denoise (d)')
+  .onChange(() => displayChanged())
+  .listen();
+gui
   .add(settings, 'dof', 0, 0.05, 0.001)
   .name('depth of field (click to focus)')
   .onChange(changed);
@@ -798,6 +916,9 @@ document.addEventListener('keydown', (e) => {
     view.paused = !view.paused;
   } else if (e.key === 'r') {
     resetCamera();
+  } else if (e.key === 'd') {
+    settings.denoise = !settings.denoise;
+    displayChanged();
   } else if (e.key === 'n') {
     view.showTiles = !view.showTiles;
     redraw = true;
