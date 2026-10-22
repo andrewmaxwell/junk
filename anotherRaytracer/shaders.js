@@ -117,12 +117,16 @@ fn peak(c: vec3f) -> f32 {
 const KNEE = 0.6;
 /** How far over white a color is when it's halfway washed out */
 const WASH_OUT = 16.;
+/** How far toward white tone mapping washes out a color with this peak */
+fn washOut(p: f32) -> f32 {
+  let over = max(p - 1., 0.);
+  return over / (over + WASH_OUT);
+}
 fn toneMap(x: vec3f) -> vec3f {
   let p = peak(x);
   if (p <= KNEE) { return x; }
   let eased = KNEE + (1. - KNEE) * (1. - exp((KNEE - p) / (1. - KNEE)));
-  let over = max(p - 1., 0.);
-  return mix(x * (eased / p), vec3f(eased), over / (over + WASH_OUT));
+  return mix(x * (eased / p), vec3f(eased), washOut(p));
 }
 
 /**
@@ -766,8 +770,17 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         // only about half of the paths reach, would average out too dim.
         // The whole color is scaled down, so it keeps its hue; clamping
         // each channel would turn colored lights white.
-        let limit = params.maxBrightness * blurArea(direction, cameraDist) / choiceProb;
-        color += tint * e * min(1., limit / max(e.r, max(e.g, e.b)));
+        let blur = blurArea(direction, cameraDist);
+        // But tone mapping washes colors far brighter than white out toward
+        // white, and the clamp would stop a light from ever getting that
+        // bright, so its reflections in glass would stay deep red or blue,
+        // darker than what's around them. So wash it out first, by how
+        // bright it really is, spread over the pixels it's blurred across.
+        if (params.toneMap == 1u) {
+          e = mix(e, vec3f(peak(e)), washOut(peak(applyContrast(e * params.exposure / blur))));
+        }
+        let limit = params.maxBrightness * blur / choiceProb;
+        color += tint * e * min(1., limit / peak(e));
       } else {
         color += tint * e * indirectScale(e);
       }

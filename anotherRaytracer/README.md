@@ -22,7 +22,7 @@ How it renders:
 - **depth of field** traces rays from random points on a lens, focused at the distance you click.
 - The first few random choices of each sample come from a scrambled Sobol sequence, which spreads samples more evenly than plain random numbers, so noise fades faster.
 - Adaptive sampling: every 8×8 tile gets at least 32 samples, then stops once its estimated noise is below the **noise target**. Noise is measured in each color channel as displayed, so speckles that differ only in color, or that show in areas brighter than white, still count. **show refining tiles** highlights the ones still going.
-- HDR screens show lights brighter than white (in Safari; Chrome on macOS clips them). On SDR screens, bright areas ease into white instead of clipping, keeping their color, so a bright orange light still looks orange.
+- HDR screens show lights brighter than white (in Safari; Chrome on macOS clips them). On SDR screens, bright areas ease into white instead of clipping, keeping their color, so a bright orange light still looks orange. Colors far brighter than white wash out toward white, like film, so lights and their reflections in glass and mirrors have white-hot cores.
 - Out-of-focus lights spread into discs that stay as bright as they should.
 
 - `main.js` – WebGPU setup, the frame loop, camera, controls, and the lil-gui panel
