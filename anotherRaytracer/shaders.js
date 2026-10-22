@@ -842,7 +842,12 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // Saved, since shadow rays change hitDist
     let end = hitDist;
     if (seenByCamera) { cameraDist += end; }
-    let fogLit = params.fogDensity > 0. && params.sampling != 2u && params.lightCount > 0u;
+    // Fog fills the scene, out to its farthest surfaces, not all of space: a
+    // ray that hits nothing has left it. Otherwise rays escaping an open
+    // scene would wander on through endless fog, far from any light, which
+    // took most of the time in foggy scenes and added nothing visible.
+    let foggy = params.fogDensity > 0. && hit >= 0;
+    let fogLit = foggy && params.sampling != 2u && params.lightCount > 0u;
     // Only on rays the camera sees directly, where the glow around lights
     // shows the most. Later bounces aren't worth the extra shadow ray.
     let equiangular = fogLit && seenByCamera;
@@ -879,7 +884,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // picked using one of them at random, and the throughput corrects for
     // how likely the others were to stop there or get past it.
     var fogDist = 1e30;
-    if (params.fogDensity > 0.) {
+    if (foggy) {
       let u = rand2();
       let densities = fogDensities();
       let density = densities[min(u32(u.y * 3.), 2u)];
@@ -980,7 +985,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // Russian roulette: after a few bounces, end the path at random, and
     // boost the survivors to make up for the ones that ended
     if (depth >= 5) {
-      let q = min(0.95, max(sColor.r, max(sColor.g, sColor.b)) + shape.surface.x);
+      let q = min(0.95, peak(through));
       if (rand() >= q) { break; }
       through /= q;
       choiceProb *= q;
