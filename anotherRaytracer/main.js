@@ -743,11 +743,15 @@ const loop = () => {
   stats.textContent =
     `${status} · ${samplesPerPixel} spp · ${rate.toFixed(0)} spp/s · ` +
     `${activeTiles < 0 ? '–' : Math.round((100 * activeTiles) / tileCount)}% refining · ` +
-    `${width}×${height}\n` +
-    'drag: orbit · shift/right drag: pan · scroll: zoom · click: focus · ' +
-    'space: pause · r: reset view';
+    `${width}×${height}${settings.denoise ? ' · denoised' : ''}\n` +
+    hints;
   requestAnimationFrame(loop);
 };
+
+const hints = matchMedia('(pointer: coarse)').matches
+  ? 'drag: orbit · pinch: zoom · two fingers: pan · tap: select and focus'
+  : 'drag: orbit · shift/right drag: pan · scroll: zoom · ' +
+    'click: select and focus · space: pause · r: reset view';
 
 /** Call whenever the camera changes */
 const cameraMoved = () => {
