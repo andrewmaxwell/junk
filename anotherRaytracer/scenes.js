@@ -28,8 +28,8 @@ export const LIGHT = 3;
  * Spheres use `radius`. Plates are rectangles facing `normal`, spanning
  * halfWidth along u and halfHeight along v.
  *
- * `color` is the surface color, or for lights, the emitted light. Lights must
- * be spheres.
+ * `color` is the surface color, or for lights, the emitted light. Plate
+ * lights shine from their front only.
  *
  * Diffuse surfaces are paint, which can have a glossy clear coat, like
  * varnish: `gloss` is how much of the surface it covers (0 to 1). Like real
@@ -546,12 +546,16 @@ export const scenes = {
 
 /**
  * Packs shapes into the `Shape` structs of the `objects` buffer in shaders.js:
- * six vec4s per shape.
+ * six vec4s per shape. Plates' radius is a ball's of the same area, for
+ * lightGuess.
  * @type {(objects: Shape[]) => Float32Array} */
 export const packObjects = (objects) =>
   new Float32Array(
     objects.flatMap((s) => [
-      ...[...s.center, s.radius],
+      ...s.center,
+      s.shape === PLATE
+        ? Math.sqrt((4 * s.halfWidth * s.halfHeight) / Math.PI)
+        : s.radius,
       ...[...s.normal, s.shape],
       ...[...s.u, s.halfWidth],
       ...[...s.v, s.halfHeight],

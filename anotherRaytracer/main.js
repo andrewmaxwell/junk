@@ -1066,7 +1066,7 @@ const edit = {
 
 /** What to call an object */
 const describe = (/** @type {import('./scenes.js').Shape} */ o) => {
-  if (o.material === LIGHT) return 'light';
+  if (o.material === LIGHT) return o.shape === SPHERE ? 'light' : 'light panel';
   const material = Object.keys(materials).find(
     (k) => materials[/** @type {keyof typeof materials} */ (k)] === o.material,
   );
@@ -1127,7 +1127,9 @@ const showEdit = () => {
     edit.brightness = +Math.log2(peak).toFixed(1);
   } else {
     edit.color = toHex(o.color);
-    edit.brightness = 5;
+    // Brightness to start at if it becomes a light: a ball glows, but a
+    // whole wall as bright would be blinding
+    edit.brightness = o.shape === SPHERE ? 5 : 1;
   }
   edit.gloss = o.gloss;
   edit.roughness = o.roughness;
@@ -1164,12 +1166,6 @@ const applyEdit = () => {
   if (!o) return;
   const material =
     materials[/** @type {keyof typeof materials} */ (edit.material)];
-  // The shader can only aim at round lights
-  if (material === LIGHT && o.shape !== SPHERE) {
-    showEdit();
-    objectFolder.title(`Objects: ${describe(o)} (only balls can be lights)`);
-    return;
-  }
   const peak = Math.max(...o.color);
   const color =
     edit.color !== shownColor

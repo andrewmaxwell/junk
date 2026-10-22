@@ -322,6 +322,8 @@ fn skyColor(d: vec3f) -> vec3f {
 /** The light a light gives off toward a viewer looking in direction d */
 fn emitted(light: u32, d: vec3f) -> vec3f {
   let color = objects[light].colorMaterial.rgb;
+  // Plates shine from their front only, like a window or a lamp's panel
+  if (isPlate(light)) { return select(vec3f(0.), color, dot(d, objects[light].normalShape.xyz) < 0.); }
   if (objects[light].surface.w == 0.) { return color; }
   return color * skyColor(d);
 }
@@ -496,17 +498,93 @@ fn lightConeOneMinusCos(p: vec3f, light: u32) -> f32 {
   return sinMaxSq / (1. + sqrt(1. - sinMaxSq));
 }
 
+fn isPlate(s: u32) -> bool {
+  return i32(objects[s].normalShape.w) == PLATE;
+}
+
+/**
+ * A plate light as seen from p, which must be in front of it, in a frame
+ * with x and y along its sides and z along its normal: its corners' x and y
+ * from p, its depth z0 (negative), and the normals of the four planes
+ * through p and each edge, for sampleRectangle
+ */
+struct RectView {
+  x0: f32, x1: f32, y0: f32, y1: f32, z0: f32,
+  n0: vec3f, n1: vec3f, n2: vec3f, n3: vec3f,
+  /** The solid angle it covers */
+  solidAngle: f32,
+}
+
+/** The angle between unit vectors, accurately even when they nearly line up */
+fn angleBetween(a: vec3f, b: vec3f) -> f32 {
+  if (dot(a, b) < 0.) { return PI - 2. * asin(min(length(a + b) / 2., 1.)); }
+  return 2. * asin(min(length(b - a) / 2., 1.));
+}
+
+fn rectView(p: vec3f, light: u32) -> RectView {
+  let o = objects[light];
+  let u = o.uHalf.xyz;
+  let v = o.vHalf.xyz;
+  let corner = o.centerRadius.xyz - u * o.uHalf.w - v * o.vHalf.w - p;
+  var r: RectView;
+  r.x0 = dot(corner, u);
+  r.y0 = dot(corner, v);
+  r.z0 = dot(corner, o.normalShape.xyz);
+  r.x1 = r.x0 + 2. * o.uHalf.w;
+  r.y1 = r.y0 + 2. * o.vHalf.w;
+  let v00 = vec3f(r.x0, r.y0, r.z0);
+  let v01 = vec3f(r.x0, r.y1, r.z0);
+  let v10 = vec3f(r.x1, r.y0, r.z0);
+  let v11 = vec3f(r.x1, r.y1, r.z0);
+  r.n0 = normalize(cross(v00, v10));
+  r.n1 = normalize(cross(v10, v11));
+  r.n2 = normalize(cross(v11, v01));
+  r.n3 = normalize(cross(v01, v00));
+  r.solidAngle = angleBetween(-r.n0, r.n1) + angleBetween(-r.n1, r.n2) +
+    angleBetween(-r.n2, r.n3) + angleBetween(-r.n3, r.n0) - 2. * PI;
+  return r;
+}
+
+/**
+ * Below this solid angle, the sum of angles above loses too much precision
+ * in 32-bit floats, and plate lights are sampled by area instead. They look
+ * small then, so it makes little difference.
+ */
+const MIN_SOLID_ANGLE = 1e-3;
+
+/** Whether p is in front of plate light, where it shines */
+fn inFrontOf(p: vec3f, light: u32) -> bool {
+  return dot(p - objects[light].centerRadius.xyz, objects[light].normalShape.xyz) > 0.;
+}
+
+/**
+ * The probability density, per solid angle, that sampleLight picks the
+ * direction l toward light from p, which hits it at distance dist
+ */
+fn lightPdf(p: vec3f, l: vec3f, dist: f32, light: u32) -> f32 {
+  if (!isPlate(light)) { return 1. / (2. * PI * lightConeOneMinusCos(p, light)); }
+  if (!inFrontOf(p, light)) { return 0.; }
+  let solidAngle = rectView(p, light).solidAngle;
+  if (solidAngle >= MIN_SOLID_ANGLE) { return 1. / solidAngle; }
+  let o = objects[light];
+  let area = 4. * o.uHalf.w * o.vHalf.w;
+  return dist * dist / (area * max(abs(dot(l, o.normalShape.xyz)), 1e-6));
+}
+
 /** MIS weight for a strategy with density a, competing with density b. */
 fn powerHeuristic(a: f32, b: f32) -> f32 {
   return a * a / (a * a + b * b);
 }
 
-/** How much a light hit by a random diffuse bounce from p should count. */
-fn bounceLightWeight(p: vec3f, bouncePdf: f32, light: u32) -> f32 {
+/**
+ * How much a light hit by a random bounce from p, in direction d, at
+ * distance dist, should count
+ */
+fn bounceLightWeight(p: vec3f, d: vec3f, dist: f32, bouncePdf: f32, light: u32) -> f32 {
   if (params.sampling == 2u) { return 1.; }
   if (params.sampling == 1u) { return 0.; } // light sampling already counted it
-  let lightPdf = lightPickProb(p, vec3f(0.), false, light) / (2. * PI * lightConeOneMinusCos(p, light));
-  return powerHeuristic(bouncePdf, lightPdf);
+  let pdf = lightPickProb(p, vec3f(0.), false, light) * lightPdf(p, d, dist, light);
+  return powerHeuristic(bouncePdf, pdf);
 }
 
 /** Scale factor that caps a bounced-light contribution at maxIndirect. */
@@ -722,10 +800,53 @@ fn samplePhase(d: vec3f) -> vec3f {
 }
 
 /**
- * Picks a random direction from p toward a light, uniformly within the cone
- * it covers. Returns the direction, and in w the cone's solid angle.
+ * A random point on plate light, seen from p in front of it, picked evenly
+ * by the solid angle it covers rather than by its area, so a big light up
+ * close, like a ceiling, isn't sampled mostly far off at grazing angles.
+ * From "An Area-Preserving Parametrization for Spherical Rectangles" (Ureña,
+ * Fajardo & King), as pbrt-v4 has it.
+ */
+fn sampleRectangle(p: vec3f, light: u32, r: RectView, u: vec2f) -> vec3f {
+  let g0 = angleBetween(-r.n0, r.n1);
+  let g1 = angleBetween(-r.n1, r.n2);
+  let g2 = angleBetween(-r.n2, r.n3);
+  let g3 = angleBetween(-r.n3, r.n0);
+  // Pick x so each strip of the rectangle gets its share of the solid angle
+  let au = u.x * (g0 + g1 - 2. * PI) + (u.x - 1.) * (g2 + g3);
+  let fu = (cos(au) * r.n0.z - r.n2.z) / sin(au);
+  let cu = clamp(sign(fu) / sqrt(fu * fu + r.n0.z * r.n0.z), -0.99999, 0.99999);
+  let xu = clamp(-(cu * r.z0) / sqrt(1. - cu * cu), r.x0, r.x1);
+  // Then y, evenly by solid angle along that strip
+  let dd = sqrt(xu * xu + r.z0 * r.z0);
+  let h0 = r.y0 / sqrt(dd * dd + r.y0 * r.y0);
+  let h1 = r.y1 / sqrt(dd * dd + r.y1 * r.y1);
+  let hv = h0 + u.y * (h1 - h0);
+  let yv = select(r.y1, hv * dd / sqrt(1. - hv * hv), hv * hv < 0.99999);
+  let o = objects[light];
+  return p + o.uHalf.xyz * xu + o.vHalf.xyz * yv + o.normalShape.xyz * r.z0;
+}
+
+/**
+ * Picks a random direction from p toward a light: uniformly within the cone
+ * a ball covers, or the solid angle a plate covers. Returns the direction,
+ * and in w 1 / its probability density, which is the solid angle if it's
+ * even, or 0 for a plate facing away.
  */
 fn sampleLight(p: vec3f, light: u32) -> vec4f {
+  if (isPlate(light)) {
+    if (!inFrontOf(p, light)) { return vec4f(0., 0., 1., 0.); }
+    let u = rand2();
+    let r = rectView(p, light);
+    if (r.solidAngle >= MIN_SOLID_ANGLE) {
+      return vec4f(normalize(sampleRectangle(p, light, r, u) - p), r.solidAngle);
+    }
+    // Small or far: evenly by area
+    let o = objects[light];
+    let q = o.centerRadius.xyz + o.uHalf.xyz * o.uHalf.w * (2. * u.x - 1.) +
+      o.vHalf.xyz * o.vHalf.w * (2. * u.y - 1.);
+    let l = normalize(q - p);
+    return vec4f(l, 1. / lightPdf(p, l, length(q - p), light));
+  }
   let w = normalize(objects[light].centerRadius.xyz - p);
   let oneMinusCos = lightConeOneMinusCos(p, light);
   let u = rand2();
@@ -745,10 +866,17 @@ fn sampleLight(p: vec3f, light: u32) -> vec4f {
  */
 fn lightGuess(p: vec3f, d: vec3f, alongRay: bool, light: u32) -> f32 {
   let b = brightness(objects[light].colorMaterial.rgb);
-  if (!alongRay) { return b * lightConeOneMinusCos(p, light); }
   let c = objects[light].centerRadius.xyz - p;
+  // For plates, a ball of the same area; see packObjects in scenes.js. One
+  // formula for both, since a branch here, run for every light several
+  // times a bounce, slowed everything down by 12%.
   let r = objects[light].centerRadius.w;
-  return b * r * r / max(length(c - d * dot(c, d)), r);
+  if (alongRay) { return b * r * r / max(length(c - d * dot(c, d)), r); }
+  // Plates shine from the front only, and look smaller edge on. Balls have
+  // no normal.
+  let n = objects[light].normalShape.xyz;
+  let facing = select(1., max(-dot(c, n), 0.) / length(c), dot(n, n) > 0.);
+  return b * facing * lightConeOneMinusCos(p, light);
 }
 
 /**
@@ -810,9 +938,12 @@ fn equiangularPdf(o: vec3f, d: vec3f, tMax: f32, light: u32, t: f32) -> f32 {
   return a.w / ((a.y - a.x) * (a.w * a.w + s * s));
 }
 
-/** Fraction of the light, per channel, that gets from p along l to the light: 0 if blocked, less in fog */
-fn lightVisibility(p: vec3f, l: vec3f, light: u32) -> vec3f {
-  if (intersect(p, l) != i32(light)) { return vec3f(0.); }
+/**
+ * Fraction of the light, per channel, that gets from p to the light along a
+ * sampleLight sample: 0 if blocked or the light faces away, less in fog
+ */
+fn lightVisibility(p: vec3f, ls: vec4f, light: u32) -> vec3f {
+  if (ls.w <= 0. || intersect(p, ls.xyz) != i32(light)) { return vec3f(0.); }
   return exp(-fogDensities() * hitDist);
 }
 
@@ -1071,7 +1202,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       let eq = sampleEquiangular(o, d, end, light, u.y);
       let p = o + d * eq.x;
       let ls = sampleLight(p, light);
-      let visible = lightVisibility(p, ls.xyz, light);
+      let visible = lightVisibility(p, ls, light);
       if (any(visible > vec3f(0.))) {
         let pick = lightPickProb(p, vec3f(0.), false, light);
         let transmittance = exp(-fogDensities() * eq.x);
@@ -1125,7 +1256,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         let light = pickLight(p, vec3f(0.), false, rand2().x);
         let pick = lightPickProb(p, vec3f(0.), false, light);
         let ls = sampleLight(p, light);
-        let visible = lightVisibility(p, ls.xyz, light);
+        let visible = lightVisibility(p, ls, light);
         if (any(visible > vec3f(0.))) {
           var weight = 1.;
           if (equiangular) {
@@ -1159,7 +1290,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
     if (material == LIGHT) {
       var w = 1.;
-      if (bouncePdf > 0.) { w = bounceLightWeight(o, bouncePdf, s); }
+      if (bouncePdf > 0.) { w = bounceLightWeight(o, d, end, bouncePdf, s); }
       var e = emitted(s, d) * w * through;
       if (seenByCamera) {
         // The light is far brighter than the screen can show. Clamping it
@@ -1233,7 +1364,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         // Only counts if the light is in front of this surface, and nothing
         // is in the way
         var visible = vec3f(0.);
-        if (cosSurface > 0. && dot(l, nl) > 0.) { visible = lightVisibility(p + nl * EPSILON, l, light); }
+        if (cosSurface > 0. && dot(l, nl) > 0.) { visible = lightVisibility(p + nl * EPSILON, ls, light); }
         if (any(visible > vec3f(0.))) {
           // radiance * BSDF * cos(theta) / pdf, where the pdf is the chance
           // of picking this light over the cone's solid angle
