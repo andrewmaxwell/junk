@@ -99,6 +99,54 @@ fn tileIndex(id: vec2u) -> u32 {
 fn brightness(c: vec3f) -> f32 {
   return dot(c, vec3f(0.2126, 0.7152, 0.0722));
 }
+
+/** The brightest of a color's channels */
+fn peak(c: vec3f) -> f32 {
+  return max(c.r, max(c.g, c.b));
+}
+
+/**
+ * For SDR screens. Below the knee, brightness is left alone. Above it, it
+ * eases toward white instead of clipping, so bright areas keep their shading:
+ * 1 shows as 0.85, 2 as 0.99. The whole color is scaled by how much its
+ * brightest channel eases, so it keeps its hue; easing each channel
+ * separately would turn every bright color white. Then, like film or an eye,
+ * colors much brighter than white do wash out toward white, but gradually:
+ * a light 8 times white keeps most of its color.
+ */
+const KNEE = 0.6;
+/** How far over white a color is when it's halfway washed out */
+const WASH_OUT = 16.;
+fn toneMap(x: vec3f) -> vec3f {
+  let p = peak(x);
+  if (p <= KNEE) { return x; }
+  let eased = KNEE + (1. - KNEE) * (1. - exp((KNEE - p) / (1. - KNEE)));
+  let over = max(p - 1., 0.);
+  return mix(x * (eased / p), vec3f(eased), over / (over + WASH_OUT));
+}
+
+/**
+ * Over 1, darkens what's darker than middle gray and brightens what's
+ * brighter, by raising brightness relative to middle gray to this power.
+ * Each channel separately, so colors get a bit richer too.
+ */
+const MIDDLE_GRAY = 0.18;
+fn applyContrast(x: vec3f) -> vec3f {
+  return MIDDLE_GRAY * pow(max(x, vec3f(0.)) / MIDDLE_GRAY, vec3f(params.contrast));
+}
+
+/** A linear color as the display shows it, before sRGB encoding */
+fn shown(c: vec3f) -> vec3f {
+  var color = applyContrast(c * params.exposure);
+  if (params.toneMap == 1u) {
+    color = toneMap(color);
+  } else if (peak(color) > params.maxBrightness) {
+    // Brighter than the screen can show. Scale the whole color down, rather
+    // than letting the screen clip each channel, which turns colors white.
+    color *= params.maxBrightness / peak(color);
+  }
+  return color;
+}
 `;
 
 export const traceShader = /* wgsl */ `${common}
@@ -159,8 +207,12 @@ struct Shape {
 @group(0) @binding(1) var<storage, read> objects: array<Shape>;
 /** Per pixel: summed color, and in w the sample count */
 @group(0) @binding(2) var<storage, read_write> sums: array<vec4f>;
-/** Per pixel: summed squared brightness, for estimating noise */
-@group(0) @binding(3) var<storage, read_write> sqSums: array<f32>;
+/**
+ * Per pixel: summed squared color, each channel separately, for estimating
+ * noise. Not just brightness: under differently colored lights, samples can
+ * be equally bright but differently colored. w is unused.
+ */
+@group(0) @binding(3) var<storage, read_write> sqSums: array<vec4f>;
 /** Per tile: 1 if it still needs samples. Written by tileShader. */
 @group(0) @binding(4) var<storage, read> tiles: array<u32>;
 
@@ -853,14 +905,14 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let size = vec2f(f32(params.width), f32(params.height));
   let index = id.y * params.width + id.x;
   var prev = vec4f(0.);
-  var prevSq = 0.;
+  var prevSq = vec4f(0.);
   if (params.frame > 0u) {
     prev = sums[index];
     prevSq = sqSums[index];
   }
 
   var sum = vec3f(0.);
-  var sqSum = 0.;
+  var sqSum = vec3f(0.);
   for (var i = 0u; i < params.samplesPerFrame; i++) {
     sampleIndex = u32(prev.w) + i;
     dimension = 0u;
@@ -883,10 +935,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     }
     let c = trace(o, normalize(dir));
     sum += c;
-    sqSum += brightness(c) * brightness(c);
+    sqSum += c * c;
   }
   sums[index] = prev + vec4f(sum, f32(params.samplesPerFrame));
-  sqSums[index] = prevSq + sqSum;
+  sqSums[index] = prevSq + vec4f(sqSum, 0.);
 }`;
 
 /**
@@ -900,7 +952,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
  */
 export const tileShader = /* wgsl */ `${common}
 @group(0) @binding(1) var<storage, read> sums: array<vec4f>;
-@group(0) @binding(2) var<storage, read> sqSums: array<f32>;
+@group(0) @binding(2) var<storage, read> sqSums: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> tiles: array<u32>;
 /** How many tiles are still going, for main.js to show and to know when to stop */
 @group(0) @binding(4) var<storage, read_write> activeTiles: atomic<u32>;
@@ -911,10 +963,6 @@ const MIN_SAMPLES = 32.;
 /** Each pixel's squared noise */
 var<workgroup> noise: array<f32, TILE * TILE>;
 
-/** Brightness as displayed, roughly: clipped to white, with gamma */
-fn display(x: f32) -> f32 {
-  return pow(clamp(x, 0., 1.), 1. / 2.2);
-}
 
 @compute @workgroup_size(TILE, TILE)
 fn main(@builtin(global_invocation_id) id: vec3u, @builtin(local_invocation_index) local: u32) {
@@ -922,13 +970,19 @@ fn main(@builtin(global_invocation_id) id: vec3u, @builtin(local_invocation_inde
   if (id.x < params.width && id.y < params.height) {
     let s = sums[id.y * params.width + id.x];
     let count = max(s.w, 1.);
-    let mean = brightness(s.rgb) / count;
-    let variance = max(0., sqSums[id.y * params.width + id.x] / count - mean * mean);
+    let color = s.rgb / count;
+    let variance = max(vec3f(0.), sqSums[id.y * params.width + id.x].rgb / count - color * color);
     // Standard error: how far the average of the samples is likely to be off
     let stdErr = sqrt(variance / count);
-    // In display brightness, where dark values are stretched by gamma
-    let e = display(mean + stdErr) - display(mean - stdErr);
-    n = e * e;
+    // As displayed. The display scales a color as a whole, which keeps its
+    // hue, so near white, where it squeezes brightness, differences in hue
+    // still show. So scale the noise by how much it scales this color, then
+    // apply gamma, which stretches dark values.
+    let c = shown(color);
+    let err = stdErr * brightness(c) / max(brightness(color), 1e-6);
+    let e = pow(c + err, vec3f(1. / 2.2)) - pow(max(c - err, vec3f(0.)), vec3f(1. / 2.2));
+    // Averaged over the channels
+    n = dot(e, e) / 3.;
   }
   noise[local] = n;
   workgroupBarrier();
@@ -961,52 +1015,10 @@ fn vertex(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   return vec4f(corners[i], 0., 1.);
 }
 
-/** The brightest of a color's channels */
-fn peak(c: vec3f) -> f32 {
-  return max(c.r, max(c.g, c.b));
-}
-
-/**
- * For SDR screens. Below the knee, brightness is left alone. Above it, it
- * eases toward white instead of clipping, so bright areas keep their shading:
- * 1 shows as 0.85, 2 as 0.99. The whole color is scaled by how much its
- * brightest channel eases, so it keeps its hue; easing each channel
- * separately would turn every bright color white. Then, like film or an eye,
- * colors much brighter than white do wash out toward white, but gradually:
- * a light 8 times white keeps most of its color.
- */
-const KNEE = 0.6;
-/** How far over white a color is when it's halfway washed out */
-const WASH_OUT = 16.;
-fn toneMap(x: vec3f) -> vec3f {
-  let p = peak(x);
-  if (p <= KNEE) { return x; }
-  let eased = KNEE + (1. - KNEE) * (1. - exp((KNEE - p) / (1. - KNEE)));
-  let over = max(p - 1., 0.);
-  return mix(x * (eased / p), vec3f(eased), over / (over + WASH_OUT));
-}
-
-/**
- * Over 1, darkens what's darker than middle gray and brightens what's
- * brighter, by raising brightness relative to middle gray to this power.
- * Each channel separately, so colors get a bit richer too.
- */
-const MIDDLE_GRAY = 0.18;
-fn applyContrast(x: vec3f) -> vec3f {
-  return MIDDLE_GRAY * pow(max(x, vec3f(0.)) / MIDDLE_GRAY, vec3f(params.contrast));
-}
-
 @fragment
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let s = sums[u32(pos.y) * params.width + u32(pos.x)];
-  var color = applyContrast(s.rgb / max(s.w, 1.) * params.exposure);
-  if (params.toneMap == 1u) {
-    color = toneMap(color);
-  } else if (peak(color) > params.maxBrightness) {
-    // Brighter than the screen can show. Scale the whole color down, rather
-    // than letting the screen clip each channel, which turns colors white.
-    color *= params.maxBrightness / peak(color);
-  }
+  var color = shown(s.rgb / max(s.w, 1.));
   if (params.showTiles == 1u && tiles[tileIndex(vec2u(pos.xy))] == 1u) {
     color = mix(color, vec3f(1., 0., 0.), 0.3);
   }

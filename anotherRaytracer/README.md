@@ -1,6 +1,6 @@
 Another Raytracer - 2026 - A WebGPU path tracer with fog, rainbow glass, and depth of field.
 
-A progressive path tracer in a WebGPU compute shader: spheres and flat plates, with diffuse, glossy, mirror, brushed metal, glass and light materials. Drag to orbit, shift-drag or right-drag to pan, scroll to zoom, and click to focus. The panel switches scenes and changes everything else; settings that differ from the defaults are kept in the URL, so the address bar is a shareable link. **save image** downloads a PNG.
+A progressive path tracer in a WebGPU compute shader: spheres and flat plates, with diffuse, glossy, mirror, brushed metal, glass and light materials. Drag to orbit, shift-drag or right-drag to pan, scroll to zoom, and click to focus. The panel switches scenes and changes everything else; the view and any settings that differ from the defaults are kept in the URL, so the address bar is a shareable link. **save image** downloads a PNG.
 
 Scenes:
 
@@ -11,6 +11,7 @@ Scenes:
 - **mirrors**: two facing mirrors reflecting glowing orbs and balls into the distance
 - **bokeh**: balls on a polished black table, with fairy lights behind blurred into discs by depth of field
 - **sunset**: balls on a plain with long shadows, a low sun, and hazy air that glows around it
+- **rgb**: a red, a green and a blue light in light fog, casting cyan, magenta and yellow shadows that overlap into red, green, blue and black, of a floating ball, two posts, and glass and mirror balls
 
 How it renders:
 
@@ -20,7 +21,7 @@ How it renders:
 - **glass dispersion**: the first time a path refracts, it follows one random wavelength, which bends by its own amount, so glass casts rainbow-edged caustics.
 - **depth of field** traces rays from random points on a lens, focused at the distance you click.
 - The first few random choices of each sample come from a scrambled Sobol sequence, which spreads samples more evenly than plain random numbers, so noise fades faster.
-- Adaptive sampling: every 8×8 tile gets at least 32 samples, then stops once its estimated noise is below the **noise target**. **show refining tiles** highlights the ones still going.
+- Adaptive sampling: every 8×8 tile gets at least 32 samples, then stops once its estimated noise is below the **noise target**. Noise is measured in each color channel as displayed, so speckles that differ only in color, or that show in areas brighter than white, still count. **show refining tiles** highlights the ones still going.
 - HDR screens show lights brighter than white (in Safari; Chrome on macOS clips them). On SDR screens, bright areas ease into white instead of clipping, keeping their color, so a bright orange light still looks orange.
 - Out-of-focus lights spread into discs that stay as bright as they should.
 

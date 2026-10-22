@@ -28,7 +28,7 @@ const defaults = {
    * `noiseThreshold` in shaders.js
    */
   noise: 0.02,
-  /** How strongly glass splits light into rainbows. See `dispersion` in shaders.js */
+  /** How strongly glass splits light into rainbows. See `dispersion` in shaders.js. Scenes can change this default. */
   dispersion: 1,
   /** Fog density; see `fogDensity` in shaders.js. Scenes can change this default. */
   fog: 0,
@@ -64,7 +64,7 @@ for (const [key, value] of Object.entries(defaults)) {
 if (!(settings.scene in scenes)) settings.scene = defaults.scene;
 
 /** Settings each scene can pick its own default for; see `Scene` in scenes.js */
-const sceneKeys = ['fog', 'fogForward', 'fogBlue', 'dof'];
+const sceneKeys = ['fog', 'fogForward', 'fogBlue', 'dof', 'dispersion'];
 /** The default for a setting in this scene, which the URL leaves out */
 const sceneDefault = (/** @type {string} */ key) =>
   scenes[settings.scene]().defaults?.[key] ??
@@ -223,7 +223,7 @@ const resize = () => {
   const storage = (size) =>
     device.createBuffer({size, usage: GPUBufferUsage.STORAGE});
   const sums = storage(width * height * 16);
-  const sqSums = storage(width * height * 4);
+  const sqSums = storage(width * height * 16);
   const tiles = storage(tileCount * 4);
   pixelBuffers = [sums, sqSums, tiles];
   /** @type {(pipeline: GPUPipelineBase, buffers: GPUBuffer[]) => GPUBindGroup} */
@@ -288,8 +288,29 @@ function resetCamera() {
   camera.yaw = Math.atan2(offset[0], offset[2]);
   camera.pitch = Math.asin(offset[1] / camera.distance);
   camera.focus = camera.distance;
+  sceneCamera = cameraParam();
   cameraMoved();
 }
+
+/** The camera as the URL keeps it: target, yaw, pitch, distance and focus */
+const cameraParam = () =>
+  [...camera.target, camera.yaw, camera.pitch, camera.distance, camera.focus]
+    .map((x) => +x.toFixed(3))
+    .join('_');
+/** cameraParam for the scene's own camera, which the URL leaves out */
+let sceneCamera = '';
+let saveCameraTimer = 0;
+/** Puts the camera in the URL once it stops moving, since browsers limit how often the URL can change */
+const saveCamera = () => {
+  clearTimeout(saveCameraTimer);
+  saveCameraTimer = setTimeout(() => {
+    const url = new URL(location.href);
+    const value = cameraParam();
+    if (value === sceneCamera) url.searchParams.delete('camera');
+    else url.searchParams.set('camera', value);
+    history.replaceState(null, '', url);
+  }, 300);
+};
 
 /** @type {(a: number[], b: number[]) => number[]} */
 const cross = ([ax, ay, az], [bx, by, bz]) => [
@@ -484,6 +505,7 @@ const loop = () => {
 const cameraMoved = () => {
   moving = true;
   restart();
+  saveCamera();
 };
 
 ///////////////////////////////
@@ -544,6 +566,7 @@ canvas.addEventListener('pointerup', (e) => {
   if (!isFinite(t)) return;
   // The lens focuses on a plane, so it's the depth that matters
   camera.focus = t * forward.reduce((sum, f, i) => sum + f * d[i], 0);
+  saveCamera();
   if (settings.dof > 0) restart();
 });
 /** Downloads the image as shown, as a PNG */
@@ -622,18 +645,19 @@ light
   })
   .onChange(changed);
 
+// Adaptive sampling measures noise as displayed, so tiles that looked done
+// may need more samples now
+const displayChanged = () => {
+  saveSettings();
+  activeTiles = -1;
+  redraw = true;
+};
 const display = gui.addFolder('Display');
 display
   .add(settings, 'exposure', -4, 4, 0.1)
   .name('exposure (stops)')
-  .onChange(() => {
-    saveSettings();
-    redraw = true;
-  });
-display.add(settings, 'contrast', 0.5, 2, 0.05).onChange(() => {
-  saveSettings();
-  redraw = true;
-});
+  .onChange(displayChanged);
+display.add(settings, 'contrast', 0.5, 2, 0.05).onChange(displayChanged);
 display.add(view, 'hdr').name('HDR (h)').onChange(saveHdr).listen();
 display
   .add(view, 'toneMapping')
@@ -697,4 +721,11 @@ document.addEventListener('keydown', (e) => {
 new ResizeObserver(resize).observe(canvas);
 
 loadScene();
+const urlCamera = urlParams.get('camera')?.split('_').map(Number);
+if (urlCamera?.length === 7 && urlCamera.every(isFinite)) {
+  camera.target = urlCamera.slice(0, 3);
+  [camera.yaw, camera.pitch, camera.distance, camera.focus] =
+    urlCamera.slice(3);
+  cameraMoved();
+}
 loop();

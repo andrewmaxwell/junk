@@ -106,7 +106,7 @@ const plate = (
  * @typedef {{
  *   objects: Shape[],
  *   camera: {position: number[], target: number[], zoom: number},
- *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number},
+ *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number},
  * }} Scene
  * The camera orbits `target`, and starts focused on it. `zoom` is the image
  * height at distance 1. `defaults` overrides the panel's defaults for this
@@ -393,6 +393,55 @@ function sunsetScene() {
   };
 }
 
+/**
+ * A red, a green and a blue light in a row, in front of a white wall. Each
+ * light's shadow is lit by the other two, so it's the opposite color: cyan,
+ * magenta and yellow, in the reverse order of the lights. Where two shadows
+ * overlap only one light gets in, so it's red, green or blue, and where all
+ * three do it's black. The floating ball's shadows overlap like a color wheel;
+ * the post by the wall casts shadows that nearly coincide, and the one further
+ * out casts them apart. Glass focuses each light into its own colored spot,
+ * and fog shows the beams.
+ * @type {() => Scene} */
+function rgbShadowsScene() {
+  const big = 1000;
+  const white = [0.8, 0.8, 0.8];
+  const gray = [0.3, 0.3, 0.3];
+  // Small, so the shadows have sharp edges
+  /** @type {(x: number, color: number[]) => Shape} */
+  const light = (x, color) =>
+    sphere(
+      1,
+      [x, 25, 30],
+      color.map((c) => c * 3500),
+      LIGHT,
+    );
+  /** @type {(x: number, z: number) => Shape} */
+  const post = (x, z) => plate([x, 15, z], [0, 0, 1], [1, 0, 0], 1, 15, gray);
+  return {
+    objects: [
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, white, {oneSided: true}),
+      plate([0, 50, -40], [0, 0, 1], [1, 0, 0], big, big, white, {
+        oneSided: true,
+      }), // wall
+      light(-11, [1, 0, 0]),
+      light(0, [0, 1, 0]),
+      light(11, [0, 0, 1]),
+      // Faint sky, so the top of the mirror ball reflects something
+      sphere(150, [0, 600, 400], [0.15, 0.15, 0.15], LIGHT),
+      sphere(4, [-14, 26, -29], gray, DIFFUSE, 0.3, 300), // floating ball
+      post(14, -15),
+      post(-2, -34),
+      sphere(5, [-2, 5, 4], [0.97, 0.97, 0.97], GLASS),
+      sphere(4, [16, 4, 14], [0.9, 0.9, 0.9], MIRROR),
+    ],
+    camera: {position: [-55, 50, 85], target: [6, 12, -12], zoom: 0.6},
+    // The lights are each one primary color, so glass has no white light to
+    // split into rainbows; dispersion would only add noise
+    defaults: {fog: 0.0004, dispersion: 0},
+  };
+}
+
 /** @type {Record<string, () => Scene>} */
 export const scenes = {
   cornell: cornellScene,
@@ -402,6 +451,7 @@ export const scenes = {
   mirrors: mirrorsScene,
   bokeh: bokehScene,
   sunset: sunsetScene,
+  rgb: rgbShadowsScene,
 };
 
 /**
