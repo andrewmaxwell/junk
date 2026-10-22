@@ -66,9 +66,11 @@ const defaults = {
   /** Brightens or darkens the display, in stops (doublings). Scenes can change this default. */
   exposure: 0,
   /**
-   * Depth of field: the camera lens's radius, as a fraction of the distance
-   * in focus. 0 keeps everything sharp. Click the image to focus. Scenes
-   * can change this default.
+   * Depth of field: the camera lens's radius, as a fraction of how far the
+   * scene's own camera is from what it looks at. 0 keeps everything sharp.
+   * Click the image to focus. Scenes can change this default. (A fraction
+   * of the distance in focus would make focusing on the sky blur
+   * everything else away.)
    */
   dof: 0,
 };
@@ -425,6 +427,8 @@ const resize = () => {
 /** Orbits target. `focus` is the distance that depth of field keeps sharp. */
 const camera = {target: [0, 0, 0], yaw: 0, pitch: 0, distance: 1, focus: 1};
 
+/** How far the scene's own camera is from what it looks at: its size, roughly */
+let sceneSize = 1;
 /** World units per bump on surfaces: smaller for smaller scenes */
 let detailScale = 1;
 
@@ -433,7 +437,8 @@ const loadScene = () => {
   // From the scene's own camera, not the current one, so zooming doesn't
   // change the bumps
   const {position, target} = scene.camera;
-  detailScale = Math.hypot(...position.map((p, i) => p - target[i])) / 300;
+  sceneSize = Math.hypot(...position.map((p, i) => p - target[i]));
+  detailScale = sceneSize / 300;
   objects = scene.objects.map((o) => ({...o}));
   selected = -1;
   uploadObjects(false);
@@ -612,7 +617,7 @@ const render = (trace = true) => {
   paramsF32[24] = settings.noise;
   paramsU32[25] = +view.showTiles;
   paramsF32[26] = 2 ** settings.exposure;
-  paramsF32[27] = settings.dof * camera.focus;
+  paramsF32[27] = settings.dof * sceneSize;
   paramsF32[28] = camera.focus;
   paramsU32[29] = lightCount;
   paramsF32[30] = settings.fogForward;
@@ -919,8 +924,10 @@ const click = (/** @type {number} */ x, /** @type {number} */ y) => {
   const {position, forward, d} = pointerRay(x, y);
   const {index, t} = hitObject(gpuObjects, position, d);
   const hit = gpuObjects[index];
-  // Sky domes aren't things you can pick up
-  select(hit && !hit.sky ? hit.id : -1);
+  // Sky domes aren't things you can pick up. Clicking the selection again
+  // lets it go.
+  const id = hit && !hit.sky ? hit.id : -1;
+  select(id === selected ? -1 : id);
   if (!isFinite(t)) return;
   // The lens focuses on a plane, so it's the depth that matters
   camera.focus = t * forward.reduce((sum, f, i) => sum + f * d[i], 0);
@@ -971,27 +978,45 @@ const saveHdr = () => {
 
 const gui = new GUI({title: 'Another Raytracer'});
 if (innerWidth < 600) gui.close();
-gui.add(settings, 'scene', Object.keys(scenes)).onChange(() => {
-  // Each scene has its own fog and depth of field
+/** Puts every setting but the scene back to its default, or the scene's */
+const useDefaults = () => {
+  Object.assign(settings, defaults, {scene: settings.scene});
   useSceneDefaults();
   saveSettings();
+  gui.controllersRecursive().forEach((c) => c.updateDisplay());
+};
+
+gui.add(settings, 'scene', Object.keys(scenes)).onChange(() => {
+  // Each scene starts with its own settings, not the last scene's
+  useDefaults();
   loadScene();
   select(-1);
   saveEdits();
-  gui.controllersRecursive().forEach((c) => c.updateDisplay());
 });
 gui.add(view, 'paused').name('pause (space)').listen();
 gui.add({reset: resetCamera}, 'reset').name('reset view (r)');
-gui.add({saveImage}, 'saveImage').name('save image');
 gui
-  .add(settings, 'denoise')
-  .name('denoise (d)')
-  .onChange(() => displayChanged())
-  .listen();
+  .add(
+    {
+      resetSettings: () => {
+        useDefaults();
+        // Pixel scale may have changed
+        resize();
+      },
+    },
+    'resetSettings',
+  )
+  .name('reset settings');
+gui.add({saveImage}, 'saveImage').name('save image');
 gui
   .add(settings, 'dof', 0, 0.05, 0.001)
   .name('depth of field (click to focus)')
   .onChange(changed);
+gui.add(settings, 'fog', 0, 0.02, 0.0001).onChange(changed);
+gui
+  .add(settings, 'exposure', -4, 4, 0.1)
+  .name('exposure (stops)')
+  .onChange(() => brightnessChanged());
 
 ///////////////////////////////
 // Editing objects
@@ -1071,6 +1096,9 @@ const editControls = {
   remove: objectFolder
     .add({remove: () => removeSelected()}, 'remove')
     .name('delete (⌫)'),
+  deselect: objectFolder
+    .add({deselect: () => select(-1)}, 'deselect')
+    .name('deselect (esc, or click it again)'),
 };
 objectFolder.add({addBall: () => addBall()}, 'addBall').name('add a ball');
 const undoControl = objectFolder
@@ -1101,12 +1129,16 @@ const showEdit = () => {
   }
   edit.gloss = o.gloss;
   edit.roughness = +toRoughness(o.shininess).toFixed(3);
-  // Sizes from a quarter to four times what it was when selected
+  // Sizes from a quarter to four times what it was when selected. Only set
+  // then, or the range would shift under the slider as it moves.
   edit.size = o.radius;
-  editControls.size
-    .min(o.radius / 4)
-    .max(o.radius * 4)
-    .step(o.radius / 100);
+  if (sizeRangeFor !== selected) {
+    sizeRangeFor = selected;
+    editControls.size
+      .min(+(o.radius / 4).toPrecision(2))
+      .max(+(o.radius * 4).toPrecision(2))
+      .step(+(o.radius / 50).toPrecision(1));
+  }
   editControls.size.show(o.shape === SPHERE);
   editControls.gloss.show(o.material === DIFFUSE);
   editControls.roughness.show(
@@ -1121,6 +1153,8 @@ const showEdit = () => {
 };
 /** The color showEdit put in the panel, so other edits don't round it */
 let shownColor = '';
+/** Which selection the size slider's range was set for */
+let sizeRangeFor = -1;
 
 /** Changes the selected object to match the panel */
 const applyEdit = () => {
@@ -1171,6 +1205,7 @@ const objectsEdited = () => {
 /** Selects objects[index], or nothing with -1 */
 const select = (/** @type {number} */ index) => {
   selected = index;
+  sizeRangeFor = -1;
   showEdit();
   redraw = true;
 };
@@ -1303,8 +1338,23 @@ const loadEdits = (/** @type {string} */ json) => {
   }
 };
 
-const light = gui.addFolder('Light');
-light.add(settings, 'fog', 0, 0.02, 0.0001).onChange(changed);
+/** Settings changes that only change how the image is shown */
+const displayChanged = () => {
+  saveSettings();
+  redraw = true;
+};
+// Adaptive sampling measures noise as displayed, so tiles that looked done
+// may need more samples now
+const brightnessChanged = () => {
+  displayChanged();
+  activeTiles = -1;
+};
+
+// The rest: finer control of light and display, and for comparing methods
+// and trading speed for accuracy
+const advanced = gui.addFolder('Advanced').close();
+
+const light = advanced.addFolder('Light');
 light
   .add(settings, 'fogForward', -0.9, 0.9, 0.05)
   .name('fog scatters forward')
@@ -1319,22 +1369,12 @@ light
   .name('surface detail')
   .onChange(changed);
 
-/** Settings changes that only change how the image is shown */
-const displayChanged = () => {
-  saveSettings();
-  redraw = true;
-};
-// Adaptive sampling measures noise as displayed, so tiles that looked done
-// may need more samples now
-const brightnessChanged = () => {
-  displayChanged();
-  activeTiles = -1;
-};
-const display = gui.addFolder('Display');
+const display = advanced.addFolder('Display');
 display
-  .add(settings, 'exposure', -4, 4, 0.1)
-  .name('exposure (stops)')
-  .onChange(brightnessChanged);
+  .add(settings, 'denoise')
+  .name('denoise (d)')
+  .onChange(displayChanged)
+  .listen();
 display
   .add(settings, 'glow', 0, 0.2, 0.005)
   .name('lens glow')
@@ -1350,21 +1390,25 @@ display
   .onChange(changed)
   .listen();
 display.add(view, 'hdr').name('HDR (h)').onChange(saveHdr).listen();
+display
+  .add(settings, 'headroom', 1, 16, 0.5)
+  .name('HDR headroom')
+  .onChange(changed);
 
-// For comparing methods and trading speed for accuracy
-const advanced = gui.addFolder('Advanced').close();
-advanced
+const sampling = advanced.addFolder('Sampling');
+sampling
   .add(settings, 'sampling', {
     'both (MIS)': 'mis',
     'aim at lights': 'light',
     'random bounces': 'bsdf',
   })
+  .name('method')
   .onChange(changed);
-advanced
+sampling
   .add(settings, 'clamp', 0, 100, 1)
   .name('indirect clamp (0: none)')
   .onChange(changed);
-advanced
+sampling
   .add(settings, 'scale', 0.25, 2, 0.25)
   .name('pixel scale')
   .onChange(() => {
@@ -1377,19 +1421,15 @@ const keepGoing = () => {
   saveSettings();
   activeTiles = -1;
 };
-advanced
+sampling
   .add(settings, 'noise', 0, 0.1, 0.005)
   .name('noise target (0: none)')
   .onChange(keepGoing);
-advanced
+sampling
   .add(settings, 'spp', 16, 16384, 16)
   .name('max spp')
   .onChange(keepGoing);
-advanced
-  .add(settings, 'headroom', 1, 16, 0.5)
-  .name('HDR headroom')
-  .onChange(changed);
-advanced
+sampling
   .add(view, 'showTiles')
   .name('show refining tiles (n)')
   .onChange(() => {
