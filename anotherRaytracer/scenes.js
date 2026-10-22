@@ -21,7 +21,7 @@ export const LIGHT = 3;
  *   color: number[],
  *   material: number,
  *   gloss: number,
- *   shininess: number,
+ *   roughness: number,
  *   oneSided: boolean,
  *   sky: boolean,
  * }} Shape
@@ -31,11 +31,13 @@ export const LIGHT = 3;
  * `color` is the surface color, or for lights, the emitted light. Lights must
  * be spheres.
  *
- * Diffuse surfaces can have a glossy coat, like plastic: `gloss` is the
- * fraction of light it reflects head on (0 to 1; more toward grazing
- * angles), and `shininess` is how tight its reflections are (around 10 is
- * satin, 1000 is nearly a mirror). Mirrors with a `shininess` are rough
- * metal, with blurry reflections tinted by `color`.
+ * Diffuse surfaces are paint, which can have a glossy clear coat, like
+ * varnish: `gloss` is how much of the surface it covers (0 to 1). Like real
+ * varnish, it reflects a little head on and more toward grazing angles.
+ * `roughness` is how blurry its reflections are: 0 is a perfect mirror,
+ * around 0.03 polished, 0.1 glossy, 0.3 satin (GGX's alpha). Mirrors are
+ * metal: they reflect their `color`, whiter toward grazing angles, and with
+ * a `roughness`, blurrily, like brushed metal.
  *
  * Glass is colored by `color` as light goes through it: that's what's left
  * after going as far as its radius. So glass should be spheres; glass
@@ -61,14 +63,14 @@ const cross = ([ax, ay, az], [bx, by, bz]) => [
   ax * by - ay * bx,
 ];
 
-/** @type {(radius: number, center: number[], color: number[], material: number, gloss?: number, shininess?: number) => Shape} */
+/** @type {(radius: number, center: number[], color: number[], material: number, gloss?: number, roughness?: number) => Shape} */
 export const sphere = (
   radius,
   center,
   color,
   material,
   gloss = 0,
-  shininess = 0,
+  roughness = 0,
 ) => ({
   shape: SPHERE,
   center,
@@ -81,7 +83,7 @@ export const sphere = (
   color,
   material,
   gloss,
-  shininess,
+  roughness,
   oneSided: false,
   sky: false,
 });
@@ -89,7 +91,7 @@ export const sphere = (
 /**
  * A rectangle facing `normal`, spanning halfWidth along u (which must be
  * perpendicular to the normal) and halfHeight along normal × u.
- * @type {(center: number[], normal: number[], u: number[], halfWidth: number, halfHeight: number, color: number[], options?: {material?: number, gloss?: number, shininess?: number, oneSided?: boolean}) => Shape} */
+ * @type {(center: number[], normal: number[], u: number[], halfWidth: number, halfHeight: number, color: number[], options?: {material?: number, gloss?: number, roughness?: number, oneSided?: boolean}) => Shape} */
 const plate = (
   center,
   normal,
@@ -97,7 +99,7 @@ const plate = (
   halfWidth,
   halfHeight,
   color,
-  {material = DIFFUSE, gloss = 0, shininess = 0, oneSided = false} = {},
+  {material = DIFFUSE, gloss = 0, roughness = 0, oneSided = false} = {},
 ) => ({
   shape: PLATE,
   center,
@@ -110,7 +112,7 @@ const plate = (
   color,
   material,
   gloss,
-  shininess,
+  roughness,
   oneSided,
   sky: false,
 });
@@ -165,8 +167,8 @@ function cornellScene() {
       plate([50, 50, -150], [0, 0, 1], [1, 0, 0], big, big, [1, 1, 1], wall), // far wall
       plate([50, 0, 50], [0, 1, 0], [1, 0, 0], big, big, [0.8, 0.2, 0.2], {
         ...wall,
-        gloss: 0.2,
-        shininess: 100,
+        gloss: 1,
+        roughness: 0.14,
       }), // floor
       plate(
         [50, 100, 50],
@@ -181,8 +183,8 @@ function cornellScene() {
       sphere(1.5, [72, 55, 125], [400, 320, 220], LIGHT), // small warm light
       sphere(16.5, [27, 36.5, 47], [0.9, 0.9, 0.9], MIRROR), // mirror ball
       sphere(20, [73, 25, 75], [0.9, 0.9, 0.9], GLASS), // glass ball
-      sphere(10, [60, 65, 0], [0.5, 0.5, 0.5], DIFFUSE, 0.5, 30), // upper satin ball
-      sphere(16, [20, 16, 160], [0.3, 0.3, 0.35], DIFFUSE, 0.6, 2000), // lower left polished ball
+      sphere(10, [60, 65, 0], [0.5, 0.5, 0.5], DIFFUSE, 1, 0.25), // upper satin ball
+      sphere(16, [20, 16, 160], [0.3, 0.3, 0.35], DIFFUSE, 1, 0.032), // lower left polished ball
     ],
     camera: {
       position: [50, 50.014, 350],
@@ -226,16 +228,16 @@ function veachScene() {
     objects.push(sphere(radius, center, color, LIGHT));
   });
 
-  [10000, 1500, 250, 50].forEach((shininess, i) => {
+  [0.014, 0.036, 0.089, 0.2].forEach((roughness, i) => {
     const center = [0, 0.2 - 0.85 * i, -1.5 + 1.4 * i];
     // Tilt each plate to reflect the camera's view up toward the lights
     const toEye = normalize(eye.map((e, k) => e - center[k]));
     const toLights = normalize(lightRow.map((l, k) => l - center[k]));
     const normal = normalize(toEye.map((e, k) => e + toLights[k]));
     objects.push(
-      plate(center, normal, [1, 0, 0], 4.5, 0.4, [0, 0, 0], {
-        gloss: 1,
-        shininess,
+      plate(center, normal, [1, 0, 0], 4.5, 0.4, [0.9, 0.9, 0.9], {
+        material: MIRROR,
+        roughness,
       }),
     );
   });
@@ -292,7 +294,7 @@ function shaftsScene() {
     // and fog outside the beams are cool
     sphere(30, [50, 60, 260], [0.8, 1.4, 3.2], LIGHT),
     sphere(12, [49.532, 12, -14.008], [0.95, 0.95, 0.95], GLASS),
-    sphere(10, [75.715, 10, -41.197], [0.95, 0.64, 0.54], MIRROR, 0, 300), // brushed copper
+    sphere(10, [75.715, 10, -41.197], [0.95, 0.64, 0.54], MIRROR, 0, 0.081), // brushed copper
   ];
   // Blinds across the window, 5.5 tall with gaps of 2.5. Each gap lets in a
   // thin sheet of light, seen edge on from the front.
@@ -363,8 +365,8 @@ function mirrorsScene() {
     objects: [
       plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.3, 0.28, 0.26], {
         oneSided: true,
-        gloss: 0.3,
-        shininess: 300,
+        gloss: 1,
+        roughness: 0.081,
       }), // floor
       wall(-30),
       wall(30),
@@ -373,10 +375,10 @@ function mirrorsScene() {
       sphere(1.8, [2, 32, 22], [7, 2, 5], LIGHT), // pink orb
       // Soft white light high above
       sphere(30, [0, 200, 40], [6, 6, 6], LIGHT),
-      sphere(6, [-8, 6, 0], [0.9, 0.2, 0.15], DIFFUSE, 0.3, 500), // red
+      sphere(6, [-8, 6, 0], [0.9, 0.2, 0.15], DIFFUSE, 1, 0.063), // red
       sphere(5, [10, 5, -12], [0.95, 0.8, 0.45], MIRROR), // gold
       sphere(7, [6, 7, 22], [0.97, 0.97, 0.97], GLASS),
-      sphere(3, [-16, 3, 26], [0.2, 0.6, 0.3], DIFFUSE, 0.3, 500), // green
+      sphere(3, [-16, 3, 26], [0.2, 0.6, 0.3], DIFFUSE, 1, 0.063), // green
     ],
     // Orbiting a point inside the room
     camera: {
@@ -400,8 +402,8 @@ function bokehScene() {
   const objects = [
     plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.12, 0.07, 0.04], {
       oneSided: true,
-      gloss: 0.5,
-      shininess: 3000,
+      gloss: 1,
+      roughness: 0.026,
     }), // polished walnut table
     // A dark wall far behind, for the fairy lights to glow on
     plate([0, 50, -230], [0, 0, 1], [1, 0, 0], big, big, [0.3, 0.24, 0.2], {
@@ -413,7 +415,7 @@ function bokehScene() {
     sphere(200, [0, 500, 150], [0.4, 0.45, 0.55], LIGHT),
     sphere(5, [0, 5, 0], [0.97, 0.97, 0.97], GLASS),
     sphere(4, [-11, 4, -4], [0.95, 0.75, 0.4], MIRROR), // gold
-    sphere(3.5, [10, 3.5, -3], [0.7, 0.08, 0.1], DIFFUSE, 0.4, 2000), // red
+    sphere(3.5, [10, 3.5, -3], [0.7, 0.08, 0.1], DIFFUSE, 1, 0.032), // red
   ];
   // Fairy lights far behind, sagging between posts
   const colors = [
@@ -453,10 +455,10 @@ function sunsetScene() {
       // much fog that it hides the sky. It lights the shadows and the air,
       // blue from overhead and orange from near the sun.
       skyDome(50000, [0, -48000, 0], 0.6),
-      sphere(20, [0, 20, 0], [0.8, 0.8, 0.8], DIFFUSE, 0.2, 50),
+      sphere(20, [0, 20, 0], [0.8, 0.8, 0.8], DIFFUSE, 1, 0.2),
       sphere(10, [35, 10, 20], [0.95, 0.95, 0.95], GLASS),
       sphere(12, [-40, 12, 30], [0.9, 0.9, 0.9], MIRROR),
-      sphere(6, [1.9255, 6, 60.734], [0.15, 0.3, 0.6], DIFFUSE, 0.5, 500),
+      sphere(6, [1.9255, 6, 60.734], [0.15, 0.3, 0.6], DIFFUSE, 1, 0.063),
       sphere(40, [-150, 40, -250], [0.45, 0.35, 0.3], DIFFUSE),
       sphere(25, [120, 25, -180], [0.45, 0.35, 0.3], DIFFUSE),
     ],
@@ -509,7 +511,7 @@ function rgbShadowsScene() {
       light(11, [0, 0, 1]),
       // Faint sky, so the top of the mirror ball reflects something
       sphere(150, [0, 600, 400], [0.15, 0.15, 0.15], LIGHT),
-      sphere(4, [-14, 26, -29], gray, DIFFUSE, 0.3, 300), // floating ball
+      sphere(4, [-14, 26, -29], gray, DIFFUSE, 1, 0.081), // floating ball
       post(14, -15),
       post(-2, -34),
       sphere(5, [-2, 5, 4], [0.97, 0.97, 0.97], GLASS),
@@ -554,7 +556,7 @@ export const packObjects = (objects) =>
       ...[...s.u, s.halfWidth],
       ...[...s.v, s.halfHeight],
       ...[...s.color, s.material],
-      ...[s.gloss, s.shininess, +s.oneSided, +s.sky],
+      ...[s.gloss, s.roughness, +s.oneSided, +s.sky],
     ]),
   );
 

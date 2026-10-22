@@ -9,6 +9,7 @@
 
 ## Measuring
 
+- Materials: a white furnace test (delete a scene's objects with URL edits, surround the camera with a radius-1000 white light, add white balls, and render with `tone=clip`, no denoise, glow, vignette or detail) should show every ball as bright as the background. Anything brighter means a material creates energy. Balls next to each other dim each other's facing sides if either loses energy, so judge by their centers.
 - The stats' spp/s includes shader compile time. Compare speed by the change in spp between two readings a few seconds apart, with `noise=0` so adaptive sampling doesn't stop tiles. Headless Chrome via Playwright (`channel: 'chrome'`, `--enable-unsafe-webgpu`) runs WebGPU on the real GPU.
 - Check correctness by rendering to a fixed `spp` with `noise=0` and comparing mean brightness against the previous version; a faster change that shifts the mean is a bug unless it's meant to change the look.
 
@@ -17,4 +18,5 @@
 - Fog used to fill all of space, so rays escaping an open scene scattered on through endless fog. Ending fog at the farthest surface: rgb 28 -> 125, shafts 39 -> 58. Shafts lost a warm haze that came from sunlit fog outside its open front.
 - Russian roulette by throughput instead of surface color: cornell 44 -> 107, same converged brightness.
 - Surface detail used to cost 1.5-3x (mirrors 144 vs 435 without it). A single pcg3d hash per lattice point, plus computing smudges only for the first bounces and only when the random choice could use them, brought mirrors to 308 vs 430. The bumps' noise is the rest; Andrew wants the detail to look good, so it stays.
+- GGX with energy compensation and Fresnel coats: same convergence time as the old Phong lobes (cornell 15.5 vs 16.5 s, shafts 29.6 vs 28.6 s to done at 800x500). Without compensation, white metal at roughness 0.3 reflected 88% and at 0.7, 50%.
 - The denoiser every frame cost about 12%. Running it every frame below 64 spp and every 150 ms after brought that to 1-4%.

@@ -17,6 +17,7 @@ import {
   tileShader,
   traceShader,
 } from './shaders.js';
+import {albedoTable} from './ggx.js';
 import {skyTable} from './sky.js';
 
 /**
@@ -253,6 +254,14 @@ const strideBuffers = [1, 2, 4, 8, 16].map((stride) => {
   return buffer;
 });
 
+/** For rough reflections' lost light; see ggx.js */
+const singleBounceData = albedoTable();
+const singleBounceBuffer = device.createBuffer({
+  size: singleBounceData.byteLength,
+  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+});
+device.queue.writeBuffer(singleBounceBuffer, 0, singleBounceData);
+
 // Params in shaders.js: 4 × (vec3f + u32), then 22 scalars, padded to a
 // multiple of 16 bytes
 const paramsData = new ArrayBuffer(160);
@@ -376,6 +385,7 @@ const resize = () => {
     skyBuffer,
     albedoSums,
     normalDepthSums,
+    singleBounceBuffer,
   ]);
   tileBindGroup = bindGroup(tilePipeline, [
     paramsBuffer,
@@ -1042,15 +1052,6 @@ const fromHex = (/** @type {string} */ hex) =>
     return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
   });
 
-/**
- * Roughness, from 0 for polished to about 0.7 for matte, as the shader's
- * Phong shininess and back: about the same spread of reflections as a
- * microfacet surface of that roughness (Walter et al.'s conversion)
- */
-const toShininess = (/** @type {number} */ r) => (r > 0 ? 2 / (r * r) - 2 : 0);
-const toRoughness = (/** @type {number} */ s) =>
-  s > 0 ? Math.sqrt(2 / (s + 2)) : 0;
-
 const materials = {paint: DIFFUSE, metal: MIRROR, glass: GLASS, light: LIGHT};
 /** The selected object's settings, as the panel shows them */
 const edit = {
@@ -1087,7 +1088,7 @@ const editControls = {
     .name('gloss coat')
     .onChange(() => applyEdit()),
   roughness: objectFolder
-    .add(edit, 'roughness', 0, 0.7, 0.005)
+    .add(edit, 'roughness', 0, 0.7, 0.001)
     .onChange(() => applyEdit()),
   brightness: objectFolder
     .add(edit, 'brightness', -2, 20, 0.1)
@@ -1129,7 +1130,7 @@ const showEdit = () => {
     edit.brightness = 5;
   }
   edit.gloss = o.gloss;
-  edit.roughness = +toRoughness(o.shininess).toFixed(3);
+  edit.roughness = o.roughness;
   // Sizes from a quarter to four times what it was when selected. Only set
   // then, or the range would shift under the slider as it moves.
   edit.size = o.radius;
@@ -1184,13 +1185,11 @@ const applyEdit = () => {
       ? color.map((c) => (c / colorPeak) * 2 ** edit.brightness)
       : color;
   o.gloss = material === DIFFUSE ? edit.gloss : 0;
-  // Paint's gloss coat needs some spread; metal at 0 is a perfect mirror
-  o.shininess =
-    material === MIRROR
-      ? toShininess(edit.roughness)
-      : material === DIFFUSE && edit.gloss > 0
-        ? toShininess(Math.max(edit.roughness, 0.02))
-        : 0;
+  // Metal at 0 is a perfect mirror
+  o.roughness =
+    material === MIRROR || (material === DIFFUSE && edit.gloss > 0)
+      ? edit.roughness
+      : 0;
   if (o.shape === SPHERE) o.radius = edit.size;
   objectsEdited();
   showEdit();
@@ -1247,9 +1246,9 @@ const addBall = () => {
     return 0.05 + 0.75 * Math.min(1, Math.max(0, x)) ** 2;
   });
   const options = [
-    sphere(radius, center, paint, DIFFUSE, 0.4, toShininess(0.08)),
+    sphere(radius, center, paint, DIFFUSE, 1, 0.08),
     sphere(radius, center, paint, DIFFUSE),
-    sphere(radius, center, [0.95, 0.75, 0.4], MIRROR, 0, toShininess(0.05)), // gold
+    sphere(radius, center, [0.95, 0.75, 0.4], MIRROR, 0, 0.05), // gold
     sphere(radius, center, [0.97, 0.97, 0.97], GLASS),
     sphere(
       radius,
@@ -1284,7 +1283,7 @@ const editsParam = () => {
       'color',
       'material',
       'gloss',
-      'shininess',
+      'roughness',
     ]);
     const changed = Object.fromEntries(
       fields
@@ -1329,6 +1328,11 @@ const loadEdits = (/** @type {string} */ json) => {
       const i = Number(key);
       if (!(i >= 0 && i < 1000)) continue;
       const base = objects[i] ?? sphere(1, [0, 0, 0], [0.5, 0.5, 0.5], DIFFUSE);
+      // Links from before roughness replaced Phong shininess
+      if (e && 'shininess' in e) {
+        e.roughness = e.shininess > 0 ? Math.sqrt(2 / (e.shininess + 2)) : 0;
+        delete e.shininess;
+      }
       objects[i] = e === 0 ? null : {...base, ...e};
     }
     // Indexes skipped over are holes, not objects

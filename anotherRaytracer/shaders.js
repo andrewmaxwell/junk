@@ -2,6 +2,7 @@
 // every pixel to a running sum; the display shader divides by the sample
 // count.
 
+import {ALBEDO_SIZE} from './ggx.js';
 import {SKY_HEIGHT, SKY_WIDTH} from './sky.js';
 
 /** Shared by both shaders. main.js writes it; keep the layouts in sync. */
@@ -271,7 +272,7 @@ struct Shape {
   uHalf: vec4f,
   vHalf: vec4f,
   colorMaterial: vec4f,
-  surface: vec4f, // gloss, shininess, oneSided, sky
+  surface: vec4f, // gloss, roughness, oneSided, sky
 }
 
 @group(0) @binding(1) var<storage, read> objects: array<Shape>;
@@ -466,10 +467,15 @@ fn intersect(o: vec3f, d: vec3f) -> i32 {
   return hit;
 }
 
+/** A unit vector perpendicular to the unit vector w */
+fn perpendicular(w: vec3f) -> vec3f {
+  return normalize(select(vec3f(0., -w.z, w.y), vec3f(w.z, 0., -w.x), abs(w.x) > 0.1));
+}
+
 /** The unit vector at angle acos(cosA) from the unit axis w, rotated phi around it. */
 fn directionAround(w: vec3f, cosA: f32, phi: f32) -> vec3f {
   // u and v are perpendicular to w and each other
-  let u = normalize(select(vec3f(0., -w.z, w.y), vec3f(w.z, 0., -w.x), abs(w.x) > 0.1));
+  let u = perpendicular(w);
   let v = cross(w, u);
   let sinA = sqrt(max(0., 1. - cosA * cosA));
   return (u * cos(phi) + v * sin(phi)) * sinA + w * cosA;
@@ -509,60 +515,198 @@ fn indirectScale(c: vec3f) -> f32 {
   return select(1., params.maxIndirect / brightest, brightest > params.maxIndirect);
 }
 
+///////////////////////////////
+// Materials
+///////////////////////////////
+
 /**
- * The fraction of light a diffuse surface's glossy coat reflects, seen from
- * an angle with this cosine to the normal. Like real gloss, it's gloss head
- * on, but reflects more and more toward grazing angles, all of it at 90°
- * (Schlick's approximation of Fresnel), so balls get bright rims. Rough
- * metal is all coat.
+ * The fraction of light a smooth boundary reflects (Fresnel's equations,
+ * for unpolarized light), for light arriving at an angle with cosine cosI,
+ * into a material eta times as optically dense: 1.5 into glass, 1 / 1.5
+ * back out of it. Past the critical angle on the way out, all of it.
  */
-fn coatReflectance(s: u32, cosView: f32) -> f32 {
-  if (i32(objects[s].colorMaterial.w) == MIRROR) { return 1.; }
-  let gloss = objects[s].surface.x;
-  if (gloss == 0.) { return 0.; }
-  return gloss + (1. - gloss) * pow(clamp(1. - cosView, 0., 1.), 5.);
+fn fresnelDielectric(cosI: f32, eta: f32) -> f32 {
+  let c = clamp(cosI, 0., 1.);
+  let sinT2 = (1. - c * c) / (eta * eta);
+  if (sinT2 >= 1.) { return 1.; }
+  let cosT = sqrt(1. - sinT2);
+  let s = (c - eta * cosT) / (c + eta * cosT);
+  let p = (eta * c - cosT) / (eta * c + cosT);
+  return 0.5 * (s * s + p * p);
 }
 
 /**
- * For a diffuse (maybe glossy) surface or rough metal, sets bsdf to how much
- * light arriving from direction l it scatters toward the viewer, and returns
- * the probability density that sampleSurface picks l. nl is the normal on
- * the viewer's side, and r is the viewing direction mirrored about it.
+ * The fraction of light metal reflects, in each channel, at an angle with
+ * cosine cosI: its color head on, rising to white at grazing angles
+ * (Schlick's form, which is what OpenPBR uses for metals without a separate
+ * edge tint)
  */
-fn evalSurface(s: u32, nl: vec3f, r: vec3f, l: vec3f, bsdf: ptr<function, vec3f>) -> f32 {
-  let coat = coatReflectance(s, dot(r, nl));
-  let shininess = objects[s].surface.y;
+fn fresnelMetal(color: vec3f, cosI: f32) -> vec3f {
+  return color + (1. - color) * pow(1. - clamp(cosI, 0., 1.), 5.);
+}
+
+/** Paint's clear coat is like varnish: a little denser than air, as glass is */
+const COAT_INDEX = 1.5;
+/**
+ * How much of the light scattered up from paint the coat reflects back down
+ * into it, mostly by total internal reflection: 1 - (1 - 0.0918) / 1.5^2,
+ * where 0.0918 is the coat's average reflectance for light from all
+ * directions outside it
+ */
+const COAT_INSIDE_REFLECTANCE = 0.5963;
+
+/**
+ * Rough reflections are microfacet reflections (Walter et al., "Microfacet
+ * Models for Refraction through Rough Surfaces"): the surface is made of tiny
+ * mirrors, tilted by the GGX distribution, which has a sharp peak and long
+ * soft tails, like real highlights. Roughness alpha is the tilts' spread,
+ * from 0 for a perfect mirror. Below this it's too sharp for 32-bit floats.
+ */
+const MIN_ROUGHNESS = 0.002;
+
+/** How many tiny mirrors face half-vector h, by the cosine of its angle from the normal */
+fn ggx(cosH: f32, a2: f32) -> f32 {
+  let d = cosH * cosH * (a2 - 1.) + 1.;
+  return a2 / (PI * d * d);
+}
+
+/**
+ * Smith's Lambda for GGX: from a direction with this cosine to the normal,
+ * how much the tiny mirrors hide each other (G1 = 1 / (1 + Lambda))
+ */
+fn smithLambda(cosA: f32, a2: f32) -> f32 {
+  let c2 = max(cosA * cosA, 1e-8);
+  return 0.5 * (sqrt(1. + a2 * (1. - c2) / c2) - 1.);
+}
+
+/**
+ * A random half-vector, picked in proportion to how much of the surface the
+ * viewer sees facing it, so few samples are wasted on facets turned away
+ * ("Sampling Visible GGX Normals with Spherical Caps", Dupuy & Benyoub). n
+ * is the normal and v the direction to the viewer.
+ */
+fn sampleVisibleNormal(n: vec3f, v: vec3f, alpha: f32, u: vec2f) -> vec3f {
+  let t = perpendicular(n);
+  let b = cross(n, t);
+  // Stretch the view as if the surface were smooth, pick a direction in the
+  // cap the view sees, then unstretch
+  let stretched = normalize(vec3f(alpha * dot(v, t), alpha * dot(v, b), dot(v, n)));
+  let phi = 2. * PI * u.x;
+  let z = (1. - u.y) * (1. + stretched.z) - stretched.z;
+  let sinA = sqrt(clamp(1. - z * z, 0., 1.));
+  let h = vec3f(sinA * cos(phi), sinA * sin(phi), z) + stretched;
+  let local = normalize(vec3f(alpha * h.x, alpha * h.y, max(h.z, 1e-6)));
+  return t * local.x + b * local.y + n * local.z;
+}
+
+/**
+ * How much white GGX metal reflects with one bounce, by roughness and view
+ * cosine: albedoTable in ggx.js, four to a vec4 (uniform arrays need that)
+ */
+@group(0) @binding(9) var<uniform> singleBounce: array<vec4f, ${(ALBEDO_SIZE * ALBEDO_SIZE) / 4}>;
+
+fn singleBounceAt(row: u32, col: u32) -> f32 {
+  let i = row * ${ALBEDO_SIZE}u + col;
+  return singleBounce[i / 4u][i % 4u];
+}
+
+/** singleBounce at any roughness and view cosine, blending the nearest four */
+fn singleBounceAlbedo(alpha: f32, cosV: f32) -> f32 {
+  let p = clamp(vec2f(alpha, cosV), vec2f(0.), vec2f(1.)) * f32(${ALBEDO_SIZE - 1});
+  let i = min(vec2u(p), vec2u(${ALBEDO_SIZE - 2}u));
+  let f = p - vec2f(i);
+  let top = mix(singleBounceAt(i.x, i.y), singleBounceAt(i.x, i.y + 1u), f.y);
+  let bottom = mix(singleBounceAt(i.x + 1u, i.y), singleBounceAt(i.x + 1u, i.y + 1u), f.y);
+  return mix(top, bottom, f.x);
+}
+
+/** The roughness of a rough surface */
+fn roughness(s: u32) -> f32 {
+  return max(objects[s].surface.y, MIN_ROUGHNESS);
+}
+
+/**
+ * The chance that sampleSurface bounces off the glossy coat, or for metal,
+ * 1. Roughly the share of light the coat reflects, seen from an angle with
+ * this cosine, but at least a quarter of its coverage, so faint reflections
+ * of lit things, not just of lights, still get found.
+ */
+fn coatChance(s: u32, cosV: f32) -> f32 {
+  if (i32(objects[s].colorMaterial.w) == MIRROR) { return 1.; }
+  let coverage = objects[s].surface.x;
+  return coverage * mix(fresnelDielectric(cosV, COAT_INDEX), 1., 0.25);
+}
+
+/**
+ * For paint (maybe with a glossy coat) or rough metal, sets bsdf to how much
+ * light arriving from direction l it scatters toward the viewer, in
+ * direction v, and returns the probability density that sampleSurface picks
+ * l. n is the surface's normal on the viewer's side, which the coat and
+ * metal reflect about, and ns the normal paint's bumps tilt.
+ *
+ * Paint's coat covers its gloss fraction of it, and reflects as clear
+ * varnish does: a little head on, more toward grazing angles. What it
+ * doesn't reflect reaches the paint. Metal reflects its color.
+ */
+fn evalSurface(s: u32, ns: vec3f, n: vec3f, v: vec3f, l: vec3f, bsdf: ptr<function, vec3f>) -> f32 {
+  let metal = i32(objects[s].colorMaterial.w) == MIRROR;
   let color = objects[s].colorMaterial.rgb;
+  let coverage = select(objects[s].surface.x, 1., metal);
+  let cosV = max(dot(n, v), 1e-6);
+  let cosL = dot(n, l);
   var glossy = vec3f(0.);
   var glossyPdf = 0.;
-  if (coat > 0.) {
-    // Phong lobe: strongest in the mirror direction, falling off as
-    // cos(angle from it) ^ shininess
-    // Clamped to 1 too: a cosine a hair over 1 raised to a high shininess
-    // can overflow
-    let lobe = pow(clamp(dot(r, l), 0., 1.), shininess) / (2. * PI);
-    // Metal tints its reflections; a clear coat doesn't
-    let tint = select(vec3f(1.), color, i32(objects[s].colorMaterial.w) == MIRROR);
-    glossy = coat * (shininess + 2.) * lobe * tint;
-    glossyPdf = (shininess + 1.) * lobe;
+  if (coverage > 0. && cosL > 0.) {
+    let a2 = roughness(s) * roughness(s);
+    let h = normalize(v + l);
+    let cosVH = dot(v, h);
+    let d = ggx(max(dot(n, h), 0.), a2);
+    let lambdaV = smithLambda(cosV, a2);
+    // Facets hidden from the viewer or the light don't count
+    let shadowing = 1. / (1. + lambdaV + smithLambda(cosL, a2));
+    var f = vec3f(coverage * fresnelDielectric(cosVH, COAT_INDEX));
+    // Light that bounces between the tiny mirrors before leaving, which one
+    // bounce misses, scaled by how much of it each reflection keeps: its
+    // reflectance head on
+    var headOn = vec3f(coverage * 0.04);
+    if (metal) {
+      f = fresnelMetal(color, cosVH);
+      headOn = color;
+    }
+    let single = singleBounceAlbedo(roughness(s), cosV);
+    f *= 1. + headOn * (1. - single) / single;
+    glossy = f * d * shadowing / (4. * cosV * cosL);
+    // The density of l from sampleVisibleNormal
+    glossyPdf = d / ((1. + lambdaV) * 4. * cosV);
   }
-  *bsdf = (1. - coat) / PI * color + glossy;
-  // sampleSurface picks the glossy lobe with probability coat
-  return (1. - coat) * (max(dot(l, nl), 0.) / PI) + coat * glossyPdf;
+  var paint = vec3f(0.);
+  if (!metal) {
+    // Under the coat: light that gets through it scatters off the paint,
+    // and what the coat reflects back down scatters again, and so on, so
+    // paint loses a little more each time; that's why varnish deepens
+    // colors. Coming out, it spreads into a wider range of directions than
+    // it was in, by the index squared.
+    let through = (1. - fresnelDielectric(cosV, COAT_INDEX)) *
+      (1. - fresnelDielectric(max(dot(ns, l), 0.), COAT_INDEX));
+    let coated = through / (COAT_INDEX * COAT_INDEX * (1. - color * COAT_INSIDE_REFLECTANCE));
+    paint = color / PI * mix(vec3f(1.), coated, coverage);
+  }
+  *bsdf = paint + glossy;
+  let chance = coatChance(s, cosV);
+  return (1. - chance) * max(dot(l, ns), 0.) / PI + chance * glossyPdf;
 }
 
 /**
- * Picks a random bounce direction off a diffuse (maybe glossy) surface or
- * rough metal: from the glossy lobe with probability coatReflectance (choice
- * is uniform in [0, 1)), otherwise favoring directions near the normal.
+ * Picks a random bounce direction off paint or rough metal: off the coat (or
+ * metal) with probability coatChance, given choice uniform in [0, 1), or
+ * otherwise favoring directions near the bumps' normal ns.
  */
-fn sampleSurface(s: u32, n: vec3f, r: vec3f, choice: f32) -> vec3f {
+fn sampleSurface(s: u32, ns: vec3f, n: vec3f, v: vec3f, choice: f32) -> vec3f {
   let u = rand2();
-  let phi = 2. * PI * u.y;
-  if (choice < coatReflectance(s, dot(r, n))) {
-    return directionAround(r, pow(u.x, 1. / (objects[s].surface.y + 1.)), phi);
+  if (choice < coatChance(s, max(dot(n, v), 0.))) {
+    return reflect(-v, sampleVisibleNormal(n, v, roughness(s), u));
   }
-  return directionAround(n, sqrt(1. - u.x), phi);
+  return directionAround(ns, sqrt(1. - u.x), 2. * PI * u.y);
 }
 
 /** A random direction for light traveling in direction d to scatter in fog, picked in proportion to phase */
@@ -1074,9 +1218,6 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // noise is slow.
       var ns = nl;
       if (depth < 2 && params.detail > 0.) { ns = bumpNormal(nl, p); }
-      // Viewing direction mirrored about the normal, the center of the
-      // glossy lobe
-      let r = reflect(d, nl);
       var bsdf: vec3f;
       // Which light to aim at, and whether to bounce off the glossy coat
       let choices = rand2();
@@ -1096,7 +1237,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         if (any(visible > vec3f(0.))) {
           // radiance * BSDF * cos(theta) / pdf, where the pdf is the chance
           // of picking this light over the cone's solid angle
-          let pdf = evalSurface(s, ns, r, l, &bsdf);
+          let pdf = evalSurface(s, ns, nl, -d, l, &bsdf);
           var weight = 1.;
           if (params.sampling == 0u) { weight = powerHeuristic(pick / ls.w, pdf); }
           let c = through * emitted(light, l) * bsdf * visible * (weight * cosSurface * ls.w / pick);
@@ -1107,21 +1248,18 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
       // Indirect light: bounce in a random direction. If this hits a light,
       // bounceLightWeight keeps it from being double counted with the above.
-      let next = sampleSurface(s, ns, r, choices.y);
+      let next = sampleSurface(s, ns, nl, -d, choices.y);
       let cosTheta = dot(next, ns);
       // A glossy lobe, or a bump, pointed it into the surface
       if (cosTheta <= 0. || dot(next, nl) <= 0.) { break; }
-      bouncePdf = evalSurface(s, ns, r, next, &bsdf);
-      // Far out in a tight lobe, cos ^ shininess underflows to 0, and 0 / 0
+      bouncePdf = evalSurface(s, ns, nl, -d, next, &bsdf);
+      // Far out in a tight lobe, the density underflows to 0, and 0 / 0
       // would be NaN. A direction that's never picked carries no light.
       if (bouncePdf <= 0.) { break; }
       through *= bsdf * cosTheta / bouncePdf;
       seenByCamera = false;
       d = next;
     } else {
-      // Mirrors tint what they reflect. Glass doesn't tint its reflections;
-      // it colors light inside it, by glassTransmittance.
-      if (material == MIRROR) { through *= sColor; }
       bouncePdf = 0.;
       // A smudge is a thin greasy film. Most light still reflects or
       // refracts sharply, but some scatters a little off course, so through
@@ -1139,6 +1277,10 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       let snl = select(-sn, sn, into);
       var next = reflect(d, sn);
       var reflected = true;
+      // Mirrors reflect their color, whiter toward grazing angles. Glass
+      // doesn't tint its reflections; it colors light inside it, by
+      // glassTransmittance.
+      if (material == MIRROR) { through *= fresnelMetal(sColor, -dot(d, snl)); }
 
       if (material == GLASS) {
         var index = 1.5;
@@ -1146,12 +1288,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         let t = refract(d, snl, select(index, 1. / index, into));
         // Otherwise total internal reflection: keep the mirror direction
         if (any(t != vec3f(0.))) {
-          // Fresnel: how much reflects vs refracts (Schlick's approximation)
-          // Clamped because rounding can push it just below 0, and GPU
-          // pow() of a negative number is NaN, which would stick in the
-          // pixel's sum forever as a white dot
-          let c = clamp(1. - select(dot(t, sn), -dot(d, snl), into), 0., 1.);
-          let reflectance = 0.04 + 0.96 * pow(c, 5.);
+          // Fresnel: how much reflects vs refracts
+          let reflectance = fresnelDielectric(-dot(d, snl), select(1. / index, index, into));
           // Pick one at random, with probability P of reflecting, and
           // divide by that probability to stay unbiased
           let P = 0.25 + 0.5 * reflectance;
