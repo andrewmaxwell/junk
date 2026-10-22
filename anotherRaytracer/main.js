@@ -47,16 +47,12 @@ const defaults = {
   vignette: 0.5,
   /** Brightens or darkens the display, in stops (doublings). Scenes can change this default. */
   exposure: 0,
-  /** Over 1 deepens shadows and brightens highlights; see applyContrast in shaders.js */
-  contrast: 1.25,
   /**
    * Depth of field: the camera lens's radius, as a fraction of the distance
    * in focus. 0 keeps everything sharp. Click the image to focus. Scenes
    * can change this default.
    */
   dof: 0,
-  /** 'sobol' or 'random'; see rand2 in shaders.js */
-  sequence: 'sobol',
 };
 /** @typedef {typeof defaults} Settings */
 
@@ -199,9 +195,9 @@ const glowPipelines = ['downsample', 'blurRows', 'blurColumns'].map(
     }),
 );
 
-// Params in shaders.js: 4 × (vec3f + u32), then 22 scalars, padded to a
+// Params in shaders.js: 4 × (vec3f + u32), then 20 scalars, padded to a
 // multiple of 16 bytes
-const paramsData = new ArrayBuffer(160);
+const paramsData = new ArrayBuffer(144);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
 const paramsBuffer = device.createBuffer({
@@ -475,14 +471,12 @@ const render = (trace = true) => {
   paramsF32[27] = settings.dof * camera.focus;
   paramsF32[28] = camera.focus;
   paramsU32[29] = lightCount;
-  paramsU32[30] = +(settings.sequence === 'sobol');
-  paramsF32[31] = settings.contrast;
-  paramsF32[32] = settings.fogForward;
-  paramsF32[33] = settings.fogBlue;
-  paramsF32[34] = settings.detail;
-  paramsF32[35] = detailScale;
-  paramsF32[36] = settings.glow;
-  paramsF32[37] = settings.vignette;
+  paramsF32[30] = settings.fogForward;
+  paramsF32[31] = settings.fogBlue;
+  paramsF32[32] = settings.detail;
+  paramsF32[33] = detailScale;
+  paramsF32[34] = settings.glow;
+  paramsF32[35] = settings.vignette;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -718,42 +712,31 @@ light
   .name('glass dispersion')
   .onChange(changed);
 light
-  .add(settings, 'clamp', 0, 100, 1)
-  .name('indirect clamp (0: none)')
-  .onChange(changed);
-light
   .add(settings, 'detail', 0, 3, 0.1)
   .name('surface detail')
   .onChange(changed);
-light
-  .add(settings, 'sampling', {
-    'both (MIS)': 'mis',
-    'aim at lights': 'light',
-    'random bounces': 'bsdf',
-  })
-  .onChange(changed);
 
-// Adaptive sampling measures noise as displayed, so tiles that looked done
-// may need more samples now
+/** Settings changes that only change how the image is shown */
 const displayChanged = () => {
   saveSettings();
-  activeTiles = -1;
   redraw = true;
+};
+// Adaptive sampling measures noise as displayed, so tiles that looked done
+// may need more samples now
+const brightnessChanged = () => {
+  displayChanged();
+  activeTiles = -1;
 };
 const display = gui.addFolder('Display');
 display
   .add(settings, 'exposure', -4, 4, 0.1)
   .name('exposure (stops)')
-  .onChange(displayChanged);
-display.add(settings, 'contrast', 0.5, 2, 0.05).onChange(displayChanged);
+  .onChange(brightnessChanged);
 display
   .add(settings, 'glow', 0, 0.2, 0.005)
   .name('lens glow')
-  .onChange(() => {
-    saveSettings();
-    redraw = true;
-  });
-display.add(view, 'hdr').name('HDR (h)').onChange(saveHdr).listen();
+  .onChange(displayChanged);
+display.add(settings, 'vignette', 0, 1, 0.05).onChange(displayChanged);
 display
   .add(settings, 'tone', {
     filmic: 'filmic',
@@ -763,17 +746,22 @@ display
   .name('SDR tone curve (t)')
   .onChange(changed)
   .listen();
-display.add(settings, 'vignette', 0, 1, 0.05).onChange(() => {
-  saveSettings();
-  redraw = true;
-});
-display
-  .add(settings, 'headroom', 1, 16, 0.5)
-  .name('HDR headroom')
-  .onChange(changed);
+display.add(view, 'hdr').name('HDR (h)').onChange(saveHdr).listen();
 
-const quality = gui.addFolder('Quality');
-quality
+// For comparing methods and trading speed for accuracy
+const advanced = gui.addFolder('Advanced').close();
+advanced
+  .add(settings, 'sampling', {
+    'both (MIS)': 'mis',
+    'aim at lights': 'light',
+    'random bounces': 'bsdf',
+  })
+  .onChange(changed);
+advanced
+  .add(settings, 'clamp', 0, 100, 1)
+  .name('indirect clamp (0: none)')
+  .onChange(changed);
+advanced
   .add(settings, 'scale', 0.25, 2, 0.25)
   .name('pixel scale')
   .onChange(() => {
@@ -786,16 +774,16 @@ const keepGoing = () => {
   saveSettings();
   activeTiles = -1;
 };
-quality
+advanced
   .add(settings, 'noise', 0, 0.1, 0.005)
   .name('noise target (0: none)')
   .onChange(keepGoing);
-quality.add(settings, 'spp', 16, 16384, 16).name('max spp').onChange(keepGoing);
-quality
-  .add(settings, 'sequence', {'Sobol (smoother)': 'sobol', random: 'random'})
-  .name('random numbers')
+advanced.add(settings, 'spp', 16, 16384, 16).name('max spp').onChange(keepGoing);
+advanced
+  .add(settings, 'headroom', 1, 16, 0.5)
+  .name('HDR headroom')
   .onChange(changed);
-quality
+advanced
   .add(view, 'showTiles')
   .name('show refining tiles (n)')
   .onChange(() => {

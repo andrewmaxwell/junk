@@ -73,10 +73,6 @@ struct Params {
   focusDistance: f32,
   /** Lights are the first lightCount objects */
   lightCount: u32,
-  /** 1 to use the Sobol sequence for the first few random choices; see rand2 */
-  sobol: u32,
-  /** The display's contrast; see applyContrast */
-  contrast: f32,
   /**
    * Which way fog scatters light, from -1 (back where it came from) through
    * 0 (every direction evenly) to 1 (straight on). Real haze is around 0.7,
@@ -154,13 +150,14 @@ fn toneMap(x: vec3f) -> vec3f {
 }
 
 /**
- * Over 1, darkens what's darker than middle gray and brightens what's
- * brighter, by raising brightness relative to middle gray to this power.
- * Each channel separately, so colors get a bit richer too.
+ * Deepens what's darker than middle gray and brightens what's brighter, by
+ * raising brightness relative to middle gray to the power CONTRAST. Each
+ * channel separately, so colors get a bit richer too.
  */
 const MIDDLE_GRAY = 0.18;
+const CONTRAST = 1.25;
 fn applyContrast(x: vec3f) -> vec3f {
-  return MIDDLE_GRAY * pow(max(x, vec3f(0.)) / MIDDLE_GRAY, vec3f(params.contrast));
+  return MIDDLE_GRAY * pow(max(x, vec3f(0.)) / MIDDLE_GRAY, vec3f(CONTRAST));
 }
 
 /**
@@ -385,7 +382,7 @@ fn scramble(x: u32, seed: u32) -> u32 {
  * don't line up with each other.
  */
 fn rand2() -> vec2f {
-  if (params.sobol == 0u || dimension >= SOBOL_PAIRS) {
+  if (dimension >= SOBOL_PAIRS) {
     return vec2f(rand(), rand());
   }
   let s = pcg(pixelSeed + pcg(dimension));
