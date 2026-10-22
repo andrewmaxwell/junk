@@ -62,7 +62,14 @@ const cross = ([ax, ay, az], [bx, by, bz]) => [
 ];
 
 /** @type {(radius: number, center: number[], color: number[], material: number, gloss?: number, shininess?: number) => Shape} */
-const sphere = (radius, center, color, material, gloss = 0, shininess = 0) => ({
+export const sphere = (
+  radius,
+  center,
+  color,
+  material,
+  gloss = 0,
+  shininess = 0,
+) => ({
   shape: SPHERE,
   center,
   radius,
@@ -501,12 +508,14 @@ export const packObjects = (objects) =>
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
 /**
- * Distance along a ray (from o in unit direction d) to the closest shape it
- * hits, or Infinity. Matches `intersect` in shaders.js.
- * @type {(objects: Shape[], o: number[], d: number[]) => number} */
-export const hitDistance = (objects, o, d) => {
+ * The closest shape a ray (from o in unit direction d) hits, as its index in
+ * objects (-1 for none) and the distance to it (Infinity for none). Matches
+ * `intersect` in shaders.js.
+ * @type {(objects: Shape[], o: number[], d: number[]) => {index: number, t: number}} */
+export const hitObject = (objects, o, d) => {
   let closest = Infinity;
-  for (const s of objects) {
+  let index = -1;
+  for (const [i, s] of objects.entries()) {
     const p = s.center.map((c, i) => c - o[i]);
     let t;
     if (s.shape === SPHERE) {
@@ -527,7 +536,10 @@ export const hitDistance = (objects, o, d) => {
         continue;
       }
     }
-    if (t > 0 && t < closest) closest = t;
+    if (t > 0 && t < closest) {
+      closest = t;
+      index = i;
+    }
   }
-  return closest;
+  return {index, t: closest};
 };

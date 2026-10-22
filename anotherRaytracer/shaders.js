@@ -100,7 +100,11 @@ struct Params {
   vignette: f32,
   /** 1 to show the denoised image; see denoiseShader */
   denoise: u32,
+  /** The object to outline, as the camera sees it, or NONE */
+  selected: u32,
 }
+
+const NONE = 0xffffffffu;
 
 @group(0) @binding(0) var<uniform> params: Params;
 
@@ -291,7 +295,10 @@ struct Shape {
 @group(0) @binding(6) var<storage, read> sky: array<vec4f>;
 /**
  * For the denoiser, per pixel: the summed color (in rgb) of what each sample
- * first saw, and its normal (xyz) and distance (w). See guideAlbedo.
+ * first saw, and its normal (xyz) and distance (w). See guideAlbedo. In
+ * albedoSums' w, not summed: the object the camera sees there, for
+ * outlining it, or -1. (A buffer of its own would pass WebGPU's default
+ * limit of 8 per shader.)
  */
 @group(0) @binding(7) var<storage, read_write> albedoSums: array<vec4f>;
 @group(0) @binding(8) var<storage, read_write> normalDepthSums: array<vec4f>;
@@ -333,6 +340,8 @@ var<private> guideNormal: vec3f;
 var<private> guideDepth: f32;
 /** Whether the guide is settled for this sample */
 var<private> guided: bool;
+/** The first object the current sample hit, or NONE */
+var<private> firstHit: u32;
 
 /** Smooth glass and mirrors, which bounce light in one direction, not a spread */
 fn isSmooth(s: u32) -> bool {
@@ -883,6 +892,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // Saved, since shadow rays change hitDist
     let end = hitDist;
     if (seenByCamera) { cameraDist += end; }
+    if (depth == 0) { firstHit = select(NONE, u32(hit), hit >= 0); }
     if (!guided && hit >= 0) {
       let g = objects[u32(hit)];
       var gn = g.normalShape.xyz;
@@ -1255,7 +1265,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   sums[index] = prev + vec4f(sum, f32(params.samplesPerFrame));
   sqSums[index] = prevSq + vec4f(sqSum, 0.);
   glowSums[index] = prevGlow + vec4f(glowSum, 0.);
-  albedoSums[index] = prevAlbedo + vec4f(albedoSum, 0.);
+  albedoSums[index] = vec4f(prevAlbedo.rgb + albedoSum, select(-1., f32(firstHit), firstHit != NONE));
   normalDepthSums[index] = prevNormalDepth + normalDepthSum;
 }`;
 
@@ -1580,6 +1590,24 @@ export const displayShader = /* wgsl */ `${common}
 @group(0) @binding(3) var<storage, read> glow: array<vec4f>;
 /** The denoiser's result: color in rgb */
 @group(0) @binding(4) var<storage, read> denoised: array<vec4f>;
+/** In w, the object the camera sees at each pixel; see albedoSums in traceShader */
+@group(0) @binding(5) var<storage, read> albedoSums: array<vec4f>;
+
+fn isSelected(pos: vec2i) -> bool {
+  return albedoSums[u32(pos.y) * params.width + u32(pos.x)].w == f32(params.selected);
+}
+
+/** Whether pixel pos is on the edge of the selected object */
+fn onOutline(pos: vec2i) -> bool {
+  let inside = isSelected(pos);
+  for (var k = 0; k < 4; k++) {
+    // Two pixels out, so it shows on high resolution screens
+    let q = pos + array(vec2i(2, 0), vec2i(-2, 0), vec2i(0, 2), vec2i(0, -2))[k];
+    if (any(q < vec2i(0)) || q.x >= i32(params.width) || q.y >= i32(params.height)) { continue; }
+    if (isSelected(q) != inside) { return true; }
+  }
+  return false;
+}
 
 /** The lens glow at pixel position pos, blending the four nearest texels */
 fn glowAt(pos: vec2f) -> vec3f {
@@ -1618,6 +1646,9 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let tanSq = dot(offset, offset);
   linear *= mix(1., 1. / ((1. + tanSq) * (1. + tanSq)), params.vignette);
   var color = shown(linear);
+  if (params.selected != NONE && onOutline(vec2i(pos.xy))) {
+    color = mix(color, vec3f(1., 0.75, 0.2), 0.8);
+  }
   if (params.showTiles == 1u && tiles[tileIndex(vec2u(pos.xy))] == 1u) {
     color = mix(color, vec3f(1., 0., 0.), 0.3);
   }

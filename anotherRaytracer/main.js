@@ -1,5 +1,15 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
-import {LIGHT, hitDistance, packObjects, scenes} from './scenes.js';
+import {
+  DIFFUSE,
+  GLASS,
+  LIGHT,
+  MIRROR,
+  SPHERE,
+  hitObject,
+  packObjects,
+  scenes,
+  sphere,
+} from './scenes.js';
 import {
   denoiseShader,
   displayShader,
@@ -149,8 +159,15 @@ const fail = (/** @type {string} */ message) => {
   failure = message;
   stats.textContent = message;
 };
+device.addEventListener('uncapturederror', (e) =>
+  fail(
+    `GPU error: ${/** @type {GPUUncapturedErrorEvent} */ (e).error.message}`,
+  ),
+);
 device.lost.then((info) =>
-  fail(`The GPU stopped (${info.message || info.reason}). Reload to try again.`),
+  fail(
+    `The GPU stopped (${info.message || info.reason}). Reload to try again.`,
+  ),
 );
 
 const context = /** @type {GPUCanvasContext} */ (canvas.getContext('webgpu'));
@@ -218,12 +235,11 @@ const glowPipelines = ['downsample', 'blurRows', 'blurColumns'].map(
 );
 
 const denoiseModule = compile(denoiseShader);
-const [preparePipeline, blurPipeline] = ['prepare', 'blur'].map(
-  (entryPoint) =>
-    device.createComputePipeline({
-      layout: 'auto',
-      compute: {module: denoiseModule, entryPoint},
-    }),
+const [preparePipeline, blurPipeline] = ['prepare', 'blur'].map((entryPoint) =>
+  device.createComputePipeline({
+    layout: 'auto',
+    compute: {module: denoiseModule, entryPoint},
+  }),
 );
 // The denoiser's passes reach 1, 2, 4, 8 and 16 pixels apart
 const strideBuffers = [1, 2, 4, 8, 16].map((stride) => {
@@ -235,7 +251,7 @@ const strideBuffers = [1, 2, 4, 8, 16].map((stride) => {
   return buffer;
 });
 
-// Params in shaders.js: 4 × (vec3f + u32), then 21 scalars, padded to a
+// Params in shaders.js: 4 × (vec3f + u32), then 22 scalars, padded to a
 // multiple of 16 bytes
 const paramsData = new ArrayBuffer(160);
 const paramsF32 = new Float32Array(paramsData);
@@ -246,8 +262,21 @@ const paramsBuffer = device.createBuffer({
 });
 
 let scene = scenes[settings.scene]();
-// The shader expects lights first
+/**
+ * The scene's objects as edited: null where one was deleted, then any that
+ * were added. Edits are kept in the URL as differences from scene.objects.
+ * @type {(import('./scenes.js').Shape | null)[]}
+ */
+let objects = [];
+/**
+ * The objects as the GPU gets them: without deleted ones, and lights first,
+ * as the shader expects. Each knows its index in objects as `id`.
+ * @type {(import('./scenes.js').Shape & {id: number})[]}
+ */
+let gpuObjects = [];
 let lightCount = 0;
+/** The selected object's index in objects, or -1 */
+let selected = -1;
 /** @type {GPUBuffer} */
 let objectBuffer;
 /** The scene's sky for sky domes, or a placeholder; see skyTable in sky.js */
@@ -384,6 +413,7 @@ const resize = () => {
     tiles,
     glow,
     filtered[1],
+    albedoSums,
   ]);
   restart();
 };
@@ -404,20 +434,9 @@ const loadScene = () => {
   // change the bumps
   const {position, target} = scene.camera;
   detailScale = Math.hypot(...position.map((p, i) => p - target[i])) / 300;
-  // Lights first, as the shader expects
-  const isLight = (/** @type {{material: number}} */ s) => s.material === LIGHT;
-  scene.objects = [
-    ...scene.objects.filter(isLight),
-    ...scene.objects.filter((s) => !isLight(s)),
-  ];
-  lightCount = scene.objects.filter(isLight).length;
-  objectBuffer?.destroy();
-  const objectData = packObjects(scene.objects);
-  objectBuffer = device.createBuffer({
-    size: objectData.byteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(objectBuffer, 0, objectData);
+  objects = scene.objects.map((o) => ({...o}));
+  selected = -1;
+  uploadObjects(false);
   skyBuffer?.destroy();
   const skyData = scene.sky
     ? skyTable(scene.sky.sun, scene.sky.haze)
@@ -430,6 +449,33 @@ const loadScene = () => {
   resize();
   resetCamera();
 };
+
+/**
+ * Sends the objects to the GPU, after they change. Restarts the image unless
+ * told not to.
+ */
+function uploadObjects(start = true) {
+  const isLight = (/** @type {{material: number}} */ o) => o.material === LIGHT;
+  const present = objects.flatMap((o, id) => (o ? [{...o, id}] : []));
+  gpuObjects = [
+    ...present.filter(isLight),
+    ...present.filter((o) => !isLight(o)),
+  ];
+  lightCount = present.filter(isLight).length;
+  const data = packObjects(gpuObjects);
+  // Room to add a few without making a new buffer, which needs new bind
+  // groups too
+  if (!objectBuffer || objectBuffer.size < data.byteLength) {
+    objectBuffer?.destroy();
+    objectBuffer = device.createBuffer({
+      size: Math.max(data.byteLength * 2, 96 * 64),
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    if (skyBuffer) resize();
+  }
+  device.queue.writeBuffer(objectBuffer, 0, data);
+  if (start) restart();
+}
 
 function resetCamera() {
   const {position, target} = scene.camera;
@@ -475,6 +521,15 @@ const normalize = (v) => {
   const len = Math.hypot(...v);
   return v.map((x) => x / len);
 };
+
+/**
+ * The image's height at distance 1. Scenes are framed for landscape screens
+ * by their height, which would crop most of the scene on a phone held
+ * upright, so narrow screens show at least as much width as a 5:4 one.
+ */
+const viewZoom = () =>
+  scene.camera.zoom *
+  Math.max(1, 1.25 / (canvas.clientWidth / canvas.clientHeight));
 
 /** Camera position and unit forward, right and up vectors */
 const cameraBasis = () => {
@@ -530,7 +585,7 @@ function restart() {
 /** Adds samples, then shows them. With trace false, only shows them. */
 const render = (trace = true) => {
   const {position, forward, right, up} = cameraBasis();
-  const {zoom} = scene.camera;
+  const zoom = viewZoom();
   paramsF32.set(position, 0);
   paramsU32[3] = frame;
   paramsF32.set(forward, 4);
@@ -546,7 +601,7 @@ const render = (trace = true) => {
   );
   paramsU32[15] = ['mis', 'light', 'bsdf'].indexOf(settings.sampling);
   paramsF32[16] = settings.clamp || 1e30;
-  paramsU32[17] = scene.objects.length;
+  paramsU32[17] = gpuObjects.length;
   paramsU32[18] = width;
   paramsU32[19] = height;
   const tone = /** @type {keyof typeof sdrWhite} */ (settings.tone);
@@ -567,6 +622,8 @@ const render = (trace = true) => {
   paramsF32[34] = settings.glow;
   paramsF32[35] = settings.vignette;
   paramsU32[36] = +settings.denoise;
+  const shown = gpuObjects.findIndex((o) => o.id === selected);
+  paramsU32[37] = shown < 0 || hideSelection ? 0xffffffff : shown;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -704,67 +761,179 @@ const cameraMoved = () => {
 ///////////////////////////////
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+/** The ray from the camera through a point on the canvas, in CSS pixels */
+const pointerRay = (/** @type {number} */ x, /** @type {number} */ y) => {
+  const {position, forward, right, up} = cameraBasis();
+  const zoom = viewZoom();
+  const aspect = canvas.clientWidth / canvas.clientHeight;
+  const u = (x / canvas.clientWidth - 0.5) * zoom * aspect;
+  const v = (0.5 - y / canvas.clientHeight) * zoom;
+  const d = normalize(forward.map((f, i) => f + right[i] * u + up[i] * v));
+  return {position, forward, d};
+};
+
+/** Pointers that are down, by id, at their last position */
+const pointers = new Map();
+/**
+ * What dragging does: 'orbit', 'pan', 'move' (the selected ball), 'pinch'
+ * (two fingers: zoom and pan), or 'none' (after a pinch, until every finger
+ * lifts, so the last one doesn't suddenly orbit)
+ */
+let dragMode = 'orbit';
 // How far the pointer has moved since it went down, to tell clicks from drags
 let dragged = 0;
+/** While moving a ball: from where the pointer's ray meets its height to its center */
+let grabOffset = [0, 0, 0];
+
+/** Where a ray meets the level plane at height y, or null if it doesn't */
+const meetLevel = (
+  /** @type {number[]} */ o,
+  /** @type {number[]} */ d,
+  /** @type {number} */ y,
+) => {
+  const t = (y - o[1]) / d[1];
+  return t > 0 && isFinite(t) ? o.map((x, i) => x + d[i] * t) : null;
+};
+
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, {x: e.offsetX, y: e.offsetY});
+  if (pointers.size === 2) {
+    dragMode = 'pinch';
+    return;
+  }
+  if (pointers.size > 2) return;
   dragged = 0;
+  dragMode = e.shiftKey || e.button > 0 ? 'pan' : 'orbit';
+  // Dragging the selected ball moves it
+  const ball = objects[selected];
+  if (dragMode === 'orbit' && ball?.shape === SPHERE) {
+    const {position, d} = pointerRay(e.offsetX, e.offsetY);
+    const hit = hitObject(gpuObjects, position, d);
+    const level = meetLevel(position, d, ball.center[1]);
+    if (gpuObjects[hit.index]?.id === selected && level) {
+      dragMode = 'move';
+      grabOffset = ball.center.map((c, i) => c - level[i]);
+    }
+  }
 });
+
+/** Pans so the scene moves dx, dy CSS pixels with the pointer */
+const pan = (/** @type {number} */ dx, /** @type {number} */ dy) => {
+  const {right, up} = cameraBasis();
+  const perPixel = (camera.distance * viewZoom()) / canvas.clientHeight;
+  camera.target = camera.target.map(
+    (t, i) => t + (-right[i] * dx + up[i] * dy) * perPixel,
+  );
+};
+
+/** Zooms by factor, toward the target */
+const zoomBy = (/** @type {number} */ factor) => {
+  camera.distance *= factor;
+  // Moving toward the target, keep the same thing in focus
+  camera.focus *= factor;
+};
+
 canvas.addEventListener('pointermove', (e) => {
-  if (!e.buttons) return;
-  dragged += Math.abs(e.movementX) + Math.abs(e.movementY);
-  if (e.shiftKey || e.buttons & 6) {
-    // Pan: move the target so the scene follows the pointer
-    const {right, up} = cameraBasis();
-    const perPixel =
-      (camera.distance * scene.camera.zoom) / canvas.clientHeight;
-    camera.target = camera.target.map(
-      (t, i) => t + (-right[i] * e.movementX + up[i] * e.movementY) * perPixel,
-    );
+  const last = pointers.get(e.pointerId);
+  if (!last) return;
+  const now = {x: e.offsetX, y: e.offsetY};
+  if (dragMode === 'pinch') {
+    // Zoom by how far apart the two fingers are, and pan with their middle
+    const [a, b] = [...pointers.values()];
+    const before = {
+      mid: {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2},
+      gap: Math.hypot(a.x - b.x, a.y - b.y),
+    };
+    pointers.set(e.pointerId, now);
+    const [c, d] = [...pointers.values()];
+    const gap = Math.hypot(c.x - d.x, c.y - d.y);
+    if (gap > 0 && before.gap > 0) zoomBy(before.gap / gap);
+    pan((c.x + d.x) / 2 - before.mid.x, (c.y + d.y) / 2 - before.mid.y);
+    cameraMoved();
+    return;
+  }
+  pointers.set(e.pointerId, now);
+  if (dragMode === 'none') return;
+  const dx = now.x - last.x;
+  const dy = now.y - last.y;
+  dragged += Math.abs(dx) + Math.abs(dy);
+  // Small wobbles of a tap shouldn't move anything
+  if (dragged < 4) return;
+  if (dragMode === 'move') {
+    const ball = objects[selected];
+    if (!ball) return;
+    const {position, d} = pointerRay(now.x, now.y);
+    const level = meetLevel(position, d, ball.center[1]);
+    if (!level) return;
+    ball.center = level.map((x, i) => x + grabOffset[i]);
+    objectsEdited();
+    return;
+  }
+  if (dragMode === 'pan') {
+    pan(dx, dy);
   } else {
-    camera.yaw -= e.movementX * 0.005;
-    camera.pitch = Math.max(
-      -1.5,
-      Math.min(1.5, camera.pitch + e.movementY * 0.005),
-    );
+    camera.yaw -= dx * 0.005;
+    camera.pitch = Math.max(-1.5, Math.min(1.5, camera.pitch + dy * 0.005));
   }
   cameraMoved();
 });
+
 canvas.addEventListener(
   'wheel',
   (e) => {
     e.preventDefault();
-    const factor = Math.exp(e.deltaY * 0.001);
-    camera.distance *= factor;
-    // Moving toward the target, keep the same thing in focus
-    camera.focus *= factor;
+    // Trackpad pinches come as wheel events with ctrl held
+    zoomBy(Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.001)));
     cameraMoved();
   },
   {passive: false},
 );
-// Click: focus on whatever is under the pointer
-canvas.addEventListener('pointerup', (e) => {
-  if (e.button !== 0 || dragged > 3) return;
-  const {position, forward, right, up} = cameraBasis();
-  const {zoom} = scene.camera;
-  const x = (e.offsetX / canvas.clientWidth - 0.5) * zoom;
-  const y = (0.5 - e.offsetY / canvas.clientHeight) * zoom;
-  const aspect = canvas.clientWidth / canvas.clientHeight;
-  const d = normalize(
-    forward.map((f, i) => f + right[i] * x * aspect + up[i] * y),
-  );
-  const t = hitDistance(scene.objects, position, d);
+
+const pointerEnd = (/** @type {PointerEvent} */ e) => {
+  if (!pointers.delete(e.pointerId)) return;
+  if (pointers.size) {
+    if (dragMode === 'pinch') dragMode = 'none';
+    return;
+  }
+  // A click or tap: select what's under it, and focus on it
+  if (
+    e.type === 'pointerup' &&
+    dragMode !== 'none' &&
+    dragged < 4 &&
+    e.button <= 0
+  ) {
+    click(e.offsetX, e.offsetY);
+  }
+};
+canvas.addEventListener('pointerup', pointerEnd);
+canvas.addEventListener('pointercancel', pointerEnd);
+
+/** Selects the object at a point on the canvas, and focuses on it */
+const click = (/** @type {number} */ x, /** @type {number} */ y) => {
+  const {position, forward, d} = pointerRay(x, y);
+  const {index, t} = hitObject(gpuObjects, position, d);
+  const hit = gpuObjects[index];
+  // Sky domes aren't things you can pick up
+  select(hit && !hit.sky ? hit.id : -1);
   if (!isFinite(t)) return;
   // The lens focuses on a plane, so it's the depth that matters
   camera.focus = t * forward.reduce((sum, f, i) => sum + f * d[i], 0);
   saveCamera();
   if (settings.dof > 0) restart();
-});
+};
+
+/** True to leave out the selection's outline */
+let hideSelection = false;
 /** Downloads the image as shown, as a PNG */
 function saveImage() {
   // A WebGPU canvas only keeps its image until the frame ends, so draw it
-  // again and capture it right away
+  // again and capture it right away, without the selection's outline
+  hideSelection = true;
   render(false);
+  hideSelection = false;
+  redraw = true;
   canvas.toBlob((blob) => {
     if (!blob) return;
     const link = document.createElement('a');
@@ -803,6 +972,8 @@ gui.add(settings, 'scene', Object.keys(scenes)).onChange(() => {
   useSceneDefaults();
   saveSettings();
   loadScene();
+  select(-1);
+  saveEdits();
   gui.controllersRecursive().forEach((c) => c.updateDisplay());
 });
 gui.add(view, 'paused').name('pause (space)').listen();
@@ -817,6 +988,316 @@ gui
   .add(settings, 'dof', 0, 0.05, 0.001)
   .name('depth of field (click to focus)')
   .onChange(changed);
+
+///////////////////////////////
+// Editing objects
+///////////////////////////////
+
+/** Linear RGB, 0 to 1, as a CSS hex color, which is sRGB encoded */
+const toHex = (/** @type {number[]} */ rgb) =>
+  '#' +
+  rgb
+    .map((c) => {
+      const x = Math.min(1, Math.max(0, c));
+      const srgb = x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055;
+      return Math.round(srgb * 255)
+        .toString(16)
+        .padStart(2, '0');
+    })
+    .join('');
+/** A CSS hex color as linear RGB */
+const fromHex = (/** @type {string} */ hex) =>
+  [1, 3, 5].map((i) => {
+    const srgb = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+  });
+
+/**
+ * Roughness, from 0 for polished to about 0.7 for matte, as the shader's
+ * Phong shininess and back: about the same spread of reflections as a
+ * microfacet surface of that roughness (Walter et al.'s conversion)
+ */
+const toShininess = (/** @type {number} */ r) => (r > 0 ? 2 / (r * r) - 2 : 0);
+const toRoughness = (/** @type {number} */ s) =>
+  s > 0 ? Math.sqrt(2 / (s + 2)) : 0;
+
+const materials = {paint: DIFFUSE, metal: MIRROR, glass: GLASS, light: LIGHT};
+/** The selected object's settings, as the panel shows them */
+const edit = {
+  material: 'paint',
+  color: '#ffffff',
+  gloss: 0,
+  roughness: 0.1,
+  /** Lights' brightness, in stops over white */
+  brightness: 5,
+  size: 1,
+};
+
+/** What to call an object */
+const describe = (/** @type {import('./scenes.js').Shape} */ o) => {
+  if (o.material === LIGHT) return 'light';
+  const material = Object.keys(materials).find(
+    (k) => materials[/** @type {keyof typeof materials} */ (k)] === o.material,
+  );
+  const coat = o.material === DIFFUSE && o.gloss > 0 ? 'glossy ' : '';
+  if (o.shape === SPHERE) return `${coat}${material} ball`;
+  const name =
+    o.normal[1] > 0.7 ? 'floor' : o.normal[1] < -0.7 ? 'ceiling' : 'wall';
+  return o.material === DIFFUSE ? `${coat}${name}` : `${material} ${name}`;
+};
+
+const objectFolder = gui.addFolder('Objects');
+const editControls = {
+  material: objectFolder
+    .add(edit, 'material', Object.keys(materials))
+    .onChange(() => applyEdit()),
+  color: objectFolder.addColor(edit, 'color').onChange(() => applyEdit()),
+  gloss: objectFolder
+    .add(edit, 'gloss', 0, 1, 0.01)
+    .name('gloss coat')
+    .onChange(() => applyEdit()),
+  roughness: objectFolder
+    .add(edit, 'roughness', 0, 0.7, 0.005)
+    .onChange(() => applyEdit()),
+  brightness: objectFolder
+    .add(edit, 'brightness', -2, 20, 0.1)
+    .name('brightness (stops)')
+    .onChange(() => applyEdit()),
+  size: objectFolder.add(edit, 'size', 0, 1).onChange(() => applyEdit()),
+  remove: objectFolder
+    .add({remove: () => removeSelected()}, 'remove')
+    .name('delete (⌫)'),
+};
+objectFolder.add({addBall: () => addBall()}, 'addBall').name('add a ball');
+const undoControl = objectFolder
+  .add({undo: () => undoEdits()}, 'undo')
+  .name('undo all edits');
+
+/** Shows the selected object's settings in the panel, or a hint */
+const showEdit = () => {
+  const o = objects[selected];
+  objectFolder.title(
+    o ? `Objects: ${describe(o)}` : 'Objects (click one to edit it)',
+  );
+  for (const c of Object.values(editControls)) c.show(!!o);
+  undoControl.show(!!editsParam());
+  if (!o) return;
+  const peak = Math.max(...o.color);
+  edit.material =
+    Object.keys(materials).find(
+      (k) =>
+        materials[/** @type {keyof typeof materials} */ (k)] === o.material,
+    ) ?? 'paint';
+  if (o.material === LIGHT) {
+    edit.color = toHex(o.color.map((c) => c / peak));
+    edit.brightness = +Math.log2(peak).toFixed(1);
+  } else {
+    edit.color = toHex(o.color);
+    edit.brightness = 5;
+  }
+  edit.gloss = o.gloss;
+  edit.roughness = +toRoughness(o.shininess).toFixed(3);
+  // Sizes from a quarter to four times what it was when selected
+  edit.size = o.radius;
+  editControls.size
+    .min(o.radius / 4)
+    .max(o.radius * 4)
+    .step(o.radius / 100);
+  editControls.size.show(o.shape === SPHERE);
+  editControls.gloss.show(o.material === DIFFUSE);
+  editControls.roughness.show(
+    o.material === MIRROR || (o.material === DIFFUSE && o.gloss > 0),
+  );
+  editControls.brightness.show(o.material === LIGHT);
+  editControls.color.name(
+    o.material === LIGHT ? 'color' : o.material === GLASS ? 'tint' : 'color',
+  );
+  shownColor = edit.color;
+  for (const c of Object.values(editControls)) c.updateDisplay();
+};
+/** The color showEdit put in the panel, so other edits don't round it */
+let shownColor = '';
+
+/** Changes the selected object to match the panel */
+const applyEdit = () => {
+  const o = objects[selected];
+  if (!o) return;
+  const material =
+    materials[/** @type {keyof typeof materials} */ (edit.material)];
+  // The shader can only aim at round lights
+  if (material === LIGHT && o.shape !== SPHERE) {
+    showEdit();
+    objectFolder.title(`Objects: ${describe(o)} (only balls can be lights)`);
+    return;
+  }
+  const peak = Math.max(...o.color);
+  const color =
+    edit.color !== shownColor
+      ? fromHex(edit.color)
+      : o.material === LIGHT
+        ? o.color.map((c) => c / peak)
+        : o.color.map((c) => Math.min(c, 1));
+  o.material = material;
+  // A light's color is its hue, at its brightest channel, times its brightness
+  const colorPeak = Math.max(...color, 1e-6);
+  o.color =
+    material === LIGHT
+      ? color.map((c) => (c / colorPeak) * 2 ** edit.brightness)
+      : color;
+  o.gloss = material === DIFFUSE ? edit.gloss : 0;
+  // Paint's gloss coat needs some spread; metal at 0 is a perfect mirror
+  o.shininess =
+    material === MIRROR
+      ? toShininess(edit.roughness)
+      : material === DIFFUSE && edit.gloss > 0
+        ? toShininess(Math.max(edit.roughness, 0.02))
+        : 0;
+  if (o.shape === SPHERE) o.radius = edit.size;
+  objectsEdited();
+  showEdit();
+};
+
+/** Call whenever objects change */
+const objectsEdited = () => {
+  uploadObjects();
+  moving = true;
+  saveEdits();
+};
+
+/** Selects objects[index], or nothing with -1 */
+const select = (/** @type {number} */ index) => {
+  selected = index;
+  showEdit();
+  redraw = true;
+};
+
+const removeSelected = () => {
+  if (!objects[selected]) return;
+  objects[selected] = null;
+  select(-1);
+  objectsEdited();
+};
+
+const undoEdits = () => {
+  objects = scene.objects.map((o) => ({...o}));
+  select(-1);
+  objectsEdited();
+};
+
+/** Drops a random ball onto the floor near the middle of the view, and selects it */
+const addBall = () => {
+  const radius = +(camera.distance / 20).toPrecision(2);
+  // Somewhere level, not on top of another ball
+  let center = camera.target.map((t, i) => t + (i === 1 ? radius : 0));
+  for (let tries = 0; tries < 20; tries++) {
+    const {position, d} = pointerRay(
+      canvas.clientWidth * (0.3 + 0.4 * Math.random()),
+      canvas.clientHeight * (0.45 + 0.4 * Math.random()),
+    );
+    const {index, t} = hitObject(gpuObjects, position, d);
+    const hit = gpuObjects[index];
+    if (hit && hit.shape !== SPHERE && hit.normal[1] > 0.7) {
+      center = position.map((p, i) => p + d[i] * t + (i === 1 ? radius : 0));
+      break;
+    }
+  }
+  const hue = Math.random() * 6;
+  const paint = [0, 4, 2].map((k) => {
+    const x = Math.abs(((hue + k) % 6) - 3) - 1;
+    return 0.05 + 0.75 * Math.min(1, Math.max(0, x)) ** 2;
+  });
+  const options = [
+    sphere(radius, center, paint, DIFFUSE, 0.4, toShininess(0.08)),
+    sphere(radius, center, paint, DIFFUSE),
+    sphere(radius, center, [0.95, 0.75, 0.4], MIRROR, 0, toShininess(0.05)), // gold
+    sphere(radius, center, [0.97, 0.97, 0.97], GLASS),
+    sphere(
+      radius,
+      center,
+      paint.map((c) => 0.3 + c),
+      GLASS,
+    ),
+  ];
+  objects.push(options[Math.floor(Math.random() * options.length)]);
+  select(objects.length - 1);
+  objectsEdited();
+};
+
+/**
+ * Edits as differences from the scene, for the URL: for each object that
+ * changed, by index, the fields that did, or 0 if it was deleted. Added
+ * objects have every field. Null if nothing changed.
+ */
+const editsParam = () => {
+  const round = (/** @type {number} */ x) => +x.toPrecision(5);
+  /** @type {Record<number, object | 0>} */
+  const edits = {};
+  for (const [i, o] of objects.entries()) {
+    const original = scene.objects[i];
+    if (!o) {
+      if (original) edits[i] = 0;
+      continue;
+    }
+    const fields = /** @type {const} */ ([
+      'center',
+      'radius',
+      'color',
+      'material',
+      'gloss',
+      'shininess',
+    ]);
+    const changed = Object.fromEntries(
+      fields
+        .map((f) => {
+          const v = o[f];
+          return [f, Array.isArray(v) ? v.map(round) : round(v)];
+        })
+        .filter(
+          ([f, v]) =>
+            !original ||
+            JSON.stringify(v) !==
+              JSON.stringify(
+                Array.isArray(original[f])
+                  ? original[f].map(round)
+                  : round(original[f]),
+              ),
+        ),
+    );
+    if (Object.keys(changed).length) edits[i] = changed;
+  }
+  return Object.keys(edits).length ? JSON.stringify(edits) : null;
+};
+
+let saveEditsTimer = 0;
+/** Puts the edits in the URL, once they stop changing */
+const saveEdits = () => {
+  clearTimeout(saveEditsTimer);
+  saveEditsTimer = setTimeout(() => {
+    const url = new URL(location.href);
+    const value = editsParam();
+    if (value) url.searchParams.set('edits', value);
+    else url.searchParams.delete('edits');
+    history.replaceState(null, '', url);
+    undoControl.show(!!value);
+  }, 300);
+};
+
+/** Applies edits from the URL, as editsParam makes them */
+const loadEdits = (/** @type {string} */ json) => {
+  try {
+    for (const [key, e] of Object.entries(JSON.parse(json))) {
+      const i = Number(key);
+      if (!(i >= 0 && i < 1000)) continue;
+      const base = objects[i] ?? sphere(1, [0, 0, 0], [0.5, 0.5, 0.5], DIFFUSE);
+      objects[i] = e === 0 ? null : {...base, ...e};
+    }
+    // Indexes skipped over are holes, not objects
+    objects = Array.from(objects, (o) => o ?? null);
+    uploadObjects();
+  } catch (error) {
+    console.warn("Ignoring edits in the URL that I can't read:", error);
+  }
+};
 
 const light = gui.addFolder('Light');
 light.add(settings, 'fog', 0, 0.02, 0.0001).onChange(changed);
@@ -896,7 +1377,10 @@ advanced
   .add(settings, 'noise', 0, 0.1, 0.005)
   .name('noise target (0: none)')
   .onChange(keepGoing);
-advanced.add(settings, 'spp', 16, 16384, 16).name('max spp').onChange(keepGoing);
+advanced
+  .add(settings, 'spp', 16, 16384, 16)
+  .name('max spp')
+  .onChange(keepGoing);
 advanced
   .add(settings, 'headroom', 1, 16, 0.5)
   .name('HDR headroom')
@@ -919,6 +1403,10 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'd') {
     settings.denoise = !settings.denoise;
     displayChanged();
+  } else if (e.key === 'Escape') {
+    select(-1);
+  } else if (e.key === 'Backspace' || e.key === 'Delete') {
+    removeSelected();
   } else if (e.key === 'n') {
     view.showTiles = !view.showTiles;
     redraw = true;
@@ -933,6 +1421,9 @@ document.addEventListener('keydown', (e) => {
 new ResizeObserver(resize).observe(canvas);
 
 loadScene();
+const urlEdits = urlParams.get('edits');
+if (urlEdits) loadEdits(urlEdits);
+showEdit();
 const urlCamera = urlParams.get('camera')?.split('_').map(Number);
 if (urlCamera?.length === 7 && urlCamera.every(isFinite)) {
   camera.target = urlCamera.slice(0, 3);
