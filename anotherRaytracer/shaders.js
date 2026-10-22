@@ -1570,17 +1570,19 @@ fn blur(@builtin(global_invocation_id) id: vec3u) {
       let g = normalDepth[j];
       let a = albedoSlope[j].rgb;
       let offset = length(vec2f(f32(x), f32(y))) * f32(stride);
-      let w = kernel[x + 2] * kernel[y + 2] *
+      var w = kernel[x + 2] * kernel[y + 2] *
         pow(max(dot(guide.xyz, g.xyz), 0.), SIGMA_NORMAL) *
         exp(-abs(guide.w - g.w) / (SIGMA_DEPTH * albedo.w * offset + 1e-3 * guide.w + 1e-6) -
           abs(b - brightness(c.rgb)) / noise -
           length(albedo.rgb - a) / SIGMA_ALBEDO);
+      // A pixel always matches itself, even if its normal averaged to zero
+      if (x == 0 && y == 0) { w = kernel[2] * kernel[2]; }
       // The variance of a weighted average goes as the weights squared
       sum += vec4f(c.rgb * w, c.w * w * w);
       weightSum += w;
     }
   }
-  // The center always counts fully, so weightSum > 0
+  // The center always counts, so weightSum > 0
   result[i] = vec4f(sum.rgb / weightSum, sum.w / (weightSum * weightSum));
 }`;
 

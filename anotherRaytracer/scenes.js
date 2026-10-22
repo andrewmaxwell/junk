@@ -328,10 +328,13 @@ function mirrorsScene() {
   const wall = (x) =>
     plate([x, 40, 0], [-Math.sign(x), 0, 0], [0, 0, 1], 100, 40, mirror, {
       material: MIRROR,
+      // So orbiting outside shows the room, like a dollhouse, rather than
+      // the back of a mirror reflecting nothing
+      oneSided: true,
     });
   return {
     objects: [
-      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.1, 0.1, 0.12], {
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.3, 0.28, 0.26], {
         oneSided: true,
         gloss: 0.3,
         shininess: 300,
@@ -342,13 +345,14 @@ function mirrorsScene() {
       sphere(2, [14, 18, 8], [1.5, 3.5, 8], LIGHT), // blue orb
       sphere(1.8, [2, 32, 22], [7, 2, 5], LIGHT), // pink orb
       // Soft white light high above
-      sphere(30, [0, 200, 40], [3, 3, 3], LIGHT),
+      sphere(30, [0, 200, 40], [6, 6, 6], LIGHT),
       sphere(6, [-8, 6, 0], [0.9, 0.2, 0.15], DIFFUSE, 0.3, 500), // red
       sphere(5, [10, 5, -12], [0.95, 0.8, 0.45], MIRROR), // gold
       sphere(7, [6, 7, 22], [0.97, 0.97, 0.97], GLASS),
       sphere(3, [-16, 3, 26], [0.2, 0.6, 0.3], DIFFUSE, 0.3, 500), // green
     ],
-    camera: {position: [20, 20, 55], target: [-30, 12, 0], zoom: 0.8},
+    // Looking into the left mirror, orbiting a point inside the room
+    camera: {position: [20, 20, 55], target: [-5, 16, 27.5], zoom: 0.8},
   };
 }
 
@@ -360,13 +364,19 @@ function bokehScene() {
   const big = 1000;
   /** @type {Shape[]} */
   const objects = [
-    plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.02, 0.02, 0.02], {
+    plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.12, 0.07, 0.04], {
       oneSided: true,
-      gloss: 0.6,
+      gloss: 0.5,
       shininess: 3000,
-    }), // table
+    }), // polished walnut table
+    // A dark wall far behind, for the fairy lights to glow on
+    plate([0, 50, -230], [0, 0, 1], [1, 0, 0], big, big, [0.3, 0.24, 0.2], {
+      oneSided: true,
+    }),
     // A big soft light up and to the left, like a window
-    sphere(20, [-60, 70, 40], [10, 9.6, 9], LIGHT),
+    sphere(20, [-60, 70, 40], [30, 28.8, 27], LIGHT),
+    // Dim cool light from above, so shadows aren't empty
+    sphere(200, [0, 500, 150], [0.4, 0.45, 0.55], LIGHT),
     sphere(5, [0, 5, 0], [0.97, 0.97, 0.97], GLASS),
     sphere(4, [-11, 4, -4], [0.95, 0.75, 0.4], MIRROR), // gold
     sphere(3.5, [10, 3.5, -3], [0.7, 0.08, 0.1], DIFFUSE, 0.4, 2000), // red
