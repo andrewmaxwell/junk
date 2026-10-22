@@ -23,6 +23,7 @@ export const LIGHT = 3;
  *   gloss: number,
  *   shininess: number,
  *   oneSided: boolean,
+ *   sky: boolean,
  * }} Shape
  * Spheres use `radius`. Plates are rectangles facing `normal`, spanning
  * halfWidth along u and halfHeight along v.
@@ -42,6 +43,9 @@ export const LIGHT = 3;
  *
  * One-sided plates are invisible from behind, so walls disappear when the
  * camera orbits outside them, like a dollhouse.
+ *
+ * A `sky` light is a dome whose color in each direction is the scene's sky
+ * (see `sky` in Scene) times `color`.
  */
 
 /** @type {(v: number[]) => number[]} */
@@ -72,6 +76,7 @@ const sphere = (radius, center, color, material, gloss = 0, shininess = 0) => ({
   gloss,
   shininess,
   oneSided: false,
+  sky: false,
 });
 
 /**
@@ -100,18 +105,32 @@ const plate = (
   gloss,
   shininess,
   oneSided,
+  sky: false,
+});
+
+/**
+ * A sky dome: a light so big and high that it covers the sky, colored by
+ * the scene's sky, and as bright on average as brightness
+ * @type {(radius: number, center: number[], brightness: number) => Shape}
+ */
+const skyDome = (radius, center, brightness) => ({
+  ...sphere(radius, center, [brightness, brightness, brightness], LIGHT),
+  sky: true,
 });
 
 /**
  * @typedef {{
  *   objects: Shape[],
  *   camera: {position: number[], target: number[], zoom: number},
+ *   sky?: {sun: number[], haze?: number},
  *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number},
  * }} Scene
  * The camera orbits `target`, and starts focused on it. `zoom` is the image
  * height at distance 1. `defaults` overrides the panel's defaults for this
  * scene (see `defaults` in main.js): `fog` is the fog's density, the chance
  * per unit of distance that light scatters off it, and `dof` the lens size.
+ * `sky` colors sky domes: as the real sky looks with the sun in direction
+ * `sun`, and `haze` times as hazy as usual (see sky.js).
  */
 
 /** @type {() => Scene} */
@@ -378,9 +397,11 @@ function sunsetScene() {
       }),
       // The sun, low and far, to the left of the balls
       sphere(40, [-2800, 250, -1200], [6000, 3000, 1200], LIGHT),
-      // Blue sky: so big and high that it reaches down to 7° above the
-      // horizon, where the haze hides its edge. It lights the shadows and the air.
-      sphere(59500, [0, 60000, 0], [0.08, 0.17, 0.4], LIGHT),
+      // The sky: a shallow dome over everything, 2000 overhead and meeting
+      // the ground 14000 away, so there's no gap at the horizon, and not so
+      // much fog that it hides the sky. It lights the shadows and the air,
+      // blue from overhead and orange from near the sun.
+      skyDome(50000, [0, -48000, 0], 0.6),
       sphere(20, [0, 20, 0], [0.8, 0.8, 0.8], DIFFUSE, 0.2, 50),
       sphere(10, [35, 10, 20], [0.95, 0.95, 0.95], GLASS),
       sphere(12, [-40, 12, 30], [0.9, 0.9, 0.9], MIRROR),
@@ -389,7 +410,9 @@ function sunsetScene() {
       sphere(25, [120, 25, -180], [0.45, 0.35, 0.3], DIFFUSE),
     ],
     camera: {position: [60, 18, 160], target: [-45, 25, 0], zoom: 0.75},
-    defaults: {fog: 0.0002, fogForward: 0.7, fogBlue: 1},
+    sky: {sun: [-2800, 250, -1200]},
+    // Thin, since the sky has haze of its own
+    defaults: {fog: 0.0001, fogForward: 0.7, fogBlue: 1, dof: 0.004},
   };
 }
 
@@ -442,7 +465,7 @@ function rgbShadowsScene() {
     },
     // The lights are each one primary color, so glass has no white light to
     // split into rainbows; dispersion would only add noise
-    defaults: {fog: 0.0004, dispersion: 0, exposure: -1.5},
+    defaults: {fog: 0.0004, dispersion: 0, exposure: -1.5, dof: 0.003},
   };
 }
 
@@ -470,7 +493,7 @@ export const packObjects = (objects) =>
       ...[...s.u, s.halfWidth],
       ...[...s.v, s.halfHeight],
       ...[...s.color, s.material],
-      ...[s.gloss, s.shininess, +s.oneSided, 0],
+      ...[s.gloss, s.shininess, +s.oneSided, +s.sky],
     ]),
   );
 

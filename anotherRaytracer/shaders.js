@@ -2,6 +2,8 @@
 // every pixel to a running sum; the display shader divides by the sample
 // count.
 
+import {SKY_HEIGHT, SKY_WIDTH} from './sky.js';
+
 /** Shared by both shaders. main.js writes it; keep the layouts in sync. */
 const common = /* wgsl */ `
 struct Params {
@@ -38,7 +40,10 @@ struct Params {
    * in HDR, or in SDR, the brightness that tone mapping shows as white
    */
   maxBrightness: f32,
-  /** 1 to ease brightness over 1 into white for SDR screens, 0 to clip */
+  /**
+   * How SDR screens show brightness over 1: 0 clips it, 1 eases it into
+   * white (toneMap), 2 is a filmic curve (agx)
+   */
   toneMap: u32,
   /**
    * Fog filling the scene: the chance per unit of distance that light
@@ -92,6 +97,11 @@ struct Params {
   detailScale: f32,
   /** Lens glow: the fraction of light the lens spreads into a halo */
   glow: f32,
+  /**
+   * How much the image darkens toward its corners, as through a real lens:
+   * 0 for none, 1 for the cos^4 falloff of a simple lens
+   */
+  vignette: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -153,10 +163,49 @@ fn applyContrast(x: vec3f) -> vec3f {
   return MIDDLE_GRAY * pow(max(x, vec3f(0.)) / MIDDLE_GRAY, vec3f(params.contrast));
 }
 
+/**
+ * A filmic curve for SDR screens: AgX (Troy Sobotka's, as in Blender), using
+ * Benjamin Wrensch's polynomial fit. Like film, it rolls off shadows as well
+ * as highlights, and bright colors desaturate toward white as they would on
+ * film, not just when they clip.
+ */
+const AGX_MIN_EV = -12.47393;
+const AGX_MAX_EV = 4.026069;
+fn agx(c: vec3f) -> vec3f {
+  // Into AgX's working space, then log encoded from MIN_ to MAX_EV
+  let inset = mat3x3f(
+    0.842479062253094, 0.0423282422610123, 0.0423756549057051,
+    0.0784335999999992, 0.878468636469772, 0.0784336,
+    0.0792237451477643, 0.0791661274605434, 0.879142973793104,
+  );
+  var x = clamp(log2(max(inset * c, vec3f(1e-10))), vec3f(AGX_MIN_EV), vec3f(AGX_MAX_EV));
+  x = (x - AGX_MIN_EV) / (AGX_MAX_EV - AGX_MIN_EV);
+  // The S-shaped contrast curve
+  let x2 = x * x;
+  let x4 = x2 * x2;
+  x = 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+  // Plain AgX is flat and washed out, so like Blender's, it gets a "punchy"
+  // look: more contrast and saturation
+  x = pow(max(x, vec3f(0.)), vec3f(1.35));
+  let luma = dot(x, vec3f(0.2126, 0.7152, 0.0722));
+  x = luma + 1.4 * (x - luma);
+  let outset = mat3x3f(
+    1.19687900512017, -0.0528968517574562, -0.0529716355144438,
+    -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
+    -0.0990297440797205, -0.0989611768448433, 1.15107367264116,
+  );
+  // The curve's output is gamma encoded; back to linear
+  return pow(max(outset * x, vec3f(0.)), vec3f(2.2));
+}
+/** Brightness that agx shows as white */
+const AGX_WHITE = 16.;
+
 /** A linear color as the display shows it, before sRGB encoding */
 fn shown(c: vec3f) -> vec3f {
   var color = applyContrast(c * params.exposure);
-  if (params.toneMap == 1u) {
+  if (params.toneMap == 2u) {
+    color = agx(color);
+  } else if (params.toneMap == 1u) {
     color = toneMap(color);
   } else if (peak(color) > params.maxBrightness) {
     // Brighter than the screen can show. Scale the whole color down, rather
@@ -219,7 +268,7 @@ struct Shape {
   uHalf: vec4f,
   vHalf: vec4f,
   colorMaterial: vec4f,
-  surface: vec4f, // gloss, shininess, oneSided
+  surface: vec4f, // gloss, shininess, oneSided, sky
 }
 
 @group(0) @binding(1) var<storage, read> objects: array<Shape>;
@@ -239,6 +288,30 @@ struct Shape {
  * glows far more than one just over it, though both show as white.
  */
 @group(0) @binding(5) var<storage, read_write> glowSums: array<vec4f>;
+/** The sky's color by direction, for sky domes: skyTable in sky.js */
+@group(0) @binding(6) var<storage, read> sky: array<vec4f>;
+
+/** The sky's color in unit direction d, blending the table's nearest four */
+fn skyColor(d: vec3f) -> vec3f {
+  // Row r is at (r / (SKY_HEIGHT - 1))² of 90° up; below the horizon, the
+  // horizon's color
+  let up = sqrt(max(asin(clamp(d.y, -1., 1.)), 0.) / (PI / 2.)) * f32(${SKY_HEIGHT - 1});
+  let around = (atan2(d.z, d.x) / (2. * PI) + 0.5) * f32(${SKY_WIDTH});
+  let row = min(u32(up), ${SKY_HEIGHT - 2}u);
+  let col = u32(around) % ${SKY_WIDTH}u;
+  let nextCol = (col + 1u) % ${SKY_WIDTH}u;
+  let f = vec2f(fract(around), up - f32(row));
+  let below = mix(sky[row * ${SKY_WIDTH}u + col], sky[row * ${SKY_WIDTH}u + nextCol], f.x);
+  let above = mix(sky[(row + 1u) * ${SKY_WIDTH}u + col], sky[(row + 1u) * ${SKY_WIDTH}u + nextCol], f.x);
+  return mix(below, above, min(f.y, 1.)).rgb;
+}
+
+/** The light a light gives off toward a viewer looking in direction d */
+fn emitted(light: u32, d: vec3f) -> vec3f {
+  let color = objects[light].colorMaterial.rgb;
+  if (objects[light].surface.w == 0.) { return color; }
+  return color * skyColor(d);
+}
 
 /** The current sample's light that the clamp in trace removed */
 var<private> clamped: vec3f;
@@ -383,6 +456,9 @@ fn directionAround(w: vec3f, cosA: f32, phi: f32) -> vec3f {
 fn lightConeOneMinusCos(p: vec3f, light: u32) -> f32 {
   let l = objects[light].centerRadius.xyz - p;
   let r = objects[light].centerRadius.w;
+  // Inside it, like under a sky dome, it's in every direction: the cone is
+  // the whole sphere, cos = -1
+  if (dot(l, l) < r * r) { return 2.; }
   let sinMaxSq = min(1., r * r / dot(l, l));
   return sinMaxSq / (1. + sqrt(1. - sinMaxSq));
 }
@@ -792,7 +868,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         let ph = phase(d, ls.xyz);
         if (params.sampling == 0u) { weight *= powerHeuristic(pick / ls.w, ph); }
         let scattered = transmittance * fogDensities() * FOG_ALBEDO;
-        let c = through * objects[light].colorMaterial.rgb * scattered * visible * (ph * weight * ls.w / pdf);
+        let c = through * emitted(light, ls.xyz) * scattered * visible * (ph * weight * ls.w / pdf);
         color += tint * c * select(indirectScale(c), 1., seenByCamera);
       }
     }
@@ -846,7 +922,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
           }
           let ph = phase(d, ls.xyz);
           if (params.sampling == 0u) { weight *= powerHeuristic(pick / ls.w, ph); }
-          let c = through * objects[light].colorMaterial.rgb * visible * (ph * weight * ls.w / pick);
+          let c = through * emitted(light, ls.xyz) * visible * (ph * weight * ls.w / pick);
           color += tint * c * select(indirectScale(c), 1., seenByCamera);
         }
       }
@@ -870,7 +946,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     if (material == LIGHT) {
       var w = 1.;
       if (bouncePdf > 0.) { w = bounceLightWeight(o, bouncePdf, s); }
-      var e = sColor * w * through;
+      var e = emitted(s, d) * w * through;
       if (seenByCamera) {
         // The light is far brighter than the screen can show. Clamping it
         // to the screen's brightest here, before pixel samples are averaged,
@@ -888,7 +964,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         // darker than what's around them. So wash it out first, by how
         // bright it really is, spread over the pixels it's blurred across.
         let unclamped = e;
-        if (params.toneMap == 1u) {
+        if (params.toneMap != 0u) {
           e = mix(e, vec3f(peak(e)), washOut(peak(applyContrast(e * params.exposure / blur))));
         }
         let limit = params.maxBrightness * blur / choiceProb;
@@ -953,7 +1029,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
           let pdf = evalSurface(s, ns, r, l, &bsdf);
           var weight = 1.;
           if (params.sampling == 0u) { weight = powerHeuristic(pick / ls.w, pdf); }
-          let c = through * objects[light].colorMaterial.rgb * bsdf * visible * (weight * cosSurface * ls.w / pick);
+          let c = through * emitted(light, l) * bsdf * visible * (weight * cosSurface * ls.w / pick);
           // Light reaching the first surface the camera sees is direct light
           color += tint * c * select(indirectScale(c), 1., seenByCamera);
         }
@@ -1279,6 +1355,14 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   var linear = s.rgb / max(s.w, 1.);
   // The lens spreads that fraction of the light into the glow
   if (params.glow > 0.) { linear = mix(linear, glowAt(pos.xy), params.glow); }
+  // Vignetting: light reaching the edges of the image comes in at an angle,
+  // so it's spread over more of the sensor, and the lens looks smaller from
+  // there. Together, brightness falls off as cos^4 of the angle.
+  let screen = pos.xy / vec2f(f32(params.width), f32(params.height)) - 0.5;
+  // Off the center of the image plane, 1 unit in front of the camera
+  let offset = params.camRight * screen.x + params.camUp * screen.y;
+  let tanSq = dot(offset, offset);
+  linear *= mix(1., 1. / ((1. + tanSq) * (1. + tanSq)), params.vignette);
   var color = shown(linear);
   if (params.showTiles == 1u && tiles[tileIndex(vec2u(pos.xy))] == 1u) {
     color = mix(color, vec3f(1., 0., 0.), 0.3);

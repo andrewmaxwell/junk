@@ -1,6 +1,7 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {LIGHT, hitDistance, packObjects, scenes} from './scenes.js';
 import {displayShader, glowShader, tileShader, traceShader} from './shaders.js';
+import {skyTable} from './sky.js';
 
 /**
  * Everything the controls change. Settings that differ from their defaults
@@ -40,6 +41,10 @@ const defaults = {
   detail: 1,
   /** The fraction of light the lens spreads into a glow; see glowShader in shaders.js */
   glow: 0.005,
+  /** How SDR screens show brightness over 1: 'filmic', 'ease' or 'clip'; see `toneMap` in shaders.js */
+  tone: 'filmic',
+  /** Darkening toward the corners, 0 to 1; see `vignette` in shaders.js */
+  vignette: 0.5,
   /** Brightens or darkens the display, in stops (doublings). Scenes can change this default. */
   exposure: 0,
   /** Over 1 deepens shadows and brightens highlights; see applyContrast in shaders.js */
@@ -98,8 +103,13 @@ const saveSettings = () => {
   history.replaceState(null, '', url);
 };
 
-/** In SDR with tone mapping, lights clamp here, which toneMap shows as white */
-const sdrWhite = 4;
+/**
+ * In SDR, lights clamp at the brightness each tone curve shows as white:
+ * toneMap's and agx's in shaders.js
+ */
+const sdrWhite = {clip: 1, ease: 4, filmic: 16};
+/** settings.tone as params.toneMap */
+const toneCurves = ['clip', 'ease', 'filmic'];
 
 const canvas = /** @type {HTMLCanvasElement} */ (
   document.querySelector('canvas')
@@ -132,8 +142,6 @@ const view = {
   /** Highlight the tiles adaptive sampling is still refining */
   showTiles: false,
   hdr: matchMedia('(dynamic-range: high)').matches,
-  /** In SDR, whether to ease bright areas into white instead of clipping them */
-  toneMapping: true,
 };
 // HDR is remembered per browser, since some (Chrome on macOS, as of 154) say
 // the screen is HDR but then show HDR canvases clipped
@@ -191,7 +199,7 @@ const glowPipelines = ['downsample', 'blurRows', 'blurColumns'].map(
     }),
 );
 
-// Params in shaders.js: 4 × (vec3f + u32), then 21 scalars, padded to a
+// Params in shaders.js: 4 × (vec3f + u32), then 22 scalars, padded to a
 // multiple of 16 bytes
 const paramsData = new ArrayBuffer(160);
 const paramsF32 = new Float32Array(paramsData);
@@ -206,6 +214,9 @@ let scene = scenes[settings.scene]();
 let lightCount = 0;
 /** @type {GPUBuffer} */
 let objectBuffer;
+/** The scene's sky for sky domes, or a placeholder; see skyTable in sky.js */
+/** @type {GPUBuffer} */
+let skyBuffer;
 
 // How many tiles adaptive sampling still refines, counted on the GPU and
 // copied back to show and to know when to stop
@@ -273,6 +284,7 @@ const resize = () => {
     sqSums,
     tiles,
     glowSums,
+    skyBuffer,
   ]);
   tileBindGroup = bindGroup(tilePipeline, [
     paramsBuffer,
@@ -325,6 +337,15 @@ const loadScene = () => {
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
   device.queue.writeBuffer(objectBuffer, 0, objectData);
+  skyBuffer?.destroy();
+  const skyData = scene.sky
+    ? skyTable(scene.sky.sun, scene.sky.haze)
+    : new Float32Array(4);
+  skyBuffer = device.createBuffer({
+    size: skyData.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(skyBuffer, 0, skyData);
   resize();
   resetCamera();
 };
@@ -443,9 +464,9 @@ const render = (trace = true) => {
   paramsU32[17] = scene.objects.length;
   paramsU32[18] = width;
   paramsU32[19] = height;
-  const toneMap = !view.hdr && view.toneMapping;
-  paramsF32[20] = view.hdr ? settings.headroom : toneMap ? sdrWhite : 1;
-  paramsU32[21] = +toneMap;
+  const tone = /** @type {keyof typeof sdrWhite} */ (settings.tone);
+  paramsF32[20] = view.hdr ? settings.headroom : sdrWhite[tone];
+  paramsU32[21] = view.hdr ? 0 : toneCurves.indexOf(tone);
   paramsF32[22] = settings.fog;
   paramsF32[23] = settings.dispersion;
   paramsF32[24] = settings.noise;
@@ -461,6 +482,7 @@ const render = (trace = true) => {
   paramsF32[34] = settings.detail;
   paramsF32[35] = detailScale;
   paramsF32[36] = settings.glow;
+  paramsF32[37] = settings.vignette;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -733,10 +755,18 @@ display
   });
 display.add(view, 'hdr').name('HDR (h)').onChange(saveHdr).listen();
 display
-  .add(view, 'toneMapping')
-  .name('SDR tone mapping (t)')
-  .onChange(restart)
+  .add(settings, 'tone', {
+    filmic: 'filmic',
+    'ease into white': 'ease',
+    clip: 'clip',
+  })
+  .name('SDR tone curve (t)')
+  .onChange(changed)
   .listen();
+display.add(settings, 'vignette', 0, 1, 0.05).onChange(() => {
+  saveSettings();
+  redraw = true;
+});
 display
   .add(settings, 'headroom', 1, 16, 0.5)
   .name('HDR headroom')
@@ -784,8 +814,8 @@ document.addEventListener('keydown', (e) => {
     view.showTiles = !view.showTiles;
     redraw = true;
   } else if (e.key === 't') {
-    view.toneMapping = !view.toneMapping;
-    restart();
+    settings.tone = toneCurves[(toneCurves.indexOf(settings.tone) + 1) % 3];
+    changed();
   } else if (e.key === 'h') {
     view.hdr = !view.hdr;
     saveHdr();

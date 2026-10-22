@@ -10,7 +10,7 @@ Scenes:
 - **caustics**: clear and colored glass balls on a pale floor, focusing light into their shadows
 - **mirrors**: two facing mirrors reflecting glowing orbs and balls into the distance
 - **bokeh**: balls on a polished black table, with fairy lights behind blurred into discs by depth of field
-- **sunset**: balls on a plain with long shadows, a low sun, and hazy air that glows around it
+- **sunset**: balls on a plain with long shadows, a low sun, a physically based sky, and hazy air that glows around the sun
 - **rgb**: a red, a green and a blue light in light fog, casting cyan, magenta and yellow shadows that overlap into red, green, blue and black, of a floating ball, two posts, and glass and mirror balls
 
 How it renders:
@@ -24,9 +24,12 @@ How it renders:
 - **lens glow**: like a real lens, a small fraction of the light spreads into a soft halo, which shows around lights and glints. Lights are clamped to the screen's brightest, but the glow gets the light that clamp removes, so a light thousands of times brighter than white glows like one.
 - The first few random choices of each sample come from a scrambled Sobol sequence, which spreads samples more evenly than plain random numbers, so noise fades faster.
 - Adaptive sampling: every 8×8 tile gets at least 32 samples, then stops once its estimated noise is below the **noise target**. Noise is measured in each color channel as displayed, so speckles that differ only in color, or that show in areas brighter than white, still count. **show refining tiles** highlights the ones still going.
-- HDR screens show lights brighter than white (in Safari; Chrome on macOS clips them). On SDR screens, bright areas ease into white instead of clipping, keeping their color, so a bright orange light still looks orange. Colors far brighter than white wash out toward white, like film, so lights and their reflections in glass and mirrors have white-hot cores.
+- HDR screens show lights brighter than white (in Safari; Chrome on macOS clips them). On SDR screens, the **SDR tone curve** (**t** cycles it) is filmic by default: AgX, as in Blender, with a punchy look, which rolls off shadows and highlights like film. **ease into white** keeps bright colors' hue until they're far brighter than white, so a bright orange light still looks orange; **clip** just clips. Colors far brighter than white wash out toward white, so lights and their reflections in glass and mirrors have white-hot cores.
+- **vignette** darkens the corners, as light reaching them through a real lens falls off as cos⁴ of its angle.
+- Sky domes are lights colored by a physically based sky (Nishita's): sunlight scattered by air, which scatters blue most, and by haze, which glows around the sun. Ozone keeps the sky blue overhead at sunset. It's computed once per scene into a table the shader looks up by direction.
 - Out-of-focus lights spread into discs that stay as bright as they should.
 
 - `main.js` – WebGPU setup, the frame loop, camera, controls, and the lil-gui panel
 - `shaders.js` – the path tracer, adaptive sampling, and display shaders (WGSL)
 - `scenes.js` – the scenes, and packing them for the GPU
+- `sky.js` – the physically based sky
