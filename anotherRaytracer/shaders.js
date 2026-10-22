@@ -83,6 +83,15 @@ struct Params {
    * blue sky, and lights seen through a lot of it turn orange.
    */
   fogBlue: f32,
+  /**
+   * How uneven surfaces are: paint finely bumpy, glass and mirrors smudged
+   * in places. 0 for mathematically smooth.
+   */
+  detail: f32,
+  /** World units per bump; main.js sets it from the scene's size */
+  detailScale: f32,
+  /** Lens glow: the fraction of light the lens spreads into a halo */
+  glow: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -93,6 +102,11 @@ const TILE = 8u;
 /** Index of the tile that pixel id is in */
 fn tileIndex(id: vec2u) -> u32 {
   return (id.y / TILE) * ((params.width + TILE - 1u) / TILE) + id.x / TILE;
+}
+
+/** Size of the lens glow's image: one texel per tile */
+fn glowSize() -> vec2u {
+  return (vec2u(params.width, params.height) + TILE - 1u) / TILE;
 }
 
 /** How bright a linear RGB color looks */
@@ -219,6 +233,15 @@ struct Shape {
 @group(0) @binding(3) var<storage, read_write> sqSums: array<vec4f>;
 /** Per tile: 1 if it still needs samples. Written by tileShader. */
 @group(0) @binding(4) var<storage, read> tiles: array<u32>;
+/**
+ * Per pixel: summed light that trace clamped away from lights the camera
+ * sees, for the lens glow. A light thousands of times brighter than white
+ * glows far more than one just over it, though both show as white.
+ */
+@group(0) @binding(5) var<storage, read_write> glowSums: array<vec4f>;
+
+/** The current sample's light that the clamp in trace removed */
+var<private> clamped: vec3f;
 
 /** Smooth glass and mirrors, which bounce light in one direction, not a spread */
 fn isSmooth(s: u32) -> bool {
@@ -587,6 +610,94 @@ fn glassIndex(w: f32) -> f32 {
 }
 
 ///////////////////////////////
+// Surface detail
+///////////////////////////////
+
+// Real surfaces are never perfectly even. Gradient noise (Perlin's), summed
+// over a few sizes, varies them a little from point to point. It depends
+// only on position, so each point stays the same as samples add up.
+
+/** A pseudorandom gradient for a lattice point of the noise */
+fn latticeGradient(c: vec3i) -> vec3f {
+  let h = pcg(u32(c.x) + pcg(u32(c.y) + pcg(u32(c.z))));
+  let v = vec3u(h, pcg(h), pcg(h + 1u)) >> vec3u(8u);
+  return vec3f(v) / 8388608. - 1.;
+}
+
+/**
+ * Smoothly varying noise, roughly -1 to 1, with features about 1 apart. In
+ * x, and its gradient in yzw, worked out exactly rather than by sampling
+ * nearby points, which would take four times as long.
+ */
+fn noise(p: vec3f) -> vec4f {
+  let i = floor(p);
+  let f = p - i;
+  // Weights that ease in and out, so there are no creases at cell edges,
+  // and their slopes
+  let u = f * f * f * (f * (f * 6. - 15.) + 10.);
+  let du = 30. * f * f * (f - 1.) * (f - 1.);
+  var sum = vec4f(0.);
+  for (var k = 0u; k < 8u; k++) {
+    let corner = vec3f(vec3u(k, k >> 1u, k >> 2u) & vec3u(1u));
+    let w = mix(1. - u, u, corner);
+    let dw = du * (corner * 2. - 1.);
+    let g = latticeGradient(vec3i(i + corner));
+    let v = dot(g, f - corner);
+    let weight = w.x * w.y * w.z;
+    let dWeight = vec3f(dw.x * w.y * w.z, w.x * dw.y * w.z, w.x * w.y * dw.z);
+    sum += vec4f(weight * v, dWeight * v + weight * g);
+  }
+  return sum * 1.4;
+}
+
+/** noise summed over octaves, each half the size and strength of the last */
+fn fbm(p: vec3f, octaves: i32) -> f32 {
+  var sum = 0.;
+  var strength = 0.5;
+  var q = p;
+  for (var i = 0; i < octaves; i++) {
+    sum += strength * noise(q).x;
+    // Offset each octave so their lattices don't line up
+    q = q * 2.03 + 17.1;
+    strength *= 0.5;
+  }
+  return sum;
+}
+
+/** How many sizes of bumps there are, each half the last */
+const BUMP_OCTAVES = 6;
+
+/**
+ * A bumpy surface's normal here: n tilted by noise, like paint over plaster.
+ * Only light and shading see the bumps; the surface itself stays flat. The
+ * bumps come in BUMP_OCTAVES sizes, from 4 detailScales across down to
+ * finer than a pixel at the scene's starting view. Bigger ones are gentler,
+ * so from a distance, where the fine ones average out, a surface looks
+ * smooth, but close up it's textured. Much bigger, slower noise varies how
+ * bumpy, so it isn't the same everywhere.
+ */
+fn bumpNormal(n: vec3f, p: vec3f) -> vec3f {
+  var slope = vec3f(0.);
+  var size = 4. * params.detailScale;
+  var steepness = 1.;
+  for (var i = 0; i < BUMP_OCTAVES; i++) {
+    // A bump of height steepness * size, so its slope is steepness
+    slope += steepness * noise(p / size + f32(i) * 17.1).yzw;
+    size *= 0.5;
+    steepness *= 1.4;
+  }
+  let patches = noise(p / (40. * params.detailScale) + 51.3).x;
+  let bumpiness = 0.004 * params.detail * mix(0.3, 1.5, smoothstep(-0.5, 0.5, patches));
+  // Tilt away from uphill, along the surface
+  return normalize(n - bumpiness * (slope - n * dot(slope, n)));
+}
+
+/** How smudged glass or a mirror is here, from 0 to 1 */
+fn smudge(p: vec3f) -> f32 {
+  return params.detail * smoothstep(0.15, 0.5, fbm(p / (6. * params.detailScale), 4));
+}
+
+///////////////////////////////
 // Path tracing
 ///////////////////////////////
 
@@ -776,11 +887,14 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         // bright, so its reflections in glass would stay deep red or blue,
         // darker than what's around them. So wash it out first, by how
         // bright it really is, spread over the pixels it's blurred across.
+        let unclamped = e;
         if (params.toneMap == 1u) {
           e = mix(e, vec3f(peak(e)), washOut(peak(applyContrast(e * params.exposure / blur))));
         }
         let limit = params.maxBrightness * blur / choiceProb;
-        color += tint * e * min(1., limit / peak(e));
+        let kept = min(1., limit / peak(e));
+        color += tint * e * kept;
+        clamped += tint * unclamped * (1. - kept);
       } else {
         color += tint * e * indirectScale(e);
       }
@@ -806,6 +920,14 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     let nl = select(-n, n, into);
 
     if (!isSmooth(s)) {
+      // Bumps tilt the normal that diffuse shading sees, ns. nl stays the
+      // real surface's, which light can't go through. Glossy reflections
+      // ignore the bumps: a coat of gloss smooths them over, and on glossy
+      // surfaces they'd look like hammered metal.
+      // Later bounces skip them, since they're blurred out by then and the
+      // noise is slow.
+      var ns = nl;
+      if (depth < 2 && params.detail > 0.) { ns = bumpNormal(nl, p); }
       // Viewing direction mirrored about the normal, the center of the
       // glossy lobe
       let r = reflect(d, nl);
@@ -820,15 +942,15 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         let pick = lightPickProb(p, vec3f(0.), false, light);
         let ls = sampleLight(p, light);
         let l = ls.xyz;
-        let cosSurface = dot(l, nl);
+        let cosSurface = dot(l, ns);
         // Only counts if the light is in front of this surface, and nothing
         // is in the way
         var visible = vec3f(0.);
-        if (cosSurface > 0.) { visible = lightVisibility(p + nl * EPSILON, l, light); }
+        if (cosSurface > 0. && dot(l, nl) > 0.) { visible = lightVisibility(p + nl * EPSILON, l, light); }
         if (any(visible > vec3f(0.))) {
           // radiance * BSDF * cos(theta) / pdf, where the pdf is the chance
           // of picking this light over the cone's solid angle
-          let pdf = evalSurface(s, nl, r, l, &bsdf);
+          let pdf = evalSurface(s, ns, r, l, &bsdf);
           var weight = 1.;
           if (params.sampling == 0u) { weight = powerHeuristic(pick / ls.w, pdf); }
           let c = through * objects[light].colorMaterial.rgb * bsdf * visible * (weight * cosSurface * ls.w / pick);
@@ -839,10 +961,11 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
       // Indirect light: bounce in a random direction. If this hits a light,
       // bounceLightWeight keeps it from being double counted with the above.
-      let next = sampleSurface(s, nl, r, choices.y);
-      let cosTheta = dot(next, nl);
-      if (cosTheta <= 0.) { break; } // glossy lobe pointed into the surface
-      bouncePdf = evalSurface(s, nl, r, next, &bsdf);
+      let next = sampleSurface(s, ns, r, choices.y);
+      let cosTheta = dot(next, ns);
+      // A glossy lobe, or a bump, pointed it into the surface
+      if (cosTheta <= 0. || dot(next, nl) <= 0.) { break; }
+      bouncePdf = evalSurface(s, ns, r, next, &bsdf);
       // Far out in a tight lobe, cos ^ shininess underflows to 0, and 0 / 0
       // would be NaN. A direction that's never picked carries no light.
       if (bouncePdf <= 0.) { break; }
@@ -854,19 +977,27 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // it colors light inside it, by glassTransmittance.
       if (material == MIRROR) { through *= sColor; }
       bouncePdf = 0.;
-      var next = reflect(d, n);
+      // Smudges blur reflection and refraction a little: each sample sees
+      // the surface tilted at random, more where it's more smudged
+      var sn = n;
+      var m = 0.;
+      if (params.detail > 0.) { m = smudge(p); }
+      if (m > 0.) { sn = normalize(n + 0.1 * m * (vec3f(rand(), rand(), rand()) * 2. - 1.)); }
+      let snl = select(-sn, sn, into);
+      var next = reflect(d, sn);
+      var reflected = true;
 
       if (material == GLASS) {
         var index = 1.5;
         if (wavelength > 0.) { index = glassIndex(wavelength); }
-        let t = refract(d, nl, select(index, 1. / index, into));
+        let t = refract(d, snl, select(index, 1. / index, into));
         // Otherwise total internal reflection: keep the mirror direction
         if (any(t != vec3f(0.))) {
           // Fresnel: how much reflects vs refracts (Schlick's approximation)
           // Clamped because rounding can push it just below 0, and GPU
           // pow() of a negative number is NaN, which would stick in the
           // pixel's sum forever as a white dot
-          let c = clamp(1. - select(dot(t, n), -dot(d, nl), into), 0., 1.);
+          let c = clamp(1. - select(dot(t, sn), -dot(d, snl), into), 0., 1.);
           let reflectance = 0.04 + 0.96 * pow(c, 5.);
           // Pick one at random, with probability P of reflecting, and
           // divide by that probability to stay unbiased
@@ -876,6 +1007,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
             choiceProb *= P;
           } else {
             next = t;
+            reflected = false;
             through *= (1. - reflectance) / (1. - P);
             choiceProb *= 1. - P;
             // Now inside the ball, or back out. Glass plates are too thin to
@@ -889,14 +1021,18 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
               wavelength = mix(MIN_WAVELENGTH, MAX_WAVELENGTH, rand());
               tint = wavelengthColor(wavelength);
               let i = glassIndex(wavelength);
-              let bent = refract(d, nl, select(i, 1. / i, into));
+              let bent = refract(d, snl, select(i, 1. / i, into));
               // Rarely, a wavelength that bends more reflects entirely
               // where yellow wouldn't
-              next = select(reflect(d, n), bent, any(bent != vec3f(0.)));
+              next = select(reflect(d, sn), bent, any(bent != vec3f(0.)));
+              reflected = all(bent == vec3f(0.));
             }
           }
         }
       }
+      // At grazing angles, a smudge can tilt the surface enough to send a
+      // reflection into it, or a refraction back out. Flip it back across.
+      if ((dot(next, nl) > 0.) != reflected) { next -= 2. * dot(next, nl) * nl; }
       d = next;
     }
     // Start the next ray a hair off the surface, on the side it's leaving
@@ -919,10 +1055,13 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let index = id.y * params.width + id.x;
   var prev = vec4f(0.);
   var prevSq = vec4f(0.);
+  var prevGlow = vec4f(0.);
   if (params.frame > 0u) {
     prev = sums[index];
     prevSq = sqSums[index];
+    prevGlow = glowSums[index];
   }
+  var glowSum = vec3f(0.);
 
   var sum = vec3f(0.);
   var sqSum = vec3f(0.);
@@ -946,12 +1085,20 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
       o += offset;
       dir = d * params.focusDistance - offset;
     }
+    clamped = vec3f(0.);
     let c = trace(o, normalize(dir));
-    sum += c;
+    // Rarely, rounding makes a sample NaN (in glass, somewhere), which would
+    // stick in the sum forever, and the lens glow would spread it into a
+    // big black square. NaN fails every comparison, so this drops it.
+    if (all(abs(c) < vec3f(1e30)) && all(abs(clamped) < vec3f(1e30))) {
+      sum += c;
+      glowSum += clamped;
+    }
     sqSum += c * c;
   }
   sums[index] = prev + vec4f(sum, f32(params.samplesPerFrame));
   sqSums[index] = prevSq + vec4f(sqSum, 0.);
+  glowSums[index] = prevGlow + vec4f(glowSum, 0.);
 }`;
 
 /**
@@ -1017,9 +1164,107 @@ fn main(@builtin(global_invocation_id) id: vec3u, @builtin(local_invocation_inde
   if (refining) { atomicAdd(&activeTiles, 1u); }
 }`;
 
+/**
+ * Lens glow. Real lenses, and eyes, scatter a little of the light coming
+ * through them into a wide halo. It's everywhere, but only shows around
+ * things far brighter than what's near them: lights, and their glints. This
+ * blurs the image, at one texel per tile since the glow is soft anyway, by
+ * a narrow and a wide Gaussian, for the display shader to mix in.
+ */
+export const glowShader = /* wgsl */ `${common}
+@group(0) @binding(1) var<storage, read> sums: array<vec4f>;
+@group(0) @binding(2) var<storage, read> glowSums: array<vec4f>;
+/** Each tile's average, with the light trace clamped away put back */
+@group(0) @binding(3) var<storage, read_write> small: array<vec4f>;
+/** small blurred along rows: narrow and wide, two per texel */
+@group(0) @binding(4) var<storage, read_write> rows: array<vec4f>;
+/** The glow: small blurred both ways, half narrow and half wide */
+@group(0) @binding(5) var<storage, read_write> glow: array<vec4f>;
+
+/** The two blurs' widths, in texels: about 12 and 64 pixels */
+const NARROW = 1.5;
+const WIDE = 8.;
+/** How far the blurs reach, in texels: past this, the wide one is ~0 */
+const REACH = 24;
+
+@compute @workgroup_size(8, 8)
+fn downsample(@builtin(global_invocation_id) id: vec3u) {
+  let size = glowSize();
+  if (any(id.xy >= size)) { return; }
+  var sum = vec3f(0.);
+  var count = 0.;
+  for (var y = id.y * TILE; y < min((id.y + 1u) * TILE, params.height); y++) {
+    for (var x = id.x * TILE; x < min((id.x + 1u) * TILE, params.width); x++) {
+      let i = y * params.width + x;
+      let s = sums[i];
+      sum += (s.rgb + glowSums[i].rgb) / max(s.w, 1.);
+      count += 1.;
+    }
+  }
+  small[id.y * size.x + id.x] = vec4f(sum / count, 0.);
+}
+
+/**
+ * A Gaussian's weight at x, tapered to 0 at REACH. Lights are so bright that
+ * even the Gaussian's far tail shows, so cutting it off would leave an edge.
+ */
+fn gaussian(x: f32, width: f32) -> f32 {
+  let taper = 1. - x * x / f32(REACH * REACH);
+  return exp(-0.5 * x * x / (width * width)) * taper * taper;
+}
+
+@compute @workgroup_size(8, 8)
+fn blurRows(@builtin(global_invocation_id) id: vec3u) {
+  let size = glowSize();
+  if (any(id.xy >= size)) { return; }
+  var narrow = vec4f(0.);
+  var wide = vec4f(0.);
+  for (var k = -REACH; k <= REACH; k++) {
+    let x = i32(id.x) + k;
+    if (x < 0 || x >= i32(size.x)) { continue; }
+    // Weights in w, so texels off the edge don't count
+    let c = vec4f(small[id.y * size.x + u32(x)].rgb, 1.);
+    narrow += c * gaussian(f32(k), NARROW);
+    wide += c * gaussian(f32(k), WIDE);
+  }
+  let i = id.y * size.x + id.x;
+  rows[2u * i] = narrow / narrow.w;
+  rows[2u * i + 1u] = wide / wide.w;
+}
+
+@compute @workgroup_size(8, 8)
+fn blurColumns(@builtin(global_invocation_id) id: vec3u) {
+  let size = glowSize();
+  if (any(id.xy >= size)) { return; }
+  var narrow = vec4f(0.);
+  var wide = vec4f(0.);
+  for (var k = -REACH; k <= REACH; k++) {
+    let y = i32(id.y) + k;
+    if (y < 0 || y >= i32(size.y)) { continue; }
+    let i = u32(y) * size.x + id.x;
+    narrow += vec4f(rows[2u * i].rgb, 1.) * gaussian(f32(k), NARROW);
+    wide += vec4f(rows[2u * i + 1u].rgb, 1.) * gaussian(f32(k), WIDE);
+  }
+  glow[id.y * size.x + id.x] = vec4f(mix(narrow.rgb / narrow.w, wide.rgb / wide.w, 0.5), 0.);
+}`;
+
 export const displayShader = /* wgsl */ `${common}
 @group(0) @binding(1) var<storage, read> sums: array<vec4f>;
 @group(0) @binding(2) var<storage, read> tiles: array<u32>;
+@group(0) @binding(3) var<storage, read> glow: array<vec4f>;
+
+/** The lens glow at pixel position pos, blending the four nearest texels */
+fn glowAt(pos: vec2f) -> vec3f {
+  let size = vec2i(glowSize());
+  // Texel centers are at the middle of each tile
+  let q = pos / f32(TILE) - 0.5;
+  let f = q - floor(q);
+  let a = clamp(vec2i(floor(q)), vec2i(0), size - 1);
+  let b = clamp(vec2i(floor(q)) + 1, vec2i(0), size - 1);
+  let top = mix(glow[a.y * size.x + a.x].rgb, glow[a.y * size.x + b.x].rgb, f.x);
+  let bottom = mix(glow[b.y * size.x + a.x].rgb, glow[b.y * size.x + b.x].rgb, f.x);
+  return mix(top, bottom, f.y);
+}
 
 // One triangle that covers the whole screen
 @vertex
@@ -1031,7 +1276,10 @@ fn vertex(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
 @fragment
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let s = sums[u32(pos.y) * params.width + u32(pos.x)];
-  var color = shown(s.rgb / max(s.w, 1.));
+  var linear = s.rgb / max(s.w, 1.);
+  // The lens spreads that fraction of the light into the glow
+  if (params.glow > 0.) { linear = mix(linear, glowAt(pos.xy), params.glow); }
+  var color = shown(linear);
   if (params.showTiles == 1u && tiles[tileIndex(vec2u(pos.xy))] == 1u) {
     color = mix(color, vec3f(1., 0., 0.), 0.3);
   }

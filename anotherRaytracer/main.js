@@ -1,6 +1,6 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {LIGHT, hitDistance, packObjects, scenes} from './scenes.js';
-import {displayShader, tileShader, traceShader} from './shaders.js';
+import {displayShader, glowShader, tileShader, traceShader} from './shaders.js';
 
 /**
  * Everything the controls change. Settings that differ from their defaults
@@ -36,7 +36,11 @@ const defaults = {
   fogForward: 0,
   /** 0 for gray fog, up to 1 for sky blue; see `fogBlue` in shaders.js. Scenes can change this default. */
   fogBlue: 0,
-  /** Brightens or darkens the display, in stops (doublings) */
+  /** How uneven surfaces are, 0 for mathematically smooth; see `detail` in shaders.js */
+  detail: 1,
+  /** The fraction of light the lens spreads into a glow; see glowShader in shaders.js */
+  glow: 0.005,
+  /** Brightens or darkens the display, in stops (doublings). Scenes can change this default. */
   exposure: 0,
   /** Over 1 deepens shadows and brightens highlights; see applyContrast in shaders.js */
   contrast: 1.25,
@@ -64,7 +68,14 @@ for (const [key, value] of Object.entries(defaults)) {
 if (!(settings.scene in scenes)) settings.scene = defaults.scene;
 
 /** Settings each scene can pick its own default for; see `Scene` in scenes.js */
-const sceneKeys = ['fog', 'fogForward', 'fogBlue', 'dof', 'dispersion'];
+const sceneKeys = [
+  'fog',
+  'fogForward',
+  'fogBlue',
+  'dof',
+  'dispersion',
+  'exposure',
+];
 /** The default for a setting in this scene, which the URL leaves out */
 const sceneDefault = (/** @type {string} */ key) =>
   scenes[settings.scene]().defaults?.[key] ??
@@ -170,9 +181,19 @@ const displayPipeline = device.createRenderPipeline({
   vertex: {module: displayModule},
   fragment: {module: displayModule, targets: [{format: 'rgba16float'}]},
 });
+const glowModule = compile(glowShader);
+// The lens glow's three passes, in order
+const glowPipelines = ['downsample', 'blurRows', 'blurColumns'].map(
+  (entryPoint) =>
+    device.createComputePipeline({
+      layout: 'auto',
+      compute: {module: glowModule, entryPoint},
+    }),
+);
 
-// Params in shaders.js: 4 × (vec3f + u32), then 16 scalars
-const paramsData = new ArrayBuffer(144);
+// Params in shaders.js: 4 × (vec3f + u32), then 21 scalars, padded to a
+// multiple of 16 bytes
+const paramsData = new ArrayBuffer(160);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
 const paramsBuffer = device.createBuffer({
@@ -207,6 +228,8 @@ let traceBindGroup;
 let tileBindGroup;
 /** @type {GPUBindGroup} */
 let displayBindGroup;
+/** @type {GPUBindGroup[]} */
+let glowBindGroups = [];
 let width = 0;
 let height = 0;
 let tileCount = 0;
@@ -225,13 +248,21 @@ const resize = () => {
   const sums = storage(width * height * 16);
   const sqSums = storage(width * height * 16);
   const tiles = storage(tileCount * 4);
-  pixelBuffers = [sums, sqSums, tiles];
-  /** @type {(pipeline: GPUPipelineBase, buffers: GPUBuffer[]) => GPUBindGroup} */
+  const glowSums = storage(width * height * 16);
+  // The lens glow works at one texel per tile
+  const small = storage(tileCount * 16);
+  const rows = storage(tileCount * 32);
+  const glow = storage(tileCount * 16);
+  pixelBuffers = [sums, sqSums, tiles, glowSums, small, rows, glow];
+  /**
+   * Binds buffers in order, or each at the binding it's keyed by
+   * @type {(pipeline: GPUPipelineBase, buffers: GPUBuffer[] | Record<number, GPUBuffer>) => GPUBindGroup}
+   */
   const bindGroup = (pipeline, buffers) =>
     device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
-      entries: buffers.map((buffer, binding) => ({
-        binding,
+      entries: Object.entries(buffers).map(([binding, buffer]) => ({
+        binding: Number(binding),
         resource: {buffer},
       })),
     });
@@ -241,6 +272,7 @@ const resize = () => {
     sums,
     sqSums,
     tiles,
+    glowSums,
   ]);
   tileBindGroup = bindGroup(tilePipeline, [
     paramsBuffer,
@@ -249,7 +281,17 @@ const resize = () => {
     tiles,
     activeTilesBuffer,
   ]);
-  displayBindGroup = bindGroup(displayPipeline, [paramsBuffer, sums, tiles]);
+  glowBindGroups = [
+    {0: paramsBuffer, 1: sums, 2: glowSums, 3: small},
+    {0: paramsBuffer, 3: small, 4: rows},
+    {0: paramsBuffer, 4: rows, 5: glow},
+  ].map((buffers, i) => bindGroup(glowPipelines[i], buffers));
+  displayBindGroup = bindGroup(displayPipeline, [
+    paramsBuffer,
+    sums,
+    tiles,
+    glow,
+  ]);
   restart();
 };
 
@@ -260,8 +302,15 @@ const resize = () => {
 /** Orbits target. `focus` is the distance that depth of field keeps sharp. */
 const camera = {target: [0, 0, 0], yaw: 0, pitch: 0, distance: 1, focus: 1};
 
+/** World units per bump on surfaces: smaller for smaller scenes */
+let detailScale = 1;
+
 const loadScene = () => {
   scene = scenes[settings.scene]();
+  // From the scene's own camera, not the current one, so zooming doesn't
+  // change the bumps
+  const {position, target} = scene.camera;
+  detailScale = Math.hypot(...position.map((p, i) => p - target[i])) / 300;
   // Lights first, as the shader expects
   const isLight = (/** @type {{material: number}} */ s) => s.material === LIGHT;
   scene.objects = [
@@ -409,6 +458,9 @@ const render = (trace = true) => {
   paramsF32[31] = settings.contrast;
   paramsF32[32] = settings.fogForward;
   paramsF32[33] = settings.fogBlue;
+  paramsF32[34] = settings.detail;
+  paramsF32[35] = detailScale;
+  paramsF32[36] = settings.glow;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -427,6 +479,16 @@ const render = (trace = true) => {
   const readActiveTiles = trace && !readingActiveTiles;
   if (readActiveTiles) {
     encoder.copyBufferToBuffer(activeTilesBuffer, 0, activeTilesRead, 0, 4);
+  }
+
+  if (settings.glow > 0) {
+    const pass = encoder.beginComputePass();
+    for (const [i, pipeline] of glowPipelines.entries()) {
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, glowBindGroups[i]);
+      pass.dispatchWorkgroups(Math.ceil(width / 64), Math.ceil(height / 64));
+    }
+    pass.end();
   }
 
   const display = encoder.beginRenderPass({
@@ -638,6 +700,10 @@ light
   .name('indirect clamp (0: none)')
   .onChange(changed);
 light
+  .add(settings, 'detail', 0, 3, 0.1)
+  .name('surface detail')
+  .onChange(changed);
+light
   .add(settings, 'sampling', {
     'both (MIS)': 'mis',
     'aim at lights': 'light',
@@ -658,6 +724,13 @@ display
   .name('exposure (stops)')
   .onChange(displayChanged);
 display.add(settings, 'contrast', 0.5, 2, 0.05).onChange(displayChanged);
+display
+  .add(settings, 'glow', 0, 0.2, 0.005)
+  .name('lens glow')
+  .onChange(() => {
+    saveSettings();
+    redraw = true;
+  });
 display.add(view, 'hdr').name('HDR (h)').onChange(saveHdr).listen();
 display
   .add(view, 'toneMapping')

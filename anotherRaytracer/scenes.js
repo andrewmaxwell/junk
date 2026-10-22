@@ -106,7 +106,7 @@ const plate = (
  * @typedef {{
  *   objects: Shape[],
  *   camera: {position: number[], target: number[], zoom: number},
- *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number},
+ *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number},
  * }} Scene
  * The camera orbits `target`, and starts focused on it. `zoom` is the image
  * height at distance 1. `defaults` overrides the panel's defaults for this
@@ -435,10 +435,14 @@ function rgbShadowsScene() {
       sphere(5, [-2, 5, 4], [0.97, 0.97, 0.97], GLASS),
       sphere(4, [16, 4, 14], [0.9, 0.9, 0.9], MIRROR),
     ],
-    camera: {position: [-55, 50, 85], target: [6, 12, -12], zoom: 0.6},
+    camera: {
+      position: [-82.95, 40.39, 47],
+      target: [7.507, 14.346, -9.059],
+      zoom: 0.6,
+    },
     // The lights are each one primary color, so glass has no white light to
     // split into rainbows; dispersion would only add noise
-    defaults: {fog: 0.0004, dispersion: 0},
+    defaults: {fog: 0.0004, dispersion: 0, exposure: -1.5},
   };
 }
 
