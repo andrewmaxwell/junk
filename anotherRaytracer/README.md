@@ -4,13 +4,14 @@ A progressive path tracer in a WebGPU compute shader: spheres and flat plates, w
 
 Scenes:
 
-- **cornell**: a Cornell-box hallway with a mirror ball, a glass ball, and glossy balls
+- **cornell**: a Cornell-box hallway lit by a panel in the ceiling, with mirror, glass, floating amber glass, gold and glossy balls
 - **veach**: the multiple importance sampling test scene from Eric Veach's thesis
 - **shafts** (the default): a foggy room lit through window blinds, with a glass ball and a brushed copper ball in the beams
 - **caustics**: clear and colored glass balls on a pale floor, focusing light into their shadows
 - **mirrors**: two facing mirrors reflecting glowing orbs and balls into the distance
 - **bokeh**: balls on a polished walnut table, with fairy lights behind blurred into discs by depth of field
 - **sunset**: balls on a plain with long shadows, a low sun, a physically based sky, and hazy air that glows around the sun
+- **neon**: a dark gallery lit only by colored tubes of light, after Dan Flavin: a row on the back wall and a diagonal on the left, each washing the wall behind it in its color, glowing in light haze, and stretched into streaks by the polished floor
 - **rgb**: a red, a green and a blue light in light fog, casting cyan, magenta and yellow shadows that overlap into red, green, blue and black, of a floating ball, two posts, and glass and mirror balls
 
 Editing: the **Objects** folder edits whatever you've selected (it's outlined in gold). Turn it into paint (with a gloss coat), metal, glass or a light, and change its color, roughness, brightness or size. Drag a selected ball to slide it around. **add a ball** drops a random one near the middle of the view, **delete** (or Backspace) removes the selection, and **undo all edits** puts the scene back. Walls, floors and other plates can be lights too, glowing panels that shine from their front, like a window or a softbox; turn Cornell's ceiling into one for the classic soft-shadowed box. Walls and floors don't drag, so dragging them still orbits.

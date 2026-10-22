@@ -179,12 +179,20 @@ function cornellScene() {
         [0.8, 0.8, 0.2],
         wall,
       ), // ceiling
-      sphere(12, [35, 74, 60], [25, 25, 25], LIGHT), // big light
-      sphere(1.5, [72, 55, 125], [400, 320, 220], LIGHT), // small warm light
+      // Floating amber glass, which focuses the panel's light into a warm
+      // spot in its shadow
+      sphere(12, [35, 74, 60], [0.95, 0.5, 0.15], GLASS),
+      sphere(5, [72, 5, 125], [1, 0.78, 0.34], MIRROR, 0, 0.02), // polished gold
       sphere(16.5, [27, 36.5, 47], [0.9, 0.9, 0.9], MIRROR), // mirror ball
       sphere(20, [73, 25, 75], [0.9, 0.9, 0.9], GLASS), // glass ball
       sphere(10, [60, 65, 0], [0.5, 0.5, 0.5], DIFFUSE, 1, 0.25), // upper satin ball
       sphere(16, [20, 16, 160], [0.3, 0.3, 0.35], DIFFUSE, 1, 0.032), // lower left polished ball
+      // A panel in the ceiling, like the original Cornell box's. Last, so
+      // links' edits of the objects above still point at the same ones.
+      plate([50, 99.8, 30], [0, -1, 0], [1, 0, 0], 22, 28, [30, 28.5, 26], {
+        material: LIGHT,
+        oneSided: true,
+      }),
     ],
     camera: {
       position: [50, 50.014, 350],
@@ -532,6 +540,97 @@ function rgbShadowsScene() {
   };
 }
 
+/**
+ * A dark gallery lit only by thin colored strips of light, after Dan
+ * Flavin's fluorescent tubes: a row on the back wall, and one diagonal on the
+ * left. Each washes the walls in its color, the polished floor stretches
+ * their reflections into streaks, light haze glows around them, and the
+ * balls show colored soft shadows, one for each strip.
+ * @type {() => Scene} */
+function neonScene() {
+  // The room spans x -60 to 60, y 0 to 70, and z from -40 forward. The
+  // front is open.
+  const big = 1000;
+  const wall = {oneSided: true};
+  /**
+   * A tube of light, standing off a wall, facing out along normal. Panels
+   * shine from their front only, and a tube glows all around, so it's two
+   * back to back: one lighting the room, and one washing the wall behind it
+   * in its color. Thin, so its shadows are sharp across and soft along.
+   * @type {(center: number[], normal: number[], along: number[], length: number, color: number[]) => Shape[]}
+   */
+  const tube = (center, normal, along, length, color) =>
+    [1, -1].map((side) =>
+      plate(
+        center,
+        normal.map((n) => n * side),
+        along.map((a) => a * side),
+        0.6,
+        length,
+        color.map((c) => c * 30),
+        {material: LIGHT, oneSided: true},
+      ),
+    );
+  // Diagonal, from low near the back to high toward the front
+  const diagonal = normalize([0, 1, 1.3]);
+  return {
+    objects: [
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.35, 0.35, 0.37], {
+        ...wall,
+        gloss: 1,
+        roughness: 0.04,
+      }), // polished concrete floor
+      plate(
+        [0, 50, -40],
+        [0, 0, 1],
+        [1, 0, 0],
+        big,
+        big,
+        [0.8, 0.8, 0.8],
+        wall,
+      ), // back wall
+      plate(
+        [-60, 50, 0],
+        [1, 0, 0],
+        [0, 0, 1],
+        big,
+        big,
+        [0.8, 0.8, 0.8],
+        wall,
+      ), // left wall
+      plate(
+        [60, 50, 0],
+        [-1, 0, 0],
+        [0, 0, 1],
+        big,
+        big,
+        [0.8, 0.8, 0.8],
+        wall,
+      ), // right wall
+      plate([0, 70, 0], [0, -1, 0], [1, 0, 0], big, big, [0.3, 0.3, 0.3], wall), // ceiling
+      // Upright tubes on the back wall
+      ...tube([-33, 22, -36], [0, 0, 1], [1, 0, 0], 20, [1, 0.15, 0.45]), // pink
+      ...tube([-11, 22, -36], [0, 0, 1], [1, 0, 0], 20, [0.1, 0.75, 1]), // cyan
+      ...tube([11, 22, -36], [0, 0, 1], [1, 0, 0], 20, [1, 0.55, 0.1]), // amber
+      ...tube([33, 22, -36], [0, 0, 1], [1, 0, 0], 20, [0.2, 1, 0.3]), // green
+      // The diagonal, on the left wall
+      ...tube(
+        [-56, 30, 0],
+        [1, 0, 0],
+        normalize(cross([1, 0, 0], diagonal)),
+        28,
+        [1, 0.85, 0.5],
+      ),
+      sphere(9, [-8, 9, -8], [0.8, 0.8, 0.8], DIFFUSE), // white, for colored shadows
+      sphere(6, [18, 6, 4], [0.95, 0.95, 0.95], MIRROR), // chrome
+      sphere(7, [-30, 7, 14], [0.97, 0.97, 0.97], GLASS),
+      sphere(4, [8, 4, 22], [0.05, 0.05, 0.05], DIFFUSE, 1, 0.03), // black lacquer
+    ],
+    camera: {position: [24, 22, 95], target: [-6, 20, -10], zoom: 0.75},
+    defaults: {fog: 0.002, dof: 0.004},
+  };
+}
+
 /** @type {Record<string, () => Scene>} */
 export const scenes = {
   cornell: cornellScene,
@@ -542,6 +641,7 @@ export const scenes = {
   bokeh: bokehScene,
   sunset: sunsetScene,
   rgb: rgbShadowsScene,
+  neon: neonScene,
 };
 
 /**
