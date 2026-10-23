@@ -3,12 +3,13 @@
 
 import {albedoTable} from './ggx.js';
 import {settings, toneCurves, view} from './settings.js';
-import {packObjects, LIGHT, TEAPOT} from './shapes.js';
+import {packObjects, LIGHT, isBounded} from './shapes.js';
 import {denoiseShader} from './shaders/denoise.js';
 import {displayShader} from './shaders/display.js';
 import {glowShader} from './shaders/glow.js';
 import {tileShader} from './shaders/tiles.js';
 import {traceShader} from './shaders/trace.js';
+import {packDiamond} from './diamond.js';
 import {packTeapot} from './teapot.js';
 
 const canvas = /** @type {HTMLCanvasElement} */ (
@@ -119,7 +120,7 @@ const strideBuffers = [1, 2, 4, 8, 16].map((stride) =>
 /** For rough reflections' lost light; see ggx.js */
 const singleBounceBuffer = bufferWith(albedoTable(), GPUBufferUsage.UNIFORM);
 
-// Params in shaders/common.js: 4 × (vec3f + u32), then 27 scalars, padded to
+// Params in shaders/common.js: 4 × (vec3f + u32), then 28 scalars, padded to
 // a multiple of 16 bytes
 const paramsData = new ArrayBuffer(176);
 const paramsF32 = new Float32Array(paramsData);
@@ -133,7 +134,7 @@ const paramsBuffer = device.createBuffer({
 let objectBuffer;
 let objectCount = 0;
 let lightCount = 0;
-let teapotCount = 0;
+let boundedCount = 0;
 /**
  * The scene's sky for sky domes (skyTable in sky.js, or a placeholder), then
  * the teapot (packTeapot in teapot.js); see `tables` in shaders/geometry.js
@@ -141,6 +142,7 @@ let teapotCount = 0;
  */
 let tablesBuffer;
 const teapotData = packTeapot();
+const diamondData = packDiamond();
 /** Where the teapot starts in tablesBuffer, in vec4s */
 let teapotStart = 0;
 
@@ -281,15 +283,15 @@ export const resize = () => {
 };
 
 /**
- * Sends objects to the GPU: lights first and teapots last, as the shader
+ * Sends objects to the GPU: lights first and teapots and diamonds last, as the shader
  * expects
  * @type {(objects: import('./shapes.js').Shape[]) => void}
  */
 export const setObjects = (objects) => {
   const data = packObjects(objects);
   lightCount = objects.filter((o) => o.material === LIGHT).length;
-  teapotCount = objects.filter((o) => o.shape === TEAPOT).length;
-  objectCount = objects.length - teapotCount;
+  boundedCount = objects.filter(isBounded).length;
+  objectCount = objects.length - boundedCount;
   // Room to add a few without making a new buffer, which needs new bind
   // groups too
   if (!objectBuffer || objectBuffer.size < data.byteLength) {
@@ -303,17 +305,23 @@ export const setObjects = (objects) => {
   device.queue.writeBuffer(objectBuffer, 0, data);
 };
 
-/** Sends the scene's sky (skyTable in sky.js), if it has one, and the teapot */
+/** Sends the scene's sky (skyTable in sky.js), if it has one, the teapot and the diamond */
 export const setTables = (/** @type {Float32Array | null} */ sky) => {
   const skyData = sky ?? new Float32Array(4);
   teapotStart = skyData.length / 4;
   tablesBuffer?.destroy();
   tablesBuffer = device.createBuffer({
-    size: skyData.byteLength + teapotData.data.byteLength,
+    size:
+      skyData.byteLength + teapotData.data.byteLength + diamondData.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
   device.queue.writeBuffer(tablesBuffer, 0, skyData);
   device.queue.writeBuffer(tablesBuffer, skyData.byteLength, teapotData.data);
+  device.queue.writeBuffer(
+    tablesBuffer,
+    skyData.byteLength + teapotData.data.byteLength,
+    diamondData,
+  );
   bind();
 };
 
@@ -425,9 +433,10 @@ const writeParams = (/** @type {FrameView} */ v) => {
   paramsU32[37] = v.selected < 0 ? 0xffffffff : v.selected;
   paramsU32[38] = teapotStart;
   paramsU32[39] = teapotStart + teapotData.trianglesStart;
-  paramsU32[40] = teapotCount;
+  paramsU32[40] = boundedCount;
   paramsF32[41] = settings.grain;
   paramsF32[42] = settings.aberration;
+  paramsU32[43] = teapotStart + teapotData.data.length / 4;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 };
 

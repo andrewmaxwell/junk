@@ -12,8 +12,10 @@ import {
   PLATE,
   SPHERE,
   TEAPOT,
+  DIAMOND,
   bottomOf,
   hitObject,
+  isBounded,
   sphere,
   teapot,
 } from './shapes.js';
@@ -62,7 +64,7 @@ const edit = {
   /** Lights' brightness, in stops over white */
   brightness: 5,
   size: 1,
-  /** Teapots' turn around the vertical, in degrees */
+  /** Teapots' and diamonds' turn around the vertical, in degrees */
   turn: 0,
 };
 
@@ -78,6 +80,11 @@ const describe = (/** @type {Shape} */ o) => {
         : '';
   if (o.shape === SPHERE) return `${coat}${material} ball`;
   if (o.shape === TEAPOT) return `${coat}${material} teapot`;
+  if (o.shape === DIAMOND) {
+    return o.material === GLASS
+      ? `${coat}diamond`
+      : `${coat}${material} diamond`;
+  }
   const name =
     o.normal[1] > 0.7 ? 'floor' : o.normal[1] < -0.7 ? 'ceiling' : 'wall';
   return o.material === DIFFUSE ? `${coat}${name}` : `${material} ${name}`;
@@ -158,11 +165,10 @@ export const showEdit = () => {
   }
   edit.turn = o.turn;
   editControls.size.show(o.shape !== PLATE);
-  editControls.turn.show(o.shape === TEAPOT);
-  // Teapots can't be lights
+  editControls.turn.show(isBounded(o));
+  // Teapots and diamonds can't be lights
   const options = editControls.material.$select.options;
-  options[Object.keys(materials).indexOf('light')].disabled =
-    o.shape === TEAPOT;
+  options[Object.keys(materials).indexOf('light')].disabled = isBounded(o);
   editControls.gloss.show(o.material === DIFFUSE);
   editControls.roughness.show(
     o.material === MIRROR ||
@@ -212,7 +218,7 @@ const applyEdit = () => {
     o.center[1] += (edit.size - o.radius) * bottomOf(o);
     o.radius = edit.size;
   }
-  if (o.shape === TEAPOT) o.turn = edit.turn;
+  if (isBounded(o)) o.turn = edit.turn;
   objectsEdited();
   showEdit();
 };
@@ -421,8 +427,8 @@ export const loadEdits = () => {
       }
       /** @type {Shape | null} */
       const o = e === 0 ? null : {...base, ...e};
-      // Teapots can't be lights
-      if (o?.shape === TEAPOT && o.material === LIGHT) o.material = DIFFUSE;
+      // Teapots and diamonds can't be lights
+      if (o && isBounded(o) && o.material === LIGHT) o.material = DIFFUSE;
       objects[i] = o;
     }
     world.setObjects(objects);

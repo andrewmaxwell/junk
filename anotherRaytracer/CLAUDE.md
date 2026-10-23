@@ -5,8 +5,9 @@
 - `Params` in shaders/common.js and `writeParams` in renderer.js must match, including the buffer size (a multiple of 16 bytes).
 - The trace shader's pieces in shaders/ are joined into one WGSL module, so they share every name, and the order of declarations doesn't matter.
 - `filter`, `common`, `smooth` and `flat` are reserved words in WGSL. WGSL `max` takes two arguments.
-- Teapots go last in the objects buffer and get their own loop in `intersect`: a third shape in the main loop made scenes without teapots 3-10% slower (bokeh 108 -> 97), even with the traversal call removed.
+- Teapots and diamonds go last in the objects buffer and get their own loop in `intersect`: a third shape in the main loop made scenes without teapots 3-10% slower (bokeh 108 -> 97), even with the traversal call removed. Diamonds are tested against all 73 facet planes, with no hierarchy, only for rays that hit their bounding ball.
 - Teapot normals are the patches' own, interpolated across flat triangles; `into` and `nl` use the flat triangle's. Every patch winds the same way, so the normal is cross(dP/dt, dP/ds) to point out.
+- Glass smudges (`detail`) blur a diamond's sparkles into a speckled haze, so the diamond scene defaults to `detail: 0`. With it on, adaptive sampling also stopped tiles before rare light paths showed up, leaving a blocky mosaic.
 - Shader compile errors and uncaptured GPU errors show in the stats line, so a blank or frozen image with no message there is a logic bug, not a GPU error.
 - Scene edits live in the URL as differences from `scene.objects` by index (see `editsParam` in editor.js), so reordering or removing objects in a scene's definition changes what old links show. Add new objects at the end.
 - lil-gui stops key events from its own controls, so shortcuts don't work right after clicking a panel button.

@@ -140,6 +140,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       var gn = g.normalShape.xyz;
       if (i32(g.normalShape.w) == SPHERE) { gn = normalize(o + d * end - g.centerRadius.xyz); }
       if (i32(g.normalShape.w) == TEAPOT) { gn = teapotNormal(g, tri, bary, true); }
+      if (i32(g.normalShape.w) == DIAMOND) { gn = diamondNormal(g, tri); }
       guideNormal = faceForward(gn, d, gn);
       // Lights are far brighter than any surface color; their hue will do
       guideAlbedo = g.colorMaterial.rgb / max(1., peak(g.colorMaterial.rgb));
@@ -313,6 +314,9 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     } else if (i32(shape.normalShape.w) == TEAPOT) {
       n = teapotNormal(shape, tri, bary, true);
       facet = teapotNormal(shape, tri, bary, false);
+    } else if (i32(shape.normalShape.w) == DIAMOND) {
+      n = diamondNormal(shape, tri);
+      facet = n;
     }
     // Normals facing the side the ray came from
     let into = dot(facet, d) < 0.;

@@ -108,7 +108,8 @@ struct Params {
   /** Where the teapot's hierarchy and triangles start in tables, in vec4s */
   teapotNodes: u32,
   teapotTriangles: u32,
-  teapotCount: u32,
+  /** Teapots and diamonds, which come after the balls and plates */
+  boundedCount: u32,
   /**
    * Film grain: how much each pixel is randomly brighter or darker, as a
    * fraction of white on screen. 0 for none.
@@ -120,6 +121,8 @@ struct Params {
    * corners. 0 for none.
    */
   aberration: f32,
+  /** Where the diamond's facets start in tables, in vec4s */
+  diamondPlanes: u32,
 }
 
 const NONE = 0xffffffffu;

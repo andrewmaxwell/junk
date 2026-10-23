@@ -1,6 +1,7 @@
-// The shapes scenes are made of: balls, flat plates and teapots. Packed
+// The shapes scenes are made of: balls, flat plates, teapots and diamonds. Packed
 // into arrays for the shader, and hit by rays for picking.
 
+import {DIAMOND_BOTTOM, hitDiamond} from './diamond.js';
 import {TEAPOT_BOTTOM, hitTeapot} from './teapot.js';
 import {cross, dot} from './vec.js';
 
@@ -8,6 +9,7 @@ import {cross, dot} from './vec.js';
 export const SPHERE = 0;
 export const PLATE = 1;
 export const TEAPOT = 2;
+export const DIAMOND = 3;
 
 // Materials
 export const DIFFUSE = 0;
@@ -35,7 +37,8 @@ export const LIGHT = 3;
  * Spheres use `radius`. Plates are rectangles facing `normal`, spanning
  * halfWidth along u and halfHeight along v. Teapots (teapot.js) fit in a
  * ball of `radius` around `center`, turned `turn` degrees around the
- * vertical, with the spout toward +x at 0.
+ * vertical, with the spout toward +x at 0. Diamonds (diamond.js) are
+ * round brilliant cuts, table up, fit and turned the same way.
  *
  * `color` is the surface color, or for lights, the emitted light. Plate
  * lights shine from their front only.
@@ -52,7 +55,7 @@ export const LIGHT = 3;
  * after going as far as its radius. So glass should be spheres or teapots;
  * glass plates are clear. `ior` is how much it bends light (its index of
  * refraction, for yellow): 1.33 for water, 1.5 for glass, 2.42 for diamond.
- * With a `roughness`, it's frosted. Teapots can't be lights.
+ * With a `roughness`, it's frosted. Teapots and diamonds can't be lights.
  *
  * One-sided plates are invisible from behind, so walls disappear when the
  * camera orbits outside them, like a dollhouse.
@@ -115,14 +118,39 @@ export const teapot = (
 });
 
 /**
+ * A diamond with its culet on the floor at height `floor`, in a ball of
+ * `radius` around (x, z): diamond glass, which bends light as much as real
+ * diamond does
+ * @type {(radius: number, [x, floor, z]: number[], turn: number, color?: number[]) => Shape}
+ */
+export const diamond = (radius, [x, floor, z], turn, color = [1, 1, 1]) => ({
+  ...sphere(radius, [x, floor - DIAMOND_BOTTOM * radius, z], color, GLASS),
+  shape: DIAMOND,
+  turn,
+  ior: 2.42,
+});
+
+/**
+ * Teapots and diamonds: shapes that fit in a ball of their radius, turned
+ * around the vertical, which the shader tests after the others
+ * @type {(o: Shape) => boolean}
+ */
+export const isBounded = (o) => o.shape === TEAPOT || o.shape === DIAMOND;
+
+/**
  * How far below its center a shape's lowest point is, as a fraction of its
  * radius, for keeping things on the floor as they change size
  * @type {(o: Shape) => number}
  */
-export const bottomOf = (o) => (o.shape === TEAPOT ? -TEAPOT_BOTTOM : 1);
+export const bottomOf = (o) =>
+  o.shape === TEAPOT
+    ? -TEAPOT_BOTTOM
+    : o.shape === DIAMOND
+      ? -DIAMOND_BOTTOM
+      : 1;
 
 /**
- * A teapot's own x, y and z axes in the world: y is up, and it's turned
+ * A teapot's or diamond's own x, y and z axes in the world: y is up, and it's turned
  * around it
  * @type {(turn: number) => number[][]}
  */
@@ -179,14 +207,16 @@ export const skyDome = (radius, center, brightness) => ({
 /**
  * Packs shapes into the `Shape` structs of the `objects` buffer in shaders/geometry.js:
  * six vec4s per shape. Plates' radius is a ball's of the same area, for
- * lightGuess. Teapots' u, v and normal are their own x, y and z axes.
+ * lightGuess. Teapots' and diamonds' u, v and normal are their own x, y
+ * and z axes.
  * Glass, which has no gloss coat, has its ior in gloss's place.
  * @type {(objects: Shape[]) => Float32Array} */
 export const packObjects = (objects) =>
   new Float32Array(
     objects.flatMap((s) => {
-      const [u, v, normal] =
-        s.shape === TEAPOT ? teapotAxes(s.turn) : [s.u, s.v, s.normal];
+      const [u, v, normal] = isBounded(s)
+        ? teapotAxes(s.turn)
+        : [s.u, s.v, s.normal];
       return [
         ...s.center,
         s.shape === PLATE
@@ -223,11 +253,11 @@ export const hitObject = (objects, o, d) => {
       if (det < 0) continue;
       t = b - Math.sqrt(det);
       if (t <= 0) t = b + Math.sqrt(det);
-    } else if (s.shape === TEAPOT) {
+    } else if (isBounded(s)) {
       // In its own space, where it fits in a unit ball
       const axes = teapotAxes(s.turn);
       const rel = p.map((x) => -x / s.radius);
-      t = hitTeapot(
+      t = (s.shape === TEAPOT ? hitTeapot : hitDiamond)(
         axes.map((a) => dot(rel, a)),
         axes.map((a) => dot(d, a) / s.radius),
       );

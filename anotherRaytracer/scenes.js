@@ -5,6 +5,7 @@ import {
   GLASS,
   LIGHT,
   MIRROR,
+  diamond,
   plate,
   skyDome,
   sphere,
@@ -20,7 +21,7 @@ import {cross, normalize} from './vec.js';
  *   camera: {position: number[], target: number[], zoom: number, focus?: number},
  *   sky?: {sun: number[], haze?: number},
  *   size?: number,
- *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number},
+ *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number, detail?: number, noise?: number},
  * }} Scene
  * The camera orbits `target`, and starts focused on it, or `focus` away if
  * given. `zoom` is the image height at distance 1. `defaults` overrides the
@@ -285,6 +286,45 @@ function teapotsScene() {
     camera: {position: [26, 30, 80], target: [0, 8, 4], zoom: 0.6},
     // Shallow, as in a product photo, so the table's far edge blurs
     defaults: {dof: 0.015},
+  };
+}
+
+/**
+ * A big round brilliant diamond floating over black velvet, under a dome of
+ * small lights, like a jeweler's: each facet catches a different one, and
+ * the stone bends light so much that colors fan out into fire. The dark
+ * between the lights is what gives it contrast.
+ * @type {() => Scene} */
+function diamondScene() {
+  const big = 1000;
+  const center = [0, 14, 0];
+  // Spread evenly over the sky, from a little above the horizon to overhead,
+  // along a golden-angle spiral
+  const count = 64;
+  const lights = Array.from({length: count}, (_, i) => {
+    const up = 0.3 + (0.7 * (i + 0.5)) / count;
+    const around = i * Math.PI * (3 - Math.sqrt(5));
+    const out = Math.sqrt(1 - up * up);
+    const direction = [out * Math.cos(around), up, out * Math.sin(around)];
+    return sphere(
+      1.8,
+      center.map((c, k) => c + 120 * direction[k]),
+      [200, 200, 200],
+      LIGHT,
+    );
+  });
+  return {
+    objects: [
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.01, 0.01, 0.01]), // black velvet
+      diamond(10, [0, 4, 0], 10),
+      // The room, very dim, so facets that don't catch a light are gray, not
+      // black
+      sphere(500, center, [0.025, 0.025, 0.025], LIGHT),
+      ...lights,
+    ],
+    camera: {position: [0, 44, 46], target: center, zoom: 0.42},
+    // A clean stone: smudges would blur the sparkles into a haze
+    defaults: {dof: 0.004, detail: 0},
   };
 }
 
@@ -574,6 +614,7 @@ export const scenes = {
   shafts: shaftsScene,
   caustics: causticsScene,
   teapots: teapotsScene,
+  diamond: diamondScene,
   mirrors: mirrorsScene,
   bokeh: bokehScene,
   sunset: sunsetScene,

@@ -1,5 +1,6 @@
 // The scene's shapes as the trace shader has them, and finding what a ray
-// hits: balls, plates, and teapots through their bounding volume hierarchy.
+// hits: balls, plates, teapots through their bounding volume hierarchy, and
+// diamonds by their facets.
 
 export const geometry = /* wgsl */ `
 const EPSILON = 1e-3;
@@ -11,6 +12,8 @@ const SPHERE = 0;
 const PLATE = 1;
 
 const TEAPOT = 2;
+
+const DIAMOND = 3;
 
 
 /** Packed by packObjects in shapes.js */
@@ -28,7 +31,8 @@ struct Shape {
 
 /**
  * The sky's color by direction, for sky domes (skyTable in sky.js), then the
- * teapot (packTeapot in teapot.js), at params.teapotNodes. (A buffer of its
+ * teapot (packTeapot in teapot.js), at params.teapotNodes, then the
+ * diamond's facets (packDiamond in diamond.js), at params.diamondPlanes. (A buffer of its
  * own would pass WebGPU's default limit of 8 per shader.)
  */
 @group(0) @binding(6) var<storage, read> tables: array<vec4f>;
@@ -40,7 +44,8 @@ var<private> hitDist: f32;
 
 /**
  * Where the last call to intersect hit, if it was a teapot: which triangle,
- * and how far toward its second and third corners
+ * and how far toward its second and third corners. For a diamond, which
+ * facet.
  */
 var<private> hitTriangle: u32;
 
@@ -71,15 +76,9 @@ fn boxEntry(o: vec3f, inv: vec3f, node: u32, tMax: f32) -> f32 {
  * tests the triangles in the boxes it reaches (Möller-Trumbore).
  */
 fn intersectTeapot(o: vec3f, d: vec3f, s: Shape, tMax: f32) -> f32 {
-  // The teapot's own space, where it fits in a unit ball. The direction
-  // shrinks with it, so distances along the ray are the same as outside.
-  let r = s.centerRadius.w;
-  let x = s.uHalf.xyz;
-  let y = s.vHalf.xyz;
-  let z = s.normalShape.xyz;
-  let rel = (o - s.centerRadius.xyz) / r;
-  let lo = vec3f(dot(rel, x), dot(rel, y), dot(rel, z));
-  let ld = vec3f(dot(d, x), dot(d, y), dot(d, z)) / r;
+  let own = ownSpace(o, d, s);
+  let lo = own[0];
+  let ld = own[1];
   let inv = 1. / ld;
   var best = tMax;
   // Boxes still to visit. The hierarchy is 18 deep.
@@ -146,6 +145,67 @@ fn teapotNormal(s: Shape, tri: u32, bary: vec2f, curved: bool) -> vec3f {
 }
 
 
+/**
+ * A teapot's or diamond's own space, where it fits in a unit ball: o's
+ * position and d's direction there. The direction shrinks with it, so
+ * distances along the ray are the same as outside.
+ */
+fn ownSpace(o: vec3f, d: vec3f, s: Shape) -> array<vec3f, 2> {
+  let r = s.centerRadius.w;
+  let x = s.uHalf.xyz;
+  let y = s.vHalf.xyz;
+  let z = s.normalShape.xyz;
+  let rel = (o - s.centerRadius.xyz) / r;
+  return array(vec3f(dot(rel, x), dot(rel, y), dot(rel, z)), vec3f(dot(d, x), dot(d, y), dot(d, z)) / r);
+}
+
+
+/** The diamond has a facet per plane, its normal in xyz and distance in w */
+const DIAMOND_FACETS = 73u;
+
+/**
+ * Where a ray from o in unit direction d first hits diamond s, if that's
+ * before tMax, setting hitTriangle to the facet; otherwise tMax. It's the
+ * space inside every facet's plane, so the ray is inside it from when it
+ * has crossed into the last of them until it crosses out of the first.
+ * From inside, it's where the ray leaves.
+ */
+fn intersectDiamond(o: vec3f, d: vec3f, s: Shape, tMax: f32) -> f32 {
+  let own = ownSpace(o, d, s);
+  var enter = 0.;
+  var leave = 1e30;
+  var enterFacet = 0u;
+  var leaveFacet = 0u;
+  for (var i = 0u; i < DIAMOND_FACETS; i++) {
+    let plane = tables[params.diamondPlanes + i];
+    let facing = dot(plane.xyz, own[1]);
+    let t = (plane.w - dot(plane.xyz, own[0])) / facing;
+    if (facing < 0.) {
+      if (t > enter) { enter = t; enterFacet = i; }
+    } else if (facing > 0.) {
+      if (t < leave) { leave = t; leaveFacet = i; }
+    } else if (dot(plane.xyz, own[0]) > plane.w) {
+      return tMax;
+    }
+  }
+  if (enter >= leave) { return tMax; }
+  var t = enter;
+  hitTriangle = enterFacet;
+  if (enter <= EPSILON) {
+    t = leave;
+    hitTriangle = leaveFacet;
+  }
+  return select(tMax, t, t > EPSILON && t < tMax);
+}
+
+
+/** Diamond s's facet's normal, pointing out */
+fn diamondNormal(s: Shape, facet: u32) -> vec3f {
+  let n = tables[params.diamondPlanes + facet].xyz;
+  return normalize(s.uHalf.xyz * n.x + s.vHalf.xyz * n.y + s.normalShape.xyz * n.z);
+}
+
+
 /** Index of the closest object hit by a ray, or -1. Sets hitDist. */
 fn intersect(o: vec3f, d: vec3f) -> i32 {
   var hit = -1;
@@ -179,18 +239,23 @@ fn intersect(o: vec3f, d: vec3f) -> i32 {
       hit = i32(i);
     }
   }
-  // Teapots, in a loop of their own: a third kind of shape in the loop
-  // above made every scene 8% slower, teapots or not.
-  for (var i = params.objectCount; i < params.objectCount + params.teapotCount; i++) {
+  // Teapots and diamonds, in a loop of their own: a third kind of shape in
+  // the loop above made every scene 8% slower, teapots or not.
+  for (var i = params.objectCount; i < params.objectCount + params.boundedCount; i++) {
     let s = objects[i];
-    // A teapot fits in its ball, so only rays that hit that, before
-    // anything closer, look further
+    // Each fits in its ball, so only rays that hit that, before anything
+    // closer, look further
     let p = s.centerRadius.xyz - o;
     let r = s.centerRadius.w;
     let b = dot(p, d);
     let det = b * b - dot(p, p) + r * r;
     if (det < 0. || b + sqrt(det) <= EPSILON || b - sqrt(det) >= hitDist) { continue; }
-    let t = intersectTeapot(o, d, s, hitDist);
+    var t: f32;
+    if (i32(s.normalShape.w) == DIAMOND) {
+      t = intersectDiamond(o, d, s, hitDist);
+    } else {
+      t = intersectTeapot(o, d, s, hitDist);
+    }
     if (t < hitDist) {
       hitDist = t;
       hit = i32(i);

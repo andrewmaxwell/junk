@@ -3,7 +3,7 @@
 import * as renderer from './renderer.js';
 import {scenes} from './scenes.js';
 import {settings} from './settings.js';
-import {LIGHT, TEAPOT} from './shapes.js';
+import {LIGHT, isBounded} from './shapes.js';
 import {skyTable} from './sky.js';
 
 /** @typedef {import('./shapes.js').Shape} Shape */
@@ -17,7 +17,7 @@ export let scene = scenes[settings.scene]();
 export let objects = [];
 /**
  * The objects as the GPU has them: without deleted ones, lights first and
- * teapots last, as the shader expects. Each knows its index in objects as
+ * teapots and diamonds last, as the shader expects. Each knows its index in objects as
  * `id`.
  * @type {(Shape & {id: number})[]}
  */
@@ -60,11 +60,10 @@ export const setObjects = (/** @type {(Shape | null)[]} */ list) => {
 export const objectsChanged = (moving = false) => {
   const present = objects.flatMap((o, id) => (o ? [{...o, id}] : []));
   const isLight = (/** @type {Shape} */ o) => o.material === LIGHT;
-  const isTeapot = (/** @type {Shape} */ o) => o.shape === TEAPOT;
   gpuObjects = [
     ...present.filter(isLight),
-    ...present.filter((o) => !isLight(o) && !isTeapot(o)),
-    ...present.filter(isTeapot),
+    ...present.filter((o) => !isLight(o) && !isBounded(o)),
+    ...present.filter(isBounded),
   ];
   renderer.setObjects(gpuObjects);
   renderer.restart(moving);

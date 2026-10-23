@@ -89,6 +89,8 @@ const sceneKeys = [
   'dof',
   'dispersion',
   'exposure',
+  'detail',
+  'noise',
 ];
 /** The default for a setting in this scene, which the URL leaves out */
 const sceneDefault = (/** @type {string} */ key) =>
