@@ -41,8 +41,9 @@ const EMITTER_SIZE = 16;
  * laser, by its power. Packed as four vec4s each, for the photon shader to
  * pick from: light index (-1 for a laser), target index, running total of
  * the shares (up to 1), and share; then for lasers, position and radius,
- * direction and wavelength, and power. And how many there are.
- * @type {(objects: Shape[], lasers: Laser[]) => {data: Float32Array, count: number}}
+ * direction and wavelength, and power. And how many there are, and their
+ * total power, roughly.
+ * @type {(objects: Shape[], lasers: Laser[]) => {data: Float32Array, count: number, power: number}}
  */
 export const photonEmitters = (objects, lasers) => {
   /** @type {{weight: number, values: number[]}[]} */
@@ -94,5 +95,5 @@ export const photonEmitters = (objects, lasers) => {
     data[k * EMITTER_SIZE + 2] = k === emitters.length - 1 ? 1 : running;
     data[k * EMITTER_SIZE + 3] = weight / total;
   }
-  return {data, count: emitters.length};
+  return {data, count: emitters.length, power: total};
 };

@@ -130,6 +130,8 @@ struct Params {
   pairCount: u32,
   /** How far around a point photons are gathered from, shrinking each frame; see gatherPhotons */
   photonRadius: f32,
+  /** One photon's power, roughly: all their power over how many there are */
+  photonPower: f32,
 }
 
 const NONE = 0xffffffffu;

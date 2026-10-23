@@ -24,8 +24,11 @@ const PI = 3.14159265359;
  * samples can be equally bright but differently colored. Second, summed
  * light that trace clamped away from lights the camera sees, for the lens
  * glow. A light thousands of times brighter than white glows far more than
- * one just over it, though both show as white. (Separate buffers would pass
- * WebGPU's default limit of 8 per shader.)
+ * one just over it, though both show as white. In their w's, the summed
+ * squares and sum of each frame's average brightness from photons, for
+ * the tile shader: a frame's samples all gather from the same photons, so
+ * they agree with each other more than with other frames'. (Separate
+ * buffers would pass WebGPU's default limit of 8 per shader.)
  */
 @group(0) @binding(3) var<storage, read_write> sqGlowSums: array<vec4f>;
 
@@ -48,6 +51,9 @@ const PI = 3.14159265359;
 
 /** The current sample's light that the clamp in trace removed */
 var<private> clamped: vec3f;
+
+/** The current sample's light from photons */
+var<private> photonLight: vec3f;
 
 /**
  * What the current sample first saw, for the denoiser: the first surface
@@ -339,7 +345,9 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
           if (wavelength > 0.) { index = glassIndex(u32(inside), wavelength); }
           squeeze = 1. / (index * index);
         }
-        color += tint * through * squeeze * gatherVolumePhotons(p, d, densities);
+        let gathered = tint * through * squeeze * gatherVolumePhotons(p, d, densities);
+        color += gathered;
+        photonLight += gathered;
         causticState = 1u;
         glossyShare = vec3f(0.);
       } else {
@@ -443,7 +451,9 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
       // Caustics: light that reached here through glass or off mirrors
       if (causticState == 0u && params.pairCount > 0u) {
-        color += tint * through * gatherPhotons(s, p, ns, smoothNl, nl, -d);
+        let gathered = tint * through * gatherPhotons(s, p, ns, smoothNl, nl, -d);
+        color += gathered;
+        photonLight += gathered;
         causticState = 1u;
       } else {
         causticState = 3u;
@@ -605,6 +615,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 
   var sum = vec3f(0.);
   var sqSum = vec3f(0.);
+  var photonSum = vec3f(0.);
   for (var i = 0u; i < params.samplesPerFrame; i++) {
     sampleIndex = u32(prev.w) + i;
     dimension = 0u;
@@ -626,6 +637,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
       dir = d * params.focusDistance - offset;
     }
     clamped = vec3f(0.);
+    photonLight = vec3f(0.);
     // Until it hits something, it's looking at empty space, far away
     guided = false;
     guideAlbedo = vec3f(0.);
@@ -641,11 +653,13 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
       sum += c;
       sqSum += c * c;
       glowSum += clamped;
+      photonSum += photonLight;
     }
   }
+  let photonFrame = brightness(photonSum / f32(params.samplesPerFrame));
   sums[index] = prev + vec4f(sum, f32(params.samplesPerFrame));
-  sqGlowSums[2u * index] = prevSq + vec4f(sqSum, 0.);
-  sqGlowSums[2u * index + 1u] = prevGlow + vec4f(glowSum, 0.);
+  sqGlowSums[2u * index] = prevSq + vec4f(sqSum, photonFrame * photonFrame);
+  sqGlowSums[2u * index + 1u] = prevGlow + vec4f(glowSum, photonFrame);
   albedoSums[index] = vec4f(prevAlbedo.rgb + albedoSum, select(-1., f32(firstHit), firstHit != NONE));
   normalDepthSums[index] = prevNormalDepth + normalDepthSum;
 }

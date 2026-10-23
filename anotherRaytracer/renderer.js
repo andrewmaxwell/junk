@@ -134,7 +134,7 @@ const strideBuffers = [1, 2, 4, 8, 16].map((stride) =>
 /** For rough reflections' lost light; see ggx.js */
 const singleBounceBuffer = bufferWith(albedoTable(), GPUBufferUsage.UNIFORM);
 
-// Params in shaders/common.js: 4 × (vec3f + u32), then 31 scalars, padded to
+// Params in shaders/common.js: 4 × (vec3f + u32), then 32 scalars, padded to
 // a multiple of 16 bytes
 const paramsData = new ArrayBuffer(192);
 const paramsF32 = new Float32Array(paramsData);
@@ -153,6 +153,8 @@ const photonBuffer = device.createBuffer({
 /** @type {GPUBuffer | undefined} */
 let pairsBuffer;
 let pairCount = 0;
+/** The photons' total power, roughly; see photonEmitters in photons.js */
+let photonPower = 0;
 /** @type {GPUBindGroup} */
 let photonBindGroup;
 
@@ -249,6 +251,7 @@ const bind = () => {
     sqGlowSums,
     tiles,
     activeTilesBuffer,
+    pixelBuffers.tileFrames,
   ]);
   glowBindGroups = [
     {0: paramsBuffer, 1: sums, 2: sqGlowSums, 3: small},
@@ -301,6 +304,7 @@ export const resize = () => {
     sums: storage(pixels),
     sqGlowSums: storage(pixels * 2),
     tiles: storage(tileCount * 4),
+    tileFrames: storage(tileCount * 4),
     // The lens glow works at one texel per tile
     small: storage(tileCount * 16),
     rows: storage(tileCount * 32),
@@ -326,6 +330,7 @@ export const setObjects = (objects, lasers = []) => {
   const data = packObjects(objects);
   const pairs = photonEmitters(objects, lasers);
   pairCount = pairs.count;
+  photonPower = pairs.power;
   if (!pairsBuffer || pairsBuffer.size < pairs.data.byteLength) {
     pairsBuffer?.destroy();
     pairsBuffer = device.createBuffer({
@@ -488,6 +493,7 @@ const writeParams = (/** @type {FrameView} */ v) => {
   // Shrinking each frame, so the blur fades as photons add up (Knaus and
   // Zwicker's progressive photon mapping, with alpha 2/3)
   paramsF32[46] = PHOTON_RADIUS * v.detailScale * (frame + 1) ** (-1 / 6);
+  paramsF32[47] = photonPower / PHOTONS;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 };
 
