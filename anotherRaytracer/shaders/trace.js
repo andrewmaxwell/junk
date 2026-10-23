@@ -132,6 +132,36 @@ fn gatherPhotons(s: u32, p: vec3f, ns: vec3f, n: vec3f, nl: vec3f, v: vec3f) -> 
   return sum / (PI * r * r);
 }
 
+/**
+ * Light from this frame's photons scattered in fog or haze near p, toward a
+ * viewer looking in direction d: each photon's power, scattered by the
+ * phase function, spread over the ball of params.photonRadius around p, and
+ * over the medium's densities, since denser fog stops more photons there for
+ * the same light passing through (volumetric photon mapping)
+ */
+fn gatherVolumePhotons(p: vec3f, d: vec3f, densities: vec3f) -> vec3f {
+  let r = params.photonRadius;
+  var sum = vec3f(0.);
+  let first = photonCell(p - r);
+  for (var k = 0; k < 8; k++) {
+    let cell = first + vec3i(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+    var i = photonMap[photonHash(cell)];
+    while (i != 0u) {
+      let start = photonStart(i - 1u);
+      i = photonMap[start + 3u];
+      // Surface photons have a normal; these don't
+      if (photonMap[start + 12u] != 0u || photonMap[start + 13u] != 0u || photonMap[start + 14u] != 0u) { continue; }
+      let q = bitcast<vec3f>(vec3u(photonMap[start], photonMap[start + 1u], photonMap[start + 2u]));
+      if (any(photonCell(q) != cell)) { continue; }
+      let gap = q - p;
+      if (dot(gap, gap) > r * r) { continue; }
+      let w = bitcast<vec3f>(vec3u(photonMap[start + 8u], photonMap[start + 9u], photonMap[start + 10u]));
+      sum += phase(w, -d) * bitcast<vec3f>(vec3u(photonMap[start + 4u], photonMap[start + 5u], photonMap[start + 6u]));
+    }
+  }
+  return sum / (4. / 3. * PI * r * r * r * max(densities, vec3f(1e-30)));
+}
+
 /** Follows one path from the camera, returning the light it carries. */
 fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   var o = origin;
@@ -205,8 +235,10 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // ray that hits nothing has left it. Otherwise rays escaping an open
     // scene would wander on through endless fog, far from any light, which
     // took most of the time in foggy scenes and added nothing visible.
-    let foggy = params.fogDensity > 0. && hit >= 0;
-    let fogLit = foggy && params.sampling != 2u && params.lightCount > 0u;
+    // Or in hazy glass, its haze, where no light shines straight in
+    let densities = mediumDensities(inside);
+    let foggy = any(densities > vec3f(0.)) && hit >= 0;
+    let fogLit = foggy && inside < 0 && params.sampling != 2u && params.lightCount > 0u;
     // Only on rays the camera sees directly, where the glow around lights
     // shows the most. Later bounces aren't worth the extra shadow ray.
     let equiangular = fogLit && seenByCamera;
@@ -235,7 +267,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         let pick = lightPickProb(p, vec3f(0.), false, light, lightGuessTotal(p, vec3f(0.), false));
         let transmittance = exp(-fogDensities() * eq.x);
         let pdf = lightPickProb(o, d, true, light, rayTotal) * eq.y;
-        let scatterPdf = fogScatterPdf(transmittance) * pick;
+        let scatterPdf = fogScatterPdf(densities, transmittance) * pick;
         var weight = powerHeuristic(pdf, scatterPdf);
         let ph = phase(d, ls.xyz);
         if (params.sampling == 0u) { weight *= powerHeuristic(pick / ls.w, ph); }
@@ -253,14 +285,13 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     var fogDist = 1e30;
     if (foggy) {
       let u = rand2();
-      let densities = fogDensities();
       let density = densities[min(u32(u.y * 3.), 2u)];
       fogDist = -log(1. - u.x) / density;
       // The max()es keep it from being 0 / 0, which is NaN, when so little
       // light gets that far that it rounds to 0 in every channel
       if (fogDist < end) {
         let transmittance = exp(-densities * fogDist);
-        through *= densities * transmittance / max(fogScatterPdf(transmittance), 1e-30);
+        through *= densities * transmittance / max(fogScatterPdf(densities, transmittance), 1e-30);
       } else {
         let transmittance = exp(-densities * end);
         through *= transmittance / max(dot(transmittance, vec3f(1. / 3.)), 1e-30);
@@ -271,8 +302,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // Fog absorbs some light. After a few bounces, end the path with that
       // probability instead, so survivors don't get dimmer.
       if (depth < 5) {
-        through *= FOG_ALBEDO;
-      } else if (rand() >= FOG_ALBEDO) {
+        through *= mediumAlbedo(inside);
+      } else if (rand() >= mediumAlbedo(inside)) {
         break;
       }
       let p = o + d * fogDist;
@@ -289,7 +320,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         if (any(visible > vec3f(0.))) {
           var weight = 1.;
           if (equiangular) {
-            let scatterPdf = fogScatterPdf(exp(-fogDensities() * fogDist)) * pick;
+            let scatterPdf = fogScatterPdf(densities, exp(-densities * fogDist)) * pick;
             let eqPdf = lightPickProb(o, d, true, light, rayTotal) * equiangularPdf(o, d, end, light, fogDist);
             weight = powerHeuristic(scatterPdf, eqPdf);
           }
@@ -302,11 +333,29 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
       // Indirect light: scatter in a random direction. Its density equals
       // the phase function, so the throughput is unchanged.
+      // Caustics: light that reached here through glass or off mirrors
+      if (causticState == 0u && params.pairCount > 0u) {
+        // In glass, light is squeezed into a narrower cone of directions,
+        // so it's index^2 times as bright there, as the photons find. Paths
+        // from the camera skip that factor going in and coming back out,
+        // since it cancels, but this one doesn't come back out.
+        var squeeze = 1.;
+        if (inside >= 0) {
+          var index = objects[u32(inside)].surface.x;
+          if (wavelength > 0.) { index = glassIndex(u32(inside), wavelength); }
+          squeeze = 1. / (index * index);
+        }
+        color += tint * through * squeeze * gatherVolumePhotons(p, d, densities);
+        causticState = 1u;
+        glossyShare = vec3f(0.);
+      } else {
+        causticState = 3u;
+      }
+
       let next = samplePhase(d);
       bouncePdf = phase(d, next);
       seenByCamera = false;
       guided = true;
-      causticState = 3u;
       o = p;
       d = next;
       continue;

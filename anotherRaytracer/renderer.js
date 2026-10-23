@@ -490,7 +490,7 @@ const writeParams = (/** @type {FrameView} */ v) => {
   paramsU32[43] = teapotStart + teapotData.data.length / 4;
   paramsU32[44] = beamCount;
   paramsF32[45] = settings.contrast;
-  paramsU32[46] = pairCount;
+  paramsU32[46] = settings.photons ? pairCount : 0;
   // Shrinking each frame, so the blur fades as photons add up (Knaus and
   // Zwicker's progressive photon mapping, with alpha 2/3)
   paramsF32[47] = PHOTON_RADIUS * v.detailScale * (frame + 1) ** (-1 / 6);
@@ -504,10 +504,11 @@ const render = (/** @type {FrameView} */ v, trace = true) => {
   const groups = [Math.ceil(width / 8), Math.ceil(height / 8)];
   if (trace) {
     encoder.clearBuffer(activeTilesBuffer);
-    if (pairCount) encoder.clearBuffer(photonBuffer, 0, PHOTON_CELLS * 4);
+    const photons = settings.photons && pairCount > 0;
+    if (photons) encoder.clearBuffer(photonBuffer, 0, PHOTON_CELLS * 4);
     const pass = encoder.beginComputePass();
     // Photons first, for the trace to gather
-    if (pairCount) {
+    if (photons) {
       pass.setPipeline(photonPipeline);
       pass.setBindGroup(0, photonBindGroup);
       pass.dispatchWorkgroups(PHOTONS / 64);

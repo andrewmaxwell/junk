@@ -6,6 +6,16 @@ export const fog = /* wgsl */ `
 /** Fraction of light that fog scatters rather than absorbs */
 const FOG_ALBEDO = 0.9;
 
+
+/**
+ * The fraction of light that the medium in glass object inside (or with -1,
+ * the fog) scatters rather than absorbs: glass's haze absorbs none, since
+ * its color does that
+ */
+fn mediumAlbedo(inside: i32) -> f32 {
+  return select(FOG_ALBEDO, 1., inside >= 0);
+}
+
 /**
  * Fog's phase function: the share of light, traveling in direction a, that
  * scatters into direction b, per steradian. Henyey-Greenstein, which leans
@@ -29,12 +39,23 @@ fn fogDensities() -> vec3f {
 
 
 /**
- * The probability density that fog scatters a ray at distance t, given the
- * fraction of light that gets that far in each channel: the distance is
- * picked using one channel, at random (see trace), so it's their average.
+ * The density of what light is passing through, in each channel: the haze
+ * in glass object inside, or with -1, the fog. Glass has no fog in it.
  */
-fn fogScatterPdf(transmittance: vec3f) -> f32 {
-  return dot(fogDensities() * transmittance, vec3f(1. / 3.));
+fn mediumDensities(inside: i32) -> vec3f {
+  if (inside >= 0) { return vec3f(objects[u32(inside)].surface.w); }
+  return fogDensities();
+}
+
+
+/**
+ * The probability density that a medium of these densities scatters a ray
+ * at distance t, given the fraction of light that gets that far in each
+ * channel: the distance is picked using one channel, at random (see
+ * trace), so it's their average.
+ */
+fn fogScatterPdf(densities: vec3f, transmittance: vec3f) -> f32 {
+  return dot(densities * transmittance, vec3f(1. / 3.));
 }
 
 

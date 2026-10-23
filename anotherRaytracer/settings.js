@@ -8,6 +8,8 @@ export const defaults = {
   scene: 'shafts',
   /** 'mis', 'light' or 'bsdf'; see `sampling` in shaders/common.js */
   sampling: 'mis',
+  /** Caustics from photons, or only from paths from the camera; see photons.js */
+  photons: true,
   /** Cap on bounced light per sample; 0 for none. See `maxIndirect` in shaders/common.js */
   clamp: 20,
   /** Rendered pixels per CSS pixel. 2 is sharp on retina screens, but 4x slower. */

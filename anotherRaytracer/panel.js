@@ -187,6 +187,10 @@ sampling
   .name('method')
   .onChange(changed);
 sampling
+  .add(settings, 'photons')
+  .name('photons for caustics')
+  .onChange(changed);
+sampling
   .add(settings, 'clamp', 0, 100, 1)
   .name('indirect clamp (0: none)')
   .onChange(changed);

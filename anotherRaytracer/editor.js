@@ -61,6 +61,8 @@ const edit = {
   roughness: 0.1,
   /** Glass's index of refraction */
   ior: 1.5,
+  /** Glass's cloudiness inside */
+  haze: 0,
   /** Lights' brightness, in stops over white */
   brightness: 5,
   size: 1,
@@ -107,6 +109,7 @@ export const addObjectsFolder = (/** @type {GUI} */ gui) => {
     gloss: folder.add(edit, 'gloss', 0, 1, 0.01).name('gloss coat'),
     roughness: folder.add(edit, 'roughness', 0, 0.7, 0.001),
     ior: folder.add(edit, 'ior', 1, 2.5, 0.01).name('index of refraction'),
+    haze: folder.add(edit, 'haze', 0, 0.3, 0.001),
     brightness: folder
       .add(edit, 'brightness', -2, 20, 0.1)
       .name('brightness (stops)'),
@@ -153,6 +156,7 @@ export const showEdit = () => {
   edit.gloss = o.gloss;
   edit.roughness = o.roughness;
   edit.ior = o.ior;
+  edit.haze = o.haze;
   // Sizes from a quarter to four times what it was when selected. Only set
   // then, or the range would shift under the slider as it moves.
   edit.size = o.radius;
@@ -177,6 +181,7 @@ export const showEdit = () => {
   );
   editControls.roughness.name(o.material === GLASS ? 'frost' : 'roughness');
   editControls.ior.show(o.material === GLASS);
+  editControls.haze.show(o.material === GLASS);
   editControls.brightness.show(o.material === LIGHT);
   editControls.color.name(o.material === GLASS ? 'tint' : 'color');
   shownColor = edit.color;
@@ -212,6 +217,7 @@ const applyEdit = () => {
       ? edit.roughness
       : 0;
   o.ior = edit.ior;
+  o.haze = edit.haze;
   if (o.shape !== PLATE && o.radius !== edit.size) {
     // Growing or shrinking from its bottom, so what's on the floor stays on
     // it
@@ -371,6 +377,7 @@ const editFields = /** @type {const} */ ([
   'gloss',
   'roughness',
   'ior',
+  'haze',
 ]);
 
 /**

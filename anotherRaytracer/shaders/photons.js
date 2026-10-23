@@ -1,6 +1,7 @@
 // Photons, for caustics: light followed from the lights through glass and
-// off smooth mirrors to the first surface it lands on, where it's stored
-// for the trace shader to gather (see gatherPhotons in shaders/trace.js).
+// off smooth mirrors to the first surface it lands on, or the first place
+// it scatters in fog or hazy glass, where it's stored for the trace shader
+// to gather (see gatherPhotons and gatherVolumePhotons in shaders/trace.js).
 // The camera's paths leave that light to the photons. Each frame traces a
 // fresh set into a hash grid: a linked list of photons per cell.
 
@@ -15,7 +16,7 @@ import {random} from './random.js';
 export const PHOTONS = 1 << 16;
 /** Cells in the hash grid, each the head of a list of photons */
 export const PHOTON_CELLS = 1 << 18;
-/** u32s per photon: position and next, power, direction, normal */
+/** u32s per photon: position and next, power, direction, normal (0 in fog or haze) */
 const PHOTON_SIZE = 16;
 /** u32s in the photon map: the cells' heads, then the photons */
 export const PHOTON_MAP_SIZE = PHOTON_CELLS + PHOTONS * PHOTON_SIZE;
@@ -195,9 +196,29 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let bary = hitBary;
     let s = u32(hit);
     let material = i32(objects[s].colorMaterial.w);
+    // Fog, or haze in glass. Until glass or a mirror, what it scatters is
+    // the camera's to find, so it's only dimmed. After, it may scatter, as
+    // in trace: a random distance, picked by one channel's density, and
+    // where it does, it's stored.
+    let densities = mediumDensities(inside);
+    if (any(densities > vec3f(0.))) {
+      if (depth == 0) {
+        power *= exp(-densities * end);
+      } else {
+        let u = rand2();
+        let scatter = -log(1. - u.x) / densities[min(u32(u.y * 3.), 2u)];
+        if (scatter < end) {
+          let transmittance = exp(-densities * scatter);
+          power *= densities * transmittance / max(fogScatterPdf(densities, transmittance), 1e-30);
+          power *= glassTransmittance(inside, scatter);
+          storePhoton(i, o + d * scatter, power * tint, d, vec3f(0.));
+          return;
+        }
+        let transmittance = exp(-densities * end);
+        power *= transmittance / max(dot(transmittance, vec3f(1. / 3.)), 1e-30);
+      }
+    }
     if (material == LIGHT) { return; }
-    // Fog dims it, but its scattered light is the camera's to find
-    if (params.fogDensity > 0.) { power *= exp(-fogDensities() * end); }
     power *= glassTransmittance(inside, end);
     var p = o + d * end;
     var sn = objects[s].normalShape.xyz;
