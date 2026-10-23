@@ -580,10 +580,10 @@ fn powerHeuristic(a: f32, b: f32) -> f32 {
  * How much a light hit by a random bounce from p, in direction d, at
  * distance dist, should count
  */
-fn bounceLightWeight(p: vec3f, d: vec3f, dist: f32, bouncePdf: f32, light: u32) -> f32 {
+fn bounceLightWeight(p: vec3f, d: vec3f, dist: f32, bouncePdf: f32, light: u32, total: f32) -> f32 {
   if (params.sampling == 2u) { return 1.; }
   if (params.sampling == 1u) { return 0.; } // light sampling already counted it
-  let pdf = lightPickProb(p, vec3f(0.), false, light) * lightPdf(p, d, dist, light);
+  let pdf = lightPickProb(p, vec3f(0.), false, light, total) * lightPdf(p, d, dist, light);
   return powerHeuristic(bouncePdf, pdf);
 }
 
@@ -880,21 +880,30 @@ fn lightGuess(p: vec3f, d: vec3f, alongRay: bool, light: u32) -> f32 {
 }
 
 /**
- * The probability that pickLight picks this light. Half the time it picks
- * evenly, so a light that looks dim, or is bright but blocked, still gets
- * picked sometimes; the other half, in proportion to lightGuess.
+ * lightGuess summed over every light, which pickLight and lightPickProb
+ * divide by. Worked out once per point and passed to both: summing it in
+ * each, and again when a bounce hit a light, took most of the time in
+ * scenes with many lights.
  */
-fn lightPickProb(p: vec3f, d: vec3f, alongRay: bool, light: u32) -> f32 {
+fn lightGuessTotal(p: vec3f, d: vec3f, alongRay: bool) -> f32 {
   var total = 0.;
   for (var i = 0u; i < params.lightCount; i++) { total += lightGuess(p, d, alongRay, i); }
+  return total;
+}
+
+/**
+ * The probability that pickLight picks this light. Half the time it picks
+ * evenly, so a light that looks dim, or is bright but blocked, still gets
+ * picked sometimes; the other half, in proportion to lightGuess. total is
+ * lightGuessTotal for the same point.
+ */
+fn lightPickProb(p: vec3f, d: vec3f, alongRay: bool, light: u32, total: f32) -> f32 {
   return 0.5 / f32(params.lightCount) + 0.5 * lightGuess(p, d, alongRay, light) / total;
 }
 
 /** Picks one light as lightPickProb describes, given u uniform in [0, 1) */
-fn pickLight(p: vec3f, d: vec3f, alongRay: bool, u: f32) -> u32 {
+fn pickLight(p: vec3f, d: vec3f, alongRay: bool, u: f32, total: f32) -> u32 {
   if (u < 0.5) { return min(u32(u * 2. * f32(params.lightCount)), params.lightCount - 1u); }
-  var total = 0.;
-  for (var i = 0u; i < params.lightCount; i++) { total += lightGuess(p, d, alongRay, i); }
   var left = (u - 0.5) * 2. * total;
   for (var i = 0u; i < params.lightCount - 1u; i++) {
     left -= lightGuess(p, d, alongRay, i);
@@ -1155,6 +1164,11 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   var tint = vec3f(1.);
   // How far the path has gone while seenByCamera, through mirrors and glass
   var cameraDist = 0.;
+  // lightGuessTotal where the path last picked a light, for when its bounce
+  // from there hits one
+  var bounceTotal = 0.;
+  // lightGuessTotal along the current ray, for equiangular sampling
+  var rayTotal = 0.;
   // Which glass ball the path is inside, or -1
   var inside = -1;
 
@@ -1198,15 +1212,16 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // in dense fog, where light doesn't get far.
     if (equiangular) {
       let u = rand2();
-      let light = pickLight(o, d, true, u.x);
+      rayTotal = lightGuessTotal(o, d, true);
+      let light = pickLight(o, d, true, u.x, rayTotal);
       let eq = sampleEquiangular(o, d, end, light, u.y);
       let p = o + d * eq.x;
       let ls = sampleLight(p, light);
       let visible = lightVisibility(p, ls, light);
       if (any(visible > vec3f(0.))) {
-        let pick = lightPickProb(p, vec3f(0.), false, light);
+        let pick = lightPickProb(p, vec3f(0.), false, light, lightGuessTotal(p, vec3f(0.), false));
         let transmittance = exp(-fogDensities() * eq.x);
-        let pdf = lightPickProb(o, d, true, light) * eq.y;
+        let pdf = lightPickProb(o, d, true, light, rayTotal) * eq.y;
         let scatterPdf = fogScatterPdf(transmittance) * pick;
         var weight = powerHeuristic(pdf, scatterPdf);
         let ph = phase(d, ls.xyz);
@@ -1253,15 +1268,16 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // equiangular sample above if there was one. Fog scatters light evenly
       // in all directions.
       if (fogLit) {
-        let light = pickLight(p, vec3f(0.), false, rand2().x);
-        let pick = lightPickProb(p, vec3f(0.), false, light);
+        bounceTotal = lightGuessTotal(p, vec3f(0.), false);
+        let light = pickLight(p, vec3f(0.), false, rand2().x, bounceTotal);
+        let pick = lightPickProb(p, vec3f(0.), false, light, bounceTotal);
         let ls = sampleLight(p, light);
         let visible = lightVisibility(p, ls, light);
         if (any(visible > vec3f(0.))) {
           var weight = 1.;
           if (equiangular) {
             let scatterPdf = fogScatterPdf(exp(-fogDensities() * fogDist)) * pick;
-            let eqPdf = lightPickProb(o, d, true, light) * equiangularPdf(o, d, end, light, fogDist);
+            let eqPdf = lightPickProb(o, d, true, light, rayTotal) * equiangularPdf(o, d, end, light, fogDist);
             weight = powerHeuristic(scatterPdf, eqPdf);
           }
           let ph = phase(d, ls.xyz);
@@ -1290,7 +1306,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
     if (material == LIGHT) {
       var w = 1.;
-      if (bouncePdf > 0.) { w = bounceLightWeight(o, d, end, bouncePdf, s); }
+      if (bouncePdf > 0.) { w = bounceLightWeight(o, d, end, bouncePdf, s, bounceTotal); }
       var e = emitted(s, d) * w * through;
       if (seenByCamera) {
         // The light is far brighter than the screen can show. Clamping it
@@ -1356,8 +1372,9 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // Direct light: aim a ray at a light rather than waiting for a random
       // bounce to stumble into one.
       if (params.sampling != 2u && params.lightCount > 0u) {
-        let light = pickLight(p, vec3f(0.), false, choices.x);
-        let pick = lightPickProb(p, vec3f(0.), false, light);
+        bounceTotal = lightGuessTotal(p, vec3f(0.), false);
+        let light = pickLight(p, vec3f(0.), false, choices.x, bounceTotal);
+        let pick = lightPickProb(p, vec3f(0.), false, light, bounceTotal);
         let ls = sampleLight(p, light);
         let l = ls.xyz;
         let cosSurface = dot(l, ns);
