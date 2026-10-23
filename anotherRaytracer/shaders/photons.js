@@ -279,6 +279,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     } else if (i32(objects[s].normalShape.w) == DIAMOND) {
       sn = diamondNormal(objects[s], tri);
       facet = sn;
+    } else if (i32(objects[s].normalShape.w) >= SPONGE) {
+      sn = fractalNormal(objects[s], p);
+      facet = sn;
     }
     let into = dot(facet, d) < 0.;
     let nl = select(-facet, facet, into);

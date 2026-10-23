@@ -6,11 +6,14 @@ import {
   LIGHT,
   MIRROR,
   diamond,
+  mandelbulb,
   plate,
   skyDome,
   sphere,
+  sponge,
   teapot,
 } from './shapes.js';
+import {BULB_BOTTOM} from './fractal.js';
 import {cross, normalize} from './vec.js';
 
 /** @typedef {import('./shapes.js').Shape} Shape */
@@ -354,6 +357,43 @@ function diamondScene() {
 }
 
 /**
+ * Fractals: a glass Menger sponge, which a small bright light shines
+ * through into a lattice of caustics, a gold Mandelbulb, and a small white
+ * sponge, its tunnels lit by light bouncing down them. The glass sponge has
+ * two levels of holes: with more, it's mostly edges, and looks frosted.
+ * @type {() => Scene} */
+function fractalsScene() {
+  const big = 1000;
+  const floor = [0.75, 0.75, 0.75];
+  return {
+    objects: [
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, floor, {oneSided: true}),
+      plate([0, 50, -40], [0, 0, 1], [1, 0, 0], big, big, floor, {
+        oneSided: true,
+      }), // back wall
+      // Up, back and to the left, so the caustics fall toward the camera
+      sphere(4, [-60, 90, -30], [500, 470, 420], LIGHT),
+      // Faint blue sky for the shadows
+      sphere(150, [0, 600, 400], [0.15, 0.2, 0.3], LIGHT),
+      sponge(14, [-14, 0, 0], 30, 2, [0.97, 0.97, 0.97], GLASS),
+      mandelbulb(
+        13,
+        [18, 13 * BULB_BOTTOM, -6],
+        20,
+        8,
+        [0.95, 0.75, 0.4],
+        MIRROR,
+        0,
+        0.15,
+      ), // gold
+      sponge(6, [10, 0, 24], -20, 4, [0.9, 0.9, 0.9], DIFFUSE),
+    ],
+    camera: {position: [30, 42, 96], target: [0, 9, 4], zoom: 0.65},
+    defaults: {dof: 0.004},
+  };
+}
+
+/**
  * A ball lens: parallel green laser beams in a dark, hazy room go through a
  * slightly cloudy glass ball, which bends each by Snell's law and brings
  * them together behind it. Not all at one point: beams near the edge cross
@@ -684,6 +724,7 @@ export const scenes = {
   caustics: causticsScene,
   teapots: teapotsScene,
   diamond: diamondScene,
+  fractals: fractalsScene,
   lasers: lasersScene,
   mirrors: mirrorsScene,
   bokeh: bokehScene,

@@ -1,5 +1,5 @@
 // Editing objects: the panel's Objects folder for whatever's selected,
-// adding balls and teapots, and keeping edits in the URL.
+// adding balls, teapots and fractals, and keeping edits in the URL.
 
 import {camera, pointerRay} from './camera.js';
 import {redraw} from './renderer.js';
@@ -13,10 +13,15 @@ import {
   SPHERE,
   TEAPOT,
   DIAMOND,
+  SPONGE,
+  MANDELBULB,
   bottomOf,
   hitObject,
   isBounded,
+  isFractal,
+  mandelbulb,
   sphere,
+  sponge,
   teapot,
 } from './shapes.js';
 import * as world from './world.js';
@@ -66,8 +71,10 @@ const edit = {
   /** Lights' brightness, in stops over white */
   brightness: 5,
   size: 1,
-  /** Teapots' and diamonds' turn around the vertical, in degrees */
+  /** Teapots', diamonds' and fractals' turn around the vertical, in degrees */
   turn: 0,
+  /** A sponge's levels of holes, or a Mandelbulb's power */
+  level: 3,
 };
 
 /** What to call an object */
@@ -82,6 +89,8 @@ const describe = (/** @type {Shape} */ o) => {
         : '';
   if (o.shape === SPHERE) return `${coat}${material} ball`;
   if (o.shape === TEAPOT) return `${coat}${material} teapot`;
+  if (o.shape === SPONGE) return `${coat}${material} sponge`;
+  if (o.shape === MANDELBULB) return `${coat}${material} Mandelbulb`;
   if (o.shape === DIAMOND) {
     return o.material === GLASS
       ? `${coat}diamond`
@@ -115,6 +124,7 @@ export const addObjectsFolder = (/** @type {GUI} */ gui) => {
       .name('brightness (stops)'),
     size: folder.add(edit, 'size', 0, 1),
     turn: folder.add(edit, 'turn', -180, 180, 1).name('turn (°)'),
+    level: folder.add(edit, 'level', 1, 12, 1),
   };
   for (const c of Object.values(editControls)) c.onChange(onChange);
   editControls.remove = folder
@@ -125,6 +135,7 @@ export const addObjectsFolder = (/** @type {GUI} */ gui) => {
     .name('deselect (esc, or click it again)');
   folder.add({addBall}, 'addBall').name('add a ball');
   folder.add({addTeapot}, 'addTeapot').name('add a teapot');
+  folder.add({addFractal}, 'addFractal').name('add a fractal');
   undoControl = folder.add({undo: undoEdits}, 'undo').name('undo all edits');
 };
 
@@ -168,11 +179,20 @@ export const showEdit = () => {
       .step(+(o.radius / 50).toPrecision(1));
   }
   edit.turn = o.turn;
+  edit.level = o.level;
   editControls.size.show(o.shape !== PLATE);
   editControls.turn.show(isBounded(o));
-  // Teapots and diamonds can't be lights
+  // Sponges past 6 levels have holes too small to see, and Mandelbulbs
+  // below power 3 outgrow their ball
+  editControls.level.show(isFractal(o));
+  if (o.shape === SPONGE) editControls.level.name('levels').min(0).max(6);
+  if (o.shape === MANDELBULB) editControls.level.name('power').min(3).max(12);
+  // Teapots, diamonds and fractals can't be lights, and Mandelbulbs can't
+  // be glass
   const options = editControls.material.$select.options;
   options[Object.keys(materials).indexOf('light')].disabled = isBounded(o);
+  options[Object.keys(materials).indexOf('glass')].disabled =
+    o.shape === MANDELBULB;
   editControls.gloss.show(o.material === DIFFUSE);
   editControls.roughness.show(
     o.material === MIRROR ||
@@ -225,6 +245,7 @@ const applyEdit = () => {
     o.radius = edit.size;
   }
   if (isBounded(o)) o.turn = edit.turn;
+  if (isFractal(o)) o.level = edit.level;
   objectsEdited();
   showEdit();
 };
@@ -333,18 +354,21 @@ const addBall = () => {
   ]);
 };
 
+/** The middle size of the balls and teapots there, or one to suit the view */
+const typicalRadius = () => {
+  const sizes = world.gpuObjects
+    .filter((o) => o.shape !== PLATE && o.material !== LIGHT)
+    .map((o) => o.radius)
+    .sort((a, b) => a - b);
+  return sizes.length ? sizes[sizes.length >> 1] : camera.distance / 15.6;
+};
+
 /**
  * Stands a random teapot on the floor near the middle of the view, and
  * selects it. It's sized like the balls and teapots already there, if any.
  */
 const addTeapot = () => {
-  const sizes = world.gpuObjects
-    .filter((o) => o.shape !== PLATE && o.material !== LIGHT)
-    .map((o) => o.radius)
-    .sort((a, b) => a - b);
-  const radius = +(
-    sizes.length ? 1.3 * sizes[sizes.length >> 1] : camera.distance / 12
-  ).toPrecision(2);
+  const radius = +(1.3 * typicalRadius()).toPrecision(2);
   const spot = floorSpot(radius);
   // Spout to the right or left (a turn of the camera's yaw points it right),
   // a little toward the camera
@@ -366,12 +390,33 @@ const addTeapot = () => {
   ]);
 };
 
+/**
+ * Stands a random Menger sponge on the floor, or floats a Mandelbulb over
+ * it, near the middle of the view, and selects it. It's sized like the
+ * balls and teapots already there, if any.
+ */
+const addFractal = () => {
+  const radius = +(1.3 * typicalRadius()).toPrecision(2);
+  const spot = floorSpot(radius);
+  const turn = Math.round(Math.random() * 90 - 45);
+  const center = [spot[0], spot[1] + radius, spot[2]];
+  addOne([
+    sponge(radius, spot, turn, 3, randomPaint(), DIFFUSE),
+    sponge(radius, spot, turn, 4, [0.95, 0.95, 0.95], DIFFUSE, 1, 0.05),
+    sponge(radius, spot, turn, 3, [0.95, 0.75, 0.4], MIRROR, 0, 0.1), // gold
+    sponge(radius, spot, turn, 3, [0.97, 0.97, 0.97], GLASS),
+    mandelbulb(radius, center, turn, 8, randomPaint(), DIFFUSE),
+    mandelbulb(radius, center, turn, 8, [0.95, 0.64, 0.54], MIRROR, 0, 0.2), // copper
+  ]);
+};
+
 /** The fields edits keep, for each object that changed */
 const editFields = /** @type {const} */ ([
   'shape',
   'center',
   'radius',
   'turn',
+  'level',
   'color',
   'material',
   'gloss',
@@ -434,8 +479,9 @@ export const loadEdits = () => {
       }
       /** @type {Shape | null} */
       const o = e === 0 ? null : {...base, ...e};
-      // Teapots and diamonds can't be lights
+      // Teapots, diamonds and fractals can't be lights, nor Mandelbulbs glass
       if (o && isBounded(o) && o.material === LIGHT) o.material = DIFFUSE;
+      if (o?.shape === MANDELBULB && o.material === GLASS) o.material = DIFFUSE;
       objects[i] = o;
     }
     world.setObjects(objects);

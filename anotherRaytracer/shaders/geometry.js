@@ -1,8 +1,10 @@
 // The scene's shapes as the trace shader has them, and finding what a ray
-// hits: balls, plates, teapots through their bounding volume hierarchy, and
-// diamonds by their facets.
+// hits: balls, plates, teapots through their bounding volume hierarchy,
+// diamonds by their facets, and fractals (fractals.js) by sphere tracing.
 
-export const geometry = /* wgsl */ `
+import {fractals} from './fractals.js';
+
+export const geometry = /* wgsl */ `${fractals}
 const EPSILON = 1e-3;
 
 
@@ -239,7 +241,7 @@ fn intersect(o: vec3f, d: vec3f) -> i32 {
       hit = i32(i);
     }
   }
-  // Teapots and diamonds, in a loop of their own: a third kind of shape in
+  // Teapots, diamonds and fractals, in a loop of their own: a third kind of shape in
   // the loop above made every scene 8% slower, teapots or not.
   for (var i = params.objectCount; i < params.objectCount + params.boundedCount; i++) {
     let s = objects[i];
@@ -251,8 +253,11 @@ fn intersect(o: vec3f, d: vec3f) -> i32 {
     let det = b * b - dot(p, p) + r * r;
     if (det < 0. || b + sqrt(det) <= EPSILON || b - sqrt(det) >= hitDist) { continue; }
     var t: f32;
-    if (i32(s.normalShape.w) == DIAMOND) {
+    let kind = i32(s.normalShape.w);
+    if (kind == DIAMOND) {
       t = intersectDiamond(o, d, s, hitDist);
+    } else if (kind >= SPONGE) {
+      t = intersectFractal(o, d, s, hitDist);
     } else {
       t = intersectTeapot(o, d, s, hitDist);
     }

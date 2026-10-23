@@ -221,6 +221,12 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     let end = hitDist;
     let tri = hitTriangle;
     let bary = hitBary;
+    // A fractal's normal takes four distance estimates, so it's found once,
+    // here, for both uses below
+    var fractalN = vec3f(0.);
+    if (hit >= 0 && i32(objects[u32(hit)].normalShape.w) >= SPONGE) {
+      fractalN = fractalNormal(objects[u32(hit)], o + d * end);
+    }
     if (seenByCamera) { cameraDist += end; }
     if (depth == 0) { firstHit = select(NONE, u32(hit), hit >= 0); }
     if (!guided && hit >= 0) {
@@ -229,6 +235,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       if (i32(g.normalShape.w) == SPHERE) { gn = normalize(o + d * end - g.centerRadius.xyz); }
       if (i32(g.normalShape.w) == TEAPOT) { gn = teapotNormal(g, tri, bary, true); }
       if (i32(g.normalShape.w) == DIAMOND) { gn = diamondNormal(g, tri); }
+      if (i32(g.normalShape.w) >= SPONGE) { gn = fractalN; }
       guideNormal = faceForward(gn, d, gn);
       // Lights are far brighter than any surface color; their hue will do
       guideAlbedo = g.colorMaterial.rgb / max(1., peak(g.colorMaterial.rgb));
@@ -429,6 +436,9 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       facet = teapotNormal(shape, tri, bary, false);
     } else if (i32(shape.normalShape.w) == DIAMOND) {
       n = diamondNormal(shape, tri);
+      facet = n;
+    } else if (i32(shape.normalShape.w) >= SPONGE) {
+      n = fractalN;
       facet = n;
     }
     // Normals facing the side the ray came from

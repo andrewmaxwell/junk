@@ -1,6 +1,6 @@
-Another Raytracer - 2026 - A WebGPU path tracer with fog, rainbow glass, teapots, and depth of field.
+Another Raytracer - 2026 - A WebGPU path tracer with fog, rainbow glass, teapots, fractals, and depth of field.
 
-A progressive path tracer in a WebGPU compute shader: balls, flat panels, Utah teapots and brilliant cut diamonds, in paint, varnished paint, metal, glass and light.
+A progressive path tracer in a WebGPU compute shader: balls, flat panels, Utah teapots, brilliant cut diamonds, Menger sponges and Mandelbulbs, in paint, varnished paint, metal, glass and light.
 
 Drag to orbit, shift-drag or right-drag to pan, scroll to zoom; on a phone, pinch to zoom and drag two fingers to pan. Click or tap anything to select it and focus on it. The URL keeps the scene, the view, any edits and any changed settings, so the address bar is a shareable link. Keys: space pauses, **r** resets the view, **d** toggles the denoiser, **t** cycles tone curves, **h** toggles HDR, **n** shows refining tiles, Esc deselects.
 
@@ -11,6 +11,7 @@ Scenes:
 - **shafts** (the default): a foggy room lit through window blinds
 - **caustics**: glass balls focusing light into their shadows
 - **teapots**: a glass teapot the color of tea, glazed china and gold, lit like a product photo: a softbox, a dim fill, and strip lights behind that outline the glass
+- **fractals**: a glass Menger sponge casting a lattice of caustics, a gold Mandelbulb, and a white sponge lit down its tunnels
 - **lasers**: a ball lens: seven parallel green laser beams through a slightly cloudy glass ball in a hazy room, crossing behind it, the outer ones closer (spherical aberration). Each beam matches the path Snell's law gives, worked out separately and drawn over the image
 - **diamond**: a big round brilliant in a jeweler's light tent: a ring of softboxes that light whole facets, 40 small lights for sparkle and fire, and one small bright light behind it whose light the stone scatters into its shadow. Little gets through: a brilliant sends most light back out the top
 - **mirrors**: two facing mirrors reflecting glowing orbs into the distance
@@ -19,7 +20,7 @@ Scenes:
 - **neon**: a dark gallery lit by colored tubes, after Dan Flavin
 - **rgb**: red, green and blue lights casting cyan, magenta and yellow shadows
 
-**Editing**: the Objects folder changes whatever is selected (outlined in gold): its material, color, gloss, roughness, brightness, size, a teapot's or diamond's turn, and glass's frost, index of refraction and haze. Drag a selected ball or teapot to move it. **add a ball** and **add a teapot** drop one on the floor in view, clear of what's there; Backspace deletes; **undo all edits** restores the scene. Walls and floors can be lights too: make Cornell's ceiling one for the classic soft-shadowed box.
+**Editing**: the Objects folder changes whatever is selected (outlined in gold): its material, color, gloss, roughness, brightness, size, a teapot's, diamond's or fractal's turn, a sponge's levels of holes or a Mandelbulb's power, and glass's frost, index of refraction and haze. Drag a selected ball or teapot to move it. **add a ball**, **add a teapot** and **add a fractal** drop one on the floor in view, clear of what's there; Backspace deletes; **undo all edits** restores the scene. Walls and floors can be lights too: make Cornell's ceiling one for the classic soft-shadowed box.
 
 How it renders:
 
@@ -30,6 +31,7 @@ How it renders:
 - **Fog** fills the scene out to its surfaces. It can scatter forward like haze, and blue more than red like air. Equiangular sampling finds the glow around lights. Hazy glass has its own haze inside, which scatters without absorbing (the glass's color does that); glass has no fog in it.
 - **Teapots** are Martin Newell's 1975 Bézier patches, cut into 9,120 triangles at load, in a bounding volume hierarchy split by the surface area heuristic, and shaded with the patches' own normals. Like the original, they have no thickness, so glass teapots are solid glass.
 - **Diamonds** are round brilliants in Tolkowsky's ideal proportions: 57 facets and a 16-sided girdle. The stone is convex, so it's the space inside all 73 facets' planes, and a ray hits it where it has crossed into the last of them. Diamond bends light by 2.42, so most light entering the crown reflects inside and comes back out, and each wavelength takes a different way.
+- **Fractals** have no surface to solve for, only an estimate of how far a point is from them, at most: a ray steps forward by that much until it's within 0.00025 of the surface (sphere tracing). Menger sponges use Inigo Quilez's distance, but measured to each level's own tunnel walls, which makes it right inside too, so rays can march through glass sponges. The original also measured to the middle of each cell, which only matters inside, where glass found walls that weren't there and light got trapped bouncing among them: in a white furnace, a level-2 glass sponge was 1.6% dark and a level-3 one up to 20% where the camera looked through many walls; level 2 is now within 0.1%. Mandelbulbs (power 8 by default, y up) use the usual estimate from the derivative of z → z^power + c, which is only rough inside, so they can't be glass, and creeps up on the surface, so they stop at a thousandth of their radius: 4x faster than at 1/50,000, with detail still finer than a pixel unless you zoom far in. Normals are the distance's gradient. In a white furnace, white sponges and Mandelbulbs in paint, metal and glass are within 1% of the background.
 - **Lasers** are too narrow for a path from the camera to ever land in, so all their light comes from photons: from a small disk, straight ahead, through glass (bending each color by its own amount, in the laser's own wavelength) and off mirrors, stored wherever they scatter in fog, in hazy glass, or off a surface, and bouncing on from there, so the spots where they land light the room. Beams show in the haze, inside cloudy glass and in mirrors. They start a little soft, as the photons' radius does, and the room's light from the spots is grainy for a while.
 - **Sky**: Nishita's model of sunlight scattered by air, haze and ozone, computed once per scene into a table.
 - **Surface detail**: noise bumps paint and smudges glass and mirrors, so nothing is perfectly even.
@@ -43,6 +45,6 @@ Files:
 
 - `main.js` starts things and runs the frame loop; `renderer.js` has the WebGPU pipelines and buffers
 - `settings.js` the settings and URL; `panel.js` the lil-gui panel; `controls.js` mouse, touch and keys; `camera.js` the orbit camera; `editor.js` editing objects; `world.js` the scene as edited
-- `scenes.js` the scenes; `shapes.js` balls, panels, teapots and diamonds for the GPU and for picking; `teapot.js` the teapot's triangles and hierarchy; `diamond.js` the diamond's facets; `sky.js` the sky; `ggx.js` rough reflections' lost light; `vec.js` vector math
+- `scenes.js` the scenes; `shapes.js` balls, panels, teapots, diamonds and fractals for the GPU and for picking; `teapot.js` the teapot's triangles and hierarchy; `diamond.js` the diamond's facets; `fractal.js` fractals' distances, for picking; `sky.js` the sky; `ggx.js` rough reflections' lost light; `vec.js` vector math
 - `photons.js` where photons come from: which lights aim at which glass and mirrors, and lasers; `shaders/photons.js` traces them
-- `shaders/` the WGSL: `trace.js` joins the path tracer's pieces (`random`, `geometry`, `lights`, `fog`, `materials`, `detail`); `tiles.js` adaptive sampling; `denoise.js`; `glow.js`; `display.js`; `common.js` and `tone.js`, which every shader shares
+- `shaders/` the WGSL: `trace.js` joins the path tracer's pieces (`random`, `geometry` with `fractals`, `lights`, `fog`, `materials`, `detail`); `tiles.js` adaptive sampling; `denoise.js`; `glow.js`; `display.js`; `common.js` and `tone.js`, which every shader shares
