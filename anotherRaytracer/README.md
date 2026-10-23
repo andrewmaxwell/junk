@@ -1,6 +1,6 @@
-Another Raytracer - 2026 - A WebGPU path tracer with fog, rainbow glass, and depth of field.
+Another Raytracer - 2026 - A WebGPU path tracer with fog, rainbow glass, teapots, and depth of field.
 
-A progressive path tracer in a WebGPU compute shader: spheres and flat plates, with diffuse, glossy, mirror, brushed metal, glass and light materials. Drag to orbit, shift-drag or right-drag to pan, scroll to zoom. On a phone, pinch to zoom and drag two fingers to pan. Click or tap anything to select it and focus on it; click it again (or press Esc) to let it go. The panel switches scenes and changes the rest, and **reset settings** puts them back. Switching scenes starts from that scene's settings; the view, any edits, and any settings that differ from the defaults are kept in the URL, so the address bar is a shareable link. **save image** downloads a PNG.
+A progressive path tracer in a WebGPU compute shader: spheres, flat plates and Utah teapots, with diffuse, glossy, mirror, brushed metal, glass and light materials. Drag to orbit, shift-drag or right-drag to pan, scroll to zoom. On a phone, pinch to zoom and drag two fingers to pan. Click or tap anything to select it and focus on it; click it again (or press Esc) to let it go. The panel switches scenes and changes the rest, and **reset settings** puts them back. Switching scenes starts from that scene's settings; the view, any edits, and any settings that differ from the defaults are kept in the URL, so the address bar is a shareable link. **save image** downloads a PNG.
 
 Scenes:
 
@@ -8,16 +8,18 @@ Scenes:
 - **veach**: the multiple importance sampling test scene from Eric Veach's thesis
 - **shafts** (the default): a foggy room lit through window blinds, with a glass ball and a brushed copper ball in the beams
 - **caustics**: clear and colored glass balls on a pale floor, focusing light into their shadows
+- **teapots**: a glass teapot the color of tea, glazed china and polished gold on a tablecloth, under one small warm light
 - **mirrors**: two facing mirrors reflecting glowing orbs and balls into the distance
 - **bokeh**: balls on a polished walnut table, with fairy lights behind blurred into discs by depth of field
 - **sunset**: balls on a plain with long shadows, a low sun, a physically based sky, and hazy air that glows around the sun
 - **neon**: a dark gallery lit only by colored tubes of light, after Dan Flavin: a row on the back wall and a diagonal on the left, each washing the wall behind it in its color, glowing in light haze, and stretched into streaks by the polished floor
 - **rgb**: a red, a green and a blue light in light fog, casting cyan, magenta and yellow shadows that overlap into red, green, blue and black, of a floating ball, two posts, and glass and mirror balls
 
-Editing: the **Objects** folder edits whatever you've selected (it's outlined in gold). Turn it into paint (with a gloss coat), metal, glass or a light, and change its color, roughness, brightness or size. Drag a selected ball to slide it around. **add a ball** drops a random one near the middle of the view, **delete** (or Backspace) removes the selection, and **undo all edits** puts the scene back. Walls, floors and other plates can be lights too, glowing panels that shine from their front, like a window or a softbox; turn Cornell's ceiling into one for the classic soft-shadowed box. Walls and floors don't drag, so dragging them still orbits.
+Editing: the **Objects** folder edits whatever you've selected (it's outlined in gold). Turn it into paint (with a gloss coat), metal, glass or a light, and change its color, roughness, brightness or size. Drag a selected ball or teapot to slide it around, and **turn** a teapot. Sizes grow from the bottom, so things on the floor stay on it. **add a ball** and **add a teapot** drop a random one onto the floor near the middle of the view, clear of what's there (teapots sized like the scene's other things), **delete** (or Backspace) removes the selection, and **undo all edits** puts the scene back. Walls, floors and other plates can be lights too, glowing panels that shine from their front, like a window or a softbox; turn Cornell's ceiling into one for the classic soft-shadowed box. Walls and floors don't drag, so dragging them still orbits.
 
 How it renders:
 
+- The teapot is Martin Newell's 1975 original: 32 curved Bézier patches, cut into 9,120 triangles when the page loads (`teapot.js`). A bounding volume hierarchy of boxes, split by the surface area heuristic, means each ray only tests the handful of triangles near it, and the patches' own normals make it shade smoothly. It's the original's shape, with no thickness, so glass teapots are solid glass. In a white furnace, white paint, metal and glass teapots vanish like balls do.
 - Each bounce aims a shadow ray at one light, picked by how bright it looks from there, and also bounces at random. Rays aim evenly within the cone a ball light covers, or within the solid angle a panel light covers (Ureña et al.'s spherical rectangles), so even a whole wall of light up close is sampled where it matters. Multiple importance sampling weighs the two so each covers where the other is noisy. Paths end at random once they carry little light (Russian roulette).
 - **fog** fills the scene out to its surfaces and scatters light, so beams show up in it. A ray that hits nothing has left the fog. **fog scatters forward** makes it scatter mostly onward, like real haze, so it glows brightest looking toward a light. **fog blue** makes it scatter blue more than red, like air, for a blue sky and an orange sun. On rays the camera sees directly, equiangular sampling also checks the fog closest to a light, where its glow is brightest, so halos around lights clear up quickly.
 - Rough reflections are microfacet reflections (GGX, sampled by visible normals): the surface is made of tiny tilted mirrors, so highlights have sharp peaks and long soft tails, and stretch out at grazing angles. Light that bounces between the tiny mirrors before leaving is added back (Turquin's energy compensation, from a table in `ggx.js`), so rough white metal is as bright as smooth.
@@ -43,3 +45,4 @@ The top of the panel has the scene, view, depth of field, fog and exposure. **Ad
 - `scenes.js` – the scenes, and packing them for the GPU
 - `sky.js` – the physically based sky
 - `ggx.js` – how much light one bounce off rough microfacets loses, for the shader to add back
+- `teapot.js` – the Utah teapot: its patches, triangles and hierarchy

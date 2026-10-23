@@ -33,6 +33,7 @@ struct Params {
    * never capped.
    */
   maxIndirect: f32,
+  /** Balls and plates; teapots come after them */
   objectCount: u32,
   width: u32,
   height: u32,
@@ -103,6 +104,10 @@ struct Params {
   denoise: u32,
   /** The object to outline, as the camera sees it, or NONE */
   selected: u32,
+  /** Where the teapot's hierarchy and triangles start in tables, in vec4s */
+  teapotNodes: u32,
+  teapotTriangles: u32,
+  teapotCount: u32,
 }
 
 const NONE = 0xffffffffu;
@@ -227,6 +232,7 @@ const EPSILON = 1e-3;
 // Shapes
 const SPHERE = 0;
 const PLATE = 1;
+const TEAPOT = 2;
 
 // Materials
 const DIFFUSE = 0;
@@ -292,8 +298,12 @@ struct Shape {
  * glows far more than one just over it, though both show as white.
  */
 @group(0) @binding(5) var<storage, read_write> glowSums: array<vec4f>;
-/** The sky's color by direction, for sky domes: skyTable in sky.js */
-@group(0) @binding(6) var<storage, read> sky: array<vec4f>;
+/**
+ * The sky's color by direction, for sky domes (skyTable in sky.js), then the
+ * teapot (packTeapot in teapot.js), at params.teapotNodes. (A buffer of its
+ * own would pass WebGPU's default limit of 8 per shader.)
+ */
+@group(0) @binding(6) var<storage, read> tables: array<vec4f>;
 /**
  * For the denoiser, per pixel: the summed color (in rgb) of what each sample
  * first saw, and its normal (xyz) and distance (w). See guideAlbedo. In
@@ -314,8 +324,8 @@ fn skyColor(d: vec3f) -> vec3f {
   let col = u32(around) % ${SKY_WIDTH}u;
   let nextCol = (col + 1u) % ${SKY_WIDTH}u;
   let f = vec2f(fract(around), up - f32(row));
-  let below = mix(sky[row * ${SKY_WIDTH}u + col], sky[row * ${SKY_WIDTH}u + nextCol], f.x);
-  let above = mix(sky[(row + 1u) * ${SKY_WIDTH}u + col], sky[(row + 1u) * ${SKY_WIDTH}u + nextCol], f.x);
+  let below = mix(tables[row * ${SKY_WIDTH}u + col], tables[row * ${SKY_WIDTH}u + nextCol], f.x);
+  let above = mix(tables[(row + 1u) * ${SKY_WIDTH}u + col], tables[(row + 1u) * ${SKY_WIDTH}u + nextCol], f.x);
   return mix(below, above, min(f.y, 1.)).rgb;
 }
 
@@ -432,6 +442,108 @@ fn rand2() -> vec2f {
 
 /** Distance to the hit found by the last call to intersect */
 var<private> hitDist: f32;
+/**
+ * Where the last call to intersect hit, if it was a teapot: which triangle,
+ * and how far toward its second and third corners
+ */
+var<private> hitTriangle: u32;
+var<private> hitBary: vec2f;
+
+/**
+ * Where a ray enters node of the teapot's hierarchy, or 1e30 if it misses it
+ * or only gets there after tMax. o is the ray's start and inv 1 / its
+ * direction, in the teapot's space.
+ */
+fn boxEntry(o: vec3f, inv: vec3f, node: u32, tMax: f32) -> f32 {
+  let t0 = (tables[params.teapotNodes + 2u * node].xyz - o) * inv;
+  let t1 = (tables[params.teapotNodes + 2u * node + 1u].xyz - o) * inv;
+  let near = min(t0, t1);
+  let far = max(t0, t1);
+  let enter = max(max(near.x, near.y), max(near.z, 0.));
+  let leave = min(min(far.x, far.y), min(far.z, tMax));
+  return select(1e30, enter, enter <= leave);
+}
+
+/**
+ * Where a ray from o in unit direction d first hits teapot s, if that's
+ * before tMax, setting hitTriangle and hitBary; otherwise tMax. It walks the
+ * hierarchy of boxes (packTeapot in teapot.js), nearer box first, skipping
+ * boxes the ray misses or only reaches past the closest hit so far, and
+ * tests the triangles in the boxes it reaches (Möller-Trumbore).
+ */
+fn intersectTeapot(o: vec3f, d: vec3f, s: Shape, tMax: f32) -> f32 {
+  // The teapot's own space, where it fits in a unit ball. The direction
+  // shrinks with it, so distances along the ray are the same as outside.
+  let r = s.centerRadius.w;
+  let x = s.uHalf.xyz;
+  let y = s.vHalf.xyz;
+  let z = s.normalShape.xyz;
+  let rel = (o - s.centerRadius.xyz) / r;
+  let lo = vec3f(dot(rel, x), dot(rel, y), dot(rel, z));
+  let ld = vec3f(dot(d, x), dot(d, y), dot(d, z)) / r;
+  let inv = 1. / ld;
+  var best = tMax;
+  // Boxes still to visit. The hierarchy is 18 deep.
+  var stack: array<u32, 24>;
+  var top = 0u;
+  var node = 0u;
+  var entry = boxEntry(lo, inv, 0u, best);
+  loop {
+    if (entry < best) {
+      let count = bitcast<u32>(tables[params.teapotNodes + 2u * node + 1u].w);
+      let start = bitcast<u32>(tables[params.teapotNodes + 2u * node].w);
+      if (count == 0u) {
+        let a = boxEntry(lo, inv, start, best);
+        let b = boxEntry(lo, inv, start + 1u, best);
+        let aFirst = a <= b;
+        let far = max(a, b);
+        if (far < 1e30) {
+          stack[top] = select(start, start + 1u, aFirst);
+          top++;
+        }
+        node = select(start + 1u, start, aFirst);
+        entry = min(a, b);
+        continue;
+      }
+      for (var i = start; i < start + count; i++) {
+        let k = params.teapotTriangles + 6u * i;
+        let e1 = tables[k + 1u].xyz;
+        let e2 = tables[k + 2u].xyz;
+        let pv = cross(ld, e2);
+        let f = 1. / dot(e1, pv);
+        let tv = lo - tables[k].xyz;
+        let u = dot(tv, pv) * f;
+        let qv = cross(tv, e1);
+        let v = dot(ld, qv) * f;
+        let t = dot(e2, qv) * f;
+        if (u >= 0. && v >= 0. && u + v <= 1. && t > EPSILON && t < best) {
+          best = t;
+          hitTriangle = i;
+          hitBary = vec2f(u, v);
+        }
+      }
+    }
+    if (top == 0u) { break; }
+    top--;
+    node = stack[top];
+    // Again, since a closer hit may have been found since
+    entry = boxEntry(lo, inv, node, best);
+  }
+  return best;
+}
+
+/**
+ * Teapot s's normal on triangle tri, at bary: smooth, as the curved patches
+ * it was cut from, or the flat triangle's. Both point out of the teapot.
+ */
+fn teapotNormal(s: Shape, tri: u32, bary: vec2f, curved: bool) -> vec3f {
+  let k = params.teapotTriangles + 6u * tri;
+  var n = cross(tables[k + 1u].xyz, tables[k + 2u].xyz);
+  if (curved) {
+    n = tables[k + 3u].xyz * (1. - bary.x - bary.y) + tables[k + 4u].xyz * bary.x + tables[k + 5u].xyz * bary.y;
+  }
+  return normalize(s.uHalf.xyz * n.x + s.vHalf.xyz * n.y + s.normalShape.xyz * n.z);
+}
 
 /** Index of the closest object hit by a ray, or -1. Sets hitDist. */
 fn intersect(o: vec3f, d: vec3f) -> i32 {
@@ -462,6 +574,23 @@ fn intersect(o: vec3f, d: vec3f) -> i32 {
       ) { continue; }
     }
     if (t > EPSILON && t < hitDist) {
+      hitDist = t;
+      hit = i32(i);
+    }
+  }
+  // Teapots, in a loop of their own: a third kind of shape in the loop
+  // above made every scene 8% slower, teapots or not.
+  for (var i = params.objectCount; i < params.objectCount + params.teapotCount; i++) {
+    let s = objects[i];
+    // A teapot fits in its ball, so only rays that hit that, before
+    // anything closer, look further
+    let p = s.centerRadius.xyz - o;
+    let r = s.centerRadius.w;
+    let b = dot(p, d);
+    let det = b * b - dot(p, p) + r * r;
+    if (det < 0. || b + sqrt(det) <= EPSILON || b - sqrt(det) >= hitDist) { continue; }
+    let t = intersectTeapot(o, d, s, hitDist);
+    if (t < hitDist) {
       hitDist = t;
       hit = i32(i);
     }
@@ -1178,14 +1307,17 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // makes a glossy lobe like cos ^ 2000 overflow to infinity.
     d = normalize(d);
     let hit = intersect(o, d);
-    // Saved, since shadow rays change hitDist
+    // Saved, since shadow rays change these
     let end = hitDist;
+    let tri = hitTriangle;
+    let bary = hitBary;
     if (seenByCamera) { cameraDist += end; }
     if (depth == 0) { firstHit = select(NONE, u32(hit), hit >= 0); }
     if (!guided && hit >= 0) {
       let g = objects[u32(hit)];
       var gn = g.normalShape.xyz;
       if (i32(g.normalShape.w) == SPHERE) { gn = normalize(o + d * end - g.centerRadius.xyz); }
+      if (i32(g.normalShape.w) == TEAPOT) { gn = teapotNormal(g, tri, bary, true); }
       guideNormal = faceForward(gn, d, gn);
       // Lights are far brighter than any surface color; their hue will do
       guideAlbedo = g.colorMaterial.rgb / max(1., peak(g.colorMaterial.rgb));
@@ -1349,12 +1481,21 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
     let p = o + d * end;
     var n = shape.normalShape.xyz;
+    // The real surface's normal, which decides which side light is on.
+    // Teapots' triangles are flat, but n is the curved patches' they were
+    // cut from, for shading.
+    var facet = n;
     if (i32(shape.normalShape.w) == SPHERE) {
       n = normalize(p - shape.centerRadius.xyz);
+      facet = n;
+    } else if (i32(shape.normalShape.w) == TEAPOT) {
+      n = teapotNormal(shape, tri, bary, true);
+      facet = teapotNormal(shape, tri, bary, false);
     }
-    // Normal facing the side the ray came from
-    let into = dot(n, d) < 0.;
-    let nl = select(-n, n, into);
+    // Normals facing the side the ray came from
+    let into = dot(facet, d) < 0.;
+    let nl = select(-facet, facet, into);
+    let smoothNl = select(-n, n, into);
 
     if (!isSmooth(s)) {
       // Bumps tilt the normal that diffuse shading sees, ns. nl stays the
@@ -1363,8 +1504,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // surfaces they'd look like hammered metal.
       // Later bounces skip them, since they're blurred out by then and the
       // noise is slow.
-      var ns = nl;
-      if (depth < 2 && params.detail > 0.) { ns = bumpNormal(nl, p); }
+      var ns = smoothNl;
+      if (depth < 2 && params.detail > 0.) { ns = bumpNormal(smoothNl, p); }
       var bsdf: vec3f;
       // Which light to aim at, and whether to bounce off the glossy coat
       let choices = rand2();
@@ -1385,7 +1526,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         if (any(visible > vec3f(0.))) {
           // radiance * BSDF * cos(theta) / pdf, where the pdf is the chance
           // of picking this light over the cone's solid angle
-          let pdf = evalSurface(s, ns, nl, -d, l, &bsdf);
+          let pdf = evalSurface(s, ns, smoothNl, -d, l, &bsdf);
           var weight = 1.;
           if (params.sampling == 0u) { weight = powerHeuristic(pick / ls.w, pdf); }
           let c = through * emitted(light, l) * bsdf * visible * (weight * cosSurface * ls.w / pick);
@@ -1396,11 +1537,11 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
       // Indirect light: bounce in a random direction. If this hits a light,
       // bounceLightWeight keeps it from being double counted with the above.
-      let next = sampleSurface(s, ns, nl, -d, choices.y);
+      let next = sampleSurface(s, ns, smoothNl, -d, choices.y);
       let cosTheta = dot(next, ns);
       // A glossy lobe, or a bump, pointed it into the surface
       if (cosTheta <= 0. || dot(next, nl) <= 0.) { break; }
-      bouncePdf = evalSurface(s, ns, nl, -d, next, &bsdf);
+      bouncePdf = evalSurface(s, ns, smoothNl, -d, next, &bsdf);
       // Far out in a tight lobe, the density underflows to 0, and 0 / 0
       // would be NaN. A direction that's never picked carries no light.
       if (bouncePdf <= 0.) { break; }
@@ -1449,9 +1590,9 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
             reflected = false;
             through *= (1. - reflectance) / (1. - P);
             choiceProb *= 1. - P;
-            // Now inside the ball, or back out. Glass plates are too thin to
-            // be inside.
-            if (i32(shape.normalShape.w) == SPHERE) { inside = select(-1, i32(s), into); }
+            // Now inside the ball or teapot, or back out. Glass plates are
+            // too thin to be inside.
+            if (i32(shape.normalShape.w) != PLATE) { inside = select(-1, i32(s), into); }
             // Dispersion: the first time the path refracts, it picks a
             // wavelength to follow, and bends by that wavelength's index
             // instead. Reflection doesn't depend on wavelength (much), so

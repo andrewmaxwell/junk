@@ -3,7 +3,9 @@
 - Andrew prefers simple code whose behavior emerges from accurate basics. Light tracing for caustics was added and removed (65746d4): two estimators had to agree on which paths each counted, and one-sided walls broke that. Prefer display-side or single-estimator changes.
 - The trace shader binds 8 storage buffers, WebGPU's default per-stage limit, and phones may not offer more. Pack new per-pixel data into spare channels (the selected-object id rides in `albedoSums.w`) rather than adding a buffer.
 - `Params` in shaders.js and the `paramsF32`/`paramsU32` slots in main.js must match, including the buffer size (a multiple of 16 bytes).
-- `filter` and `common` are reserved words in WGSL. WGSL `max` takes two arguments.
+- `filter`, `common`, `smooth` and `flat` are reserved words in WGSL. WGSL `max` takes two arguments.
+- The teapot's triangles and hierarchy share the sky's storage buffer (`tables`, at `params.teapotNodes`), for the same 8-buffer limit. Teapots go last in the objects buffer and get their own loop in `intersect`: a third shape in the main loop made scenes without teapots 3-10% slower (bokeh 108 -> 97), even with the traversal call removed.
+- Teapot normals are the patches' own, interpolated across flat triangles, and `into`/`nl` use the flat triangle's. Every patch in the data winds the same way; the normal is cross(dP/dt, dP/ds) to point out.
 - Shader compile errors and uncaptured GPU errors show in the stats line, so a blank or frozen image with no message there is a logic bug, not a GPU error.
 - Scene edits live in the URL as differences from `scene.objects` by index (see `editsParam`), so reordering or removing objects in a scene's definition changes what old links show.
 
@@ -20,4 +22,8 @@
 - Surface detail used to cost 1.5-3x (mirrors 144 vs 435 without it). A single pcg3d hash per lattice point, plus computing smudges only for the first bounces and only when the random choice could use them, brought mirrors to 308 vs 430. The bumps' noise is the rest; Andrew wants the detail to look good, so it stays.
 - GGX with energy compensation and Fresnel coats: same convergence time as the old Phong lobes (cornell 15.5 vs 16.5 s, shafts 29.6 vs 28.6 s to done at 800x500). Without compensation, white metal at roughness 0.3 reflected 88% and at 0.7, 50%.
 - Rectangle lights cost scenes without them about 5% (bokeh 100 -> 95). A branch in lightGuess, which runs for every light several times a bounce, cost 12% even with no plate lights; storing plates' same-area ball radius in the unused radius field made it one formula. Sampling methods agree: Cornell with its ceiling as a light, MIS vs random bounces only, mean 120.99 vs 120.99; a thin post as a light (area-sampling fallback), 9.98 vs 10.02 with the indirect clamp off (the clamp caps bounce-only hits on lights over 20x white).
-- The denoiser every frame cost about 12%. Running it every frame below 64 spp and every 150 ms after brought that to 1-4%.
+- The denoiser every frame cost about 12%.
+- Summing lightGuess once per shading point instead of in pickLight, lightPickProb and bounceLightWeight separately: bokeh (30 lights) 90 -> 107, neon 51 -> 53, the rest unchanged; mean brightness at 512 spp within 0.1/255.
+- teapots scene: about 85-125 spp/s. The teapot is built in about 90 ms when the page loads (it was 145 before binning the split search; a prefix sweep over the bins made no difference).
+- White furnace, glossy paint: balls and teapots both lose light in a thin rim at grazing angles (about 8% at the very edge), from the coat model, not the shape. Bending teapots' shading normals so reflections stay above the triangle (Iray's/Cycles' fix) changed nothing, so it was dropped. Body centers match the background within 0.25/209.
+- Framing phones held upright as a square instead of 5:4 cropped things that matter (rgb's floating ball and shadows, bokeh's and neon's balls); only shafts gained. Running it every frame below 64 spp and every 150 ms after brought that to 1-4%.

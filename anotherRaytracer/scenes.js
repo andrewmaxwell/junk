@@ -1,8 +1,12 @@
-// Scenes of spheres and flat plates, packed into arrays for the shader.
+// Scenes of spheres, flat plates and teapots, packed into arrays for the
+// shader.
+
+import {TEAPOT_BOTTOM, hitTeapot} from './teapot.js';
 
 // Shapes
 export const SPHERE = 0;
 export const PLATE = 1;
+export const TEAPOT = 2;
 
 // Materials
 export const DIFFUSE = 0;
@@ -18,6 +22,7 @@ export const LIGHT = 3;
  *   normal: number[],
  *   u: number[], v: number[],
  *   halfWidth: number, halfHeight: number,
+ *   turn: number,
  *   color: number[],
  *   material: number,
  *   gloss: number,
@@ -26,7 +31,9 @@ export const LIGHT = 3;
  *   sky: boolean,
  * }} Shape
  * Spheres use `radius`. Plates are rectangles facing `normal`, spanning
- * halfWidth along u and halfHeight along v.
+ * halfWidth along u and halfHeight along v. Teapots (teapot.js) fit in a
+ * ball of `radius` around `center`, turned `turn` degrees around the
+ * vertical, with the spout toward +x at 0.
  *
  * `color` is the surface color, or for lights, the emitted light. Plate
  * lights shine from their front only.
@@ -40,8 +47,8 @@ export const LIGHT = 3;
  * a `roughness`, blurrily, like brushed metal.
  *
  * Glass is colored by `color` as light goes through it: that's what's left
- * after going as far as its radius. So glass should be spheres; glass
- * plates are clear.
+ * after going as far as its radius. So glass should be spheres or teapots;
+ * glass plates are clear. Teapots can't be lights.
  *
  * One-sided plates are invisible from behind, so walls disappear when the
  * camera orbits outside them, like a dollhouse.
@@ -80,6 +87,7 @@ export const sphere = (
   v: [0, 0, 0],
   halfWidth: 0,
   halfHeight: 0,
+  turn: 0,
   color,
   material,
   gloss,
@@ -87,6 +95,53 @@ export const sphere = (
   oneSided: false,
   sky: false,
 });
+
+/**
+ * A teapot standing on the floor at height `floor`, in a ball of `radius`
+ * around (x, z)
+ * @type {(radius: number, [x, floor, z]: number[], turn: number, color: number[], material: number, gloss?: number, roughness?: number) => Shape}
+ */
+export const teapot = (
+  radius,
+  [x, floor, z],
+  turn,
+  color,
+  material,
+  gloss = 0,
+  roughness = 0,
+) => ({
+  ...sphere(
+    radius,
+    [x, floor - TEAPOT_BOTTOM * radius, z],
+    color,
+    material,
+    gloss,
+    roughness,
+  ),
+  shape: TEAPOT,
+  turn,
+});
+
+/**
+ * How far below its center a shape's lowest point is, as a fraction of its
+ * radius, for keeping things on the floor as they change size
+ * @type {(o: Shape) => number}
+ */
+export const bottomOf = (o) => (o.shape === TEAPOT ? -TEAPOT_BOTTOM : 1);
+
+/**
+ * A teapot's own x, y and z axes in the world: y is up, and it's turned
+ * around it
+ * @type {(turn: number) => number[][]}
+ */
+const teapotAxes = (turn) => {
+  const a = (turn * Math.PI) / 180;
+  return [
+    [Math.cos(a), 0, -Math.sin(a)],
+    [0, 1, 0],
+    [Math.sin(a), 0, Math.cos(a)],
+  ];
+};
 
 /**
  * A rectangle facing `normal`, spanning halfWidth along u (which must be
@@ -109,6 +164,7 @@ const plate = (
   v: cross(normal, u),
   halfWidth,
   halfHeight,
+  turn: 0,
   color,
   material,
   gloss,
@@ -348,6 +404,36 @@ function causticsScene() {
       zoom: 0.65,
       focus: 95.674,
     },
+    defaults: {dof: 0.004},
+  };
+}
+
+/**
+ * Teapots on a table under one small warm light: a glass one the color of
+ * tea, which focuses the light into an amber caustic in its shadow, glazed
+ * china, and polished gold.
+ * @type {() => Scene} */
+function teapotsScene() {
+  const big = 1000;
+  return {
+    objects: [
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.7, 0.64, 0.56], {
+        oneSided: true,
+      }), // linen tablecloth
+      plate([0, 50, -45], [0, 0, 1], [1, 0, 0], big, big, [0.16, 0.18, 0.22], {
+        oneSided: true,
+      }), // dark wall
+      // High, behind and to the left, so shadows and caustics reach toward
+      // the camera
+      sphere(2.5, [-45, 75, -40], [1600, 1400, 1100], LIGHT),
+      // Faint blue sky for the shadows
+      sphere(150, [0, 600, 400], [0.08, 0.1, 0.15], LIGHT),
+      teapot(15, [0, 0, 0], 15, [0.95, 0.62, 0.3], GLASS),
+      teapot(10, [-34, 0, -16], -160, [0.85, 0.85, 0.82], DIFFUSE, 1, 0.03),
+      teapot(7, [19, 0, 24], -120, [0.95, 0.75, 0.4], MIRROR, 0, 0.03),
+      sphere(4, [-14, 4, 26], [0.97, 0.97, 0.97], GLASS),
+    ],
+    camera: {position: [26, 30, 80], target: [0, 8, 4], zoom: 0.6},
     defaults: {dof: 0.004},
   };
 }
@@ -637,6 +723,7 @@ export const scenes = {
   veach: veachScene,
   shafts: shaftsScene,
   caustics: causticsScene,
+  teapots: teapotsScene,
   mirrors: mirrorsScene,
   bokeh: bokehScene,
   sunset: sunsetScene,
@@ -647,21 +734,25 @@ export const scenes = {
 /**
  * Packs shapes into the `Shape` structs of the `objects` buffer in shaders.js:
  * six vec4s per shape. Plates' radius is a ball's of the same area, for
- * lightGuess.
+ * lightGuess. Teapots' u, v and normal are their own x, y and z axes.
  * @type {(objects: Shape[]) => Float32Array} */
 export const packObjects = (objects) =>
   new Float32Array(
-    objects.flatMap((s) => [
-      ...s.center,
-      s.shape === PLATE
-        ? Math.sqrt((4 * s.halfWidth * s.halfHeight) / Math.PI)
-        : s.radius,
-      ...[...s.normal, s.shape],
-      ...[...s.u, s.halfWidth],
-      ...[...s.v, s.halfHeight],
-      ...[...s.color, s.material],
-      ...[s.gloss, s.roughness, +s.oneSided, +s.sky],
-    ]),
+    objects.flatMap((s) => {
+      const [u, v, normal] =
+        s.shape === TEAPOT ? teapotAxes(s.turn) : [s.u, s.v, s.normal];
+      return [
+        ...s.center,
+        s.shape === PLATE
+          ? Math.sqrt((4 * s.halfWidth * s.halfHeight) / Math.PI)
+          : s.radius,
+        ...[...normal, s.shape],
+        ...[...u, s.halfWidth],
+        ...[...v, s.halfHeight],
+        ...[...s.color, s.material],
+        ...[s.gloss, s.roughness, +s.oneSided, +s.sky],
+      ];
+    }),
   );
 
 /** @type {(a: number[], b: number[]) => number} */
@@ -684,6 +775,14 @@ export const hitObject = (objects, o, d) => {
       if (det < 0) continue;
       t = b - Math.sqrt(det);
       if (t <= 0) t = b + Math.sqrt(det);
+    } else if (s.shape === TEAPOT) {
+      // In its own space, where it fits in a unit ball
+      const axes = teapotAxes(s.turn);
+      const rel = p.map((x) => -x / s.radius);
+      t = hitTeapot(
+        axes.map((a) => dot(rel, a)),
+        axes.map((a) => dot(d, a) / s.radius),
+      );
     } else {
       const facing = dot(d, s.normal);
       if (facing === 0 || (s.oneSided && facing > 0)) continue;

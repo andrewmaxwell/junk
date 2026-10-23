@@ -4,11 +4,15 @@ import {
   GLASS,
   LIGHT,
   MIRROR,
+  PLATE,
   SPHERE,
+  TEAPOT,
+  bottomOf,
   hitObject,
   packObjects,
   scenes,
   sphere,
+  teapot,
 } from './scenes.js';
 import {
   denoiseShader,
@@ -19,6 +23,7 @@ import {
 } from './shaders.js';
 import {albedoTable} from './ggx.js';
 import {skyTable} from './sky.js';
+import {packTeapot} from './teapot.js';
 
 /**
  * Everything the controls change. Settings that differ from their defaults
@@ -262,9 +267,9 @@ const singleBounceBuffer = device.createBuffer({
 });
 device.queue.writeBuffer(singleBounceBuffer, 0, singleBounceData);
 
-// Params in shaders.js: 4 × (vec3f + u32), then 22 scalars, padded to a
+// Params in shaders.js: 4 × (vec3f + u32), then 25 scalars, padded to a
 // multiple of 16 bytes
-const paramsData = new ArrayBuffer(160);
+const paramsData = new ArrayBuffer(176);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
 const paramsBuffer = device.createBuffer({
@@ -280,19 +285,27 @@ let scene = scenes[settings.scene]();
  */
 let objects = [];
 /**
- * The objects as the GPU gets them: without deleted ones, and lights first,
- * as the shader expects. Each knows its index in objects as `id`.
+ * The objects as the GPU gets them: without deleted ones, lights first and
+ * teapots last, as the shader expects. Each knows its index in objects as
+ * `id`.
  * @type {(import('./scenes.js').Shape & {id: number})[]}
  */
 let gpuObjects = [];
 let lightCount = 0;
+let teapotCount = 0;
 /** The selected object's index in objects, or -1 */
 let selected = -1;
 /** @type {GPUBuffer} */
 let objectBuffer;
-/** The scene's sky for sky domes, or a placeholder; see skyTable in sky.js */
-/** @type {GPUBuffer} */
-let skyBuffer;
+/**
+ * The scene's sky for sky domes (skyTable in sky.js, or a placeholder), then
+ * the teapot (packTeapot in teapot.js); see `tables` in shaders.js
+ * @type {GPUBuffer}
+ */
+let tablesBuffer;
+const teapotData = packTeapot();
+/** Where the teapot starts in tablesBuffer, in vec4s */
+let teapotStart = 0;
 
 // How many tiles adaptive sampling still refines, counted on the GPU and
 // copied back to show and to know when to stop
@@ -382,7 +395,7 @@ const resize = () => {
     sqSums,
     tiles,
     glowSums,
-    skyBuffer,
+    tablesBuffer,
     albedoSums,
     normalDepthSums,
     singleBounceBuffer,
@@ -453,15 +466,17 @@ const loadScene = () => {
   objects = scene.objects.map((o) => ({...o}));
   selected = -1;
   uploadObjects(false);
-  skyBuffer?.destroy();
+  tablesBuffer?.destroy();
   const skyData = scene.sky
     ? skyTable(scene.sky.sun, scene.sky.haze)
     : new Float32Array(4);
-  skyBuffer = device.createBuffer({
-    size: skyData.byteLength,
+  teapotStart = skyData.length / 4;
+  tablesBuffer = device.createBuffer({
+    size: skyData.byteLength + teapotData.data.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
-  device.queue.writeBuffer(skyBuffer, 0, skyData);
+  device.queue.writeBuffer(tablesBuffer, 0, skyData);
+  device.queue.writeBuffer(tablesBuffer, skyData.byteLength, teapotData.data);
   resize();
   resetCamera();
 };
@@ -473,11 +488,14 @@ const loadScene = () => {
 function uploadObjects(start = true) {
   const isLight = (/** @type {{material: number}} */ o) => o.material === LIGHT;
   const present = objects.flatMap((o, id) => (o ? [{...o, id}] : []));
+  const isTeapot = (/** @type {{shape: number}} */ o) => o.shape === TEAPOT;
   gpuObjects = [
     ...present.filter(isLight),
-    ...present.filter((o) => !isLight(o)),
+    ...present.filter((o) => !isLight(o) && !isTeapot(o)),
+    ...present.filter(isTeapot),
   ];
   lightCount = present.filter(isLight).length;
+  teapotCount = present.filter(isTeapot).length;
   const data = packObjects(gpuObjects);
   // Room to add a few without making a new buffer, which needs new bind
   // groups too
@@ -487,7 +505,7 @@ function uploadObjects(start = true) {
       size: Math.max(data.byteLength * 2, 96 * 64),
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    if (skyBuffer) resize();
+    if (tablesBuffer) resize();
   }
   device.queue.writeBuffer(objectBuffer, 0, data);
   if (start) restart();
@@ -617,7 +635,7 @@ const render = (trace = true) => {
   );
   paramsU32[15] = ['mis', 'light', 'bsdf'].indexOf(settings.sampling);
   paramsF32[16] = settings.clamp || 1e30;
-  paramsU32[17] = gpuObjects.length;
+  paramsU32[17] = gpuObjects.length - teapotCount;
   paramsU32[18] = width;
   paramsU32[19] = height;
   const tone = /** @type {keyof typeof sdrWhite} */ (settings.tone);
@@ -640,6 +658,9 @@ const render = (trace = true) => {
   paramsU32[36] = +settings.denoise;
   const shown = gpuObjects.findIndex((o) => o.id === selected);
   paramsU32[37] = shown < 0 || hideSelection ? 0xffffffff : shown;
+  paramsU32[38] = teapotStart;
+  paramsU32[39] = teapotStart + teapotData.trianglesStart;
+  paramsU32[40] = teapotCount;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
   const encoder = device.createCommandEncoder();
@@ -803,7 +824,7 @@ const pointers = new Map();
 let dragMode = 'orbit';
 // How far the pointer has moved since it went down, to tell clicks from drags
 let dragged = 0;
-/** While moving a ball: from where the pointer's ray meets its height to its center */
+/** While moving a ball or teapot: from where the pointer's ray meets its height to its center */
 let grabOffset = [0, 0, 0];
 
 /** Where a ray meets the level plane at height y, or null if it doesn't */
@@ -826,9 +847,9 @@ canvas.addEventListener('pointerdown', (e) => {
   if (pointers.size > 2) return;
   dragged = 0;
   dragMode = e.shiftKey || e.button > 0 ? 'pan' : 'orbit';
-  // Dragging the selected ball moves it
+  // Dragging the selected ball or teapot moves it
   const ball = objects[selected];
-  if (dragMode === 'orbit' && ball?.shape === SPHERE) {
+  if (dragMode === 'orbit' && ball && ball.shape !== PLATE) {
     const {position, d} = pointerRay(e.offsetX, e.offsetY);
     const hit = hitObject(gpuObjects, position, d);
     const level = meetLevel(position, d, ball.center[1]);
@@ -1062,6 +1083,8 @@ const edit = {
   /** Lights' brightness, in stops over white */
   brightness: 5,
   size: 1,
+  /** Teapots' turn around the vertical, in degrees */
+  turn: 0,
 };
 
 /** What to call an object */
@@ -1072,6 +1095,7 @@ const describe = (/** @type {import('./scenes.js').Shape} */ o) => {
   );
   const coat = o.material === DIFFUSE && o.gloss > 0 ? 'glossy ' : '';
   if (o.shape === SPHERE) return `${coat}${material} ball`;
+  if (o.shape === TEAPOT) return `${coat}${material} teapot`;
   const name =
     o.normal[1] > 0.7 ? 'floor' : o.normal[1] < -0.7 ? 'ceiling' : 'wall';
   return o.material === DIFFUSE ? `${coat}${name}` : `${material} ${name}`;
@@ -1095,6 +1119,10 @@ const editControls = {
     .name('brightness (stops)')
     .onChange(() => applyEdit()),
   size: objectFolder.add(edit, 'size', 0, 1).onChange(() => applyEdit()),
+  turn: objectFolder
+    .add(edit, 'turn', -180, 180, 1)
+    .name('turn (°)')
+    .onChange(() => applyEdit()),
   remove: objectFolder
     .add({remove: () => removeSelected()}, 'remove')
     .name('delete (⌫)'),
@@ -1103,6 +1131,9 @@ const editControls = {
     .name('deselect (esc, or click it again)'),
 };
 objectFolder.add({addBall: () => addBall()}, 'addBall').name('add a ball');
+objectFolder
+  .add({addTeapot: () => addTeapot()}, 'addTeapot')
+  .name('add a teapot');
 const undoControl = objectFolder
   .add({undo: () => undoEdits()}, 'undo')
   .name('undo all edits');
@@ -1143,7 +1174,15 @@ const showEdit = () => {
       .max(+(o.radius * 4).toPrecision(2))
       .step(+(o.radius / 50).toPrecision(1));
   }
-  editControls.size.show(o.shape === SPHERE);
+  editControls.size.show(o.shape !== PLATE);
+  edit.turn = o.turn;
+  editControls.turn.show(o.shape === TEAPOT);
+  // Teapots can't be lights
+  const lightOption =
+    editControls.material.$select.options[
+      Object.keys(materials).indexOf('light')
+    ];
+  lightOption.disabled = o.shape === TEAPOT;
   editControls.gloss.show(o.material === DIFFUSE);
   editControls.roughness.show(
     o.material === MIRROR || (o.material === DIFFUSE && o.gloss > 0),
@@ -1186,7 +1225,13 @@ const applyEdit = () => {
     material === MIRROR || (material === DIFFUSE && edit.gloss > 0)
       ? edit.roughness
       : 0;
-  if (o.shape === SPHERE) o.radius = edit.size;
+  if (o.shape !== PLATE && o.radius !== edit.size) {
+    // Growing or shrinking from its bottom, so what's on the floor stays on
+    // it
+    o.center[1] += (edit.size - o.radius) * bottomOf(o);
+    o.radius = edit.size;
+  }
+  if (o.shape === TEAPOT) o.turn = edit.turn;
   objectsEdited();
   showEdit();
 };
@@ -1219,29 +1264,69 @@ const undoEdits = () => {
   objectsEdited();
 };
 
-/** Drops a random ball onto the floor near the middle of the view, and selects it */
-const addBall = () => {
-  const radius = +(camera.distance / 20).toPrecision(2);
-  // Somewhere level, not on top of another ball
-  let center = camera.target.map((t, i) => t + (i === 1 ? radius : 0));
-  for (let tries = 0; tries < 20; tries++) {
+/**
+ * A random place on the floor near the middle of the view and the point the
+ * camera orbits, with room for something of this radius, clear of balls and
+ * teapots, or the roomiest place it found, or the point the camera orbits
+ * if it found no floor
+ */
+const floorSpot = (/** @type {number} */ radius) => {
+  let best = {spot: [...camera.target], room: -Infinity};
+  for (let tries = 0; tries < 30 && best.room < 0; tries++) {
     const {position, d} = pointerRay(
       canvas.clientWidth * (0.3 + 0.4 * Math.random()),
       canvas.clientHeight * (0.45 + 0.4 * Math.random()),
     );
     const {index, t} = hitObject(gpuObjects, position, d);
     const hit = gpuObjects[index];
-    if (hit && hit.shape !== SPHERE && hit.normal[1] > 0.7) {
-      center = position.map((p, i) => p + d[i] * t + (i === 1 ? radius : 0));
-      break;
-    }
+    if (hit?.shape !== PLATE || hit.normal[1] < 0.7) continue;
+    const spot = position.map((p, i) => p + d[i] * t);
+    const [x, , z] = camera.target;
+    // Not far off near the horizon
+    if (Math.hypot(spot[0] - x, spot[2] - z) > camera.distance / 2) continue;
+    const room = Math.min(
+      ...gpuObjects
+        // Ones standing near the floor, not lights high overhead
+        .filter(
+          (o) =>
+            o.shape !== PLATE &&
+            Math.abs(o.center[1] - spot[1]) < o.radius + 2 * radius,
+        )
+        .map(
+          (o) =>
+            Math.hypot(o.center[0] - spot[0], o.center[2] - spot[2]) -
+            o.radius -
+            radius,
+        ),
+    );
+    if (room > best.room) best = {spot, room};
   }
+  return best.spot;
+};
+
+/** A random color for paint, bright but not white */
+const randomPaint = () => {
   const hue = Math.random() * 6;
-  const paint = [0, 4, 2].map((k) => {
+  return [0, 4, 2].map((k) => {
     const x = Math.abs(((hue + k) % 6) - 3) - 1;
     return 0.05 + 0.75 * Math.min(1, Math.max(0, x)) ** 2;
   });
-  const options = [
+};
+
+/** Adds one of these objects at random, and selects it */
+const addOne = (/** @type {import('./scenes.js').Shape[]} */ options) => {
+  objects.push(options[Math.floor(Math.random() * options.length)]);
+  select(objects.length - 1);
+  objectsEdited();
+};
+
+/** Drops a random ball onto the floor near the middle of the view, and selects it */
+const addBall = () => {
+  const radius = +(camera.distance / 20).toPrecision(2);
+  const center = floorSpot(radius);
+  center[1] += radius;
+  const paint = randomPaint();
+  addOne([
     sphere(radius, center, paint, DIFFUSE, 1, 0.08),
     sphere(radius, center, paint, DIFFUSE),
     sphere(radius, center, [0.95, 0.75, 0.4], MIRROR, 0, 0.05), // gold
@@ -1252,10 +1337,39 @@ const addBall = () => {
       paint.map((c) => 0.3 + c),
       GLASS,
     ),
-  ];
-  objects.push(options[Math.floor(Math.random() * options.length)]);
-  select(objects.length - 1);
-  objectsEdited();
+  ]);
+};
+
+/**
+ * Stands a random teapot on the floor near the middle of the view, and
+ * selects it. It's sized like the balls and teapots already there, if any.
+ */
+const addTeapot = () => {
+  const sizes = gpuObjects
+    .filter((o) => o.shape !== PLATE && o.material !== LIGHT)
+    .map((o) => o.radius)
+    .sort((a, b) => a - b);
+  const radius = +(
+    sizes.length ? 1.3 * sizes[sizes.length >> 1] : camera.distance / 12
+  ).toPrecision(2);
+  const spot = floorSpot(radius);
+  // Spout to the right or left (a turn of the camera's yaw points it right),
+  // a little toward the camera
+  const yaw = (camera.yaw * 180) / Math.PI;
+  const turn = Math.round(
+    ((((yaw + (Math.random() < 0.5 ? -30 : -150) + 180) % 360) + 360) % 360) -
+      180,
+  );
+  /** @type {(color: number[], material: number, gloss?: number, roughness?: number) => import('./scenes.js').Shape} */
+  const make = (...args) => teapot(radius, spot, turn, ...args);
+  addOne([
+    make(randomPaint(), DIFFUSE, 1, 0.05), // glazed china
+    make([0.95, 0.95, 0.95], DIFFUSE, 1, 0.03), // white china
+    make([0.95, 0.75, 0.4], MIRROR, 0, 0.05), // gold
+    make([0.95, 0.64, 0.54], MIRROR, 0, 0.15), // brushed copper
+    make([0.97, 0.97, 0.97], GLASS),
+    make([0.95, 0.6, 0.3], GLASS), // tea colored
+  ]);
 };
 
 /**
@@ -1274,8 +1388,10 @@ const editsParam = () => {
       continue;
     }
     const fields = /** @type {const} */ ([
+      'shape',
       'center',
       'radius',
+      'turn',
       'color',
       'material',
       'gloss',
@@ -1330,6 +1446,11 @@ const loadEdits = (/** @type {string} */ json) => {
         delete e.shininess;
       }
       objects[i] = e === 0 ? null : {...base, ...e};
+      // Teapots can't be lights
+      if (objects[i]?.shape === TEAPOT && objects[i]?.material === LIGHT) {
+        /** @type {import('./scenes.js').Shape} */ (objects[i]).material =
+          DIFFUSE;
+      }
     }
     // Indexes skipped over are holes, not objects
     objects = Array.from(objects, (o) => o ?? null);
