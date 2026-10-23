@@ -20,7 +20,7 @@ struct Shape {
   uHalf: vec4f,
   vHalf: vec4f,
   colorMaterial: vec4f,
-  surface: vec4f, // gloss, roughness, oneSided, sky
+  surface: vec4f, // gloss (glass: index of refraction), roughness, oneSided, sky
 }
 
 

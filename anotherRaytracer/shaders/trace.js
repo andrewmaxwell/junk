@@ -381,8 +381,21 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // The smudge is only worked out when the random number is low enough
       // that it could be, since smudge() <= detail.
       var sn = n;
+      let frosted = material == GLASS && shape.surface.y > 0.;
       let hazy = rand();
-      if (depth < 3 && hazy < SMUDGE_HAZE * params.detail && hazy < SMUDGE_HAZE * smudge(p)) {
+      if (frosted) {
+        // Frosted glass is rough like brushed metal: tiny facets tilted by
+        // the GGX distribution, picked as the path sees them. Each reflects
+        // and refracts sharply, and light that a facet sends back into the
+        // surface, or out the side it came in, would meet another facet and
+        // carry on, so it's sent across, as for smudges below. So frosted
+        // glass loses no light.
+        let facetNl = sampleVisibleNormal(smoothNl, -d, roughness(s), rand2());
+        sn = select(-facetNl, facetNl, into);
+        // Lights seen through it are blurred, like their reflections in
+        // rough metal, not seen by the camera
+        seenByCamera = false;
+      } else if (depth < 3 && hazy < SMUDGE_HAZE * params.detail && hazy < SMUDGE_HAZE * smudge(p)) {
         sn = directionAround(n, pow(rand(), 1. / (SMUDGE_SHININESS + 1.)), 2. * PI * rand());
       }
       let snl = select(-sn, sn, into);
@@ -394,8 +407,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       if (material == MIRROR) { through *= fresnelMetal(sColor, -dot(d, snl)); }
 
       if (material == GLASS) {
-        var index = 1.5;
-        if (wavelength > 0.) { index = glassIndex(wavelength); }
+        var index = shape.surface.x;
+        if (wavelength > 0.) { index = glassIndex(s, wavelength); }
         let t = refract(d, snl, select(index, 1. / index, into));
         // Otherwise total internal reflection: keep the mirror direction
         if (any(t != vec3f(0.))) {
@@ -422,7 +435,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
             if (wavelength == 0. && params.dispersion > 0.) {
               wavelength = mix(MIN_WAVELENGTH, MAX_WAVELENGTH, rand());
               tint = wavelengthColor(wavelength);
-              let i = glassIndex(wavelength);
+              let i = glassIndex(s, wavelength);
               let bent = refract(d, snl, select(i, 1. / i, into));
               // Rarely, a wavelength that bends more reflects entirely
               // where yellow wouldn't

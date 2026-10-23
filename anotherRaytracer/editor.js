@@ -57,6 +57,8 @@ const edit = {
   color: '#ffffff',
   gloss: 0,
   roughness: 0.1,
+  /** Glass's index of refraction */
+  ior: 1.5,
   /** Lights' brightness, in stops over white */
   brightness: 5,
   size: 1,
@@ -68,7 +70,12 @@ const edit = {
 const describe = (/** @type {Shape} */ o) => {
   if (o.material === LIGHT) return o.shape === SPHERE ? 'light' : 'light panel';
   const material = materialName(o.material);
-  const coat = o.material === DIFFUSE && o.gloss > 0 ? 'glossy ' : '';
+  const coat =
+    o.material === DIFFUSE && o.gloss > 0
+      ? 'glossy '
+      : o.material === GLASS && o.roughness > 0
+        ? 'frosted '
+        : '';
   if (o.shape === SPHERE) return `${coat}${material} ball`;
   if (o.shape === TEAPOT) return `${coat}${material} teapot`;
   const name =
@@ -92,6 +99,7 @@ export const addObjectsFolder = (/** @type {GUI} */ gui) => {
     color: folder.addColor(edit, 'color'),
     gloss: folder.add(edit, 'gloss', 0, 1, 0.01).name('gloss coat'),
     roughness: folder.add(edit, 'roughness', 0, 0.7, 0.001),
+    ior: folder.add(edit, 'ior', 1, 2.5, 0.01).name('index of refraction'),
     brightness: folder
       .add(edit, 'brightness', -2, 20, 0.1)
       .name('brightness (stops)'),
@@ -137,6 +145,7 @@ export const showEdit = () => {
   }
   edit.gloss = o.gloss;
   edit.roughness = o.roughness;
+  edit.ior = o.ior;
   // Sizes from a quarter to four times what it was when selected. Only set
   // then, or the range would shift under the slider as it moves.
   edit.size = o.radius;
@@ -156,8 +165,12 @@ export const showEdit = () => {
     o.shape === TEAPOT;
   editControls.gloss.show(o.material === DIFFUSE);
   editControls.roughness.show(
-    o.material === MIRROR || (o.material === DIFFUSE && o.gloss > 0),
+    o.material === MIRROR ||
+      o.material === GLASS ||
+      (o.material === DIFFUSE && o.gloss > 0),
   );
+  editControls.roughness.name(o.material === GLASS ? 'frost' : 'roughness');
+  editControls.ior.show(o.material === GLASS);
   editControls.brightness.show(o.material === LIGHT);
   editControls.color.name(o.material === GLASS ? 'tint' : 'color');
   shownColor = edit.color;
@@ -185,11 +198,14 @@ const applyEdit = () => {
       ? color.map((c) => (c / colorPeak) * 2 ** edit.brightness)
       : color;
   o.gloss = material === DIFFUSE ? edit.gloss : 0;
-  // Metal at 0 is a perfect mirror
+  // Metal at 0 is a perfect mirror, and glass is clear
   o.roughness =
-    material === MIRROR || (material === DIFFUSE && edit.gloss > 0)
+    material === MIRROR ||
+    material === GLASS ||
+    (material === DIFFUSE && edit.gloss > 0)
       ? edit.roughness
       : 0;
+  o.ior = edit.ior;
   if (o.shape !== PLATE && o.radius !== edit.size) {
     // Growing or shrinking from its bottom, so what's on the floor stays on
     // it
@@ -223,7 +239,7 @@ export const removeSelected = () => {
 };
 
 const undoEdits = () => {
-  world.setObjects(world.scene.objects.map((o) => ({...o})));
+  world.setObjects(world.scene.objects.map((o) => structuredClone(o)));
   select(-1);
   saveEdits();
 };
@@ -295,6 +311,7 @@ const addBall = () => {
     sphere(radius, center, paint, DIFFUSE),
     sphere(radius, center, [0.95, 0.75, 0.4], MIRROR, 0, 0.05), // gold
     sphere(radius, center, [0.97, 0.97, 0.97], GLASS),
+    sphere(radius, center, [0.97, 0.97, 0.97], GLASS, 0, 0.15), // frosted
     sphere(
       radius,
       center,
@@ -332,6 +349,7 @@ const addTeapot = () => {
     make([0.95, 0.75, 0.4], MIRROR, 0, 0.05), // gold
     make([0.95, 0.64, 0.54], MIRROR, 0, 0.15), // brushed copper
     make([0.97, 0.97, 0.97], GLASS),
+    make([0.97, 0.97, 0.97], GLASS, 0, 0.15), // frosted
     make([0.95, 0.6, 0.3], GLASS), // tea colored
   ]);
 };
@@ -346,6 +364,7 @@ const editFields = /** @type {const} */ ([
   'material',
   'gloss',
   'roughness',
+  'ior',
 ]);
 
 /**

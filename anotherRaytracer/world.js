@@ -39,7 +39,7 @@ export const loadScene = () => {
     scene.size ?? Math.hypot(...position.map((p, i) => p - target[i]));
   detailScale = sceneSize / 300;
   selected = -1;
-  setObjects(scene.objects.map((o) => ({...o})));
+  setObjects(scene.objects.map((o) => structuredClone(o)));
   renderer.setTables(
     scene.sky ? skyTable(scene.sky.sun, scene.sky.haze) : null,
   );

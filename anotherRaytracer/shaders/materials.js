@@ -13,7 +13,11 @@ const GLASS = 2;
 const LIGHT = 3;
 
 
-/** Smooth glass and mirrors, which bounce light in one direction, not a spread */
+/**
+ * Glass and smooth mirrors, which send each path one way, without aiming
+ * shadow rays at lights. Frosted glass too: each path sees its surface
+ * tilted at random.
+ */
 fn isSmooth(s: u32) -> bool {
   let material = i32(objects[s].colorMaterial.w);
   return material == GLASS || (material == MIRROR && objects[s].surface.y == 0.);
@@ -262,9 +266,14 @@ fn wavelengthColor(w: f32) -> vec3f {
 }
 
 
-/** Glass's index of refraction at a wavelength: 1.5 for yellow, more for blue */
-fn glassIndex(w: f32) -> f32 {
-  return 1.5 + params.dispersion * 0.025 * ((550. / w) * (550. / w) - 1.);
+/**
+ * Glass s's index of refraction at a wavelength: its own for yellow, more for
+ * blue. Denser glass spreads colors more: diamond's fire, from an index of
+ * 2.42, is about three times ordinary glass's.
+ */
+fn glassIndex(s: u32, w: f32) -> f32 {
+  let index = objects[s].surface.x;
+  return index + params.dispersion * 0.05 * (index - 1.) * ((550. / w) * (550. / w) - 1.);
 }
 
 

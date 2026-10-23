@@ -28,6 +28,7 @@ export const LIGHT = 3;
  *   material: number,
  *   gloss: number,
  *   roughness: number,
+ *   ior: number,
  *   oneSided: boolean,
  *   sky: boolean,
  * }} Shape
@@ -49,7 +50,9 @@ export const LIGHT = 3;
  *
  * Glass is colored by `color` as light goes through it: that's what's left
  * after going as far as its radius. So glass should be spheres or teapots;
- * glass plates are clear. Teapots can't be lights.
+ * glass plates are clear. `ior` is how much it bends light (its index of
+ * refraction, for yellow): 1.33 for water, 1.5 for glass, 2.42 for diamond.
+ * With a `roughness`, it's frosted. Teapots can't be lights.
  *
  * One-sided plates are invisible from behind, so walls disappear when the
  * camera orbits outside them, like a dollhouse.
@@ -80,6 +83,7 @@ export const sphere = (
   material,
   gloss,
   roughness,
+  ior: 1.5,
   oneSided: false,
   sky: false,
 });
@@ -157,6 +161,7 @@ export const plate = (
   material,
   gloss,
   roughness,
+  ior: 1.5,
   oneSided,
   sky: false,
 });
@@ -175,6 +180,7 @@ export const skyDome = (radius, center, brightness) => ({
  * Packs shapes into the `Shape` structs of the `objects` buffer in shaders/geometry.js:
  * six vec4s per shape. Plates' radius is a ball's of the same area, for
  * lightGuess. Teapots' u, v and normal are their own x, y and z axes.
+ * Glass, which has no gloss coat, has its ior in gloss's place.
  * @type {(objects: Shape[]) => Float32Array} */
 export const packObjects = (objects) =>
   new Float32Array(
@@ -190,7 +196,12 @@ export const packObjects = (objects) =>
         ...[...u, s.halfWidth],
         ...[...v, s.halfHeight],
         ...[...s.color, s.material],
-        ...[s.gloss, s.roughness, +s.oneSided, +s.sky],
+        ...[
+          s.material === GLASS ? s.ior : s.gloss,
+          s.roughness,
+          +s.oneSided,
+          +s.sky,
+        ],
       ];
     }),
   );
