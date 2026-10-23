@@ -121,7 +121,7 @@ const strideBuffers = [1, 2, 4, 8, 16].map((stride) =>
 /** For rough reflections' lost light; see ggx.js */
 const singleBounceBuffer = bufferWith(albedoTable(), GPUBufferUsage.UNIFORM);
 
-// Params in shaders/common.js: 4 × (vec3f + u32), then 29 scalars, padded to
+// Params in shaders/common.js: 4 × (vec3f + u32), then 30 scalars, padded to
 // a multiple of 16 bytes
 const paramsData = new ArrayBuffer(192);
 const paramsF32 = new Float32Array(paramsData);
@@ -444,6 +444,7 @@ const writeParams = (/** @type {FrameView} */ v) => {
   paramsF32[42] = settings.aberration;
   paramsU32[43] = teapotStart + teapotData.data.length / 4;
   paramsU32[44] = beamCount;
+  paramsF32[45] = settings.contrast;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 };
 

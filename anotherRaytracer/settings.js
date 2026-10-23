@@ -43,6 +43,8 @@ export const defaults = {
   tone: 'filmic',
   /** Darkening toward the corners, 0 to 1; see `vignette` in shaders/common.js */
   vignette: 0.5,
+  /** Deepens shadows and brightens highlights, 1 for none; see applyContrast in shaders/tone.js. Scenes can change this default. */
+  contrast: 1.25,
   /** Film grain, as a fraction of white; see `grain` in shaders/common.js */
   grain: 0.015,
   /** Colored fringes toward the corners; see `aberration` in shaders/common.js */
@@ -89,6 +91,7 @@ const sceneKeys = [
   'dof',
   'dispersion',
   'exposure',
+  'contrast',
   'detail',
   'noise',
 ];

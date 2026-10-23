@@ -125,6 +125,8 @@ struct Params {
   diamondPlanes: u32,
   /** Lasers' beams, which come after the teapots and diamonds; see lasers.js */
   beamCount: u32,
+  /** The power brightness relative to middle gray is raised to: 1 for none; see applyContrast */
+  contrast: f32,
 }
 
 const NONE = 0xffffffffu;

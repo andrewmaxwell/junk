@@ -81,6 +81,19 @@ const planes = facets.map(([a, b, c]) => {
 /** Where the culet is: it sits on the floor at center y - bottom × radius */
 export const DIAMOND_BOTTOM = (culet - middle) / reach;
 
+/**
+ * The outward normal, in the diamond's own space, of the facet that point
+ * p, on its surface, is on: the plane it's closest to
+ * @type {(p: number[]) => number[]}
+ */
+export const facetNormal = (p) => {
+  let best = planes[0];
+  for (const plane of planes) {
+    if (dot(plane, p) - plane[3] > dot(best, p) - best[3]) best = plane;
+  }
+  return best.slice(0, 3);
+};
+
 /** The planes as vec4s: normal in xyz, distance from the middle in w */
 export const packDiamond = () => new Float32Array(planes.flat());
 

@@ -13,11 +13,14 @@ import {
   LIGHT,
   MIRROR,
   PLATE,
+  DIAMOND,
   SPHERE,
   hitObject,
+  ownAxes,
   plate,
   sphere,
 } from './shapes.js';
+import {facetNormal} from './diamond.js';
 import {cross, dot, normalize} from './vec.js';
 
 /** @typedef {import('./shapes.js').Shape} Shape */
@@ -36,6 +39,11 @@ import {cross, dot, normalize} from './vec.js';
 
 /** Beams this much dimmer than their laser are dropped */
 const FAINTEST = 1e-3;
+/**
+ * Beams this much dimmer leave no spot or glint: each is a light, and every
+ * light slows every bounce down, for light too faint to see
+ */
+const FAINTEST_LIGHT = 0.05;
 /** The fraction of a beam that glass's surface scatters where it crosses it */
 const GLINT = 0.002;
 /** How far off a surface a beam starts again */
@@ -72,6 +80,7 @@ export const traceLasers = (lasers, objects, dispersion) => {
   const spots = [];
   for (const laser of lasers) {
     const faintest = FAINTEST * Math.max(...laser.color);
+    const faintestLight = FAINTEST_LIGHT * Math.max(...laser.color);
     /**
      * Follows a beam from o in unit direction d, inside glass object
      * `inside` (or null), splitting it where it reaches glass
@@ -98,12 +107,25 @@ export const traceLasers = (lasers, objects, dispersion) => {
       }
       const s = objects[index];
       if (!s || s.material === LIGHT) return;
-      if (s.shape !== SPHERE && s.shape !== PLATE) return;
       const p = o.map((x, i) => x + d[i] * t);
-      const n =
-        s.shape === SPHERE
-          ? normalize(p.map((x, i) => x - s.center[i]))
-          : s.normal;
+      /** @type {number[]} */
+      let n;
+      if (s.shape === SPHERE) n = normalize(p.map((x, i) => x - s.center[i]));
+      else if (s.shape === PLATE) n = s.normal;
+      else if (s.shape === DIAMOND) {
+        // The facet's normal, from the diamond's own space
+        const axes = ownAxes(s.turn);
+        const local = axes.map((a) =>
+          dot(
+            p.map((x, i) => (x - s.center[i]) / s.radius),
+            a,
+          ),
+        );
+        const m = facetNormal(local);
+        n = [0, 1, 2].map((i) =>
+          axes.reduce((sum, a, k) => sum + a[i] * m[k], 0),
+        );
+      } else return;
       const into = dot(n, d) < 0;
       const nl = into ? n : scale(n, -1);
       const cosI = -dot(d, nl);
@@ -112,20 +134,26 @@ export const traceLasers = (lasers, objects, dispersion) => {
       const through = p.map((x, i) => x - nl[i] * OFFSET);
 
       if (s.material === GLASS) {
-        // A ball of light whose power is GLINT of the beam's
-        spots.push(
-          sphere(
-            laser.radius,
-            p,
-            scale(power, GLINT / (4 * Math.PI ** 2 * laser.radius ** 2)),
-            LIGHT,
-          ),
-        );
-        power = scale(power, 1 - GLINT);
         const index =
           s.ior +
           dispersion * 0.05 * (s.ior - 1) * ((550 / laser.wavelength) ** 2 - 1);
         const eta = into ? index : 1 / index;
+        // Where it crosses the surface, not where it all reflects inside, a
+        // ball of light whose power is GLINT of the beam's
+        if (
+          fresnelDielectric(cosI, eta) < 1 &&
+          Math.max(...power) > faintestLight
+        ) {
+          spots.push(
+            sphere(
+              laser.radius,
+              p,
+              scale(power, GLINT / (4 * Math.PI ** 2 * laser.radius ** 2)),
+              LIGHT,
+            ),
+          );
+          power = scale(power, 1 - GLINT);
+        }
         const reflectance = fresnelDielectric(cosI, eta);
         follow(out, reflected, scale(power, reflectance), inside, depth + 1);
         const sinT2 = (1 - cosI * cosI) / (eta * eta);
@@ -169,19 +197,20 @@ export const traceLasers = (lasers, objects, dispersion) => {
               );
         const halfWidth = laser.radius / Math.max(cosI, 0.2);
         const area = 4 * halfWidth * laser.radius;
-        spots.push(
-          plate(
-            out,
-            nl,
-            u,
-            halfWidth,
-            laser.radius,
-            power.map(
-              (c, i) => ((1 - coat) * s.color[i] * c) / (Math.PI * area),
+        if (Math.max(...power) > faintestLight)
+          spots.push(
+            plate(
+              out,
+              nl,
+              u,
+              halfWidth,
+              laser.radius,
+              power.map(
+                (c, i) => ((1 - coat) * s.color[i] * c) / (Math.PI * area),
+              ),
+              {material: LIGHT, oneSided: true},
             ),
-            {material: LIGHT, oneSided: true},
-          ),
-        );
+          );
       }
     };
     follow(laser.position, normalize(laser.direction), laser.color, null, 0);

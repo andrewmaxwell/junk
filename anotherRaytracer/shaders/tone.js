@@ -28,13 +28,12 @@ fn toneMap(x: vec3f) -> vec3f {
 
 /**
  * Deepens what's darker than middle gray and brightens what's brighter, by
- * raising brightness relative to middle gray to the power CONTRAST. Each
- * channel separately, so colors get a bit richer too.
+ * raising brightness relative to middle gray to the power params.contrast.
+ * Each channel separately, so colors get a bit richer too.
  */
 const MIDDLE_GRAY = 0.18;
-const CONTRAST = 1.25;
 fn applyContrast(x: vec3f) -> vec3f {
-  return MIDDLE_GRAY * pow(max(x, vec3f(0.)) / MIDDLE_GRAY, vec3f(CONTRAST));
+  return MIDDLE_GRAY * pow(max(x, vec3f(0.)) / MIDDLE_GRAY, vec3f(params.contrast));
 }
 
 /**

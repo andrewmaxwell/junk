@@ -22,7 +22,7 @@ import {cross, normalize} from './vec.js';
  *   sky?: {sun: number[], haze?: number},
  *   lasers?: import('./lasers.js').Laser[],
  *   size?: number,
- *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number, detail?: number, noise?: number},
+ *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number, contrast?: number, detail?: number, noise?: number},
  * }} Scene
  * The camera orbits `target`, and starts focused on it, or `focus` away if
  * given. `zoom` is the image height at distance 1. `defaults` overrides the
@@ -352,24 +352,24 @@ function diamondScene() {
 
 /**
  * Lasers in a dark, hazy room: green, red and blue beams, lit up by the
- * haze, hit a glass ball, which bends each by its own amount and splits off
- * faint reflections, and they land on the matte white walls, which scatter
- * their light around the room. A very faint panel overhead shows the rest.
+ * haze. Green goes through a glass ball, then a diamond; red splits into
+ * four in the diamond; blue bounces off a chrome ball into a mirror, then
+ * through both glass balls. Glass bends each color by its own amount and
+ * splits off faint reflections, and the beams land on the matte white
+ * walls, which scatter their light around the room. A very faint panel
+ * overhead shows the rest.
  * @type {() => Scene} */
 function lasersScene() {
   const big = 1000;
   const white = [0.75, 0.75, 0.75];
   const wall = {oneSided: true};
   const ball = [0, 18, -15];
-  /** From position, aimed this far off the ball's center */
-  const aim = (
-    /** @type {number[]} */ position,
-    /** @type {number[]} */ offset,
-  ) => ball.map((c, i) => c + offset[i] - position[i]);
-  /** @type {(position: number[], offset: number[], color: number[], wavelength: number) => import('./lasers.js').Laser} */
-  const laser = (position, offset, color, wavelength) => ({
+  const gem = [26, 14, -32];
+  const chrome = [-24, 6, -30];
+  /** @type {(position: number[], target: number[], color: number[], wavelength: number) => import('./lasers.js').Laser} */
+  const laser = (position, target, color, wavelength) => ({
     position,
-    direction: aim(position, offset),
+    direction: target.map((c, i) => c - position[i]),
     color,
     wavelength,
     radius: 0.1,
@@ -387,14 +387,43 @@ function lasersScene() {
         material: LIGHT,
         oneSided: true,
       }), // faint panel
+      diamond(7, [gem[0], gem[1] - 7, gem[2]], 20),
+      sphere(6, chrome, [0.95, 0.95, 0.97], MIRROR), // chrome ball
+      plate(
+        [-45, 14, -55],
+        normalize([1, 0, 1]),
+        normalize([1, 0, -1]),
+        10,
+        14,
+        [0.9, 0.9, 0.9],
+        {
+          material: MIRROR,
+        },
+      ), // standing mirror
+      sphere(4, [24, 16, 4], [0.98, 0.98, 0.98], GLASS), // small glass ball
     ],
     lasers: [
-      laser([-59.9, 24, 40], [2, 3, 0], [100, 2000, 40], 532),
-      laser([59.9, 12, 30], [-1, -4, 0], [1500, 30, 15], 640),
-      laser([20, 45, 59.9], [-5, 0, 0], [40, 80, 1500], 450),
+      laser(
+        [-59.9, 24, 40],
+        [ball[0] + 2, ball[1] + 3, ball[2]],
+        [100, 2000, 40],
+        532,
+      ),
+      laser(
+        [59.9, 18, 30],
+        [gem[0] - 1, gem[1], gem[2] + 1],
+        [1500, 30, 15],
+        640,
+      ),
+      laser(
+        [20, 45, 59.9],
+        [chrome[0] - 3, chrome[1] + 5, chrome[2]],
+        [40, 80, 1500],
+        450,
+      ),
     ],
     camera: {position: [0, 26, 55], target: [0, 18, -25], zoom: 0.8},
-    defaults: {fog: 0.004, fogForward: 0.3, exposure: 1},
+    defaults: {fog: 0.004, fogForward: 0.3, exposure: 2, contrast: 1.5},
   };
 }
 

@@ -154,7 +154,7 @@ export const bottomOf = (o) =>
  * around it
  * @type {(turn: number) => number[][]}
  */
-const teapotAxes = (turn) => {
+export const ownAxes = (turn) => {
   const a = (turn * Math.PI) / 180;
   return [
     [Math.cos(a), 0, -Math.sin(a)],
@@ -215,7 +215,7 @@ export const packObjects = (objects) =>
   new Float32Array(
     objects.flatMap((s) => {
       const [u, v, normal] = isBounded(s)
-        ? teapotAxes(s.turn)
+        ? ownAxes(s.turn)
         : [s.u, s.v, s.normal];
       return [
         ...s.center,
@@ -255,7 +255,7 @@ export const hitObject = (objects, o, d) => {
       if (t <= 0) t = b + Math.sqrt(det);
     } else if (isBounded(s)) {
       // In its own space, where it fits in a unit ball
-      const axes = teapotAxes(s.turn);
+      const axes = ownAxes(s.turn);
       const rel = p.map((x) => -x / s.radius);
       t = (s.shape === TEAPOT ? hitTeapot : hitDiamond)(
         axes.map((a) => dot(rel, a)),
