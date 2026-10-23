@@ -10,7 +10,7 @@ Scenes:
 - **veach**: the multiple importance sampling test scene from Eric Veach's thesis
 - **shafts** (the default): a foggy room lit through window blinds
 - **caustics**: glass balls focusing light into their shadows
-- **teapots**: a glass teapot the color of tea, glazed china and gold, under one warm light
+- **teapots**: a glass teapot the color of tea, glazed china and gold, lit like a product photo: a softbox, a dim fill, and strip lights behind that outline the glass
 - **mirrors**: two facing mirrors reflecting glowing orbs into the distance
 - **bokeh**: balls on a walnut table, with fairy lights blurred into discs
 - **sunset**: a low sun, a physically based sky, and hazy air glowing around the sun
@@ -30,7 +30,7 @@ How it renders:
 - **Surface detail**: noise bumps paint and smudges glass and mirrors, so nothing is perfectly even.
 - **Sampling**: the first choices of each sample follow a scrambled Sobol sequence. Each 8×8 tile gets at least 32 samples, then stops once its noise, as displayed, is below the **noise target**.
 - **Denoising**: an edge-avoiding wavelet filter guided by variance (SVGF without the temporal part). Each pixel's noise is known from its samples, so as it fades the filter stops averaging. At 64 samples the denoised image is closer to a 4096-sample render than the raw image at 512.
-- **Display**: AgX filmic tone mapping by default (or easing into white, or clipping), HDR where the browser shows it (Safari), a lens glow that gets the light lights are clamped by, cos⁴ vignetting, and depth of field focused where you click. Phones held upright show more of the scene vertically.
+- **Display**: AgX filmic tone mapping by default (or easing into white, or clipping), HDR where the browser shows it (Safari), a lens glow that gets the light lights are clamped by, cos⁴ vignetting, color fringes toward the corners (chromatic aberration), film grain, and depth of field focused where you click. Phones held upright show more of the scene vertically.
 
 The **Advanced** folder has fog's direction and color, dispersion, surface detail, display settings, and sampling knobs for comparing methods (MIS, lights only, bounces only; the veach scene shows the difference) and trading speed for accuracy.
 

@@ -15,8 +15,8 @@
 
 - Headless Chrome via Playwright (`channel: 'chrome'`, `--enable-unsafe-webgpu`) runs WebGPU on the real GPU. Use a fresh browser per measurement; reusing one sometimes never finishes.
 - Speed: the stats' spp/s includes shader compile time, so compare the change in spp between two readings a few seconds apart, with `noise=0` so adaptive sampling doesn't stop tiles. The GPU slows as it warms, so alternate versions (A, B, A, B) rather than running one then the other.
-- Correctness: render to a fixed `spp` with `noise=0`, no denoise, glow or vignette, and compare mean brightness with the previous version. A faster change that shifts the mean is a bug unless it's meant to change the look.
-- Materials: a white furnace test (delete a scene's objects with URL edits, surround the camera with a radius-1000 white light, add white balls or teapots, and render with `tone=clip`, `exposure=-1`, no denoise, glow, vignette or detail) should show each as bright as the background. Brighter means a material creates energy. Things next to each other dim each other's facing sides if either loses energy, so judge by their centers.
+- Correctness: render to a fixed `spp` with `noise=0`, no denoise, glow, vignette, grain or aberration, and compare mean brightness with the previous version. A faster change that shifts the mean is a bug unless it's meant to change the look.
+- Materials: a white furnace test (delete a scene's objects with URL edits, surround the camera with a radius-1000 white light, add white balls or teapots, and render with `tone=clip`, `exposure=-1`, no denoise, glow, vignette, grain, aberration or detail) should show each as bright as the background. Brighter means a material creates energy. Things next to each other dim each other's facing sides if either loses energy, so judge by their centers.
 
 ## Measured (M4, 800x500, spp/s)
 

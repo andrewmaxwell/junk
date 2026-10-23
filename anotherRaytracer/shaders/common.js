@@ -109,6 +109,17 @@ struct Params {
   teapotNodes: u32,
   teapotTriangles: u32,
   teapotCount: u32,
+  /**
+   * Film grain: how much each pixel is randomly brighter or darker, as a
+   * fraction of white on screen. 0 for none.
+   */
+  grain: f32,
+  /**
+   * Chromatic aberration: how much more the lens magnifies red than green,
+   * and green than blue, so bright edges get colored fringes toward the
+   * corners. 0 for none.
+   */
+  aberration: f32,
 }
 
 const NONE = 0xffffffffu;

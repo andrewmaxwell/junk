@@ -240,9 +240,25 @@ function causticsScene() {
 }
 
 /**
- * Teapots on a table under one small warm light: a glass one the color of
- * tea, which focuses the light into an amber caustic in its shadow, glazed
- * china, and polished gold.
+ * A rectangular light at `center`, facing `target`, upright: halfWidth
+ * across and halfHeight up and down, like a photographer's softbox
+ * @type {(center: number[], target: number[], halfWidth: number, halfHeight: number, color: number[]) => Shape}
+ */
+const softbox = (center, target, halfWidth, halfHeight, color) => {
+  const normal = normalize(target.map((t, i) => t - center[i]));
+  const u = normalize(cross([0, 1, 0], normal));
+  return plate(center, normal, u, halfWidth, halfHeight, color, {
+    material: LIGHT,
+    oneSided: true,
+  });
+};
+
+/**
+ * Teapots on a table, lit like glass in a product photo: a softbox high
+ * behind and to the left, so the glass teapot, the color of tea, focuses it
+ * into an amber caustic reaching toward the camera; a dim one in front for
+ * fill; and strip lights behind each side, out of the picture, which the
+ * glass's edges catch as bright lines. With glazed china and polished gold.
  * @type {() => Scene} */
 function teapotsScene() {
   const big = 1000;
@@ -251,21 +267,24 @@ function teapotsScene() {
       plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.7, 0.64, 0.56], {
         oneSided: true,
       }), // linen tablecloth
-      plate([0, 50, -45], [0, 0, 1], [1, 0, 0], big, big, [0.16, 0.18, 0.22], {
+      // Far back, so it's out of focus and the table fades into it, not
+      // meeting it at a hard line
+      plate([0, 50, -90], [0, 0, 1], [1, 0, 0], big, big, [0.16, 0.18, 0.22], {
         oneSided: true,
       }), // dark wall
-      // High, behind and to the left, so shadows and caustics reach toward
-      // the camera
-      sphere(2.5, [-45, 75, -40], [1600, 1400, 1100], LIGHT),
-      // Faint blue sky for the shadows
-      sphere(150, [0, 600, 400], [0.08, 0.1, 0.15], LIGHT),
+      softbox([-60, 80, -50], [0, 8, 0], 6, 4.5, [285, 250, 200]), // key
+      softbox([70, 35, 110], [0, 10, 0], 40, 25, [0.2, 0.21, 0.23]), // fill
       teapot(15, [0, 0, 0], 15, [0.95, 0.62, 0.3], GLASS),
       teapot(10, [-34, 0, -16], -160, [0.85, 0.85, 0.82], DIFFUSE, 1, 0.03),
       teapot(7, [19, 0, 24], -120, [0.95, 0.75, 0.4], MIRROR, 0, 0.03),
       sphere(4, [-14, 4, 26], [0.97, 0.97, 0.97], GLASS),
+      // Rim lights
+      softbox([-90, 22, -20], [0, 10, 0], 6, 24, [12, 12, 12]),
+      softbox([90, 22, -20], [0, 10, 0], 6, 24, [12, 12, 12]),
     ],
     camera: {position: [26, 30, 80], target: [0, 8, 4], zoom: 0.6},
-    defaults: {dof: 0.004},
+    // Shallow, as in a product photo, so the table's far edge blurs
+    defaults: {dof: 0.015},
   };
 }
 

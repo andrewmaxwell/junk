@@ -1,8 +1,9 @@
 import {common} from './common.js';
 
 /**
- * Shows the image: the samples' average (or the denoiser's), the lens glow
- * and vignette, the tone curve, and the selection's outline.
+ * Shows the image: the samples' average (or the denoiser's), the lens's
+ * color fringes, glow and vignette, the tone curve, film grain, and the
+ * selection's outline.
  */
 export const displayShader = /* wgsl */ `${common}
 @group(0) @binding(1) var<storage, read> sums: array<vec4f>;
@@ -42,6 +43,41 @@ fn glowAt(pos: vec2f) -> vec3f {
   return mix(top, bottom, f.y);
 }
 
+/** The image's color at pixel p, the samples' average or the denoiser's */
+fn pixel(p: vec2i) -> vec3f {
+  let q = clamp(p, vec2i(0), vec2i(i32(params.width), i32(params.height)) - 1);
+  let i = u32(q.y) * params.width + u32(q.x);
+  if (params.denoise == 1u) { return denoised[i].rgb; }
+  let s = sums[i];
+  return s.rgb / max(s.w, 1.);
+}
+
+/** The image's color at any position, blending the nearest four pixels */
+fn imageAt(pos: vec2f) -> vec3f {
+  let q = pos - 0.5;
+  let a = vec2i(floor(q));
+  let f = q - floor(q);
+  let top = mix(pixel(a), pixel(a + vec2i(1, 0)), f.x);
+  let bottom = mix(pixel(a + vec2i(0, 1)), pixel(a + vec2i(1, 1)), f.x);
+  return mix(top, bottom, f.y);
+}
+
+/** Roughly normally distributed, the same for each pixel every frame */
+fn grainAt(pos: vec2u) -> f32 {
+  var h = pos.x * 1973u + pos.y * 9277u + 26699u;
+  var sum = 0.;
+  for (var k = 0u; k < 4u; k++) {
+    h ^= h >> 16u;
+    h *= 0x7feb352du;
+    h ^= h >> 15u;
+    h *= 0x846ca68bu;
+    h ^= h >> 16u;
+    sum += f32(h >> 8u) / 16777216.;
+  }
+  // Four uniform numbers sum to mean 2, variance 1 / 3
+  return (sum - 2.) * 1.732;
+}
+
 // One triangle that covers the whole screen
 @vertex
 fn vertex(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
@@ -51,10 +87,16 @@ fn vertex(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
 
 @fragment
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
-  let i = u32(pos.y) * params.width + u32(pos.x);
-  let s = sums[i];
-  var linear = s.rgb / max(s.w, 1.);
-  if (params.denoise == 1u) { linear = denoised[i].rgb; }
+  var linear = pixel(vec2i(pos.xy));
+  // Chromatic aberration: a simple lens bends blue more than red, so it
+  // makes slightly different sized images in each color, lined up at the
+  // center and further apart toward the edges
+  if (params.aberration > 0.) {
+    let center = vec2f(f32(params.width), f32(params.height)) / 2.;
+    let fromCenter = pos.xy - center;
+    linear.r = imageAt(center + fromCenter * (1. + params.aberration)).r;
+    linear.b = imageAt(center + fromCenter * (1. - params.aberration)).b;
+  }
   // The lens spreads that fraction of the light into the glow
   if (params.glow > 0.) { linear = mix(linear, glowAt(pos.xy), params.glow); }
   // Vignetting: light reaching the edges of the image comes in at an angle,
@@ -66,6 +108,16 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let tanSq = dot(offset, offset);
   linear *= mix(1., 1. / ((1. + tanSq) * (1. + tanSq)), params.vignette);
   var color = shown(linear);
+  // Film grain, or a sensor's noise: light arrives as photons, so how much
+  // each pixel gets varies, by the square root of how much it gets on
+  // average. Brightness on screen is about that to the power 1 / 2.2,
+  // which makes the variation about the same at every brightness, so it's
+  // added after encoding. In brightness, not color, as
+  // photos are usually processed.
+  if (params.grain > 0.) {
+    let encoded = pow(max(color, vec3f(0.)), vec3f(1. / 2.2));
+    color = pow(max(encoded + params.grain * grainAt(vec2u(pos.xy)), vec3f(0.)), vec3f(2.2));
+  }
   if (params.selected != NONE && onOutline(vec2i(pos.xy))) {
     color = mix(color, vec3f(1., 0.75, 0.2), 0.8);
   }

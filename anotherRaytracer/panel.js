@@ -147,6 +147,14 @@ display
   .onChange(displayChanged);
 display.add(settings, 'vignette', 0, 1, 0.05).onChange(displayChanged);
 display
+  .add(settings, 'grain', 0, 0.1, 0.005)
+  .name('film grain')
+  .onChange(displayChanged);
+display
+  .add(settings, 'aberration', 0, 0.01, 0.0005)
+  .name('color fringes')
+  .onChange(displayChanged);
+display
   .add(settings, 'tone', {
     filmic: 'filmic',
     'ease into white': 'ease',
