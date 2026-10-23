@@ -22,14 +22,17 @@ addEventListener('keydown', (e) => {
   keys[e.code] = true;
   audio?.resume();
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
-  if (
-    (e.code === 'Space' || e.code === 'Enter') &&
-    state !== 'play' &&
-    Date.now() - endedAt > 800
-  )
-    start();
+  if (state !== 'play' && Date.now() - endedAt > 800) {
+    if (e.code === 'Digit1') start(1);
+    else if (e.code === 'Digit2') start(2);
+    else if (e.code === 'Space' || e.code === 'Enter') start(players);
+  }
 });
 addEventListener('keyup', (e) => (keys[e.code] = false));
+// a key released while the window is unfocused never sends keyup
+addEventListener('blur', () => {
+  for (const k in keys) keys[k] = false;
+});
 
 // --- sound ---
 let audio;
@@ -204,6 +207,8 @@ bg.height = H;
 // --- game state ---
 let state = 'title';
 let endedAt = 0;
+let players = 1;
+let soapScore = 0;
 let truck,
   trash,
   soapMen,
@@ -234,8 +239,8 @@ const spawnTrash = () => {
   trash.push({...p, born: time, golden, wobble: rand(0, 6)});
 };
 
-const spawnSoapMan = () => {
-  // walk in from an edge far from the truck
+const spawnSoapMan = (player = false) => {
+  // appear somewhere far from the truck
   let p;
   do {
     p = freeSpot(30);
@@ -245,15 +250,23 @@ const spawnSoapMan = () => {
     vx: 0,
     vy: 0,
     stun: 0,
-    dropT: rand(1, 3),
+    dropT: player ? 0 : rand(1, 3),
     speed: rand(75, 105),
     step: 0,
+    player,
   });
-  floatText(p.x, p.y - 30, 'A SOAP MAN APPEARS', '#9fe7ff');
+  floatText(
+    p.x,
+    p.y - 30,
+    player ? 'PLAYER 2: SOAP' : 'A SOAP MAN APPEARS',
+    '#9fe7ff',
+  );
 };
 
-const start = () => {
+const start = (n) => {
   state = 'play';
+  players = n;
+  soapScore = 0;
   truck = {x: 125, y: 230, vx: 0, vy: 0, a: 0, load: [], spin: 0};
   trash = [];
   soapMen = [];
@@ -265,7 +278,7 @@ const start = () => {
   shake = 0;
   combo = 0;
   for (let i = 0; i < 9; i++) spawnTrash();
-  spawnSoapMan();
+  spawnSoapMan(players === 2);
   beep(330, 0.1);
   setTimeout(() => beep(495, 0.15), 100);
 };
@@ -315,7 +328,7 @@ const update = (dt) => {
   if (time >= ROUND_TIME) {
     state = 'over';
     endedAt = Date.now();
-    if (score > best) {
+    if (players === 1 && score > best) {
       best = score;
       try {
         localStorage.setItem('truckGameBest', best);
@@ -329,10 +342,12 @@ const update = (dt) => {
 
   // --- truck ---
   const t = truck;
-  const up = keys.ArrowUp || keys.KeyW;
-  const down = keys.ArrowDown || keys.KeyS;
-  const left = keys.ArrowLeft || keys.KeyA;
-  const right = keys.ArrowRight || keys.KeyD;
+  // WASD belongs to the soap player in two player mode
+  const solo = players === 1;
+  const up = keys.ArrowUp || (solo && keys.KeyW);
+  const down = keys.ArrowDown || (solo && keys.KeyS);
+  const left = keys.ArrowLeft || (solo && keys.KeyA);
+  const right = keys.ArrowRight || (solo && keys.KeyD);
   const fx = Math.cos(t.a);
   const fy = Math.sin(t.a);
   const fwd = t.vx * fx + t.vy * fy;
@@ -370,6 +385,12 @@ const update = (dt) => {
     }
   }
   if (slick && Math.random() < 0.4) bubbles(t.x, t.y, 1, 0.4);
+  // the soap player earns points while the truck slides on their soap
+  if (
+    puddles.some((p) => p.p2 && dist(p, t) < p.r + 10) &&
+    Math.hypot(t.vx, t.vy) > 60
+  )
+    soapScore += 10 * dt;
 
   // pick up trash
   for (let i = trash.length - 1; i >= 0; i--) {
@@ -420,13 +441,29 @@ const update = (dt) => {
   }
 
   // --- soap men ---
-  const wanted = 1 + Math.floor(time / 20);
-  if (soapMen.length < wanted) spawnSoapMan();
+  // with a human soap player, computer soap men join more slowly
+  const wanted =
+    players === 2 ? Math.floor(time / 30) : 1 + Math.floor(time / 20);
+  if (soapMen.filter((m) => !m.player).length < wanted) spawnSoapMan();
   for (const m of soapMen) {
     if (m.stun > 0) {
       m.stun -= dt;
       m.vx *= Math.exp(-3 * dt);
       m.vy *= Math.exp(-3 * dt);
+    } else if (m.player) {
+      const ix = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+      const iy = (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0);
+      const il = Math.hypot(ix, iy) || 1;
+      m.vx += ((ix / il) * 210 - m.vx) * 6 * dt;
+      m.vy += ((iy / il) * 210 - m.vy) * 6 * dt;
+      if (ix || iy) m.step += dt * 14;
+      m.dropT -= dt;
+      if (m.dropT <= 0 && (keys.KeyQ || keys.KeyE || keys.ShiftLeft)) {
+        m.dropT = 1;
+        puddles.push({x: m.x, y: m.y, r: 36, t: 0, life: 9, p2: true});
+        bubbles(m.x, m.y, 8);
+        beep(700, 0.12, 'sine', 0.06, 1.5);
+      }
     } else {
       // chase where the truck is going, not where it is
       const tx = t.x + t.vx * 0.5 - m.x;
@@ -447,7 +484,7 @@ const update = (dt) => {
     m.y += m.vy * dt;
     collide(m, 14);
 
-    const d = dist(m, t);
+    const d = dist(m, t) || 1;
     if (d < 36 && m.stun <= 0) {
       const sp = Math.hypot(t.vx, t.vy);
       const nx = (m.x - t.x) / d;
@@ -466,15 +503,20 @@ const update = (dt) => {
         // he scrubs your trash away
         m.vx = nx * 200;
         m.vy = ny * 200;
-        m.stun = 1.5;
+        m.stun = m.player ? 2 : 1.5;
         t.vx -= nx * 150;
         t.vy -= ny * 150;
         t.spin = rand(-4, 4);
         bubbles(t.x, t.y, 20);
         if (t.load.length) {
-          t.load.pop();
+          const bag = t.load.pop();
           combo = 0;
           floatText(t.x, t.y - 30, 'SCRUBBED! -1 bag', '#9fe7ff');
+          if (m.player) {
+            const pts = bagValue(bag) * 2;
+            soapScore += pts;
+            floatText(m.x, m.y - 50, `+${pts} soap`, '#ff9ed2');
+          }
         } else floatText(t.x, t.y - 30, 'SO CLEAN!', '#9fe7ff');
         beep(900, 0.3, 'sine', 0.08, 0.4);
       }
@@ -616,7 +658,7 @@ const drawSoapMan = (m) => {
   ctx.lineTo(6 - legs, 17);
   ctx.stroke();
   // bar-of-soap body
-  ctx.fillStyle = '#ff9ed2';
+  ctx.fillStyle = m.player ? '#8fd3ff' : '#ff9ed2';
   ctx.beginPath();
   ctx.roundRect(-13, -14, 26, 24, 8);
   ctx.fill();
@@ -646,6 +688,15 @@ const drawSoapMan = (m) => {
     ctx.stroke();
   }
   ctx.restore();
+  if (m.player) {
+    ctx.font = 'bold 14px Trebuchet MS';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#000';
+    ctx.strokeText('P2', m.x, m.y - 30);
+    ctx.fillStyle = '#8fd3ff';
+    ctx.fillText('P2', m.x, m.y - 30);
+  }
 };
 
 const drawPuddle = (p) => {
@@ -808,47 +859,75 @@ const draw = () => {
   }
   ctx.fillStyle = '#ccc';
   ctx.textAlign = 'right';
-  ctx.fillText(combo > 1 ? `streak ${combo}` : `best ${best}`, W - 20, 78);
+  if (combo > 1) ctx.fillText(`streak ${combo}`, W - 20, 78);
+  else if (players === 1) ctx.fillText(`best ${best}`, W - 20, 78);
+
+  if (players === 2) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(W / 2 - 120, 10, 240, 50);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 26px Trebuchet MS';
+    ctx.fillStyle = '#8fd3ff';
+    ctx.fillText(`SOAP ${Math.floor(soapScore)}`, W / 2, 45);
+  }
 
   if (state === 'title') {
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(0, 0, W, H);
-    centerText('TRASH DASH', 250, 96, '#7ee05a');
-    centerText(
-      'Arrows / WASD to drive. Grab bags, haul them to the DUMP.',
-      340,
-      24,
-    );
+    centerText('TRASH DASH', 210, 96, '#7ee05a');
+    centerText('Grab trash bags and haul them to the DUMP.', 300, 24);
     centerText(
       'Bags lose value the longer they sit. Gold bags are worth triple.',
-      375,
+      335,
       24,
     );
-    centerText(`Fill all ${CAPACITY} slots for a x2 FULL LOAD bonus.`, 410, 24);
+    centerText(`Fill all ${CAPACITY} slots for a x2 FULL LOAD bonus.`, 370, 24);
     centerText(
       'SOAP MEN scrub your trash away and leave slippery puddles.',
-      460,
+      420,
       24,
       '#9fe7ff',
     );
     centerText(
       'Ram them at full speed to send them flying!',
-      495,
+      455,
       24,
       '#9fe7ff',
     );
-    centerText('Press SPACE to start', 590, 34, '#ffd84a');
+    centerText('1  SOLO: drive with arrows or WASD', 550, 30, '#ffd84a');
+    centerText('2  TRUCK vs SOAP: truck uses arrows,', 600, 30, '#ffd84a');
+    centerText(
+      'soap uses WASD and drops soap with Q, E or Shift',
+      640,
+      30,
+      '#ffd84a',
+    );
   } else if (state === 'over') {
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
     ctx.fillRect(0, 0, W, H);
-    centerText("TIME'S UP!", 280, 90, '#ff9a5a');
-    centerText(`SCORE ${score}`, 380, 56, '#ffd84a');
-    centerText(
-      score >= best && score > 0 ? 'NEW BEST!' : `best ${best}`,
-      440,
-      30,
-    );
-    centerText('Press SPACE to play again', 560, 30);
+    centerText("TIME'S UP!", 260, 90, '#ff9a5a');
+    if (players === 1) {
+      centerText(`SCORE ${score}`, 370, 56, '#ffd84a');
+      centerText(
+        score >= best && score > 0 ? 'NEW BEST!' : `best ${best}`,
+        430,
+        30,
+      );
+    } else {
+      const soap = Math.floor(soapScore);
+      centerText(`TRUCK ${score}   SOAP ${soap}`, 370, 56, '#ffd84a');
+      centerText(
+        score > soap
+          ? 'THE TRUCK WINS! The streets are clean.'
+          : score < soap
+            ? 'SOAP WINS! Squeaky clean, trash everywhere.'
+            : "IT'S A TIE!",
+        440,
+        34,
+        score < soap ? '#8fd3ff' : '#7ee05a',
+      );
+    }
+    centerText('SPACE to play again   ·   1 solo   ·   2 two players', 560, 28);
   }
 };
 
@@ -862,6 +941,6 @@ const frame = (now) => {
 };
 
 // show the town behind the title screen
-start();
+start(1);
 state = 'title';
 requestAnimationFrame(frame);
