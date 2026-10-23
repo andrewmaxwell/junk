@@ -101,12 +101,12 @@ fn blurArea(direction: vec3f, dist: f32) -> f32 {
  * around corners or through walls. ns is the bumps' normal, n the smooth
  * one, and nl the real surface's, all facing the viewer. Not by the glossy
  * coat or metal: their sharp reflections would need far more photons, so
- * paths from the camera find that light, as for any other.
+ * paths from the camera find that light, as for any other. Except lasers',
+ * which paths from the camera never find.
  */
 fn gatherPhotons(s: u32, p: vec3f, ns: vec3f, n: vec3f, nl: vec3f, v: vec3f) -> vec3f {
   let r = params.photonRadius;
   var sum = vec3f(0.);
-  if (i32(objects[s].colorMaterial.w) == MIRROR) { return sum; }
   // The eight cells within r of p
   let first = photonCell(p - r);
   for (var k = 0; k < 8; k++) {
@@ -126,7 +126,8 @@ fn gatherPhotons(s: u32, p: vec3f, ns: vec3f, n: vec3f, nl: vec3f, v: vec3f) -> 
       if (dot(l, nl) <= 0.) { continue; }
       var bsdf: vec3f;
       evalSurface(s, ns, n, v, l, &bsdf);
-      sum += evalPaint * bitcast<vec3f>(vec3u(photonMap[start + 4u], photonMap[start + 5u], photonMap[start + 6u]));
+      let laser = photonMap[start + 7u] != 0u;
+      sum += select(evalPaint, bsdf, laser) * bitcast<vec3f>(vec3u(photonMap[start + 4u], photonMap[start + 5u], photonMap[start + 6u]));
     }
   }
   return sum / (PI * r * r);
@@ -242,13 +243,6 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // Only on rays the camera sees directly, where the glow around lights
     // shows the most. Later bounces aren't worth the extra shadow ray.
     let equiangular = fogLit && seenByCamera;
-
-    // Lasers' beams lighting up the fog along this ray. Not inside glass,
-    // which has no fog, and only seen directly or in mirrors and glass: the
-    // little light they spread around the room isn't worth it.
-    if (seenByCamera && inside < 0 && params.beamCount > 0u && params.fogDensity > 0.) {
-      color += tint * through * beamGlow(o, d, end);
-    }
 
     // Direct light on the fog along this ray, at a distance picked by
     // equiangular sampling. Scattering in the fog below finds it too, so

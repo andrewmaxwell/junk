@@ -13,13 +13,21 @@ import {materials} from './materials.js';
 import {random} from './random.js';
 
 /** Photons traced each frame */
-export const PHOTONS = 1 << 16;
-/** Cells in the hash grid, each the head of a list of photons */
+export const PHOTONS = 1 << 17;
+/**
+ * Cells in the hash grid, each the head of a list of photons; the last
+ * counts the photons stored so far
+ */
 export const PHOTON_CELLS = 1 << 18;
-/** u32s per photon: position and next, power, direction, normal (0 in fog or haze) */
+/** Photons stored each frame, at most: laser photons are stored at every bounce */
+const PHOTON_SLOTS = PHOTONS * 3;
+/**
+ * u32s per photon: position and next, power and whether it's a laser's,
+ * direction, normal (0 in fog or haze)
+ */
 const PHOTON_SIZE = 16;
 /** u32s in the photon map: the cells' heads, then the photons */
-export const PHOTON_MAP_SIZE = PHOTON_CELLS + PHOTONS * PHOTON_SIZE;
+export const PHOTON_MAP_SIZE = PHOTON_CELLS + PHOTON_SLOTS * PHOTON_SIZE;
 
 /**
  * The photon map's layout and grid, for both shaders. Photons are stored in
@@ -31,6 +39,8 @@ export const photonGrid = /* wgsl */ `
 const PHOTONS = ${PHOTONS}u;
 
 const PHOTON_CELLS = ${PHOTON_CELLS}u;
+
+const PHOTON_SLOTS = ${PHOTON_SLOTS}u;
 
 const PHOTON_SIZE = ${PHOTON_SIZE}u;
 
@@ -44,7 +54,7 @@ fn photonCell(p: vec3f) -> vec3i {
 /** Where a cell's head is in the photon map */
 fn photonHash(cell: vec3i) -> u32 {
   let c = bitcast<vec3u>(cell);
-  return ((c.x * 73856093u) ^ (c.y * 19349663u) ^ (c.z * 83492791u)) % PHOTON_CELLS;
+  return ((c.x * 73856093u) ^ (c.y * 19349663u) ^ (c.z * 83492791u)) % (PHOTON_CELLS - 1u);
 }
 
 
@@ -61,11 +71,10 @@ const PI = 3.14159265359;
 @group(0) @binding(5) var<storage, read_write> photonMap: array<atomic<u32>>;
 
 /**
- * Lights and the glass or mirrors they aim photons at: light index, target
- * index, running total of the shares, and share. See photonPairs in
- * photons.js.
+ * Where photons come from, four vec4s each: lights and the glass or mirrors
+ * they aim at, and lasers. See photonEmitters in photons.js.
  */
-@group(0) @binding(10) var<storage, read> pairs: array<vec4f>;
+@group(0) @binding(10) var<storage, read> emitters: array<vec4f>;
 
 
 /** The radius of a ball around all of shape s */
@@ -114,9 +123,15 @@ fn sampleCone(y: vec3f, s: u32, u: vec2f) -> vec3f {
 }
 
 
-/** Stores photon i at p, arriving in direction d with this power, on a surface whose normal toward it is n */
-fn storePhoton(i: u32, p: vec3f, power: vec3f, d: vec3f, n: vec3f) {
+/**
+ * Stores a photon at p, arriving in direction d with this power, on a
+ * surface whose normal toward it is n, or 0 in fog or haze
+ */
+fn storePhoton(p: vec3f, power: vec3f, d: vec3f, n: vec3f, laser: bool) {
+  let i = atomicAdd(&photonMap[PHOTON_CELLS - 1u], 1u);
+  if (i >= PHOTON_SLOTS) { return; }
   let k = photonStart(i);
+  atomicStore(&photonMap[k + 7u], u32(laser));
   atomicStore(&photonMap[k], bitcast<u32>(p.x));
   atomicStore(&photonMap[k + 1u], bitcast<u32>(p.y));
   atomicStore(&photonMap[k + 2u], bitcast<u32>(p.z));
@@ -143,50 +158,70 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   // Plain random numbers, not the camera's Sobol sequence
   dimension = SOBOL_PAIRS;
 
-  // A light and a target, by their shares
+  // An emitter, by its share
   let u = rand();
-  var pick = 0u;
+  var e = 0u;
   for (var k = 0u; k < params.pairCount - 1u; k++) {
-    if (u < pairs[k].z) { break; }
-    pick = k + 1u;
-  }
-  let light = u32(pairs[pick].x);
-  let aim = u32(pairs[pick].y);
-
-  // A point on the light, evenly by area
-  let shape = objects[light];
-  var y: vec3f;
-  var n: vec3f;
-  var areaPdf: f32;
-  if (isPlate(light)) {
-    let a = rand2() * 2. - 1.;
-    y = shape.centerRadius.xyz + shape.uHalf.xyz * shape.uHalf.w * a.x + shape.vHalf.xyz * shape.vHalf.w * a.y;
-    n = shape.normalShape.xyz;
-    areaPdf = 1. / (4. * shape.uHalf.w * shape.vHalf.w);
-  } else {
-    let r = shape.centerRadius.w;
-    let a = rand2();
-    n = directionAround(vec3f(0., 1., 0.), 1. - 2. * a.x, 2. * PI * a.y);
-    y = shape.centerRadius.xyz + n * r;
-    areaPdf = 1. / (4. * PI * r * r);
+    if (u < emitters[4u * k].z) { break; }
+    e = 4u * (k + 1u);
   }
 
-  // Toward the target, and the density of that direction over every target
-  // this light aims at
-  let w = sampleCone(y, aim, rand2());
-  var dirPdf = 0.;
-  for (var k = 0u; k < params.pairCount; k++) {
-    if (u32(pairs[k].x) == light) { dirPdf += pairs[k].w * conePdf(y, w, u32(pairs[k].y)); }
-  }
-  let cosY = select(abs(dot(n, w)), dot(n, w), isPlate(light));
-  if (cosY <= 0. || dirPdf <= 0.) { return; }
-  var power = emitted(light, -w) * cosY / (areaPdf * dirPdf * f32(PHOTONS));
-
-  var o = y + w * EPSILON;
-  var d = w;
-  var inside = -1;
+  var power: vec3f;
+  var o: vec3f;
+  var d: vec3f;
   var wavelength = 0.;
+  let laser = emitters[e].x < 0.;
+  if (laser) {
+    // From a point on its disk, straight ahead, and its own wavelength
+    let disk = emitters[e + 1u];
+    d = emitters[e + 2u].xyz;
+    wavelength = emitters[e + 2u].w;
+    let a = rand2();
+    let across = perpendicular(d);
+    let angle = 2. * PI * a.y;
+    o = disk.xyz + (across * cos(angle) + cross(d, across) * sin(angle)) * disk.w * sqrt(a.x);
+    power = emitters[e + 3u].rgb / (emitters[e].w * f32(PHOTONS));
+  } else {
+    // A point on the light, evenly by area
+    let light = u32(emitters[e].x);
+    let shape = objects[light];
+    var y: vec3f;
+    var n: vec3f;
+    var areaPdf: f32;
+    if (isPlate(light)) {
+      let a = rand2() * 2. - 1.;
+      y = shape.centerRadius.xyz + shape.uHalf.xyz * shape.uHalf.w * a.x + shape.vHalf.xyz * shape.vHalf.w * a.y;
+      n = shape.normalShape.xyz;
+      areaPdf = 1. / (4. * shape.uHalf.w * shape.vHalf.w);
+    } else {
+      let r = shape.centerRadius.w;
+      let a = rand2();
+      n = directionAround(vec3f(0., 1., 0.), 1. - 2. * a.x, 2. * PI * a.y);
+      y = shape.centerRadius.xyz + n * r;
+      areaPdf = 1. / (4. * PI * r * r);
+    }
+    // Toward the target, and the density of that direction over every
+    // target this light aims at
+    let w = sampleCone(y, u32(emitters[e].y), rand2());
+    var dirPdf = 0.;
+    for (var k = 0u; k < params.pairCount; k++) {
+      let other = emitters[4u * k];
+      if (other.x >= 0. && u32(other.x) == light) { dirPdf += other.w * conePdf(y, w, u32(other.y)); }
+    }
+    let cosY = select(abs(dot(n, w)), dot(n, w), isPlate(light));
+    if (cosY <= 0. || dirPdf <= 0.) { return; }
+    power = emitted(light, -w) * cosY / (areaPdf * dirPdf * f32(PHOTONS));
+    o = y + w * EPSILON;
+    d = w;
+  }
+
+  var inside = -1;
   var tint = vec3f(1.);
+  // A laser's light is all the photons', from the start and at every bounce,
+  // since paths from the camera never find a laser. Other lights' photons
+  // only carry light that has been through glass or off a mirror, as far as
+  // the first thing it scatters off.
+  var stores = laser;
   for (var depth = 0; depth < 32; depth++) {
     d = normalize(d);
     let hit = intersect(o, d);
@@ -196,13 +231,13 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let bary = hitBary;
     let s = u32(hit);
     let material = i32(objects[s].colorMaterial.w);
-    // Fog, or haze in glass. Until glass or a mirror, what it scatters is
-    // the camera's to find, so it's only dimmed. After, it may scatter, as
-    // in trace: a random distance, picked by one channel's density, and
-    // where it does, it's stored.
+    // Fog, or haze in glass. Until a photon stores, what it scatters is the
+    // camera's to find, so it's only dimmed. After, it may scatter, as in
+    // trace: a random distance, picked by one channel's density, and where
+    // it does, it's stored.
     let densities = mediumDensities(inside);
     if (any(densities > vec3f(0.))) {
-      if (depth == 0) {
+      if (!stores) {
         power *= exp(-densities * end);
       } else {
         let u = rand2();
@@ -211,8 +246,14 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
           let transmittance = exp(-densities * scatter);
           power *= densities * transmittance / max(fogScatterPdf(densities, transmittance), 1e-30);
           power *= glassTransmittance(inside, scatter);
-          storePhoton(i, o + d * scatter, power * tint, d, vec3f(0.));
-          return;
+          storePhoton(o + d * scatter, power * tint, d, vec3f(0.), laser);
+          if (!laser) { return; }
+          // A laser's goes on, in a new direction, unless it's absorbed
+          let albedo = mediumAlbedo(inside);
+          if (rand() >= albedo) { return; }
+          o += d * scatter;
+          d = samplePhase(d);
+          continue;
         }
         let transmittance = exp(-densities * end);
         power *= transmittance / max(dot(transmittance, vec3f(1. / 3.)), 1e-30);
@@ -241,15 +282,30 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     }
     let into = dot(facet, d) < 0.;
     let nl = select(-facet, facet, into);
+    var snl = select(-sn, sn, into);
 
     if (!isSmooth(s)) {
-      // Only through glass or off a mirror first: light straight from a
-      // light is the camera's to find
-      if (depth > 0) { storePhoton(i, p, power * tint, d, nl); }
-      return;
+      if (stores) { storePhoton(p, power * tint, d, nl, laser); }
+      if (!laser) { return; }
+      // A laser's bounces on, as paint or rough metal scatter it, and ends
+      // at random in proportion to how much it loses (Russian roulette)
+      let next = sampleSurface(s, snl, snl, -d, rand());
+      let cosTheta = dot(next, snl);
+      if (cosTheta <= 0. || dot(next, nl) <= 0.) { return; }
+      var bsdf: vec3f;
+      let pdf = evalSurface(s, snl, snl, -d, next, &bsdf);
+      if (pdf <= 0.) { return; }
+      let kept = bsdf * cosTheta / pdf;
+      let q = min(0.95, peak(kept));
+      if (rand() >= q) { return; }
+      power *= kept / q;
+      d = next;
+      o = p + nl * EPSILON;
+      continue;
     }
 
-    var snl = select(-sn, sn, into);
+    // Through glass or off a mirror: other lights' photons store from here
+    stores = true;
     if (material == GLASS && objects[s].surface.y > 0.) {
       // Frosted, as in trace
       snl = sampleVisibleNormal(snl, -d, roughness(s), rand2());
@@ -266,7 +322,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         next = t;
         reflected = false;
         if (!isPlate(s)) { inside = select(-1, i32(s), into); }
-        // Dispersion, as in trace: the first refraction picks a wavelength
+        // Dispersion, as in trace: the first refraction picks a wavelength.
+        // A laser's is its own.
         if (wavelength == 0. && params.dispersion > 0.) {
           wavelength = mix(MIN_WAVELENGTH, MAX_WAVELENGTH, rand());
           tint = wavelengthColor(wavelength);

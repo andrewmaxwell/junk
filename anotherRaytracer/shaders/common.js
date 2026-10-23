@@ -124,8 +124,6 @@ struct Params {
   aberration: f32,
   /** Where the diamond's facets start in tables, in vec4s */
   diamondPlanes: u32,
-  /** Lasers' beams, which come after the teapots and diamonds; see lasers.js */
-  beamCount: u32,
   /** The power brightness relative to middle gray is raised to: 1 for none; see applyContrast */
   contrast: f32,
   /** Lights and the glass or mirrors they aim photons at; 0 for no photons. See photons.js. */

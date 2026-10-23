@@ -15,9 +15,8 @@ import {
   PHOTON_MAP_SIZE,
   photonShader,
 } from './shaders/photons.js';
-import {photonPairs} from './photons.js';
+import {photonEmitters} from './photons.js';
 import {packDiamond} from './diamond.js';
-import {packBeams} from './lasers.js';
 import {packTeapot} from './teapot.js';
 
 const canvas = /** @type {HTMLCanvasElement} */ (
@@ -135,7 +134,7 @@ const strideBuffers = [1, 2, 4, 8, 16].map((stride) =>
 /** For rough reflections' lost light; see ggx.js */
 const singleBounceBuffer = bufferWith(albedoTable(), GPUBufferUsage.UNIFORM);
 
-// Params in shaders/common.js: 4 × (vec3f + u32), then 32 scalars, padded to
+// Params in shaders/common.js: 4 × (vec3f + u32), then 31 scalars, padded to
 // a multiple of 16 bytes
 const paramsData = new ArrayBuffer(192);
 const paramsF32 = new Float32Array(paramsData);
@@ -162,7 +161,6 @@ let objectBuffer;
 let objectCount = 0;
 let lightCount = 0;
 let boundedCount = 0;
-let beamCount = 0;
 /**
  * The scene's sky for sky domes (skyTable in sky.js, or a placeholder), then
  * the teapot (packTeapot in teapot.js); see `tables` in shaders/geometry.js
@@ -242,6 +240,7 @@ const bind = () => {
     1: objectBuffer,
     5: photonBuffer,
     6: tablesBuffer,
+    9: singleBounceBuffer,
     10: pairsBuffer,
   });
   tileBindGroup = bindGroup(tilePipeline, [
@@ -320,16 +319,12 @@ export const resize = () => {
 
 /**
  * Sends objects to the GPU: lights first and teapots and diamonds last, as the shader
- * expects, then the lasers' beams
- * @type {(objects: import('./shapes.js').Shape[], beams?: import('./lasers.js').Beam[]) => void}
+ * expects, and where photons come from, including lasers
+ * @type {(objects: import('./shapes.js').Shape[], lasers?: import('./photons.js').Laser[]) => void}
  */
-export const setObjects = (objects, beams = []) => {
-  const shapes = packObjects(objects);
-  const data = new Float32Array(shapes.length + beams.length * 24);
-  data.set(shapes);
-  data.set(packBeams(beams), shapes.length);
-  beamCount = beams.length;
-  const pairs = photonPairs(objects);
+export const setObjects = (objects, lasers = []) => {
+  const data = packObjects(objects);
+  const pairs = photonEmitters(objects, lasers);
   pairCount = pairs.count;
   if (!pairsBuffer || pairsBuffer.size < pairs.data.byteLength) {
     pairsBuffer?.destroy();
@@ -488,12 +483,11 @@ const writeParams = (/** @type {FrameView} */ v) => {
   paramsF32[41] = settings.grain;
   paramsF32[42] = settings.aberration;
   paramsU32[43] = teapotStart + teapotData.data.length / 4;
-  paramsU32[44] = beamCount;
-  paramsF32[45] = settings.contrast;
-  paramsU32[46] = settings.photons ? pairCount : 0;
+  paramsF32[44] = settings.contrast;
+  paramsU32[45] = settings.photons ? pairCount : 0;
   // Shrinking each frame, so the blur fades as photons add up (Knaus and
   // Zwicker's progressive photon mapping, with alpha 2/3)
-  paramsF32[47] = PHOTON_RADIUS * v.detailScale * (frame + 1) ** (-1 / 6);
+  paramsF32[46] = PHOTON_RADIUS * v.detailScale * (frame + 1) ** (-1 / 6);
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 };
 

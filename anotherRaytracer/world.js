@@ -3,7 +3,6 @@
 import * as renderer from './renderer.js';
 import {scenes} from './scenes.js';
 import {settings} from './settings.js';
-import {traceLasers} from './lasers.js';
 import {LIGHT, isBounded} from './shapes.js';
 import {skyTable} from './sky.js';
 
@@ -60,20 +59,13 @@ export const setObjects = (/** @type {(Shape | null)[]} */ list) => {
  */
 export const objectsChanged = (moving = false) => {
   const present = objects.flatMap((o, id) => (o ? [{...o, id}] : []));
-  // Spots where lasers land are lights, but not objects to edit
-  const {beams, spots} = traceLasers(
-    scene.lasers ?? [],
-    present,
-    settings.dispersion,
-  );
   const isLight = (/** @type {Shape} */ o) => o.material === LIGHT;
   gpuObjects = [
     ...present.filter(isLight),
-    ...spots.map((o) => ({...o, id: -1})),
     ...present.filter((o) => !isLight(o) && !isBounded(o)),
     ...present.filter(isBounded),
   ];
-  renderer.setObjects(gpuObjects, beams);
+  renderer.setObjects(gpuObjects, scene.lasers);
   renderer.restart(moving);
 };
 

@@ -20,7 +20,7 @@ import {cross, normalize} from './vec.js';
  *   objects: Shape[],
  *   camera: {position: number[], target: number[], zoom: number, focus?: number},
  *   sky?: {sun: number[], haze?: number},
- *   lasers?: import('./lasers.js').Laser[],
+ *   lasers?: import('./photons.js').Laser[],
  *   size?: number,
  *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number, contrast?: number, detail?: number, noise?: number},
  * }} Scene
@@ -354,10 +354,11 @@ function diamondScene() {
  * Lasers in a dark, hazy room: green, red and blue beams, lit up by the
  * haze. Green goes through a glass ball, then a diamond; red splits into
  * four in the diamond; blue bounces off a chrome ball into a mirror, then
- * through both glass balls. Glass bends each color by its own amount and
- * splits off faint reflections, and the beams land on the matte white
- * walls, which scatter their light around the room. A very faint panel
- * overhead shows the rest.
+ * through both glass balls. The glass and the diamond are a little cloudy,
+ * so the beams show inside them, bending by each color's own amount and
+ * splitting off faint reflections. They land on the matte white walls,
+ * which scatter their light around the room. A very faint panel overhead
+ * shows the rest.
  * @type {() => Scene} */
 function lasersScene() {
   const big = 1000;
@@ -366,7 +367,7 @@ function lasersScene() {
   const ball = [0, 18, -15];
   const gem = [26, 14, -32];
   const chrome = [-24, 6, -30];
-  /** @type {(position: number[], target: number[], color: number[], wavelength: number) => import('./lasers.js').Laser} */
+  /** @type {(position: number[], target: number[], color: number[], wavelength: number) => import('./photons.js').Laser} */
   const laser = (position, target, color, wavelength) => ({
     position,
     direction: target.map((c, i) => c - position[i]),
@@ -382,12 +383,12 @@ function lasersScene() {
       plate([60, 30, 0], [-1, 0, 0], [0, 0, 1], big, big, white, wall), // right wall
       plate([0, 30, -70], [0, 0, 1], [1, 0, 0], big, big, white, wall), // back wall
       plate([0, 30, 60], [0, 0, -1], [1, 0, 0], big, big, white, wall), // front wall
-      sphere(9, ball, [0.98, 0.98, 0.98], GLASS),
+      {...sphere(9, ball, [0.98, 0.98, 0.98], GLASS), haze: 0.01},
       plate([0, 59.9, -10], [0, -1, 0], [1, 0, 0], 12, 12, [0.2, 0.2, 0.2], {
         material: LIGHT,
         oneSided: true,
       }), // faint panel
-      diamond(7, [gem[0], gem[1] - 7, gem[2]], 20),
+      {...diamond(7, [gem[0], gem[1] - 7, gem[2]], 20), haze: 0.005},
       sphere(6, chrome, [0.95, 0.95, 0.97], MIRROR), // chrome ball
       plate(
         [-45, 14, -55],
@@ -400,7 +401,7 @@ function lasersScene() {
           material: MIRROR,
         },
       ), // standing mirror
-      sphere(4, [24, 16, 4], [0.98, 0.98, 0.98], GLASS), // small glass ball
+      {...sphere(4, [24, 16, 4], [0.98, 0.98, 0.98], GLASS), haze: 0.015}, // small glass ball
     ],
     lasers: [
       laser(
