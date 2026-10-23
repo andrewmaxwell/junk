@@ -11,7 +11,7 @@ Scenes:
 - **shafts** (the default): a foggy room lit through window blinds
 - **caustics**: glass balls focusing light into their shadows
 - **teapots**: a glass teapot the color of tea, glazed china and gold, lit like a product photo: a softbox, a dim fill, and strip lights behind that outline the glass
-- **diamond**: a big round brilliant over black velvet, under a dome of 64 small lights, sparkling with fire
+- **diamond**: a big round brilliant in a jeweler's light tent: a ring of softboxes that light whole facets, and 40 small lights for sparkle and fire
 - **mirrors**: two facing mirrors reflecting glowing orbs into the distance
 - **bokeh**: balls on a walnut table, with fairy lights blurred into discs
 - **sunset**: a low sun, a physically based sky, and hazy air glowing around the sun

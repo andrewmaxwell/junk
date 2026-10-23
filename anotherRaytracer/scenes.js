@@ -290,39 +290,60 @@ function teapotsScene() {
 }
 
 /**
- * A big round brilliant diamond floating over black velvet, under a dome of
- * small lights, like a jeweler's: each facet catches a different one, and
+ * A big round brilliant diamond floating over dark velvet, lit like a
+ * jeweler's: softboxes light whole facets, small lights make sparkles, and
  * the stone bends light so much that colors fan out into fire. The dark
  * between the lights is what gives it contrast.
  * @type {() => Scene} */
 function diamondScene() {
   const big = 1000;
   const center = [0, 14, 0];
-  // Spread evenly over the sky, from a little above the horizon to overhead,
-  // along a golden-angle spiral
-  const count = 64;
-  const lights = Array.from({length: count}, (_, i) => {
-    const up = 0.3 + (0.7 * (i + 0.5)) / count;
-    const around = i * Math.PI * (3 - Math.sqrt(5));
+  /** The point this far from the diamond, at this height (sine of the angle up) and angle around */
+  const around = (/** @type {number} */ distance, up, angle) => {
     const out = Math.sqrt(1 - up * up);
-    const direction = [out * Math.cos(around), up, out * Math.sin(around)];
-    return sphere(
+    return [
+      center[0] + distance * out * Math.cos(angle),
+      center[1] + distance * up,
+      center[2] + distance * out * Math.sin(angle),
+    ];
+  };
+  // Big softboxes in a ring above, with dark gaps between them, as in a
+  // jeweler's light tent: whole facets light up white or stay dark, which
+  // shows the cut's pattern
+  const softboxes = Array.from({length: 8}, (_, k) =>
+    softbox(
+      around(110, 0.65, (k + 0.5) * (Math.PI / 4)),
+      center,
+      16,
+      16,
+      [4, 4, 4],
+    ),
+  );
+  // Small bright lights spread over the sky, from a little above the
+  // horizon to overhead, along a golden-angle spiral, for sparkle
+  const count = 40;
+  const lights = Array.from({length: count}, (_, i) =>
+    sphere(
       1.8,
-      center.map((c, k) => c + 120 * direction[k]),
+      around(
+        120,
+        0.3 + (0.7 * (i + 0.5)) / count,
+        i * Math.PI * (3 - Math.sqrt(5)),
+      ),
       [200, 200, 200],
       LIGHT,
-    );
-  });
+    ),
+  );
   return {
     objects: [
-      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.01, 0.01, 0.01]), // black velvet
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.04, 0.04, 0.04]), // dark velvet
       diamond(10, [0, 4, 0], 10),
-      // The room, very dim, so facets that don't catch a light are gray, not
-      // black
-      sphere(500, center, [0.025, 0.025, 0.025], LIGHT),
+      ...softboxes,
       ...lights,
     ],
-    camera: {position: [0, 44, 46], target: center, zoom: 0.42},
+    // Low, as diamonds are usually shown, so its outline reads: the crown
+    // over the pavilion
+    camera: {position: [0, 26, 54], target: [0, 12, 0], zoom: 0.42},
     // A clean stone: smudges would blur the sparkles into a haze
     defaults: {dof: 0.004, detail: 0},
   };
