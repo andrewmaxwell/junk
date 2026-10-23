@@ -222,7 +222,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   // only carry light that has been through glass or off a mirror, as far as
   // the first thing it scatters off.
   var stores = laser;
-  for (var depth = 0; depth < 32; depth++) {
+  // Fewer bounces than paths from the camera: a few photons stay trapped in
+  // glass teapots, and with 1000 they made the teapots scene 30% slower.
+  // A level-5 glass sponge still matches the white furnace.
+  for (var depth = 0; depth < 128; depth++) {
     d = normalize(d);
     let hit = intersect(o, d);
     if (hit < 0) { return; }

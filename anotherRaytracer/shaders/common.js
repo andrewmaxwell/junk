@@ -136,6 +136,13 @@ struct Params {
 
 const NONE = 0xffffffffu;
 
+/**
+ * Most bounces a path takes. Light can cross hundreds of walls of a fine
+ * glass sponge on its way out; paths that lose light end sooner, at random
+ * (Russian roulette).
+ */
+const MAX_BOUNCES = 1000;
+
 @group(0) @binding(0) var<uniform> params: Params;
 
 /** Pixels per side of the tiles that adaptive sampling stops as a unit */

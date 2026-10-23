@@ -211,7 +211,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   var causticState = 0u;
   var glossyShare = vec3f(1.);
 
-  for (var depth = 0; depth < 100; depth++) {
+  for (var depth = 0; depth < MAX_BOUNCES; depth++) {
     // In 32-bit floats, each new direction built from the last one is a bit
     // off unit length, and that compounds over bounces. Even 0.3% too long
     // makes a glossy lobe like cos ^ 2000 overflow to infinity.
@@ -413,10 +413,15 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       break; // lights don't reflect anything
     }
 
-    // Russian roulette: after a few bounces, end the path at random, and
-    // boost the survivors to make up for the ones that ended
+    // Russian roulette: after a few bounces, end the path at random, by how
+    // much of its light it has lost, and boost the survivors to make up for
+    // the ones that ended. Paths that have lost none, through clear glass,
+    // go on: ending them at a fixed rate left the light that crosses
+    // hundreds of a glass sponge's walls to the few paths that survived
+    // that long, thousands of times too bright, so it came in rare flashes
+    // and the sponge looked dark until then.
     if (depth >= 5) {
-      let q = min(0.95, peak(through));
+      let q = min(1., peak(through));
       if (rand() >= q) { break; }
       through /= q;
       choiceProb *= q;
@@ -553,17 +558,18 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         if (any(t != vec3f(0.))) {
           // Fresnel: how much reflects vs refracts
           let reflectance = fresnelDielectric(-dot(d, snl), select(1. / index, index, into));
-          // Pick one at random, with probability P of reflecting, and
-          // divide by that probability to stay unbiased
-          let P = 0.25 + 0.5 * reflectance;
-          if (rand() < P) {
-            through *= reflectance / P;
-            choiceProb *= P;
+          // Pick one at random, by how much of the light does each, so the
+          // path's weight stays the same. Reflecting more often than that,
+          // and weighting for it, made each refraction brighten the path
+          // and each reflection dim it, which over the hundreds of walls of
+          // a glass sponge, like roulette above, left the light to paths
+          // too rare to be picked.
+          if (rand() < reflectance) {
+            choiceProb *= reflectance;
           } else {
             next = t;
             reflected = false;
-            through *= (1. - reflectance) / (1. - P);
-            choiceProb *= 1. - P;
+            choiceProb *= 1. - reflectance;
             // Now inside the ball or teapot, or back out. Glass plates are
             // too thin to be inside.
             if (i32(shape.normalShape.w) != PLATE) { inside = select(-1, i32(s), into); }
