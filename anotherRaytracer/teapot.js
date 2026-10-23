@@ -1,6 +1,8 @@
 // The Utah teapot (Martin Newell, 1975): 32 bicubic Bézier patches, cut
 // into triangles, with a bounding volume hierarchy so a ray only tests the
-// few it might hit. The shader traces it as `intersectTeapot` in shaders.js.
+// few it might hit. The shader traces it as `intersectTeapot` in shaders/geometry.js.
+
+import {cross, dot, normalize, sub} from './vec.js';
 
 /**
  * Control points, x y z with z up, in Blinn's proportions (the original is
@@ -138,22 +140,6 @@ const bernsteinSlope = (t) => [
   6 * t * (1 - t) - 3 * t * t,
   3 * t * t,
 ];
-
-/** @type {(a: number[], b: number[]) => number[]} */
-const cross = ([ax, ay, az], [bx, by, bz]) => [
-  ay * bz - az * by,
-  az * bx - ax * bz,
-  ax * by - ay * bx,
-];
-/** @type {(a: number[], b: number[]) => number} */
-const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-/** @type {(a: number[], b: number[]) => number[]} */
-const sub = (a, b) => a.map((x, i) => x - b[i]);
-/** @type {(v: number[]) => number[]} */
-const normalize = (v) => {
-  const length = Math.hypot(...v);
-  return v.map((x) => x / length);
-};
 
 /**
  * A point on a patch at (s, t), each 0 to 1, with y up, and the surface's
@@ -303,7 +289,7 @@ const buildHierarchy = (triangles) => {
 /**
  * Where a ray from o in direction d (need not be unit length) first hits
  * the triangles, as a multiple of d, or Infinity. Matches intersectTeapot in
- * shaders.js.
+ * shaders/geometry.js.
  * @type {(triangles: Triangle[], nodes: Node[], o: number[], d: number[]) => number}
  */
 const hitTriangles = (triangles, nodes, o, d) => {

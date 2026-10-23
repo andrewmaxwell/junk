@@ -1,4 +1,4 @@
-// How much light rough reflections (GGX microfacets, as in shaders.js)
+// How much light rough reflections (GGX microfacets, as in shaders/materials.js)
 // reflect with only one bounce off the tiny mirrors. Real light bounces
 // between them too and mostly comes back out, so the shader scales its
 // reflections up by how much this falls short ("Practical multiple
