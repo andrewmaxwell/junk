@@ -11,7 +11,8 @@ import {common} from './common.js';
  */
 export const tileShader = /* wgsl */ `${common}
 @group(0) @binding(1) var<storage, read> sums: array<vec4f>;
-@group(0) @binding(2) var<storage, read> sqSums: array<vec4f>;
+/** Squared sums and clamped light, two per pixel; see sqGlowSums in shaders/trace.js */
+@group(0) @binding(2) var<storage, read> sqGlowSums: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> tiles: array<u32>;
 /** How many tiles are still going, for the renderer to show and to know when to stop */
 @group(0) @binding(4) var<storage, read_write> activeTiles: atomic<u32>;
@@ -30,7 +31,7 @@ fn main(@builtin(global_invocation_id) id: vec3u, @builtin(local_invocation_inde
     let s = sums[id.y * params.width + id.x];
     let count = max(s.w, 1.);
     let color = s.rgb / count;
-    let variance = max(vec3f(0.), sqSums[id.y * params.width + id.x].rgb / count - color * color);
+    let variance = max(vec3f(0.), sqGlowSums[2u * (id.y * params.width + id.x)].rgb / count - color * color);
     // Standard error: how far the average of the samples is likely to be off
     let stdErr = sqrt(variance / count);
     // As displayed. The display scales a color as a whole, which keeps its

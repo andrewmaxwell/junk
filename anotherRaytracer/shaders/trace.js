@@ -9,30 +9,31 @@ import {fog} from './fog.js';
 import {geometry} from './geometry.js';
 import {lights} from './lights.js';
 import {materials} from './materials.js';
+import {photonGrid} from './photons.js';
 import {random} from './random.js';
 
-export const traceShader = /* wgsl */ `${common}${random}${geometry}${lights}${fog}${materials}${detail}
+export const traceShader = /* wgsl */ `${common}${random}${geometry}${lights}${fog}${materials}${detail}${photonGrid}
 const PI = 3.14159265359;
 
 /** Per pixel: summed color, and in w the sample count */
 @group(0) @binding(2) var<storage, read_write> sums: array<vec4f>;
 
 /**
- * Per pixel: summed squared color, each channel separately, for estimating
- * noise. Not just brightness: under differently colored lights, samples can
- * be equally bright but differently colored. w is unused.
+ * Two per pixel. First, summed squared color, each channel separately, for
+ * estimating noise. Not just brightness: under differently colored lights,
+ * samples can be equally bright but differently colored. Second, summed
+ * light that trace clamped away from lights the camera sees, for the lens
+ * glow. A light thousands of times brighter than white glows far more than
+ * one just over it, though both show as white. (Separate buffers would pass
+ * WebGPU's default limit of 8 per shader.)
  */
-@group(0) @binding(3) var<storage, read_write> sqSums: array<vec4f>;
+@group(0) @binding(3) var<storage, read_write> sqGlowSums: array<vec4f>;
+
+/** Caustic photons, from shaders/photons.js; see photonGrid */
+@group(0) @binding(5) var<storage, read> photonMap: array<u32>;
 
 /** Per tile: 1 if it still needs samples. Written by tileShader. */
 @group(0) @binding(4) var<storage, read> tiles: array<u32>;
-
-/**
- * Per pixel: summed light that trace clamped away from lights the camera
- * sees, for the lens glow. A light thousands of times brighter than white
- * glows far more than one just over it, though both show as white.
- */
-@group(0) @binding(5) var<storage, read_write> glowSums: array<vec4f>;
 
 /**
  * For the denoiser, per pixel: the summed color (in rgb) of what each sample
@@ -91,6 +92,46 @@ fn blurArea(direction: vec3f, dist: f32) -> f32 {
   return max(1., PI * radius * radius / (pixel * pixel));
 }
 
+/**
+ * Light from this frame's photons landing near p on surface s, toward the
+ * viewer in direction v: each photon's power, scattered by the paint as
+ * light from where it came from would be, spread over the circle of
+ * params.photonRadius around p (a progressive photon map). Only photons on
+ * the same side of a surface facing the same way, so light doesn't leak
+ * around corners or through walls. ns is the bumps' normal, n the smooth
+ * one, and nl the real surface's, all facing the viewer. Not by the glossy
+ * coat or metal: their sharp reflections would need far more photons, so
+ * paths from the camera find that light, as for any other.
+ */
+fn gatherPhotons(s: u32, p: vec3f, ns: vec3f, n: vec3f, nl: vec3f, v: vec3f) -> vec3f {
+  let r = params.photonRadius;
+  var sum = vec3f(0.);
+  if (i32(objects[s].colorMaterial.w) == MIRROR) { return sum; }
+  // The eight cells within r of p
+  let first = photonCell(p - r);
+  for (var k = 0; k < 8; k++) {
+    let cell = first + vec3i(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+    var i = photonMap[photonHash(cell)];
+    while (i != 0u) {
+      let start = photonStart(i - 1u);
+      i = photonMap[start + 3u];
+      let q = bitcast<vec3f>(vec3u(photonMap[start], photonMap[start + 1u], photonMap[start + 2u]));
+      // Other cells can share this one's list
+      if (any(photonCell(q) != cell)) { continue; }
+      let gap = q - p;
+      if (dot(gap, gap) > r * r) { continue; }
+      let normal = bitcast<vec3f>(vec3u(photonMap[start + 12u], photonMap[start + 13u], photonMap[start + 14u]));
+      if (dot(normal, nl) < 0.9) { continue; }
+      let l = -bitcast<vec3f>(vec3u(photonMap[start + 8u], photonMap[start + 9u], photonMap[start + 10u]));
+      if (dot(l, nl) <= 0.) { continue; }
+      var bsdf: vec3f;
+      evalSurface(s, ns, n, v, l, &bsdf);
+      sum += evalPaint * bitcast<vec3f>(vec3u(photonMap[start + 4u], photonMap[start + 5u], photonMap[start + 6u]));
+    }
+  }
+  return sum / (PI * r * r);
+}
+
 /** Follows one path from the camera, returning the light it carries. */
 fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   var o = origin;
@@ -122,6 +163,16 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   var rayTotal = 0.;
   // Which glass ball the path is inside, or -1
   var inside = -1;
+  // How light is split with the photons (shaders/photons.js), which carry
+  // light that reaches the first surface the camera sees through glass or
+  // off smooth mirrors, so it isn't counted twice. 0 until that surface, if
+  // the camera reaches it through nothing but glass and mirrors; 1 after
+  // bouncing off it; 2 once glass or mirrors follow, when the photons
+  // brought the light that the surface's paint scatters, and the path only
+  // counts its gloss's share, glossyShare; 3 after anything else, when
+  // everything is the path's.
+  var causticState = 0u;
+  var glossyShare = vec3f(1.);
 
   for (var depth = 0; depth < 100; depth++) {
     // In 32-bit floats, each new direction built from the last one is a bit
@@ -255,6 +306,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       bouncePdf = phase(d, next);
       seenByCamera = false;
       guided = true;
+      causticState = 3u;
       o = p;
       d = next;
       continue;
@@ -267,9 +319,12 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     let material = i32(shape.colorMaterial.w);
 
     if (material == LIGHT) {
+      // The photons brought the paint's share of this light already
+      if (causticState == 2u && all(glossyShare == vec3f(0.))) { break; }
       var w = 1.;
       if (bouncePdf > 0.) { w = bounceLightWeight(o, d, end, bouncePdf, s, bounceTotal); }
       var e = emitted(s, d) * w * through;
+      if (causticState == 2u) { e *= glossyShare; }
       if (seenByCamera) {
         // The light is far brighter than the screen can show. Clamping it
         // to the screen's brightest here, before pixel samples are averaged,
@@ -343,6 +398,14 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // Which light to aim at, and whether to bounce off the glossy coat
       let choices = rand2();
 
+      // Caustics: light that reached here through glass or off mirrors
+      if (causticState == 0u && params.pairCount > 0u) {
+        color += tint * through * gatherPhotons(s, p, ns, smoothNl, nl, -d);
+        causticState = 1u;
+      } else {
+        causticState = 3u;
+      }
+
       // Direct light: aim a ray at a light rather than waiting for a random
       // bounce to stumble into one.
       if (params.sampling != 2u && params.lightCount > 0u) {
@@ -378,11 +441,13 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // Far out in a tight lobe, the density underflows to 0, and 0 / 0
       // would be NaN. A direction that's never picked carries no light.
       if (bouncePdf <= 0.) { break; }
+      if (causticState == 1u) { glossyShare = (bsdf - evalPaint) / max(bsdf, vec3f(1e-30)); }
       through *= bsdf * cosTheta / bouncePdf;
       seenByCamera = false;
       d = next;
     } else {
       bouncePdf = 0.;
+      if (causticState == 1u) { causticState = 2u; }
       // A smudge is a thin greasy film. Most light still reflects or
       // refracts sharply, but some scatters a little off course, so through
       // a smudge things look hazy, and bright ones have a soft glow. So
@@ -486,8 +551,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   var prevNormalDepth = vec4f(0.);
   if (params.frame > 0u) {
     prev = sums[index];
-    prevSq = sqSums[index];
-    prevGlow = glowSums[index];
+    prevSq = sqGlowSums[2u * index];
+    prevGlow = sqGlowSums[2u * index + 1u];
     prevAlbedo = albedoSums[index];
     prevNormalDepth = normalDepthSums[index];
   }
@@ -536,8 +601,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     }
   }
   sums[index] = prev + vec4f(sum, f32(params.samplesPerFrame));
-  sqSums[index] = prevSq + vec4f(sqSum, 0.);
-  glowSums[index] = prevGlow + vec4f(glowSum, 0.);
+  sqGlowSums[2u * index] = prevSq + vec4f(sqSum, 0.);
+  sqGlowSums[2u * index + 1u] = prevGlow + vec4f(glowSum, 0.);
   albedoSums[index] = vec4f(prevAlbedo.rgb + albedoSum, select(-1., f32(firstHit), firstHit != NONE));
   normalDepthSums[index] = prevNormalDepth + normalDepthSum;
 }

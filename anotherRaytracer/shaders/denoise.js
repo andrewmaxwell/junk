@@ -16,7 +16,8 @@ import {common} from './common.js';
  */
 export const denoiseShader = /* wgsl */ `${common}
 @group(0) @binding(1) var<storage, read> sums: array<vec4f>;
-@group(0) @binding(2) var<storage, read> sqSums: array<vec4f>;
+/** Squared sums and clamped light, two per pixel; see sqGlowSums in shaders/trace.js */
+@group(0) @binding(2) var<storage, read> sqGlowSums: array<vec4f>;
 @group(0) @binding(3) var<storage, read> albedoSums: array<vec4f>;
 @group(0) @binding(4) var<storage, read> normalDepthSums: array<vec4f>;
 /** Per pixel: the guide's normal, and its distance in w */
@@ -89,7 +90,7 @@ fn prepare(@builtin(global_invocation_id) id: vec3u) {
   albedoSlope[i] = vec4f(albedoSums[i].rgb / count, depthSlope(p, nd.w));
   // The variance of the average's brightness: the samples' variance over
   // their count, in each channel, weighted like brightness
-  let channels = max(vec3f(0.), sqSums[i].rgb / count - color * color) / count;
+  let channels = max(vec3f(0.), sqGlowSums[2u * i].rgb / count - color * color) / count;
   var variance = brightness(channels);
   // With only a few samples, their spread says little, so use how much the
   // averages of the pixels around vary instead

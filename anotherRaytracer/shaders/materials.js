@@ -156,6 +156,10 @@ fn coatChance(s: u32, cosV: f32) -> f32 {
 }
 
 
+/** The paint's part of what evalSurface last set bsdf to, without the coat's or metal's reflection */
+var<private> evalPaint: vec3f;
+
+
 /**
  * For paint (maybe with a glossy coat) or rough metal, sets bsdf to how much
  * light arriving from direction l it scatters toward the viewer, in
@@ -211,6 +215,7 @@ fn evalSurface(s: u32, ns: vec3f, n: vec3f, v: vec3f, l: vec3f, bsdf: ptr<functi
     paint = color / PI * mix(vec3f(1.), coated, coverage);
   }
   *bsdf = paint + glossy;
+  evalPaint = paint;
   let chance = coatChance(s, cosV);
   return (1. - chance) * max(dot(l, ns), 0.) / PI + chance * glossyPdf;
 }

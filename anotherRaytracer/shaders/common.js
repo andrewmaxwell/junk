@@ -27,11 +27,12 @@ struct Params {
   sampling: u32,
   /**
    * Caps how bright one sample of bounced light can be, as a multiple of
-   * white. Rare paths like light -> glass -> wall -> camera are correct but
-   * very bright and hard to find, so without this they show up as speckles
-   * that take ages to average out. Capping them makes those effects
-   * (caustics, mostly) a bit dimmer than they should be. Direct light is
-   * never capped.
+   * white. Rare paths, like light off a mirror ball onto a wall, then into
+   * a glossy reflection, are correct but very bright and hard to find, so
+   * without this they show up as speckles that take ages to average out.
+   * Capping them makes those effects a bit dimmer than they should be.
+   * Direct light is never capped, nor caustics on the first surface the
+   * camera sees, which come from photons.
    */
   maxIndirect: f32,
   /** Balls and plates; teapots come after them */
@@ -127,6 +128,10 @@ struct Params {
   beamCount: u32,
   /** The power brightness relative to middle gray is raised to: 1 for none; see applyContrast */
   contrast: f32,
+  /** Lights and the glass or mirrors they aim photons at; 0 for no photons. See photons.js. */
+  pairCount: u32,
+  /** How far around a point photons are gathered from, shrinking each frame; see gatherPhotons */
+  photonRadius: f32,
 }
 
 const NONE = 0xffffffffu;

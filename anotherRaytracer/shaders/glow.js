@@ -9,7 +9,8 @@ import {common} from './common.js';
  */
 export const glowShader = /* wgsl */ `${common}
 @group(0) @binding(1) var<storage, read> sums: array<vec4f>;
-@group(0) @binding(2) var<storage, read> glowSums: array<vec4f>;
+/** Squared sums and clamped light, two per pixel; see sqGlowSums in shaders/trace.js */
+@group(0) @binding(2) var<storage, read> sqGlowSums: array<vec4f>;
 /** Each tile's average, with the light trace clamped away put back */
 @group(0) @binding(3) var<storage, read_write> small: array<vec4f>;
 /** small blurred along rows: narrow and wide, two per texel */
@@ -33,7 +34,7 @@ fn downsample(@builtin(global_invocation_id) id: vec3u) {
     for (var x = id.x * TILE; x < min((id.x + 1u) * TILE, params.width); x++) {
       let i = y * params.width + x;
       let s = sums[i];
-      sum += (s.rgb + glowSums[i].rgb) / max(s.w, 1.);
+      sum += (s.rgb + sqGlowSums[2u * i + 1u].rgb) / max(s.w, 1.);
       count += 1.;
     }
   }

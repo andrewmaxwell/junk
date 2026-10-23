@@ -9,6 +9,13 @@ import {displayShader} from './shaders/display.js';
 import {glowShader} from './shaders/glow.js';
 import {tileShader} from './shaders/tiles.js';
 import {traceShader} from './shaders/trace.js';
+import {
+  PHOTONS,
+  PHOTON_CELLS,
+  PHOTON_MAP_SIZE,
+  photonShader,
+} from './shaders/photons.js';
+import {photonPairs} from './photons.js';
 import {packDiamond} from './diamond.js';
 import {packBeams} from './lasers.js';
 import {packTeapot} from './teapot.js';
@@ -23,6 +30,12 @@ const stats = /** @type {HTMLElement} */ (document.querySelector('#stats'));
  * (see shaders/tone.js): about 4 for toneMap, and 2^AGX_MAX_EV for agx
  */
 const sdrWhite = {clip: 1, ease: 4, filmic: 16};
+
+/**
+ * How far around a point the first frame gathers photons from, in units of
+ * the bumps' size (a 300th of the scene)
+ */
+const PHOTON_RADIUS = 1;
 
 const adapter = await navigator.gpu?.requestAdapter();
 if (!adapter) {
@@ -88,6 +101,7 @@ const computePipeline = (module, entryPoint) =>
     compute: {module, entryPoint},
   });
 const tracePipeline = computePipeline(compile(traceShader));
+const photonPipeline = computePipeline(compile(photonShader));
 const tilePipeline = computePipeline(compile(tileShader));
 const displayModule = compile(displayShader);
 const displayPipeline = device.createRenderPipeline({
@@ -121,7 +135,7 @@ const strideBuffers = [1, 2, 4, 8, 16].map((stride) =>
 /** For rough reflections' lost light; see ggx.js */
 const singleBounceBuffer = bufferWith(albedoTable(), GPUBufferUsage.UNIFORM);
 
-// Params in shaders/common.js: 4 × (vec3f + u32), then 30 scalars, padded to
+// Params in shaders/common.js: 4 × (vec3f + u32), then 32 scalars, padded to
 // a multiple of 16 bytes
 const paramsData = new ArrayBuffer(192);
 const paramsF32 = new Float32Array(paramsData);
@@ -130,6 +144,18 @@ const paramsBuffer = device.createBuffer({
   size: paramsData.byteLength,
   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 });
+
+/** Caustic photons, traced afresh each frame; see photonGrid in shaders/photons.js */
+const photonBuffer = device.createBuffer({
+  size: PHOTON_MAP_SIZE * 4,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+/** Lights and the glass or mirrors they aim photons at; see photons.js */
+/** @type {GPUBuffer | undefined} */
+let pairsBuffer;
+let pairCount = 0;
+/** @type {GPUBindGroup} */
+let photonBindGroup;
 
 /** @type {GPUBuffer | undefined} */
 let objectBuffer;
@@ -193,31 +219,40 @@ const bindGroup = (pipeline, buffers) =>
 
 /** Makes the bind groups, once every buffer they need exists */
 const bind = () => {
-  if (!objectBuffer || !tablesBuffer || !pixelBuffers.sums) return;
-  const {sums, sqSums, tiles, glowSums, small, rows, glow} = pixelBuffers;
+  if (!objectBuffer || !tablesBuffer || !pairsBuffer || !pixelBuffers.sums) {
+    return;
+  }
+  const {sums, sqGlowSums, tiles, small, rows, glow} = pixelBuffers;
   const {albedoSums, normalDepthSums, normalDepth, albedoSlope} = pixelBuffers;
   const filtered = [pixelBuffers.filtered0, pixelBuffers.filtered1];
-  traceBindGroup = bindGroup(tracePipeline, [
-    paramsBuffer,
-    objectBuffer,
-    sums,
-    sqSums,
-    tiles,
-    glowSums,
-    tablesBuffer,
-    albedoSums,
-    normalDepthSums,
-    singleBounceBuffer,
-  ]);
+  traceBindGroup = bindGroup(tracePipeline, {
+    0: paramsBuffer,
+    1: objectBuffer,
+    2: sums,
+    3: sqGlowSums,
+    4: tiles,
+    5: photonBuffer,
+    6: tablesBuffer,
+    7: albedoSums,
+    8: normalDepthSums,
+    9: singleBounceBuffer,
+  });
+  photonBindGroup = bindGroup(photonPipeline, {
+    0: paramsBuffer,
+    1: objectBuffer,
+    5: photonBuffer,
+    6: tablesBuffer,
+    10: pairsBuffer,
+  });
   tileBindGroup = bindGroup(tilePipeline, [
     paramsBuffer,
     sums,
-    sqSums,
+    sqGlowSums,
     tiles,
     activeTilesBuffer,
   ]);
   glowBindGroups = [
-    {0: paramsBuffer, 1: sums, 2: glowSums, 3: small},
+    {0: paramsBuffer, 1: sums, 2: sqGlowSums, 3: small},
     {0: paramsBuffer, 3: small, 4: rows},
     {0: paramsBuffer, 4: rows, 5: glow},
   ].map((buffers, i) => bindGroup(glowPipelines[i], buffers));
@@ -226,7 +261,7 @@ const bind = () => {
     bindGroup(preparePipeline, {
       ...guides,
       1: sums,
-      2: sqSums,
+      2: sqGlowSums,
       3: albedoSums,
       4: normalDepthSums,
       9: filtered[0],
@@ -265,9 +300,8 @@ export const resize = () => {
   const pixels = width * height * 16;
   pixelBuffers = {
     sums: storage(pixels),
-    sqSums: storage(pixels),
+    sqGlowSums: storage(pixels * 2),
     tiles: storage(tileCount * 4),
-    glowSums: storage(pixels),
     // The lens glow works at one texel per tile
     small: storage(tileCount * 16),
     rows: storage(tileCount * 32),
@@ -295,6 +329,17 @@ export const setObjects = (objects, beams = []) => {
   data.set(shapes);
   data.set(packBeams(beams), shapes.length);
   beamCount = beams.length;
+  const pairs = photonPairs(objects);
+  pairCount = pairs.count;
+  if (!pairsBuffer || pairsBuffer.size < pairs.data.byteLength) {
+    pairsBuffer?.destroy();
+    pairsBuffer = device.createBuffer({
+      size: Math.max(pairs.data.byteLength * 2, 4096),
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    bind();
+  }
+  device.queue.writeBuffer(pairsBuffer, 0, pairs.data);
   lightCount = objects.filter((o) => o.material === LIGHT).length;
   boundedCount = objects.filter(isBounded).length;
   objectCount = objects.length - boundedCount;
@@ -445,6 +490,10 @@ const writeParams = (/** @type {FrameView} */ v) => {
   paramsU32[43] = teapotStart + teapotData.data.length / 4;
   paramsU32[44] = beamCount;
   paramsF32[45] = settings.contrast;
+  paramsU32[46] = pairCount;
+  // Shrinking each frame, so the blur fades as photons add up (Knaus and
+  // Zwicker's progressive photon mapping, with alpha 2/3)
+  paramsF32[47] = PHOTON_RADIUS * v.detailScale * (frame + 1) ** (-1 / 6);
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 };
 
@@ -455,7 +504,14 @@ const render = (/** @type {FrameView} */ v, trace = true) => {
   const groups = [Math.ceil(width / 8), Math.ceil(height / 8)];
   if (trace) {
     encoder.clearBuffer(activeTilesBuffer);
+    if (pairCount) encoder.clearBuffer(photonBuffer, 0, PHOTON_CELLS * 4);
     const pass = encoder.beginComputePass();
+    // Photons first, for the trace to gather
+    if (pairCount) {
+      pass.setPipeline(photonPipeline);
+      pass.setBindGroup(0, photonBindGroup);
+      pass.dispatchWorkgroups(PHOTONS / 64);
+    }
     // Pick the tiles that still need samples, then sample them
     pass.setPipeline(tilePipeline);
     pass.setBindGroup(0, tileBindGroup);
