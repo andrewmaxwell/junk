@@ -10,6 +10,7 @@ import {glowShader} from './shaders/glow.js';
 import {tileShader} from './shaders/tiles.js';
 import {traceShader} from './shaders/trace.js';
 import {packDiamond} from './diamond.js';
+import {packBeams} from './lasers.js';
 import {packTeapot} from './teapot.js';
 
 const canvas = /** @type {HTMLCanvasElement} */ (
@@ -120,9 +121,9 @@ const strideBuffers = [1, 2, 4, 8, 16].map((stride) =>
 /** For rough reflections' lost light; see ggx.js */
 const singleBounceBuffer = bufferWith(albedoTable(), GPUBufferUsage.UNIFORM);
 
-// Params in shaders/common.js: 4 × (vec3f + u32), then 28 scalars, padded to
+// Params in shaders/common.js: 4 × (vec3f + u32), then 29 scalars, padded to
 // a multiple of 16 bytes
-const paramsData = new ArrayBuffer(176);
+const paramsData = new ArrayBuffer(192);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
 const paramsBuffer = device.createBuffer({
@@ -135,6 +136,7 @@ let objectBuffer;
 let objectCount = 0;
 let lightCount = 0;
 let boundedCount = 0;
+let beamCount = 0;
 /**
  * The scene's sky for sky domes (skyTable in sky.js, or a placeholder), then
  * the teapot (packTeapot in teapot.js); see `tables` in shaders/geometry.js
@@ -284,11 +286,15 @@ export const resize = () => {
 
 /**
  * Sends objects to the GPU: lights first and teapots and diamonds last, as the shader
- * expects
- * @type {(objects: import('./shapes.js').Shape[]) => void}
+ * expects, then the lasers' beams
+ * @type {(objects: import('./shapes.js').Shape[], beams?: import('./lasers.js').Beam[]) => void}
  */
-export const setObjects = (objects) => {
-  const data = packObjects(objects);
+export const setObjects = (objects, beams = []) => {
+  const shapes = packObjects(objects);
+  const data = new Float32Array(shapes.length + beams.length * 24);
+  data.set(shapes);
+  data.set(packBeams(beams), shapes.length);
+  beamCount = beams.length;
   lightCount = objects.filter((o) => o.material === LIGHT).length;
   boundedCount = objects.filter(isBounded).length;
   objectCount = objects.length - boundedCount;
@@ -437,6 +443,7 @@ const writeParams = (/** @type {FrameView} */ v) => {
   paramsF32[41] = settings.grain;
   paramsF32[42] = settings.aberration;
   paramsU32[43] = teapotStart + teapotData.data.length / 4;
+  paramsU32[44] = beamCount;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 };
 

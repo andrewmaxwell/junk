@@ -160,6 +160,13 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // shows the most. Later bounces aren't worth the extra shadow ray.
     let equiangular = fogLit && seenByCamera;
 
+    // Lasers' beams lighting up the fog along this ray. Not inside glass,
+    // which has no fog, and only seen directly or in mirrors and glass: the
+    // little light they spread around the room isn't worth it.
+    if (seenByCamera && inside < 0 && params.beamCount > 0u && params.fogDensity > 0.) {
+      color += tint * through * beamGlow(o, d, end);
+    }
+
     // Direct light on the fog along this ray, at a distance picked by
     // equiangular sampling. Scattering in the fog below finds it too, so
     // the two are weighted by how likely each was to pick that distance

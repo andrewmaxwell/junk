@@ -20,6 +20,7 @@ import {cross, normalize} from './vec.js';
  *   objects: Shape[],
  *   camera: {position: number[], target: number[], zoom: number, focus?: number},
  *   sky?: {sun: number[], haze?: number},
+ *   lasers?: import('./lasers.js').Laser[],
  *   size?: number,
  *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number, detail?: number, noise?: number},
  * }} Scene
@@ -350,6 +351,54 @@ function diamondScene() {
 }
 
 /**
+ * Lasers in a dark, hazy room: green, red and blue beams, lit up by the
+ * haze, hit a glass ball, which bends each by its own amount and splits off
+ * faint reflections, and they land on the matte white walls, which scatter
+ * their light around the room. A very faint panel overhead shows the rest.
+ * @type {() => Scene} */
+function lasersScene() {
+  const big = 1000;
+  const white = [0.75, 0.75, 0.75];
+  const wall = {oneSided: true};
+  const ball = [0, 18, -15];
+  /** From position, aimed this far off the ball's center */
+  const aim = (
+    /** @type {number[]} */ position,
+    /** @type {number[]} */ offset,
+  ) => ball.map((c, i) => c + offset[i] - position[i]);
+  /** @type {(position: number[], offset: number[], color: number[], wavelength: number) => import('./lasers.js').Laser} */
+  const laser = (position, offset, color, wavelength) => ({
+    position,
+    direction: aim(position, offset),
+    color,
+    wavelength,
+    radius: 0.1,
+  });
+  return {
+    objects: [
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.5, 0.5, 0.5], wall), // floor
+      plate([0, 60, 0], [0, -1, 0], [1, 0, 0], big, big, white, wall), // ceiling
+      plate([-60, 30, 0], [1, 0, 0], [0, 0, 1], big, big, white, wall), // left wall
+      plate([60, 30, 0], [-1, 0, 0], [0, 0, 1], big, big, white, wall), // right wall
+      plate([0, 30, -70], [0, 0, 1], [1, 0, 0], big, big, white, wall), // back wall
+      plate([0, 30, 60], [0, 0, -1], [1, 0, 0], big, big, white, wall), // front wall
+      sphere(9, ball, [0.98, 0.98, 0.98], GLASS),
+      plate([0, 59.9, -10], [0, -1, 0], [1, 0, 0], 12, 12, [0.2, 0.2, 0.2], {
+        material: LIGHT,
+        oneSided: true,
+      }), // faint panel
+    ],
+    lasers: [
+      laser([-59.9, 24, 40], [2, 3, 0], [100, 2000, 40], 532),
+      laser([59.9, 12, 30], [-1, -4, 0], [1500, 30, 15], 640),
+      laser([20, 45, 59.9], [-5, 0, 0], [40, 80, 1500], 450),
+    ],
+    camera: {position: [0, 26, 55], target: [0, 18, -25], zoom: 0.8},
+    defaults: {fog: 0.004, fogForward: 0.3, exposure: 1},
+  };
+}
+
+/**
  * Two mirrors facing each other, reflecting glowing orbs and balls between
  * them back and forth into the distance.
  * @type {() => Scene} */
@@ -636,6 +685,7 @@ export const scenes = {
   caustics: causticsScene,
   teapots: teapotsScene,
   diamond: diamondScene,
+  lasers: lasersScene,
   mirrors: mirrorsScene,
   bokeh: bokehScene,
   sunset: sunsetScene,

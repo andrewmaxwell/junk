@@ -13,7 +13,7 @@ import {
   useSceneDefaults,
   view,
 } from './settings.js';
-import {loadScene} from './world.js';
+import {loadScene, objectsChanged} from './world.js';
 
 /** Settings changes that need the image started over */
 export const changed = () => {
@@ -129,7 +129,11 @@ light.add(settings, 'fogBlue', 0, 1, 0.05).name('fog blue').onChange(changed);
 light
   .add(settings, 'dispersion', 0, 5, 0.1)
   .name('glass dispersion')
-  .onChange(changed);
+  .onChange(() => {
+    saveSettings();
+    // Lasers bend by it too
+    objectsChanged();
+  });
 light
   .add(settings, 'detail', 0, 3, 0.1)
   .name('surface detail')

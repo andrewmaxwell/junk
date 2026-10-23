@@ -1,5 +1,6 @@
 // Fog, for the trace shader: how far light goes before scattering, which
-// way it scatters, and equiangular sampling of the glow around lights.
+// way it scatters, equiangular sampling of the glow around lights, and
+// lasers' beams glowing in it.
 
 export const fog = /* wgsl */ `
 /** Fraction of light that fog scatters rather than absorbs */
@@ -77,6 +78,59 @@ fn sampleEquiangular(o: vec3f, d: vec3f, tMax: f32, light: u32, u: f32) -> vec2f
   let a = equiangularAngles(o, d, tMax, light);
   let t = clamp(a.z + a.w * tan(mix(a.x, a.y, u)), 0., tMax);
   return vec2f(t, equiangularPdf(o, d, tMax, light, t));
+}
+
+
+/**
+ * The light that lasers' beams (see lasers.js) scatter toward the viewer
+ * from fog along the ray o + t d, for t up to tMax. Each beam is a thin
+ * cylinder of light, as bright per unit of area as its power over its
+ * cross section, dimmed by fog along the way; fog in it scatters some of
+ * that toward the viewer, by the phase function, all along the length of
+ * the ray inside it. No randomness: a beam is found exactly, so it's as
+ * smooth as the pixels allow.
+ */
+fn beamGlow(o: vec3f, d: vec3f, tMax: f32) -> vec3f {
+  let densities = fogDensities();
+  var glow = vec3f(0.);
+  let first = params.objectCount + params.boundedCount;
+  for (var k = first; k < first + params.beamCount; k++) {
+    let beam = objects[k];
+    let a = beam.centerRadius.xyz;
+    let r = beam.centerRadius.w;
+    let b = beam.normalShape.xyz;
+    let w = o - a;
+    // Where the ray is within r of the beam's line: the parts of w and d
+    // across the beam, and a quadratic in t
+    let wb = dot(w, b);
+    let db = dot(d, b);
+    let across = d - b * db;
+    let wAcross = w - b * wb;
+    let qa = dot(across, across);
+    if (qa < 1e-8) { continue; }
+    let qb = dot(across, wAcross);
+    let det = qb * qb - qa * (dot(wAcross, wAcross) - r * r);
+    if (det < 0.) { continue; }
+    var t0 = (-qb - sqrt(det)) / qa;
+    var t1 = (-qb + sqrt(det)) / qa;
+    // And between the beam's ends
+    if (abs(db) > 1e-6) {
+      let s0 = -wb / db;
+      let s1 = (beam.normalShape.w - wb) / db;
+      t0 = max(t0, min(s0, s1));
+      t1 = min(t1, max(s0, s1));
+    } else if (wb < 0. || wb > beam.normalShape.w) {
+      continue;
+    }
+    t0 = max(t0, 0.);
+    t1 = min(t1, tMax);
+    if (t1 <= t0) { continue; }
+    let t = (t0 + t1) / 2.;
+    let along = wb + t * db;
+    let intensity = beam.colorMaterial.rgb / (PI * r * r) * exp(-densities * (along + t));
+    glow += intensity * densities * FOG_ALBEDO * phase(b, -d) * (t1 - t0);
+  }
+  return glow;
 }
 
 

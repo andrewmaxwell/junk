@@ -11,6 +11,7 @@ Scenes:
 - **shafts** (the default): a foggy room lit through window blinds
 - **caustics**: glass balls focusing light into their shadows
 - **teapots**: a glass teapot the color of tea, glazed china and gold, lit like a product photo: a softbox, a dim fill, and strip lights behind that outline the glass
+- **lasers**: green, red and blue lasers in a dark, hazy room, bent and split by a glass ball, landing on matte white walls that light the room
 - **diamond**: a big round brilliant in a jeweler's light tent: a ring of softboxes that light whole facets, and 40 small lights for sparkle and fire
 - **mirrors**: two facing mirrors reflecting glowing orbs into the distance
 - **bokeh**: balls on a walnut table, with fairy lights blurred into discs
@@ -28,6 +29,7 @@ How it renders:
 - **Fog** fills the scene out to its surfaces. It can scatter forward like haze, and blue more than red like air. Equiangular sampling finds the glow around lights.
 - **Teapots** are Martin Newell's 1975 Bézier patches, cut into 9,120 triangles at load, in a bounding volume hierarchy split by the surface area heuristic, and shaded with the patches' own normals. Like the original, they have no thickness, so glass teapots are solid glass.
 - **Diamonds** are round brilliants in Tolkowsky's ideal proportions: 57 facets and a 16-sided girdle. The stone is convex, so it's the space inside all 73 facets' planes, and a ray hits it where it has crossed into the last of them. Diamond bends light by 2.42, so most light entering the crown reflects inside and comes back out, and each wavelength takes a different way.
+- **Lasers** are too narrow for a path from the camera to ever land in, so they're followed forward from the laser instead, whenever the objects change: glass splits them by Fresnel's equations, bending each color by its own amount, and metal reflects them. Where one lands on paint it leaves a spot, a small panel light as bright as the light the paint scatters, and where it crosses glass, a faint glint. The shader finds each beam exactly where a camera ray passes through it, so beams in haze are smooth, not noisy. Drag the ball and the beams follow.
 - **Sky**: Nishita's model of sunlight scattered by air, haze and ozone, computed once per scene into a table.
 - **Surface detail**: noise bumps paint and smudges glass and mirrors, so nothing is perfectly even.
 - **Sampling**: the first choices of each sample follow a scrambled Sobol sequence. Each 8×8 tile gets at least 32 samples, then stops once its noise, as displayed, is below the **noise target**.
@@ -40,5 +42,5 @@ Files:
 
 - `main.js` starts things and runs the frame loop; `renderer.js` has the WebGPU pipelines and buffers
 - `settings.js` the settings and URL; `panel.js` the lil-gui panel; `controls.js` mouse, touch and keys; `camera.js` the orbit camera; `editor.js` editing objects; `world.js` the scene as edited
-- `scenes.js` the scenes; `shapes.js` balls, panels, teapots and diamonds for the GPU and for picking; `teapot.js` the teapot's triangles and hierarchy; `diamond.js` the diamond's facets; `sky.js` the sky; `ggx.js` rough reflections' lost light; `vec.js` vector math
+- `scenes.js` the scenes; `shapes.js` balls, panels, teapots and diamonds for the GPU and for picking; `teapot.js` the teapot's triangles and hierarchy; `diamond.js` the diamond's facets; `lasers.js` lasers' beams and spots; `sky.js` the sky; `ggx.js` rough reflections' lost light; `vec.js` vector math
 - `shaders/` the WGSL: `trace.js` joins the path tracer's pieces (`random`, `geometry`, `lights`, `fog`, `materials`, `detail`); `tiles.js` adaptive sampling; `denoise.js`; `glow.js`; `display.js`; `common.js` and `tone.js`, which every shader shares

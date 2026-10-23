@@ -123,6 +123,8 @@ struct Params {
   aberration: f32,
   /** Where the diamond's facets start in tables, in vec4s */
   diamondPlanes: u32,
+  /** Lasers' beams, which come after the teapots and diamonds; see lasers.js */
+  beamCount: u32,
 }
 
 const NONE = 0xffffffffu;
