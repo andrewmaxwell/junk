@@ -337,44 +337,39 @@ function diamondScene() {
   );
   return {
     objects: [
-      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.04, 0.04, 0.04]), // dark velvet
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.08, 0.08, 0.08]), // dark velvet
       diamond(10, [0, 4, 0], 10),
       ...softboxes,
       ...lights,
+      // A small, bright light high behind it, which the stone focuses into
+      // a scatter of rainbow sparks on the velvet in front of it
+      sphere(0.6, around(130, 0.9, -Math.PI / 2), [4e4, 4e4, 4e4], LIGHT),
     ],
     // Low, as diamonds are usually shown, so its outline reads: the crown
     // over the pavilion
-    camera: {position: [0, 26, 54], target: [0, 12, 0], zoom: 0.42},
+    camera: {position: [0, 36, 56], target: [0, 8, 4], zoom: 0.55},
     // A clean stone: smudges would blur the sparkles into a haze
     defaults: {dof: 0.004, detail: 0},
   };
 }
 
 /**
- * Lasers in a dark, hazy room: green, red and blue beams, lit up by the
- * haze. Green goes through a glass ball, then a diamond; red splits into
- * four in the diamond; blue bounces off a chrome ball into a mirror, then
- * through both glass balls. The glass and the diamond are a little cloudy,
- * so the beams show inside them, bending by each color's own amount and
- * splitting off faint reflections. They land on the matte white walls,
- * which scatter their light around the room. A very faint panel overhead
- * shows the rest.
+ * A ball lens: parallel green laser beams in a dark, hazy room go through a
+ * slightly cloudy glass ball, which bends each by Snell's law and brings
+ * them together behind it. Not all at one point: beams near the edge cross
+ * closer than ones near the middle (spherical aberration), which cross
+ * about 1.5 radii past the center. Each surface also splits off a faint
+ * reflection. The beams land on the matte white wall, which lights the
+ * room; a very faint panel overhead shows the rest. Seen side on, so every
+ * beam can be checked against where Snell's law says it goes.
  * @type {() => Scene} */
 function lasersScene() {
   const big = 1000;
   const white = [0.75, 0.75, 0.75];
   const wall = {oneSided: true};
-  const ball = [0, 18, -15];
-  const gem = [26, 14, -32];
-  const chrome = [-24, 6, -30];
-  /** @type {(position: number[], target: number[], color: number[], wavelength: number) => import('./photons.js').Laser} */
-  const laser = (position, target, color, wavelength) => ({
-    position,
-    direction: target.map((c, i) => c - position[i]),
-    color,
-    wavelength,
-    radius: 0.1,
-  });
+  const ball = [0, 20, -15];
+  // How far above or below the ball's center each beam goes
+  const heights = [-8.5, -6, -3, 0, 3, 6, 8.5];
   return {
     objects: [
       plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.5, 0.5, 0.5], wall), // floor
@@ -383,48 +378,21 @@ function lasersScene() {
       plate([60, 30, 0], [-1, 0, 0], [0, 0, 1], big, big, white, wall), // right wall
       plate([0, 30, -70], [0, 0, 1], [1, 0, 0], big, big, white, wall), // back wall
       plate([0, 30, 60], [0, 0, -1], [1, 0, 0], big, big, white, wall), // front wall
-      {...sphere(9, ball, [0.98, 0.98, 0.98], GLASS), haze: 0.01},
+      {...sphere(10, ball, [0.98, 0.98, 0.98], GLASS), haze: 0.008},
       plate([0, 59.9, -10], [0, -1, 0], [1, 0, 0], 12, 12, [0.2, 0.2, 0.2], {
         material: LIGHT,
         oneSided: true,
       }), // faint panel
-      {...diamond(7, [gem[0], gem[1] - 7, gem[2]], 20), haze: 0.005},
-      sphere(6, chrome, [0.95, 0.95, 0.97], MIRROR), // chrome ball
-      plate(
-        [-45, 14, -55],
-        normalize([1, 0, 1]),
-        normalize([1, 0, -1]),
-        10,
-        14,
-        [0.9, 0.9, 0.9],
-        {
-          material: MIRROR,
-        },
-      ), // standing mirror
-      {...sphere(4, [24, 16, 4], [0.98, 0.98, 0.98], GLASS), haze: 0.015}, // small glass ball
     ],
-    lasers: [
-      laser(
-        [-59.9, 24, 40],
-        [ball[0] + 2, ball[1] + 3, ball[2]],
-        [100, 2000, 40],
-        532,
-      ),
-      laser(
-        [59.9, 18, 30],
-        [gem[0] - 1, gem[1], gem[2] + 1],
-        [1500, 30, 15],
-        640,
-      ),
-      laser(
-        [20, 45, 59.9],
-        [chrome[0] - 3, chrome[1] + 5, chrome[2]],
-        [40, 80, 1500],
-        450,
-      ),
-    ],
-    camera: {position: [0, 26, 55], target: [0, 18, -25], zoom: 0.8},
-    defaults: {fog: 0.004, fogForward: 0.3, exposure: 2, contrast: 1.5},
+    lasers: heights.map((h) => ({
+      position: [-59.9, ball[1] + h, ball[2]],
+      direction: [1, 0, 0],
+      color: [30, 600, 12],
+      wavelength: 532,
+      radius: 0.1,
+    })),
+    camera: {position: [0, 20, 72], target: ball, zoom: 0.9},
+    defaults: {fog: 0.004, fogForward: 0.3, exposure: 1, contrast: 1.5},
   };
 }
 
@@ -458,7 +426,7 @@ function mirrorsScene() {
       sphere(2, [14, 18, 8], [1.5, 3.5, 8], LIGHT), // blue orb
       sphere(1.8, [2, 32, 22], [7, 2, 5], LIGHT), // pink orb
       // Soft white light high above
-      sphere(30, [0, 200, 40], [6, 6, 6], LIGHT),
+      sphere(30, [0, 200, 40], [15, 15, 15], LIGHT),
       sphere(6, [-8, 6, 0], [0.9, 0.2, 0.15], DIFFUSE, 1, 0.063), // red
       sphere(5, [10, 5, -12], [0.95, 0.8, 0.45], MIRROR), // gold
       sphere(7, [6, 7, 22], [0.97, 0.97, 0.97], GLASS),
@@ -473,6 +441,7 @@ function mirrorsScene() {
     // The size of the first view the scene was tuned with, which sets the
     // surface detail's scale
     size: 37.4,
+    defaults: {exposure: 0.5},
   };
 }
 

@@ -11,8 +11,8 @@ Scenes:
 - **shafts** (the default): a foggy room lit through window blinds
 - **caustics**: glass balls focusing light into their shadows
 - **teapots**: a glass teapot the color of tea, glazed china and gold, lit like a product photo: a softbox, a dim fill, and strip lights behind that outline the glass
-- **lasers**: green, red and blue lasers in a dark, hazy room, bent and split by cloudy glass balls and a diamond, so the beams show inside them, bounced off a chrome ball and a mirror, landing on matte white walls that light the room
-- **diamond**: a big round brilliant in a jeweler's light tent: a ring of softboxes that light whole facets, and 40 small lights for sparkle and fire
+- **lasers**: a ball lens: seven parallel green laser beams through a slightly cloudy glass ball in a hazy room, crossing behind it, the outer ones closer (spherical aberration). Each beam matches the path Snell's law gives, worked out separately and drawn over the image
+- **diamond**: a big round brilliant in a jeweler's light tent: a ring of softboxes that light whole facets, 40 small lights for sparkle and fire, and one small bright light behind it whose light the stone scatters into its shadow. Little gets through: a brilliant sends most light back out the top
 - **mirrors**: two facing mirrors reflecting glowing orbs into the distance
 - **bokeh**: balls on a walnut table, with fairy lights blurred into discs
 - **sunset**: a low sun, a physically based sky, and hazy air glowing around the sun
