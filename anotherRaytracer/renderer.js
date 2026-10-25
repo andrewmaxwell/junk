@@ -3,7 +3,7 @@
 
 import {albedoTable} from './ggx.js';
 import {settings, toneCurves, view} from './settings.js';
-import {packObjects, LIGHT, isBounded} from './shapes.js';
+import {GLASS, LIGHT, PLATE, isBounded, packObjects} from './shapes.js';
 import {denoiseShader} from './shaders/denoise.js';
 import {displayShader} from './shaders/display.js';
 import {glowShader} from './shaders/glow.js';
@@ -136,7 +136,7 @@ const singleBounceBuffer = bufferWith(albedoTable(), GPUBufferUsage.UNIFORM);
 
 // Params in shaders/common.js: 4 × (vec3f + u32), then 32 scalars, padded to
 // a multiple of 16 bytes
-const paramsData = new ArrayBuffer(192);
+const paramsData = new ArrayBuffer(208);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
 const paramsBuffer = device.createBuffer({
@@ -153,6 +153,7 @@ const photonBuffer = device.createBuffer({
 /** @type {GPUBuffer | undefined} */
 let pairsBuffer;
 let pairCount = 0;
+let paneCount = 0;
 /** The photons' total power, roughly; see photonEmitters in photons.js */
 let photonPower = 0;
 /** @type {GPUBindGroup} */
@@ -342,6 +343,9 @@ export const setObjects = (objects, lasers = []) => {
   device.queue.writeBuffer(pairsBuffer, 0, pairs.data);
   lightCount = objects.filter((o) => o.material === LIGHT).length;
   boundedCount = objects.filter(isBounded).length;
+  paneCount = objects.filter(
+    (o) => o.material === GLASS && o.shape === PLATE,
+  ).length;
   objectCount = objects.length - boundedCount;
   // Room to add a few without making a new buffer, which needs new bind
   // groups too
@@ -494,6 +498,7 @@ const writeParams = (/** @type {FrameView} */ v) => {
   // Zwicker's progressive photon mapping, with alpha 2/3)
   paramsF32[46] = PHOTON_RADIUS * v.detailScale * (frame + 1) ** (-1 / 6);
   paramsF32[47] = photonPower / PHOTONS;
+  paramsU32[48] = paneCount;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 };
 

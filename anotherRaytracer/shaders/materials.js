@@ -24,6 +24,25 @@ fn isSmooth(s: u32) -> bool {
 }
 
 
+/**
+ * Glass plates: thin panes, which light goes straight through, so shadow
+ * rays see through them too (lightVisibility)
+ */
+fn isPane(s: u32) -> bool {
+  return i32(objects[s].colorMaterial.w) == GLASS && isPlate(s);
+}
+
+
+/**
+ * The fraction of light going in direction d that pane s reflects: between
+ * its two faces, 2R / (1 + R), where R is what one face reflects
+ */
+fn paneReflectance(s: u32, d: vec3f) -> f32 {
+  let r = fresnelDielectric(abs(dot(d, objects[s].normalShape.xyz)), objects[s].surface.x);
+  return 2. * r / (1. + r);
+}
+
+
 
 /**
  * The fraction of light a smooth boundary reflects (Fresnel's equations,

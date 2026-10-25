@@ -132,6 +132,8 @@ struct Params {
   photonRadius: f32,
   /** One photon's power, roughly: all their power over how many there are */
   photonPower: f32,
+  /** How many glass plates there are, which shadow rays see through (lightVisibility) */
+  paneCount: u32,
 }
 
 const NONE = 0xffffffffu;

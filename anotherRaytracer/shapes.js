@@ -36,6 +36,7 @@ export const LIGHT = 3;
  *   roughness: number,
  *   ior: number,
  *   haze: number,
+ *   hole: number,
  *   oneSided: boolean,
  *   sky: boolean,
  * }} Shape
@@ -59,13 +60,16 @@ export const LIGHT = 3;
  * a `roughness`, blurrily, like brushed metal.
  *
  * Glass is colored by `color` as light goes through it: that's what's left
- * after going as far as its radius. So glass should be spheres or teapots;
- * glass plates are clear. `ior` is how much it bends light (its index of
+ * after going as far as its radius. Glass plates are thin panes, like a
+ * window's: light goes straight through, tinted by `color`. `ior` is how much it bends light (its index of
  * refraction, for yellow): 1.33 for water, 1.5 for glass, 2.42 for diamond.
  * With a `roughness`, it's frosted. `haze` is how cloudy it is inside: the
  * chance per unit of distance that light scatters off something in it, so
  * beams of light show through it. Teapots, diamonds and fractals can't be
  * lights, and Mandelbulbs can't be glass.
+ *
+ * A plate with a `hole` has a round hole of that radius in its middle, like
+ * a wall with a round window. Lights can't have holes.
  *
  * One-sided plates are invisible from behind, so walls disappear when the
  * camera orbits outside them, like a dollhouse.
@@ -99,6 +103,7 @@ export const sphere = (
   roughness,
   ior: 1.5,
   haze: 0,
+  hole: 0,
   oneSided: false,
   sky: false,
 });
@@ -234,8 +239,9 @@ export const ownAxes = (turn) => {
 
 /**
  * A rectangle facing `normal`, spanning halfWidth along u (which must be
- * perpendicular to the normal) and halfHeight along normal × u.
- * @type {(center: number[], normal: number[], u: number[], halfWidth: number, halfHeight: number, color: number[], options?: {material?: number, gloss?: number, roughness?: number, oneSided?: boolean}) => Shape} */
+ * perpendicular to the normal) and halfHeight along normal × u, with a
+ * round hole of radius `hole` in its middle.
+ * @type {(center: number[], normal: number[], u: number[], halfWidth: number, halfHeight: number, color: number[], options?: {material?: number, gloss?: number, roughness?: number, oneSided?: boolean, hole?: number}) => Shape} */
 export const plate = (
   center,
   normal,
@@ -243,7 +249,13 @@ export const plate = (
   halfWidth,
   halfHeight,
   color,
-  {material = DIFFUSE, gloss = 0, roughness = 0, oneSided = false} = {},
+  {
+    material = DIFFUSE,
+    gloss = 0,
+    roughness = 0,
+    oneSided = false,
+    hole = 0,
+  } = {},
 ) => ({
   shape: PLATE,
   center,
@@ -261,6 +273,7 @@ export const plate = (
   roughness,
   ior: 1.5,
   haze: 0,
+  hole,
   oneSided,
   sky: false,
 });
@@ -281,7 +294,8 @@ export const skyDome = (radius, center, brightness) => ({
  * lightGuess. Teapots', diamonds' and fractals' u, v and normal are their
  * own x, y and z axes, and fractals' level is in halfWidth's place.
  * Glass, which has no gloss coat, has its ior in gloss's place, and its haze
- * in sky's.
+ * in sky's. Plates, which are never skies or inside anything, have their
+ * hole there instead.
  * @type {(objects: Shape[]) => Float32Array} */
 export const packObjects = (objects) =>
   new Float32Array(
@@ -302,7 +316,7 @@ export const packObjects = (objects) =>
           s.material === GLASS ? s.ior : s.gloss,
           s.roughness,
           +s.oneSided,
-          s.material === GLASS ? s.haze : +s.sky,
+          s.shape === PLATE ? s.hole : s.material === GLASS ? s.haze : +s.sky,
         ],
       ];
     }),
@@ -341,7 +355,8 @@ export const hitObject = (objects, o, d) => {
       const h = d.map((x, i) => x * t - p[i]);
       if (
         Math.abs(dot(h, s.u)) > s.halfWidth ||
-        Math.abs(dot(h, s.v)) > s.halfHeight
+        Math.abs(dot(h, s.v)) > s.halfHeight ||
+        dot(h, h) < s.hole * s.hole
       ) {
         continue;
       }

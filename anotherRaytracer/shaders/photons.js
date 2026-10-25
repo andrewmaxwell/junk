@@ -310,6 +310,13 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
       continue;
     }
 
+    // Straight through a pane, as in trace: shadow rays find this light, so
+    // it stores no photons
+    if (isPane(s) && rand() >= paneReflectance(s, d)) {
+      power *= objects[s].colorMaterial.rgb;
+      o = p + d * EPSILON;
+      continue;
+    }
     // Through glass or off a mirror: other lights' photons store from here
     stores = true;
     if (material == GLASS && objects[s].surface.y > 0.) {
@@ -319,7 +326,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     var next = reflect(d, snl);
     var reflected = true;
     if (material == MIRROR) { power *= fresnelMetal(objects[s].colorMaterial.rgb, -dot(d, snl)); }
-    if (material == GLASS) {
+    // Panes that get here reflect
+    if (material == GLASS && !isPlate(s)) {
       var index = objects[s].surface.x;
       if (wavelength > 0.) { index = glassIndex(s, wavelength); }
       let t = refract(d, snl, select(index, 1. / index, into));
@@ -327,7 +335,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
       if (any(t != vec3f(0.)) && rand() >= fresnelDielectric(-dot(d, snl), select(1. / index, index, into))) {
         next = t;
         reflected = false;
-        if (!isPlate(s)) { inside = select(-1, i32(s), into); }
+        inside = select(-1, i32(s), into);
         // Dispersion, as in trace: the first refraction picks a wavelength.
         // A laser's is its own.
         if (wavelength == 0. && params.dispersion > 0.) {

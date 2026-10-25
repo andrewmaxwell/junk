@@ -7,6 +7,7 @@ import {
   MIRROR,
   diamond,
   mandelbulb,
+  ownAxes,
   plate,
   skyDome,
   sphere,
@@ -716,6 +717,173 @@ function neonScene() {
   };
 }
 
+/**
+ * A box from center, halfSize across, up and deep, turned turn degrees
+ * around the vertical: its five faces that show, the bottom left out since
+ * it sits on something. One-sided, facing out, so a ray meets the near
+ * faces and never the far ones.
+ * @type {(center: number[], halfSize: number[], turn: number, color: number[], options?: {gloss?: number, roughness?: number}) => Shape[]}
+ */
+const box = (center, [hx, hy, hz], turn, color, options = {}) => {
+  const [x, y, z] = ownAxes(turn);
+  /** @type {(axis: number[], sign: number, u: number[], hu: number, hv: number, h: number) => Shape} */
+  const face = (axis, sign, u, hu, hv, h) =>
+    plate(
+      center.map((c, i) => c + axis[i] * sign * h),
+      axis.map((a) => a * sign),
+      u,
+      hu,
+      hv,
+      color,
+      {...options, oneSided: true},
+    );
+  return [
+    face(y, 1, x, hx, hz, hy), // top
+    face(x, 1, z, hz, hy, hx),
+    face(x, -1, z, hz, hy, hx),
+    face(z, 1, x, hx, hy, hz),
+    face(z, -1, x, hx, hy, hz),
+  ];
+};
+
+/**
+ * An old attic room lit only by late afternoon sun through a round window
+ * of stained glass, ruby, amber, cobalt and green in four quarters. The
+ * dusty air shows four colored beams, which lay the window's colors on the
+ * floorboards, with a glass paperweight focusing them, and motes of dust
+ * drifting in the light. A trunk with a teapot, and a stack of books.
+ * @type {() => Scene} */
+function windowScene() {
+  // The room spans x -50 to 50, y 0 to 70, and z from -60 forward. The
+  // front is open. The opening is in the back wall.
+  const big = 1000;
+  const wall = {oneSided: true};
+  const plaster = [0.55, 0.48, 0.4];
+  const floor = [0.42, 0.27, 0.16]; // worn, waxed floorboards
+  const wood = [0.16, 0.09, 0.05];
+  // Where the room's middle is, front to back, and half its depth
+  const deep = (big - 60) / 2;
+  const deepHalf = (big + 60) / 2;
+  const radius = 13;
+  const opening = [0, 46, -60];
+  // The way the sunlight goes, down into the room and a little right
+  const light = normalize([0.12, -0.6, 0.79]);
+  const sun = opening.map((w, i) => w - light[i] * 250);
+  // Where the sunlight crosses the backdrop, 60 behind the window
+  const backdrop = opening.map((w, i) => w - (light[i] * 60) / light[2]);
+  /** @type {(sx: number, sy: number, color: number[]) => Shape} */
+  const pane = (sx, sy, color) => {
+    // Each quarter's pane runs past the round hole, so light can't slip
+    // around its edges, and sits just outside the mullions, so the seams
+    // between them are behind those
+    const half = (radius + 4) / 2;
+    return plate(
+      [opening[0] + sx * half, opening[1] + sy * half, opening[2] - 1.2],
+      [0, 0, 1],
+      [1, 0, 0],
+      half,
+      half,
+      color,
+      {material: GLASS},
+    );
+  };
+  // Motes of dust in the beams, scattered by a fixed pseudorandom sequence
+  // so the scene looks the same each time. Each is a speck of dense haze,
+  // which glows in the light as it scatters it on toward the camera, as
+  // dust does; paint, lit from behind, would look dark.
+  let seed = 7;
+  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const across = normalize(cross(light, [0, 1, 0]));
+  const up = cross(across, light);
+  /** @type {Shape[]} */
+  const motes = [];
+  for (let i = 0; i < 80; i++) {
+    // Evenly over the beams' cross section, where they're lit: out of the
+    // light they'd only shade the beams behind them
+    const t = 4 + random() * 64;
+    const r = radius * Math.sqrt(random());
+    const angle = 2 * Math.PI * random();
+    const center = opening.map(
+      (w, k) =>
+        w +
+        light[k] * t +
+        (across[k] * Math.cos(angle) + up[k] * Math.sin(angle)) * r,
+    );
+    motes.push({
+      ...sphere(0.12 + 0.08 * random(), center, [1, 1, 1], GLASS),
+      ior: 1,
+      haze: 6,
+    });
+  }
+  return {
+    objects: [
+      // The floor, ceiling and side walls stop at the back wall, so they
+      // don't shade the sunlight outside
+      plate([0, 0, deep], [0, 1, 0], [1, 0, 0], big, deepHalf, floor, {
+        ...wall,
+        gloss: 1,
+        roughness: 0.12,
+      }),
+      plate([0, 70, deep], [0, -1, 0], [1, 0, 0], big, deepHalf, plaster, wall), // ceiling
+      plate(
+        [-50, 35, deep],
+        [1, 0, 0],
+        [0, 0, 1],
+        deepHalf,
+        big,
+        plaster,
+        wall,
+      ), // left wall
+      plate(
+        [50, 35, deep],
+        [-1, 0, 0],
+        [0, 0, 1],
+        deepHalf,
+        big,
+        plaster,
+        wall,
+      ), // right wall
+      // Two-sided, so it keeps the sun out but for the window
+      plate(opening, [0, 0, 1], [1, 0, 0], big, big, plaster, {hole: radius}), // back wall
+      ...box(opening, [0.7, radius + 0.3, 1], 0, wood), // mullions
+      ...box(opening, [radius + 0.3, 0.7, 1], 0, wood),
+      pane(-1, 1, [0.85, 0.12, 0.1]), // ruby
+      pane(1, 1, [0.95, 0.62, 0.16]), // amber
+      pane(-1, -1, [0.15, 0.75, 0.25]), // green
+      pane(1, -1, [0.05, 0.15, 1]), // cobalt
+      // Small and far, so the beams' edges are nearly sharp
+      sphere(1.25, sun, [8e6, 6.2e6, 4e6], LIGHT),
+      // A dark backdrop outside, so the hazy air between, which the sun
+      // lights, glows through the glass (fog only fills space out to the
+      // farthest surfaces). One-sided, so sunlight passes through its back,
+      // with a hole where the window's shadow rays go to the sun.
+      plate(backdrop, [0, 0, 1], [1, 0, 0], big, big, [0.02, 0.02, 0.02], {
+        oneSided: true,
+        hole: radius + 1.5,
+      }),
+      // A trunk, its corner in the ruby light, with a china teapot on it
+      ...box([-14, 7, -10], [10, 7, 6.5], 20, wood, {
+        gloss: 1,
+        roughness: 0.2,
+      }),
+      teapot(5, [-9, 14, -9], 30, [0.85, 0.82, 0.74], DIFFUSE, 1, 0.03),
+      // Old books stacked at the amber light's edge, a brass ball on top
+      ...box([24, 1.5, 10], [7, 1.5, 5], -10, [0.35, 0.12, 0.1]),
+      ...box([23.5, 4.25, 10.5], [6, 1.25, 4.5], 8, [0.15, 0.22, 0.17]),
+      ...box([24.5, 6.6, 9.5], [5.2, 1.1, 4], -25, [0.45, 0.38, 0.26]),
+      sphere(3, [24, 10.7, 10], [0.95, 0.72, 0.4], MIRROR, 0, 0.12),
+      sphere(4, [8, 4, -6], [0.97, 0.97, 0.97], GLASS), // paperweight
+      ...motes,
+    ],
+    camera: {
+      position: [-34, 24, 78],
+      target: [4, 18, -20],
+      zoom: 0.8,
+    },
+    defaults: {fog: 0.01, fogForward: 0.5, dof: 0.004},
+  };
+}
+
 /** @type {Record<string, () => Scene>} */
 export const scenes = {
   cornell: cornellScene,
@@ -731,4 +899,5 @@ export const scenes = {
   sunset: sunsetScene,
   rgb: rgbShadowsScene,
   neon: neonScene,
+  window: windowScene,
 };

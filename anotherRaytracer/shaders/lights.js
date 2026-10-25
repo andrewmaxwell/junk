@@ -264,7 +264,23 @@ fn pickLight(p: vec3f, d: vec3f, alongRay: bool, u: f32, total: f32) -> u32 {
  * sampleLight sample: 0 if blocked or the light faces away, less in fog
  */
 fn lightVisibility(p: vec3f, ls: vec4f, light: u32) -> vec3f {
-  if (ls.w <= 0. || intersect(p, ls.xyz) != i32(light)) { return vec3f(0.); }
-  return exp(-fogDensities() * hitDist);
+  if (ls.w <= 0.) { return vec3f(0.); }
+  if (params.paneCount == 0u) {
+    if (intersect(p, ls.xyz) != i32(light)) { return vec3f(0.); }
+    return exp(-fogDensities() * hitDist);
+  }
+  // Through any panes on the way, tinted by each, less what it reflects
+  var o = p;
+  var dist = 0.;
+  var through = vec3f(1.);
+  for (var i = 0; i < 8; i++) {
+    let hit = intersect(o, ls.xyz);
+    dist += hitDist;
+    if (hit == i32(light)) { return through * exp(-fogDensities() * dist); }
+    if (hit < 0 || !isPane(u32(hit))) { break; }
+    through *= (1. - paneReflectance(u32(hit), ls.xyz)) * objects[u32(hit)].colorMaterial.rgb;
+    o += ls.xyz * hitDist;
+  }
+  return vec3f(0.);
 }
 `;

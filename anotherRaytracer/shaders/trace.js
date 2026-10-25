@@ -196,6 +196,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   // lightGuessTotal where the path last picked a light, for when its bounce
   // from there hits one
   var bounceTotal = 0.;
+  // How far that bounce has gone straight through panes since
+  var passed = 0.;
   // lightGuessTotal along the current ray, for equiangular sampling
   var rayTotal = 0.;
   // Which glass ball the path is inside, or -1
@@ -363,6 +365,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
 
       let next = samplePhase(d);
       bouncePdf = phase(d, next);
+      passed = 0.;
       seenByCamera = false;
       guided = true;
       o = p;
@@ -380,7 +383,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // The photons brought the paint's share of this light already
       if (causticState == 2u && all(glossyShare == vec3f(0.))) { break; }
       var w = 1.;
-      if (bouncePdf > 0.) { w = bounceLightWeight(o, d, end, bouncePdf, s, bounceTotal); }
+      if (bouncePdf > 0.) { w = bounceLightWeight(o - d * passed, d, end + passed, bouncePdf, s, bounceTotal); }
       var e = emitted(s, d) * w * through;
       if (causticState == 2u) { e *= glossyShare; }
       if (seenByCamera) {
@@ -506,6 +509,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // A glossy lobe, or a bump, pointed it into the surface
       if (cosTheta <= 0. || dot(next, nl) <= 0.) { break; }
       bouncePdf = evalSurface(s, ns, smoothNl, -d, next, &bsdf);
+      passed = 0.;
       // Far out in a tight lobe, the density underflows to 0, and 0 / 0
       // would be NaN. A direction that's never picked carries no light.
       if (bouncePdf <= 0.) { break; }
@@ -513,9 +517,17 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       through *= bsdf * cosTheta / bouncePdf;
       seenByCamera = false;
       d = next;
+    } else if (isPane(s) && rand() >= paneReflectance(s, d)) {
+      // Straight through a pane, tinted by its color, just as shadow rays
+      // go (lightVisibility), so it's not a caustic, nor a new bounce: a
+      // light found beyond is weighed as if seen from the last one
+      through *= sColor;
+      choiceProb *= 1. - paneReflectance(s, d);
+      passed += end;
     } else {
       bouncePdf = 0.;
       if (causticState == 1u) { causticState = 2u; }
+      if (isPane(s)) { choiceProb *= paneReflectance(s, d); }
       // A smudge is a thin greasy film. Most light still reflects or
       // refracts sharply, but some scatters a little off course, so through
       // a smudge things look hazy, and bright ones have a soft glow. So
@@ -550,7 +562,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // glassTransmittance.
       if (material == MIRROR) { through *= fresnelMetal(sColor, -dot(d, snl)); }
 
-      if (material == GLASS) {
+      // Panes that get here reflect, off frosting or smudges too
+      if (material == GLASS && !isPlate(s)) {
         var index = shape.surface.x;
         if (wavelength > 0.) { index = glassIndex(s, wavelength); }
         let t = refract(d, snl, select(index, 1. / index, into));
@@ -570,9 +583,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
             next = t;
             reflected = false;
             choiceProb *= 1. - reflectance;
-            // Now inside the ball or teapot, or back out. Glass plates are
-            // too thin to be inside.
-            if (i32(shape.normalShape.w) != PLATE) { inside = select(-1, i32(s), into); }
+            // Now inside the ball or teapot, or back out
+            inside = select(-1, i32(s), into);
             // Dispersion: the first time the path refracts, it picks a
             // wavelength to follow, and bends by that wavelength's index
             // instead. Reflection doesn't depend on wavelength (much), so

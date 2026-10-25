@@ -25,7 +25,7 @@ struct Shape {
   uHalf: vec4f,
   vHalf: vec4f,
   colorMaterial: vec4f,
-  surface: vec4f, // gloss (glass: index of refraction), roughness, oneSided, sky (glass: haze)
+  surface: vec4f, // gloss (glass: index of refraction), roughness, oneSided, sky (glass: haze; plates: hole)
 }
 
 
@@ -226,6 +226,7 @@ fn intersect(o: vec3f, d: vec3f) -> i32 {
       if (t <= EPSILON) { t = b + det; }
     } else {
       // Where the ray crosses the plate's plane, if that's within the plate
+      // and not in its hole
       let n = s.normalShape.xyz;
       let facing = dot(d, n);
       if (facing == 0. || (s.surface.z > 0. && facing > 0.)) { continue; }
@@ -233,7 +234,8 @@ fn intersect(o: vec3f, d: vec3f) -> i32 {
       let h = d * t - p;
       if (
         abs(dot(h, s.uHalf.xyz)) > s.uHalf.w ||
-        abs(dot(h, s.vHalf.xyz)) > s.vHalf.w
+        abs(dot(h, s.vHalf.xyz)) > s.vHalf.w ||
+        dot(h, h) < s.surface.w * s.surface.w
       ) { continue; }
     }
     if (t > EPSILON && t < hitDist) {
