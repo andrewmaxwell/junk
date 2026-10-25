@@ -748,10 +748,11 @@ const box = (center, [hx, hy, hz], turn, color, options = {}) => {
 
 /**
  * An old attic room lit only by late afternoon sun through a round window
- * of stained glass, ruby, amber, cobalt and green in four quarters. The
- * dusty air shows four colored beams, which lay the window's colors on the
- * floorboards, with a glass paperweight focusing them. A trunk with a
- * teapot, and a stack of books.
+ * of stained glass, ruby, amber, cobalt and green in four quarters, set
+ * deep in a thick wall. A branch outside dapples the light with the shadows
+ * of its leaves. The dusty air shows four colored beams, which lay the
+ * window's colors across the floorboards, with a glass paperweight focusing
+ * them. A trunk with a teapot, and a stack of books.
  * @type {() => Scene} */
 function windowScene() {
   // The room spans x -50 to 50, y 0 to 70, and z from -60 forward. The
@@ -759,15 +760,20 @@ function windowScene() {
   const big = 1000;
   const wall = {oneSided: true};
   const plaster = [0.55, 0.48, 0.4];
-  const floor = [0.42, 0.27, 0.16]; // worn, waxed floorboards
   const wood = [0.16, 0.09, 0.05];
   // Where the room's middle is, front to back, and half its depth
   const deep = (big - 60) / 2;
   const deepHalf = (big + 60) / 2;
   const radius = 13;
   const opening = [0, 46, -60];
+  // How thick the wall is: the glass is at its outside
+  const thick = 6;
+  const glass = opening[2] - thick;
   // The way the sunlight goes, down into the room and a little right
   const light = normalize([0.12, -0.6, 0.79]);
+  // A fixed pseudorandom sequence, so the scene looks the same each time
+  let seed = 7;
+  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const sun = opening.map((w, i) => w - light[i] * 250);
   // Where the sunlight crosses the backdrop, 60 behind the window
   const backdrop = opening.map((w, i) => w - (light[i] * 60) / light[2]);
@@ -778,7 +784,7 @@ function windowScene() {
     // between them are behind those
     const half = (radius + 4) / 2;
     return plate(
-      [opening[0] + sx * half, opening[1] + sy * half, opening[2] - 1.2],
+      [opening[0] + sx * half, opening[1] + sy * half, glass - 1.2],
       [0, 0, 1],
       [1, 0, 0],
       half,
@@ -787,15 +793,116 @@ function windowScene() {
       {material: GLASS},
     );
   };
+
+  // Floorboards, front to back, each a slightly different brown, with dark
+  // gaps between them, and each row butted end to end somewhere
+  const width = 7;
+  /** @type {Shape[]} */
+  const floor = [
+    plate([0, -0.15, deep], [0, 1, 0], [1, 0, 0], big, deepHalf, wood, wall),
+  ];
+  for (let x = -50 + width / 2; x < 50 + width; x += width) {
+    const joint = -40 + 80 * random();
+    for (const [z0, z1] of [
+      [-60, joint],
+      [joint, big],
+    ]) {
+      const shade = 0.8 + 0.35 * random();
+      const red = 0.95 + 0.1 * random();
+      floor.push(
+        plate(
+          [x, 0, (z0 + z1) / 2],
+          [0, 1, 0],
+          [1, 0, 0],
+          width / 2 - 0.12,
+          (z1 - z0) / 2 - 0.1,
+          [0.42 * red, 0.27, 0.16 / red].map((c) => c * shade),
+          {...wall, gloss: 1, roughness: 0.12},
+        ),
+      );
+    }
+  }
+
+  // The window's reveal: the hole through the wall, as a ring of panels
+  // facing in, plaster like the walls, whose sill catches the sun
+  const sides = 24;
+  const reveal = Array.from({length: sides}, (_, k) => {
+    const angle = (2 * Math.PI * (k + 0.5)) / sides;
+    const out = [Math.cos(angle), Math.sin(angle), 0];
+    return plate(
+      [
+        opening[0] + out[0] * radius,
+        opening[1] + out[1] * radius,
+        opening[2] - thick / 2,
+      ],
+      out.map((o) => -o),
+      [0, 0, 1],
+      thick / 2,
+      radius * Math.tan(Math.PI / sides) + 0.05,
+      plaster,
+      wall,
+    );
+  });
+
+  // A leafy branch outside, between the window and the sun, whose shadows
+  // dapple the beams. Laid out across the sunlight: a is to the left, b up,
+  // and t back toward the sun from the window.
+  const across = normalize(cross(light, [0, 1, 0]));
+  const up = cross(across, light);
+  /** @type {(t: number, a: number, b: number) => number[]} */
+  const outside = (t, a, b) =>
+    opening.map((w, k) => w - light[k] * t + across[k] * a + up[k] * b);
+  /** Along the branch from 0 at its base to 1 at its tip: [t, a, b] */
+  const along = (/** @type {number} */ f) => [
+    44 - 10 * f,
+    (1 - f) ** 2 * 34 + 2 * f * (1 - f) * 14 + f * f * 0,
+    (1 - f) ** 2 * 20 + 2 * f * (1 - f) * 8 + f * f * -4,
+  ];
+  const bark = [0.07, 0.05, 0.035];
+  const leaf = [0.1, 0.13, 0.04];
+  /** @type {Shape[]} */
+  const branch = [];
+  for (let k = 0; k < 10; k++) {
+    const p0 = outside(...along(k / 10));
+    const p1 = outside(...along((k + 1) / 10));
+    const seg = p1.map((p, i) => p - p0[i]);
+    const length = Math.hypot(...seg);
+    const u = seg.map((x) => x / length);
+    branch.push(
+      plate(
+        p0.map((p, i) => (p + p1[i]) / 2),
+        normalize(cross(u, cross(light, u))),
+        u,
+        length / 2 + 0.1,
+        0.45 * (1 - k / 14),
+        bark,
+      ),
+    );
+  }
+  // Small and scattered around its outer half, so light gets through
+  // between them in spots
+  for (let k = 0; k < 60; k++) {
+    const [t, a, b] = along(0.35 + 0.65 * random());
+    const r = 7 * Math.sqrt(random());
+    const angle = 2 * Math.PI * random();
+    branch.push(
+      sphere(
+        0.6 + 0.6 * random(),
+        outside(
+          t + 6 * (random() - 0.5),
+          a + r * Math.cos(angle),
+          b + r * Math.sin(angle),
+        ),
+        leaf,
+        DIFFUSE,
+      ),
+    );
+  }
   return {
     objects: [
       // The floor, ceiling and side walls stop at the back wall, so they
       // don't shade the sunlight outside
-      plate([0, 0, deep], [0, 1, 0], [1, 0, 0], big, deepHalf, floor, {
-        ...wall,
-        gloss: 1,
-        roughness: 0.12,
-      }),
+      ...floor,
       plate([0, 70, deep], [0, -1, 0], [1, 0, 0], big, deepHalf, plaster, wall), // ceiling
       plate(
         [-50, 35, deep],
@@ -817,8 +924,21 @@ function windowScene() {
       ), // right wall
       // Two-sided, so it keeps the sun out but for the window
       plate(opening, [0, 0, 1], [1, 0, 0], big, big, plaster, {hole: radius}), // back wall
-      ...box(opening, [0.7, radius + 0.3, 1], 0, wood), // mullions
-      ...box(opening, [radius + 0.3, 0.7, 1], 0, wood),
+      plate(
+        [opening[0], opening[1], glass],
+        [0, 0, -1],
+        [1, 0, 0],
+        big,
+        big,
+        plaster,
+        {
+          oneSided: true,
+          hole: radius,
+        },
+      ), // its outside
+      ...reveal,
+      ...box([opening[0], opening[1], glass], [0.7, radius + 0.3, 1], 0, wood), // mullions
+      ...box([opening[0], opening[1], glass], [radius + 0.3, 0.7, 1], 0, wood),
       pane(-1, 1, [0.88, 0.32, 0.26]), // ruby
       pane(1, 1, [0.95, 0.74, 0.38]), // amber
       pane(-1, -1, [0.36, 0.78, 0.42]), // green
@@ -845,6 +965,7 @@ function windowScene() {
       ...box([24.5, 6.6, 9.5], [5.2, 1.1, 4], -25, [0.45, 0.38, 0.26]),
       sphere(3, [24, 10.7, 10], [0.95, 0.72, 0.4], MIRROR, 0, 0.12),
       sphere(4, [8, 4, -6], [0.97, 0.97, 0.97], GLASS), // paperweight
+      ...branch,
     ],
     camera: {
       position: [-10.056, 14.192, 71.761],
