@@ -847,9 +847,10 @@ function windowScene() {
       sphere(4, [8, 4, -6], [0.97, 0.97, 0.97], GLASS), // paperweight
     ],
     camera: {
-      position: [-34, 24, 78],
+      position: [-10.056, 14.192, 71.761],
       target: [4, 18, -20],
       zoom: 0.8,
+      focus: 75.79,
     },
     defaults: {fog: 0.01, fogForward: 0.5, dof: 0.004},
   };
