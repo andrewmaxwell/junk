@@ -106,9 +106,9 @@ fn blurArea(direction: vec3f, dist: f32) -> f32 {
  * the same side of a surface facing the same way, so light doesn't leak
  * around corners or through walls. ns is the bumps' normal, n the smooth
  * one, and nl the real surface's, all facing the viewer. Not by the glossy
- * coat or metal: their sharp reflections would need far more photons, so
- * paths from the camera find that light, as for any other. Except lasers',
- * which paths from the camera never find. Lasers' photons are stored at
+ * coat or metal, unless it's rough (photonsGloss): their sharp reflections
+ * would need far more photons, so paths from the camera find that light, as
+ * for any other. Except lasers', which paths from the camera never find. Lasers' photons are stored at
  * every bounce, so they already carry all of a laser's light that reaches
  * here, bounced or not: they're only gathered if lasers is true, at the
  * first surface the camera sees, and later gathers would count them again.
@@ -137,7 +137,7 @@ fn gatherPhotons(s: u32, p: vec3f, ns: vec3f, n: vec3f, nl: vec3f, v: vec3f, las
       if (laser && !lasers) { continue; }
       var bsdf: vec3f;
       evalSurface(s, ns, n, v, l, &bsdf);
-      sum += select(evalPaint, bsdf, laser) * bitcast<vec3f>(vec3u(photonMap[start + 4u], photonMap[start + 5u], photonMap[start + 6u]));
+      sum += select(evalPaint, bsdf, laser || photonsGloss(s)) * bitcast<vec3f>(vec3u(photonMap[start + 4u], photonMap[start + 5u], photonMap[start + 6u]));
     }
   }
   return sum / (PI * r * r);
@@ -525,7 +525,9 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // Far out in a tight lobe, the density underflows to 0, and 0 / 0
       // would be NaN. A direction that's never picked carries no light.
       if (bouncePdf <= 0.) { break; }
-      if (causticState == 1u) { glossyShare = (bsdf - evalPaint) / max(bsdf, vec3f(1e-30)); }
+      if (causticState == 1u) {
+        glossyShare = select((bsdf - evalPaint) / max(bsdf, vec3f(1e-30)), vec3f(0.), photonsGloss(s));
+      }
       through *= bsdf * cosTheta / bouncePdf;
       seenByCamera = false;
       d = next;

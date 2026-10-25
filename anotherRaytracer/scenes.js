@@ -721,12 +721,20 @@ function neonScene() {
 
 /**
  * A box from center, halfSize across, up and deep, turned turn degrees
- * around the vertical: its five faces that show, the bottom left out since
- * it sits on something. One-sided, facing out, so a ray meets the near
- * faces and never the far ones.
- * @type {(center: number[], halfSize: number[], turn: number, color: number[], options?: {gloss?: number, roughness?: number}) => Shape[]}
+ * around the vertical. One-sided, facing out, so a ray meets the near faces
+ * and never the far ones. Without a bottom, unless it's floating: one
+ * sitting on something never shows it, but with none, a ray from below
+ * would go in and out unseen.
+ * @type {(center: number[], halfSize: number[], turn: number, color: number[], options?: {gloss?: number, roughness?: number}, floating?: boolean) => Shape[]}
  */
-const box = (center, [hx, hy, hz], turn, color, options = {}) => {
+const box = (
+  center,
+  [hx, hy, hz],
+  turn,
+  color,
+  options = {},
+  floating = false,
+) => {
   const [x, y, z] = ownAxes(turn);
   /** @type {(axis: number[], sign: number, u: number[], hu: number, hv: number, h: number) => Shape} */
   const face = (axis, sign, u, hu, hv, h) =>
@@ -745,23 +753,24 @@ const box = (center, [hx, hy, hz], turn, color, options = {}) => {
     face(x, -1, z, hz, hy, hx),
     face(z, 1, x, hx, hy, hz),
     face(z, -1, x, hx, hy, hz),
+    ...(floating ? [face(y, -1, x, hx, hz, hy)] : []),
   ];
 };
 
 /**
  * An old attic room lit only by late afternoon sun through a round window
  * of stained glass, ruby, amber, cobalt and green in four quarters, set
- * deep in a thick wall. A branch outside dapples the light with the shadows
- * of its leaves. The dusty air shows four colored beams, which lay the
- * window's colors across the floorboards, with a glass paperweight focusing
- * them. A trunk with a teapot, and a stack of books.
+ * deep in a thick wall. The old glass is wavy, so its light ripples. The
+ * dusty air shows four colored beams, which lay the window's colors across
+ * the floorboards, with a glass paperweight focusing them. A trunk with a
+ * teapot, and a stack of books.
  * @type {() => Scene} */
 function windowScene() {
-  // The room spans x -50 to 50, y 0 to 70, and z from -60 forward. The
-  // front is open. The window is in the back wall.
+  // The room spans x -50 to 50, y 0 to 70, and z -60 to 100. The window
+  // is in the back wall.
   const big = 1000;
   const wall = {oneSided: true};
-  const plaster = [0.55, 0.48, 0.4];
+  const plaster = [0.72, 0.66, 0.58]; // whitewashed
   const wood = [0.16, 0.09, 0.05];
   // Where the room's middle is, front to back, and half its depth
   const deep = (big - 60) / 2;
@@ -847,60 +856,6 @@ function windowScene() {
     );
   });
 
-  // A leafy branch outside, between the window and the sun, whose shadows
-  // dapple the beams. Laid out across the sunlight: a is to the left, b up,
-  // and t back toward the sun from the window.
-  const across = normalize(cross(light, [0, 1, 0]));
-  const up = cross(across, light);
-  /** @type {(t: number, a: number, b: number) => number[]} */
-  const outside = (t, a, b) =>
-    opening.map((w, k) => w - light[k] * t + across[k] * a + up[k] * b);
-  /** Along the branch from 0 at its base to 1 at its tip: [t, a, b] */
-  const along = (/** @type {number} */ f) => [
-    44 - 10 * f,
-    (1 - f) ** 2 * 34 + 2 * f * (1 - f) * 14 + f * f * 0,
-    (1 - f) ** 2 * 20 + 2 * f * (1 - f) * 8 + f * f * -4,
-  ];
-  const bark = [0.07, 0.05, 0.035];
-  const leaf = [0.1, 0.13, 0.04];
-  /** @type {Shape[]} */
-  const branch = [];
-  for (let k = 0; k < 10; k++) {
-    const p0 = outside(...along(k / 10));
-    const p1 = outside(...along((k + 1) / 10));
-    const seg = p1.map((p, i) => p - p0[i]);
-    const length = Math.hypot(...seg);
-    const u = seg.map((x) => x / length);
-    branch.push(
-      plate(
-        p0.map((p, i) => (p + p1[i]) / 2),
-        normalize(cross(u, cross(light, u))),
-        u,
-        length / 2 + 0.1,
-        0.45 * (1 - k / 14),
-        bark,
-      ),
-    );
-  }
-  // Small and scattered around its outer half, so light gets through
-  // between them in spots
-  for (let k = 0; k < 60; k++) {
-    const [t, a, b] = along(0.35 + 0.65 * random());
-    const r = 7 * Math.sqrt(random());
-    const angle = 2 * Math.PI * random();
-    branch.push(
-      sphere(
-        0.6 + 0.6 * random(),
-        outside(
-          t + 6 * (random() - 0.5),
-          a + r * Math.cos(angle),
-          b + r * Math.sin(angle),
-        ),
-        leaf,
-        DIFFUSE,
-      ),
-    );
-  }
   return {
     objects: [
       // The floor, ceiling and side walls stop at the back wall, so they
@@ -925,6 +880,9 @@ function windowScene() {
         plaster,
         wall,
       ), // right wall
+      // Behind the camera, keeping in the light that would leave down the
+      // room. One-sided, so orbiting outside shows the room.
+      plate([0, 35, 100], [0, 0, -1], [1, 0, 0], big, big, plaster, wall),
       // Two-sided, so it keeps the sun out but for the window
       plate(opening, [0, 0, 1], [1, 0, 0], big, big, plaster, {hole: radius}), // back wall
       plate(
@@ -940,8 +898,22 @@ function windowScene() {
         },
       ), // its outside
       ...reveal,
-      ...box([opening[0], opening[1], glass], [0.7, radius + 0.3, 1], 0, wood), // mullions
-      ...box([opening[0], opening[1], glass], [radius + 0.3, 0.7, 1], 0, wood),
+      ...box(
+        [opening[0], opening[1], glass],
+        [0.7, radius + 0.3, 1],
+        0,
+        wood,
+        {},
+        true,
+      ), // mullions
+      ...box(
+        [opening[0], opening[1], glass],
+        [radius + 0.3, 0.7, 1],
+        0,
+        wood,
+        {},
+        true,
+      ),
       pane(-1, 1, [0.88, 0.32, 0.26]), // ruby
       pane(1, 1, [0.95, 0.74, 0.38]), // amber
       pane(-1, -1, [0.36, 0.78, 0.42]), // green
@@ -968,7 +940,6 @@ function windowScene() {
       ...box([24.5, 6.6, 9.5], [5.2, 1.1, 4], -25, [0.45, 0.38, 0.26]),
       sphere(3, [24, 10.7, 10], [0.95, 0.72, 0.4], MIRROR, 0, 0.12),
       sphere(4, [8, 4, -6], [0.97, 0.97, 0.97], GLASS), // paperweight
-      ...branch,
     ],
     camera: {
       position: [-10.056, 14.192, 71.761],
@@ -983,7 +954,7 @@ function windowScene() {
     size: 250,
     // The room is lit by light bounced off the colored patches and the
     // beams, which come from photons, and in the haze it bounces many times
-    gathers: 8,
+    gathers: 16,
     defaults: {fog: 0.01, fogForward: 0.5, dof: 0.0015},
   };
 }

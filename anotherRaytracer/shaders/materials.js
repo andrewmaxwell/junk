@@ -34,6 +34,22 @@ fn isPane(s: u32) -> bool {
 }
 
 
+/**
+ * How rough a glossy coat or metal must be for photons to bring the light
+ * it reflects, as they do paint's (gatherPhotons). Sharper reflections
+ * would show the gather's blur, so paths find that light. Blurrier ones
+ * barely do, and through wavy glass, which shadow rays can't see through,
+ * a path would have to hit a small light by chance: a varnished floor lit
+ * that way lost most of its sheen, and the room the light it reflects.
+ */
+const PHOTON_GLOSS = 0.1;
+
+/** Whether photons bring all the light surface s reflects, not only its paint's */
+fn photonsGloss(s: u32) -> bool {
+  return objects[s].surface.y >= PHOTON_GLOSS;
+}
+
+
 /** A flat pane, which shadow rays see through */
 fn seesThrough(s: u32) -> bool {
   return isPane(s) && objects[s].surface.y == 0.;
