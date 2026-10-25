@@ -134,6 +134,8 @@ struct Params {
   photonPower: f32,
   /** How many glass plates there are, which shadow rays see through (lightVisibility) */
   paneCount: u32,
+  /** How many of a path's scatters gather photons (Scene.gathers in scenes.js) */
+  gathers: u32,
 }
 
 const NONE = 0xffffffffu;

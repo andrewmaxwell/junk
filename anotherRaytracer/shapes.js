@@ -63,7 +63,8 @@ export const LIGHT = 3;
  * after going as far as its radius. Glass plates are thin panes, like a
  * window's: light goes straight through, tinted by `color`. `ior` is how much it bends light (its index of
  * refraction, for yellow): 1.33 for water, 1.5 for glass, 2.42 for diamond.
- * With a `roughness`, it's frosted. `haze` is how cloudy it is inside: the
+ * With a `roughness`, it's frosted, or a pane is wavy, like old glass, in
+ * ripples that slope by about that much. `haze` is how cloudy it is inside: the
  * chance per unit of distance that light scatters off something in it, so
  * beams of light show through it. Teapots, diamonds and fractals can't be
  * lights, and Mandelbulbs can't be glass.

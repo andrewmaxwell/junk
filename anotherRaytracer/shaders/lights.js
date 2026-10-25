@@ -277,7 +277,7 @@ fn lightVisibility(p: vec3f, ls: vec4f, light: u32) -> vec3f {
     let hit = intersect(o, ls.xyz);
     dist += hitDist;
     if (hit == i32(light)) { return through * exp(-fogDensities() * dist); }
-    if (hit < 0 || !isPane(u32(hit))) { break; }
+    if (hit < 0 || !seesThrough(u32(hit))) { break; }
     through *= (1. - paneReflectance(u32(hit), ls.xyz)) * objects[u32(hit)].colorMaterial.rgb;
     o += ls.xyz * hitDist;
   }

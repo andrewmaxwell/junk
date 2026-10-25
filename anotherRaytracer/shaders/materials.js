@@ -25,11 +25,18 @@ fn isSmooth(s: u32) -> bool {
 
 
 /**
- * Glass plates: thin panes, which light goes straight through, so shadow
- * rays see through them too (lightVisibility)
+ * Glass plates: thin panes. Light goes straight through flat ones, so
+ * shadow rays see through them too (lightVisibility). Rough ones are wavy,
+ * like old glass, and bend it (paneSlope).
  */
 fn isPane(s: u32) -> bool {
   return i32(objects[s].colorMaterial.w) == GLASS && isPlate(s);
+}
+
+
+/** A flat pane, which shadow rays see through */
+fn seesThrough(s: u32) -> bool {
+  return isPane(s) && objects[s].surface.y == 0.;
 }
 
 

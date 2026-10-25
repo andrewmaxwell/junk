@@ -438,12 +438,12 @@ export const isDone = () =>
 /**
  * What a frame shows, besides settings: the camera's position and unit
  * forward, right and up vectors, the image's height at distance 1, the lens
- * and focus, the bumps' scale, and the selected object's index on the GPU
- * (or -1)
+ * and focus, the bumps' scale, how many scatters gather photons, and the
+ * selected object's index on the GPU (or -1)
  * @typedef {{
  *   position: number[], forward: number[], right: number[], up: number[],
  *   zoom: number, lensRadius: number, focus: number, detailScale: number,
- *   selected: number,
+ *   gathers: number, selected: number,
  * }} FrameView
  */
 
@@ -499,6 +499,7 @@ const writeParams = (/** @type {FrameView} */ v) => {
   paramsF32[46] = PHOTON_RADIUS * v.detailScale * (frame + 1) ** (-1 / 6);
   paramsF32[47] = photonPower / PHOTONS;
   paramsU32[48] = paneCount;
+  paramsU32[49] = v.gathers;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 };
 

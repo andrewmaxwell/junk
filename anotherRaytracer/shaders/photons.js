@@ -6,6 +6,7 @@
 // fresh set into a hash grid: a linked list of photons per cell.
 
 import {common} from './common.js';
+import {detail} from './detail.js';
 import {fog} from './fog.js';
 import {geometry} from './geometry.js';
 import {lights} from './lights.js';
@@ -64,7 +65,7 @@ fn photonStart(i: u32) -> u32 {
 }
 `;
 
-export const photonShader = /* wgsl */ `${common}${random}${geometry}${lights}${fog}${materials}${photonGrid}
+export const photonShader = /* wgsl */ `${common}${random}${geometry}${lights}${fog}${materials}${detail}${photonGrid}
 const PI = 3.14159265359;
 
 /** The photon map; see photonGrid */
@@ -310,23 +311,36 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
       continue;
     }
 
-    // Straight through a pane, as in trace: shadow rays find this light, so
-    // it stores no photons
-    if (isPane(s) && rand() >= paneReflectance(s, d)) {
+    // Straight through a flat pane, as in trace: shadow rays find this
+    // light, so it stores no photons
+    if (seesThrough(s) && rand() >= paneReflectance(s, d)) {
       power *= objects[s].colorMaterial.rgb;
       o = p + d * EPSILON;
       continue;
     }
     // Through glass or off a mirror: other lights' photons store from here
     stores = true;
-    if (material == GLASS && objects[s].surface.y > 0.) {
+    if (material == GLASS && objects[s].surface.y > 0. && !isPlate(s)) {
       // Frosted, as in trace
       snl = sampleVisibleNormal(snl, -d, roughness(s), rand2());
+    }
+    // Wavy panes, as in trace
+    var slope = vec3f(0.);
+    if (isPane(s) && objects[s].surface.y > 0.) {
+      slope = paneSlope(s, p);
+      let tilted = normalize(sn - slope);
+      snl = select(-tilted, tilted, into);
     }
     var next = reflect(d, snl);
     var reflected = true;
     if (material == MIRROR) { power *= fresnelMetal(objects[s].colorMaterial.rgb, -dot(d, snl)); }
-    // Panes that get here reflect
+    // Flat panes that get here reflect. Wavy ones reflect or go through,
+    // bent by their ripples.
+    if (isPane(s) && objects[s].surface.y > 0. && rand() >= paneReflectance(s, d)) {
+      next = normalize(d - (objects[s].surface.x - 1.) * slope);
+      reflected = false;
+      power *= objects[s].colorMaterial.rgb;
+    }
     if (material == GLASS && !isPlate(s)) {
       var index = objects[s].surface.x;
       if (wavelength > 0.) { index = glassIndex(s, wavelength); }

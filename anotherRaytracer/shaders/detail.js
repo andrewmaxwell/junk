@@ -103,6 +103,21 @@ fn bumpNormal(n: vec3f, p: vec3f) -> vec3f {
 }
 
 
+/**
+ * How a wavy pane slopes here, along it: old glass is uneven in thickness,
+ * in ripples a few detailScales across, at two sizes. Its roughness is how
+ * steep they are. Light through it bends by (index - 1) times this, as
+ * through a thin prism, so the ripples focus it into bright lines.
+ */
+fn paneSlope(s: u32, p: vec3f) -> vec3f {
+  let n = objects[s].normalShape.xyz;
+  let size = 8. * params.detailScale;
+  let g = noise(p / size).yzw + 0.5 * noise(p / (0.5 * size) + 17.1).yzw;
+  let slope = objects[s].surface.y * g;
+  return slope - n * dot(slope, n);
+}
+
+
 /** How smudged glass or a mirror is here, from 0 to 1, fading in gently */
 fn smudge(p: vec3f) -> f32 {
   return params.detail * smoothstep(0.1, 0.5, fbm(p / (6. * params.detailScale), 4));

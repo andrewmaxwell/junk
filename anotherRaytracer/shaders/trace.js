@@ -108,9 +108,12 @@ fn blurArea(direction: vec3f, dist: f32) -> f32 {
  * one, and nl the real surface's, all facing the viewer. Not by the glossy
  * coat or metal: their sharp reflections would need far more photons, so
  * paths from the camera find that light, as for any other. Except lasers',
- * which paths from the camera never find.
+ * which paths from the camera never find. Lasers' photons are stored at
+ * every bounce, so they already carry all of a laser's light that reaches
+ * here, bounced or not: they're only gathered if lasers is true, at the
+ * first surface the camera sees, and later gathers would count them again.
  */
-fn gatherPhotons(s: u32, p: vec3f, ns: vec3f, n: vec3f, nl: vec3f, v: vec3f) -> vec3f {
+fn gatherPhotons(s: u32, p: vec3f, ns: vec3f, n: vec3f, nl: vec3f, v: vec3f, lasers: bool) -> vec3f {
   let r = params.photonRadius;
   var sum = vec3f(0.);
   // The eight cells within r of p
@@ -130,9 +133,10 @@ fn gatherPhotons(s: u32, p: vec3f, ns: vec3f, n: vec3f, nl: vec3f, v: vec3f) -> 
       if (dot(normal, nl) < 0.9) { continue; }
       let l = -bitcast<vec3f>(vec3u(photonMap[start + 8u], photonMap[start + 9u], photonMap[start + 10u]));
       if (dot(l, nl) <= 0.) { continue; }
+      let laser = photonMap[start + 7u] != 0u;
+      if (laser && !lasers) { continue; }
       var bsdf: vec3f;
       evalSurface(s, ns, n, v, l, &bsdf);
-      let laser = photonMap[start + 7u] != 0u;
       sum += select(evalPaint, bsdf, laser) * bitcast<vec3f>(vec3u(photonMap[start + 4u], photonMap[start + 5u], photonMap[start + 6u]));
     }
   }
@@ -144,9 +148,10 @@ fn gatherPhotons(s: u32, p: vec3f, ns: vec3f, n: vec3f, nl: vec3f, v: vec3f) -> 
  * viewer looking in direction d: each photon's power, scattered by the
  * phase function, spread over the ball of params.photonRadius around p, and
  * over the medium's densities, since denser fog stops more photons there for
- * the same light passing through (volumetric photon mapping)
+ * the same light passing through (volumetric photon mapping). Lasers' only
+ * if lasers is true, as in gatherPhotons.
  */
-fn gatherVolumePhotons(p: vec3f, d: vec3f, densities: vec3f) -> vec3f {
+fn gatherVolumePhotons(p: vec3f, d: vec3f, densities: vec3f, lasers: bool) -> vec3f {
   let r = params.photonRadius;
   var sum = vec3f(0.);
   let first = photonCell(p - r);
@@ -158,6 +163,7 @@ fn gatherVolumePhotons(p: vec3f, d: vec3f, densities: vec3f) -> vec3f {
       i = photonMap[start + 3u];
       // Surface photons have a normal; these don't
       if (photonMap[start + 12u] != 0u || photonMap[start + 13u] != 0u || photonMap[start + 14u] != 0u) { continue; }
+      if (!lasers && photonMap[start + 7u] != 0u) { continue; }
       let q = bitcast<vec3f>(vec3u(photonMap[start], photonMap[start + 1u], photonMap[start + 2u]));
       if (any(photonCell(q) != cell)) { continue; }
       let gap = q - p;
@@ -203,14 +209,16 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
   // Which glass ball the path is inside, or -1
   var inside = -1;
   // How light is split with the photons (shaders/photons.js), which carry
-  // light that reaches the first surface the camera sees through glass or
-  // off smooth mirrors, so it isn't counted twice. 0 until that surface, if
+  // light that reaches a surface or fog through glass or off smooth
+  // mirrors, so it isn't counted twice. The first params.gathers surfaces
+  // and points in fog the path scatters off gather them. 0 until the first, if
   // the camera reaches it through nothing but glass and mirrors; 1 after
-  // bouncing off it; 2 once glass or mirrors follow, when the photons
+  // bouncing off one; 2 once glass or mirrors follow, when the photons
   // brought the light that the surface's paint scatters, and the path only
-  // counts its gloss's share, glossyShare; 3 after anything else, when
-  // everything is the path's.
+  // counts its gloss's share, glossyShare; 3 after the last gather, or
+  // without photons, when everything is the path's.
   var causticState = 0u;
+  var gathers = 0u;
   var glossyShare = vec3f(1.);
 
   for (var depth = 0; depth < MAX_BOUNCES; depth++) {
@@ -343,7 +351,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // Indirect light: scatter in a random direction. Its density equals
       // the phase function, so the throughput is unchanged.
       // Caustics: light that reached here through glass or off mirrors
-      if (causticState == 0u && params.pairCount > 0u) {
+      if (params.pairCount > 0u && gathers < params.gathers) {
+        gathers++;
         // In glass, light is squeezed into a narrower cone of directions,
         // so it's index^2 times as bright there, as the photons find. Paths
         // from the camera skip that factor going in and coming back out,
@@ -354,7 +363,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
           if (wavelength > 0.) { index = glassIndex(u32(inside), wavelength); }
           squeeze = 1. / (index * index);
         }
-        let gathered = tint * through * squeeze * gatherVolumePhotons(p, d, densities);
+        var gathered = tint * through * squeeze * gatherVolumePhotons(p, d, densities, causticState == 0u);
+        gathered *= select(indirectScale(gathered), 1., seenByCamera);
         color += gathered;
         photonLight += gathered;
         causticState = 1u;
@@ -468,8 +478,10 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       let choices = rand2();
 
       // Caustics: light that reached here through glass or off mirrors
-      if (causticState == 0u && params.pairCount > 0u) {
-        let gathered = tint * through * gatherPhotons(s, p, ns, smoothNl, nl, -d);
+      if (params.pairCount > 0u && gathers < params.gathers) {
+        gathers++;
+        var gathered = tint * through * gatherPhotons(s, p, ns, smoothNl, nl, -d, causticState == 0u);
+        gathered *= select(indirectScale(gathered), 1., seenByCamera);
         color += gathered;
         photonLight += gathered;
         causticState = 1u;
@@ -517,8 +529,8 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       through *= bsdf * cosTheta / bouncePdf;
       seenByCamera = false;
       d = next;
-    } else if (isPane(s) && rand() >= paneReflectance(s, d)) {
-      // Straight through a pane, tinted by its color, just as shadow rays
+    } else if (seesThrough(s) && rand() >= paneReflectance(s, d)) {
+      // Straight through a flat pane, tinted by its color, just as shadow rays
       // go (lightVisibility), so it's not a caustic, nor a new bounce: a
       // light found beyond is weighed as if seen from the last one
       through *= sColor;
@@ -527,7 +539,6 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     } else {
       bouncePdf = 0.;
       if (causticState == 1u) { causticState = 2u; }
-      if (isPane(s)) { choiceProb *= paneReflectance(s, d); }
       // A smudge is a thin greasy film. Most light still reflects or
       // refracts sharply, but some scatters a little off course, so through
       // a smudge things look hazy, and bright ones have a soft glow. So
@@ -537,7 +548,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // The smudge is only worked out when the random number is low enough
       // that it could be, since smudge() <= detail.
       var sn = n;
-      let frosted = material == GLASS && shape.surface.y > 0.;
+      let frosted = material == GLASS && shape.surface.y > 0. && !isPlate(s);
       let hazy = rand();
       if (frosted) {
         // Frosted glass is rough like brushed metal: tiny facets tilted by
@@ -554,6 +565,11 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       } else if (depth < 3 && hazy < SMUDGE_HAZE * params.detail && hazy < SMUDGE_HAZE * smudge(p)) {
         sn = directionAround(n, pow(rand(), 1. / (SMUDGE_SHININESS + 1.)), 2. * PI * rand());
       }
+      var slope = vec3f(0.);
+      if (isPane(s) && shape.surface.y > 0.) {
+        slope = paneSlope(s, p);
+        sn = normalize(n - slope);
+      }
       let snl = select(-sn, sn, into);
       var next = reflect(d, sn);
       var reflected = true;
@@ -562,7 +578,19 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       // glassTransmittance.
       if (material == MIRROR) { through *= fresnelMetal(sColor, -dot(d, snl)); }
 
-      // Panes that get here reflect, off frosting or smudges too
+      // Flat panes that get here reflect. Wavy ones reflect off their
+      // ripples, or go through, bent by them.
+      if (isPane(s)) {
+        let reflectance = paneReflectance(s, d);
+        if (shape.surface.y == 0. || rand() < reflectance) {
+          choiceProb *= reflectance;
+        } else {
+          next = normalize(d - (shape.surface.x - 1.) * slope);
+          reflected = false;
+          choiceProb *= 1. - reflectance;
+          through *= sColor;
+        }
+      }
       if (material == GLASS && !isPlate(s)) {
         var index = shape.surface.x;
         if (wavelength > 0.) { index = glassIndex(s, wavelength); }

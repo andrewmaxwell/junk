@@ -93,6 +93,7 @@ export const frameView = () => ({
   lensRadius: settings.dof * sceneSize,
   focus: camera.focus,
   detailScale,
+  gathers: scene.gathers ?? 1,
   selected: selectedOnGpu(),
 });
 

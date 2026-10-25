@@ -26,6 +26,7 @@ import {cross, normalize} from './vec.js';
  *   sky?: {sun: number[], haze?: number},
  *   lasers?: import('./photons.js').Laser[],
  *   size?: number,
+ *   gathers?: number,
  *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number, contrast?: number, detail?: number, noise?: number},
  * }} Scene
  * The camera orbits `target`, and starts focused on it, or `focus` away if
@@ -36,7 +37,8 @@ import {cross, normalize} from './vec.js';
  * `sky` colors sky domes: as the real sky looks with the sun in direction
  * `sun`, and `haze` times as hazy as usual (see sky.js). `size` scales the
  * lens and surface detail; it defaults to the camera's distance from its
- * target.
+ * target. `gathers` is how many of a path's scatters gather photons, 1 by
+ * default: more lights a room by the light caustics bounce off, at a cost.
  */
 
 /** @type {() => Scene} */
@@ -790,7 +792,8 @@ function windowScene() {
       half,
       half,
       color,
-      {material: GLASS},
+      // Wavy, like old glass, so it ripples the light it lets through
+      {material: GLASS, roughness: 0.04},
     );
   };
 
@@ -973,7 +976,15 @@ function windowScene() {
       zoom: 0.8,
       focus: 75.79,
     },
-    defaults: {fog: 0.01, fogForward: 0.5, dof: 0.004},
+    // Big for the view, which widens photons' gathering radius, with the
+    // ripples, bumps and lens: the light through the wavy glass comes from
+    // photons, and the haze is thin, so with the usual radius a gather in a
+    // beam rarely found any
+    size: 250,
+    // The room is lit by light bounced off the colored patches and the
+    // beams, which come from photons, and in the haze it bounces many times
+    gathers: 8,
+    defaults: {fog: 0.01, fogForward: 0.5, dof: 0.0015},
   };
 }
 
