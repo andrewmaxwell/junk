@@ -19,7 +19,7 @@ Scenes:
 - **sunset**: a low sun, a physically based sky, and hazy air glowing around the sun
 - **neon**: a dark gallery lit by colored tubes, after Dan Flavin
 - **rgb**: red, green and blue lights casting cyan, magenta and yellow shadows
-- **window**: a dusty attic lit only by late sun through a round stained glass window, ruby, amber, green and cobalt in four quarters, which casts four colored beams through the haze onto the floorboards, with motes of dust glowing in them
+- **window**: a dusty attic lit only by late sun through a round stained glass window, ruby, amber, green and cobalt in four quarters, which casts four colored beams through the haze onto the floorboards
 
 **Editing**: the Objects folder changes whatever is selected (outlined in gold): its material, color, gloss, roughness, brightness, size, a teapot's, diamond's or fractal's turn, a sponge's levels of holes or a Mandelbulb's power, and glass's frost, index of refraction and haze. Drag a selected ball or teapot to move it. **add a ball**, **add a teapot** and **add a fractal** drop one on the floor in view, clear of what's there; Backspace deletes; **undo all edits** restores the scene. Walls and floors can be lights too: make Cornell's ceiling one for the classic soft-shadowed box.
 

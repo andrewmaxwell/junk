@@ -750,12 +750,12 @@ const box = (center, [hx, hy, hz], turn, color, options = {}) => {
  * An old attic room lit only by late afternoon sun through a round window
  * of stained glass, ruby, amber, cobalt and green in four quarters. The
  * dusty air shows four colored beams, which lay the window's colors on the
- * floorboards, with a glass paperweight focusing them, and motes of dust
- * drifting in the light. A trunk with a teapot, and a stack of books.
+ * floorboards, with a glass paperweight focusing them. A trunk with a
+ * teapot, and a stack of books.
  * @type {() => Scene} */
 function windowScene() {
   // The room spans x -50 to 50, y 0 to 70, and z from -60 forward. The
-  // front is open. The opening is in the back wall.
+  // front is open. The window is in the back wall.
   const big = 1000;
   const wall = {oneSided: true};
   const plaster = [0.55, 0.48, 0.4];
@@ -787,34 +787,6 @@ function windowScene() {
       {material: GLASS},
     );
   };
-  // Motes of dust in the beams, scattered by a fixed pseudorandom sequence
-  // so the scene looks the same each time. Each is a speck of dense haze,
-  // which glows in the light as it scatters it on toward the camera, as
-  // dust does; paint, lit from behind, would look dark.
-  let seed = 7;
-  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const across = normalize(cross(light, [0, 1, 0]));
-  const up = cross(across, light);
-  /** @type {Shape[]} */
-  const motes = [];
-  for (let i = 0; i < 80; i++) {
-    // Evenly over the beams' cross section, where they're lit: out of the
-    // light they'd only shade the beams behind them
-    const t = 4 + random() * 64;
-    const r = radius * Math.sqrt(random());
-    const angle = 2 * Math.PI * random();
-    const center = opening.map(
-      (w, k) =>
-        w +
-        light[k] * t +
-        (across[k] * Math.cos(angle) + up[k] * Math.sin(angle)) * r,
-    );
-    motes.push({
-      ...sphere(0.12 + 0.08 * random(), center, [1, 1, 1], GLASS),
-      ior: 1,
-      haze: 6,
-    });
-  }
   return {
     objects: [
       // The floor, ceiling and side walls stop at the back wall, so they
@@ -847,10 +819,10 @@ function windowScene() {
       plate(opening, [0, 0, 1], [1, 0, 0], big, big, plaster, {hole: radius}), // back wall
       ...box(opening, [0.7, radius + 0.3, 1], 0, wood), // mullions
       ...box(opening, [radius + 0.3, 0.7, 1], 0, wood),
-      pane(-1, 1, [0.85, 0.12, 0.1]), // ruby
-      pane(1, 1, [0.95, 0.62, 0.16]), // amber
-      pane(-1, -1, [0.15, 0.75, 0.25]), // green
-      pane(1, -1, [0.05, 0.15, 1]), // cobalt
+      pane(-1, 1, [0.88, 0.32, 0.26]), // ruby
+      pane(1, 1, [0.95, 0.74, 0.38]), // amber
+      pane(-1, -1, [0.36, 0.78, 0.42]), // green
+      pane(1, -1, [0.28, 0.4, 0.95]), // cobalt
       // Small and far, so the beams' edges are nearly sharp
       sphere(1.25, sun, [8e6, 6.2e6, 4e6], LIGHT),
       // A dark backdrop outside, so the hazy air between, which the sun
@@ -873,7 +845,6 @@ function windowScene() {
       ...box([24.5, 6.6, 9.5], [5.2, 1.1, 4], -25, [0.45, 0.38, 0.26]),
       sphere(3, [24, 10.7, 10], [0.95, 0.72, 0.4], MIRROR, 0, 0.12),
       sphere(4, [8, 4, -6], [0.97, 0.97, 0.97], GLASS), // paperweight
-      ...motes,
     ],
     camera: {
       position: [-34, 24, 78],
