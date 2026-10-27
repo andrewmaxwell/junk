@@ -37,7 +37,7 @@ node health/query.js "select day, energy, headache, cpap_mask_off, ahi, tags fro
 - **Times** are local wall clock time everywhere, as plain timestamps.
 - **The day rule:** a night belongs to the day you wake up on (`night_day(ts)` shifts 12 hours forward). Journal entries describe the day they're written, and ones written after midnight count toward the day before.
 - **The CPAP clock** doesn't follow daylight saving time and runs ~6 minutes fast. `ingest/cpap.js` corrects for it, using a value measured against the Fitbit. If the machine's clock gets set, that correction needs a date cutoff.
-- **Weather follows me.** Days spent mostly 50+ km from home use weather from where I was, in that place's local time. `slept_km_from_home` and `tz_shift_h` come from where Timeline says I was at 3am.
+- **Weather follows me.** Days spent mostly 50+ km from home use weather from where I was, in that place's local time. `slept_km_from_home` and `tz_shift_h` come from where Timeline says I was at 3am (or, when it has no visit then, the last location before).
 - **Steps** come from both phone and watch, so the daily total is whichever device counted more.
 
 ## Google setup

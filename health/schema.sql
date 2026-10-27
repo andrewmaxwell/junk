@@ -515,18 +515,33 @@ aq AS (
   SELECT ts::DATE AS day, round(avg(pm2_5), 1) AS pm25, max(us_aqi) AS aqi_max, round(max(ozone)) AS ozone_max
   FROM outdoor_air GROUP BY ALL
 ),
--- Where Andrew slept: the place he was at 3am, by the night rule. Null when
--- Timeline has no visit then (gaps, or before 2024-08).
-slept AS (
-  SELECT d.day,
-    p.km_from_home AS slept_km_from_home,
+-- Where Andrew slept: the place he was at 3am, by the night rule. Some
+-- nights Timeline has no visit covering 3am (22 of ~800, often camping or
+-- retreats). Those use the last location point in the 12 hours before, and
+-- the time zone of the last visit in the 24 hours before.
+-- Null before 2024-08.
+slept_visit AS (
+  SELECT d.day, p."end" >= d.day + TIME '03:00' AS covers, p.km_from_home,
     -- Hours ahead of home time (America/Chicago) at 3am.
     round(date_diff('minute',
       ((d.day + TIME '03:00' - to_minutes(p.utc_offset_min))::VARCHAR || '+00')::TIMESTAMPTZ AT TIME ZONE 'America/Chicago',
       d.day + TIME '03:00') / 60, 1) AS tz_shift_h
   FROM spine d
-  JOIN places p ON d.day + TIME '03:00' BETWEEN p.start AND p."end"
-  QUALIFY row_number() OVER (PARTITION BY d.day ORDER BY p.start DESC) = 1
+  JOIN places p ON p.start <= d.day + TIME '03:00'
+    AND p."end" >= d.day + TIME '03:00' - INTERVAL 24 HOUR
+  QUALIFY row_number() OVER (PARTITION BY d.day ORDER BY covers DESC, p.start DESC) = 1
+),
+slept_point AS (
+  SELECT d.day, l.km_from_home
+  FROM spine d
+  JOIN location_points l ON l.ts BETWEEN d.day + TIME '03:00' - INTERVAL 12 HOUR AND d.day + TIME '03:00'
+  QUALIFY row_number() OVER (PARTITION BY d.day ORDER BY l.ts DESC) = 1
+),
+slept AS (
+  SELECT day,
+    CASE WHEN v.covers THEN v.km_from_home ELSE pt.km_from_home END AS slept_km_from_home,
+    v.tz_shift_h
+  FROM slept_visit v FULL JOIN slept_point pt USING (day)
 ),
 -- Daytime whereabouts (calendar day). Days with no Timeline data are null.
 outings AS (
@@ -561,7 +576,11 @@ SELECT
   dayname(spine.day) AS weekday,
   j.energy, j.mood, j.anxiety, j.headache, j.exercise, j.notes,
   coalesce(cal.headache_events, 0) AS headache_events,
-  cal.headache_first_time, coalesce(cal.triptan, false) AS triptan, cal.headache_note,
+  cal.headache_first_time,
+  -- Calendar titles name the triptan inconsistently; the journal often does.
+  coalesce(cal.triptan, false) OR regexp_matches(coalesce(j.notes, ''), '(?i)triptan')
+    AS triptan,
+  cal.headache_note,
   coalesce(tag_days.tags, []) AS tags,
   cpap.* EXCLUDE (day), cpap_ev.cpap_arousals,
   cs.bedtime, cs.final_wake, cs.awake_mid_night_min, cs.insomnia_wake,
