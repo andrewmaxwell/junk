@@ -47,7 +47,15 @@ if (!adapter) {
     'Try a recent Chrome, Edge or Safari. Above, a picture of what it draws.';
   throw new Error('No WebGPU');
 }
+/**
+ * With ?timing in the URL, the GPU times each pass, and the stats show
+ * them, for finding what's slow
+ */
+const timing =
+  new URLSearchParams(location.search).has('timing') &&
+  adapter.features.has('timestamp-query');
 const device = await adapter.requestDevice({
+  requiredFeatures: timing ? ['timestamp-query'] : [],
   // The sums buffer is 16 bytes per pixel, which can pass the default limit
   // on big screens
   requiredLimits: {
@@ -209,6 +217,42 @@ const activeTilesRead = device.createBuffer({
   usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
 });
 let readingActiveTiles = false;
+
+/** The passes ?timing times, in order */
+// Not the display: on Apple GPUs a render pass's time includes waiting for
+// the screen, tens of ms
+const timedPasses = ['photons', 'trace', 'denoise', 'glow'];
+const querySet = timing
+  ? device.createQuerySet({type: 'timestamp', count: timedPasses.length * 2})
+  : null;
+const queryBytes = timedPasses.length * 2 * 8;
+const queryResolve = device.createBuffer({
+  size: queryBytes,
+  usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+});
+const queryRead = device.createBuffer({
+  size: queryBytes,
+  usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+});
+let readingTimes = false;
+/**
+ * With ?timing, each pass's time in ms, averaged over recent frames it ran
+ * in; empty otherwise
+ * @type {Record<string, number>}
+ */
+export const passTimes = {};
+/** For a pass's descriptor: has the GPU time it, with ?timing */
+const timed = (/** @type {string} */ name) => {
+  if (!querySet) return {};
+  const i = timedPasses.indexOf(name) * 2;
+  return {
+    timestampWrites: {
+      querySet,
+      beginningOfPassWriteIndex: i,
+      endOfPassWriteIndex: i + 1,
+    },
+  };
+};
 
 /** @type {Record<string, GPUBuffer>} */
 let pixelBuffers = {};
@@ -567,14 +611,16 @@ const render = (/** @type {FrameView} */ v, trace = true) => {
     encoder.clearBuffer(activeTilesBuffer);
     const photons = settings.photons && pairCount > 0;
     if (photons) encoder.clearBuffer(photonBuffer, 0, PHOTON_CELLS * 4);
-    const pass = encoder.beginComputePass();
     // Photons first, for the trace to gather
     if (photons) {
+      const pass = encoder.beginComputePass(timed('photons'));
       pass.setPipeline(photonPipeline);
       pass.setBindGroup(0, photonBindGroup);
       pass.dispatchWorkgroups(PHOTONS / 64);
+      pass.end();
     }
     // Pick the tiles that still need samples, then sample them
+    const pass = encoder.beginComputePass(timed('trace'));
     pass.setPipeline(tilePipeline);
     pass.setBindGroup(0, tileBindGroup);
     pass.dispatchWorkgroups(...groups);
@@ -611,7 +657,7 @@ const render = (/** @type {FrameView} */ v, trace = true) => {
     device.queue.writeBuffer(temporalBuffer, 0, temporalData);
     historyView = v;
 
-    const pass = encoder.beginComputePass();
+    const pass = encoder.beginComputePass(timed('denoise'));
     for (const [i, group] of denoiseBindGroups.entries()) {
       pass.setPipeline(i ? blurPipeline : preparePipeline);
       pass.setBindGroup(0, group);
@@ -632,7 +678,7 @@ const render = (/** @type {FrameView} */ v, trace = true) => {
   }
 
   if (settings.glow > 0) {
-    const pass = encoder.beginComputePass();
+    const pass = encoder.beginComputePass(timed('glow'));
     for (const [i, pipeline] of glowPipelines.entries()) {
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, glowBindGroups[i]);
@@ -654,7 +700,25 @@ const render = (/** @type {FrameView} */ v, trace = true) => {
   display.setBindGroup(0, displayBindGroup);
   display.draw(3);
   display.end();
+  const readTimes = querySet && !readingTimes;
+  if (readTimes) {
+    encoder.resolveQuerySet(querySet, 0, querySet.count, queryResolve, 0);
+    encoder.copyBufferToBuffer(queryResolve, 0, queryRead, 0, queryBytes);
+  }
   device.queue.submit([encoder.finish()]);
+  if (readTimes) {
+    readingTimes = true;
+    queryRead.mapAsync(GPUMapMode.READ).then(() => {
+      const t = new BigInt64Array(queryRead.getMappedRange());
+      for (const [i, name] of timedPasses.entries()) {
+        const ms = Number(t[2 * i + 1] - t[2 * i]) / 1e6;
+        // Passes that didn't run this frame leave both at 0
+        if (ms > 0) passTimes[name] = 0.9 * (passTimes[name] ?? ms) + 0.1 * ms;
+      }
+      queryRead.unmap();
+      readingTimes = false;
+    });
+  }
   if (readActiveTiles) {
     readingActiveTiles = true;
     const restartsThen = restarts;

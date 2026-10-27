@@ -33,6 +33,9 @@ const loop = () => {
     `${status} · ${samplesPerPixel} spp · ${rate.toFixed(0)} spp/s · ` +
     `${activeTiles < 0 ? '–' : Math.round((100 * activeTiles) / tileCount)}% refining · ` +
     `${width}×${height}${settings.denoise ? ' · denoised' : ''}\n` +
+    Object.entries(renderer.passTimes)
+      .map(([pass, ms]) => `${pass} ${ms.toFixed(1)} ms · `)
+      .join('') +
     hints;
   requestAnimationFrame(loop);
 };
