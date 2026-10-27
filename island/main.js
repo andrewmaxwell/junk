@@ -1,6 +1,6 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {makeRenderer} from './makeRenderer.js';
-import {defaults} from './sim.js';
+import {defaults, biome} from './sim.js';
 
 const lowPower = matchMedia('(pointer: coarse)').matches;
 const N = lowPower ? 256 : 384;
@@ -27,6 +27,7 @@ const settings = {
   tool: 'Look',
   rain: +(url.get('rain') ?? defaults.rain),
   wind: +(url.get('wind') ?? defaults.wind),
+  temperature: +(url.get('temp') ?? defaults.temperature),
   upliftRate: +(url.get('uplift') ?? defaults.upliftRate),
   seaLevel: +(url.get('sea') ?? defaults.seaLevel),
   speed: 100, // thousand years per second
@@ -41,6 +42,8 @@ function saveUrl() {
   const q = new URLSearchParams({seed: String(settings.seed)});
   if (settings.rain !== defaults.rain) q.set('rain', String(settings.rain));
   if (settings.wind !== defaults.wind) q.set('wind', String(settings.wind));
+  if (settings.temperature !== defaults.temperature)
+    q.set('temp', String(settings.temperature));
   if (settings.upliftRate !== defaults.upliftRate)
     q.set('uplift', String(settings.upliftRate));
   if (settings.seaLevel !== defaults.seaLevel)
@@ -68,6 +71,7 @@ function sendParams() {
     params: {
       rain: settings.rain,
       wind: settings.wind,
+      temperature: settings.temperature,
       upliftRate: settings.upliftRate,
       seaLevel: settings.seaLevel,
     },
@@ -94,7 +98,10 @@ let frame = null;
 let shown = null;
 worker.onmessage = ({data}) => {
   if (data.type !== 'frame') return;
-  if (frame) worker.postMessage({type: 'frame', frame}, transfers(frame));
+  if (frame) {
+    frame.rivers = null; // the worker builds new ones
+    worker.postMessage({type: 'frame', frame}, transfers(frame));
+  }
   frame = data.frame;
 };
 const transfers = (f) =>
@@ -118,6 +125,10 @@ gui
   .onChange(setTool);
 gui.add(settings, 'rain', 0, 4, 0.1).name('Rain (m/yr)').onChange(sendParams);
 gui.add(settings, 'wind', 0, 355, 5).name('Wind from (°)').onChange(sendParams);
+gui
+  .add(settings, 'temperature', -10, 35, 1)
+  .name('Sea-level temp (°C)')
+  .onChange(sendParams);
 gui
   .add(settings, 'upliftRate', 0, 5, 0.1)
   .name('Uplift (mm/yr)')
@@ -199,6 +210,8 @@ const fmt = (v, digits = 0) =>
     minimumFractionDigits: digits,
   });
 
+const capitalize = (text) => text[0].toUpperCase() + text.slice(1);
+
 function formatYears(years) {
   if (years < 1e6) return `${fmt(Math.round(years / 1000) * 1000)} years`;
   return `${fmt(years / 1e6, 2)} million years`;
@@ -231,13 +244,15 @@ function showProbe() {
       ? [`${fmt(settings.seaLevel - h)} m under the sea`]
       : [
           `${fmt(h)} m above sea level${lake > 1 ? `, under ${fmt(lake)} m of lake` : ''}`,
-          `${fmt(frame.rain[probe], 1)} m of rain a year`,
+          `${capitalize(biome(frame.rain[probe], settings.temperature - 0.0065 * (h - settings.seaLevel)))}, ${fmt(frame.rain[probe], 1)} m of rain a year`,
           area < 1e6
             ? `${fmt(area / 1e4, 1)} hectares drain through here`
             : `${fmt(area / 1e6, 1)} km² drains through here`,
-          flow < 0.1
-            ? `about ${fmt(flow * 1000, flow < 0.01 ? 2 : 0)} liters/s of water flows past`
-            : `about ${fmt(flow, flow < 10 ? 1 : 0)} m³/s of water flows past`,
+          flow < 1e-5
+            ? 'almost no water flows past'
+            : flow < 0.1
+              ? `about ${fmt(flow * 1000, flow < 0.01 ? 2 : 0)} liters/s of water flows past`
+              : `about ${fmt(flow, flow < 10 ? 1 : 0)} m³/s of water flows past`,
           `${fmt(length / 1000, 1)} km to the sea`,
         ];
   infoEl.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');

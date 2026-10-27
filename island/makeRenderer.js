@@ -23,7 +23,9 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
 
   const size = (N - 1) * cellSize;
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, 1, 10, size * 20);
+  // A near plane well out from the camera keeps enough depth precision to tell the sea surface
+  // from sea floor a meter below it 15 km away; at 10 m the shallows flickered.
+  const camera = new THREE.PerspectiveCamera(45, 1, 100, size * 20);
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.47;
@@ -148,6 +150,18 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   sea.renderOrder = 1;
   scene.add(sea);
 
+  // rivers, as ribbons the worker builds fresh each frame
+  const riverMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setRGB(0.12, 0.3, 0.4, THREE.SRGBColorSpace),
+    roughness: 0.15,
+    envMapIntensity: 0.6,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    side: THREE.DoubleSide,
+  });
+  let rivers = null;
+
   // the deep ocean floor beyond the edge of the grid
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(size * 30, size * 30).rotateX(-Math.PI / 2),
@@ -243,6 +257,28 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     water.geometry.attributes.color.array.set(frame.waterColor);
     water.geometry.attributes.color.needsUpdate = true;
     terrain.geometry.computeBoundingSphere();
+    if (rivers) {
+      scene.remove(rivers);
+      rivers.geometry.dispose();
+    }
+    const riverGeometry = new THREE.BufferGeometry();
+    riverGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(frame.rivers, 3),
+    );
+    riverGeometry.setAttribute(
+      'normal',
+      new THREE.BufferAttribute(
+        new Float32Array(frame.rivers.length)
+          .fill(0)
+          .map((_, k) => +(k % 3 === 1)),
+        3,
+      ),
+    );
+    rivers = new THREE.Mesh(riverGeometry, riverMaterial);
+    rivers.receiveShadow = true;
+    rivers.frustumCulled = false;
+    scene.add(rivers);
     sea.position.y = seaLevel;
   }
 

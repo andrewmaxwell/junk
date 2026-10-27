@@ -1,5 +1,5 @@
 // Runs the landscape model off the main thread and turns it into ready-to-draw vertex data.
-import {makeSim, defaults} from './sim.js';
+import {makeSim, defaults, potentialEvaporation, smooth} from './sim.js';
 
 const STEP_YEARS = 2000;
 const BUDGET_MS = 30; // longest stretch of stepping before checking for messages
@@ -11,10 +11,12 @@ let speed = 0; // years per real second
 let yearsDue = 0;
 let lastTick = performance.now();
 let dirty = true;
-/** @type {Float32Array} */
-let river;
-/** @type {Float32Array} */
-let wide;
+/** @type {Uint8Array} */
+let isRiver;
+/** @type {Uint8Array} */
+let visited;
+/** @type {Uint8Array} */
+let hasRiverDonor;
 /** @type {any[]} */
 const freeFrames = [];
 
@@ -24,21 +26,17 @@ const sand = lin([0.86, 0.79, 0.6]);
 const wetSand = lin([0.62, 0.6, 0.47]);
 const shelf = lin([0.35, 0.55, 0.5]);
 const deep = lin([0.05, 0.12, 0.17]);
-const lowland = lin([0.24, 0.45, 0.17]);
-const forest = lin([0.13, 0.3, 0.12]);
-const upland = lin([0.42, 0.45, 0.26]);
-const dry = lin([0.6, 0.53, 0.33]); // grass and scrub where little rain falls
-const alpine = lin([0.52, 0.49, 0.41]);
+const rainforest = lin([0.1, 0.3, 0.09]);
+const forest = lin([0.2, 0.36, 0.14]);
+const conifer = lin([0.12, 0.24, 0.15]);
+const grass = lin([0.52, 0.55, 0.27]);
+const scrub = lin([0.62, 0.55, 0.34]);
+const desert = lin([0.84, 0.69, 0.47]);
+const tundra = lin([0.5, 0.48, 0.38]);
 const rock = lin([0.42, 0.42, 0.36]);
 const snow = lin([0.93, 0.95, 0.98]);
 const lakeColor = lin([0.06, 0.2, 0.26]);
 
-const riverColor = lin([0.16, 0.33, 0.42]);
-const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
-const smooth = (a, b, t) => {
-  const x = clamp01((t - a) / (b - a));
-  return x * x * (3 - 2 * x);
-};
 const mix = (out, a, b, t) => {
   out[0] = a[0] + (b[0] - a[0]) * t;
   out[1] = a[1] + (b[1] - a[1]) * t;
@@ -66,18 +64,9 @@ function makeFrame() {
 /** Fill a frame from the current state. Assumes route() has run since the last change. */
 function fillFrame(f) {
   const {N, cellSize, height, water, wet, area, rain, discharge} = sim;
-  const num = N * N;
   const {seaLevel} = params;
   const c = [0, 0, 0];
   let peak = -Infinity;
-
-  // How river-like each point is, from its discharge. Big rivers spread into the points beside
-  // them, since a single grid cell is narrower than a pixel from most views.
-  for (let i = 0; i < num; i++) {
-    const q = Math.log10(discharge[i]);
-    river[i] = wet[i] || height[i] < seaLevel ? 0 : smooth(5.5, 6.3, q);
-    wide[i] = river[i] * smooth(6.6, 7.6, q);
-  }
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       const i = z * N + x;
@@ -105,21 +94,19 @@ function fillFrame(f) {
         mix(c, wetSand, shelf, smooth(0, 15, -above));
         blend(c, deep, smooth(10, 250, -above));
       } else {
-        mix(c, lowland, forest, smooth(20, 200, above) * 0.8);
-        blend(c, dry, smooth(1.1, 0.35, rain[i]) * 0.85);
-        blend(c, upland, smooth(300, 900, above));
-        blend(c, alpine, smooth(900, 1500, above));
+        // the same bands as biome() in sim.js, blended so they shade into each other
+        const t = params.temperature - 0.0065 * above;
+        const potential = potentialEvaporation(t);
+        const aridity = potential > 0 ? rain[i] / potential : 10;
+        mix(c, conifer, forest, smooth(4, 10, t));
+        blend(c, rainforest, smooth(15, 21, t));
+        blend(c, grass, smooth(0.9, 0.7, aridity));
+        blend(c, scrub, smooth(0.55, 0.4, aridity));
+        blend(c, desert, smooth(0.3, 0.15, aridity));
+        blend(c, tundra, smooth(5, 2, t));
         blend(c, sand, smooth(5, 1, above) * smooth(0.4, 0.15, steep));
-        blend(c, rock, smooth(0.9, 1.6, steep) * 0.85); // wet islands stay green on steep slopes
-        blend(c, snow, smooth(1700, 2000, above) * smooth(1.2, 0.6, steep));
-        const t = Math.max(
-          river[i],
-          wide[x > 0 ? i - 1 : i],
-          wide[x < N - 1 ? i + 1 : i],
-          wide[z > 0 ? i - N : i],
-          wide[z < N - 1 ? i + N : i],
-        );
-        blend(c, riverColor, t * 0.9);
+        blend(c, rock, smooth(0.9, 1.6, steep) * 0.85);
+        blend(c, snow, smooth(-1, -3, t) * smooth(1.2, 0.6, steep));
       }
       f.color[i * 3] = c[0] * 255;
       f.color[i * 3 + 1] = c[1] * 255;
@@ -140,12 +127,100 @@ function fillFrame(f) {
   f.peak = peak;
 }
 
+const RIVER_MIN_FLOW = 0.02 * 3.156e7; // m³/yr, about 20 liters a second
+
+/**
+ * Smooth ribbons along every river, as triangles in world coordinates: trace each river from
+ * its head down to where it joins a bigger one or reaches still water, round off the grid's
+ * zigzags (Chaikin's corner cutting), and give it a width that grows with its flow.
+ */
+function buildRivers() {
+  const {N, cellSize, height, water, wet, discharge, receiver} = sim;
+  const num = N * N;
+  const {seaLevel} = params;
+  hasRiverDonor.fill(0);
+  visited.fill(0);
+  for (let i = 0; i < num; i++) {
+    isRiver[i] = +(
+      !wet[i] &&
+      height[i] >= seaLevel &&
+      discharge[i] >= RIVER_MIN_FLOW &&
+      receiver[i] !== i
+    );
+  }
+  for (let i = 0; i < num; i++) if (isRiver[i]) hasRiverDonor[receiver[i]] = 1;
+
+  // water surface or ground, bilinear, at fractional grid coordinates
+  const surface = (gx, gz) => {
+    const x = Math.min(Math.max(Math.floor(gx), 0), N - 2);
+    const z = Math.min(Math.max(Math.floor(gz), 0), N - 2);
+    const fx = Math.min(1, Math.max(0, gx - x));
+    const fz = Math.min(1, Math.max(0, gz - z));
+    const at = (i) => Math.max(height[i], wet[i] ? water[i] : -Infinity);
+    const i = z * N + x;
+    return (
+      (at(i) * (1 - fx) + at(i + 1) * fx) * (1 - fz) +
+      (at(i + N) * (1 - fx) + at(i + N + 1) * fx) * fz
+    );
+  };
+  const world = (g) => (g - (N - 1) / 2) * cellSize;
+
+  const out = [];
+  for (let head = 0; head < num; head++) {
+    if (!isRiver[head] || hasRiverDonor[head]) continue;
+    // [x, z, flow] along the river
+    let points = [];
+    let i = head;
+    for (;;) {
+      points.push([i % N, Math.floor(i / N), discharge[i]]);
+      if (!isRiver[i] || visited[i]) break;
+      visited[i] = 1;
+      i = receiver[i];
+    }
+    if (points.length < 2) continue;
+    for (let pass = 0; pass < 2; pass++) {
+      const next = [points[0]];
+      for (let k = 0; k < points.length - 1; k++) {
+        const [a, b] = [points[k], points[k + 1]];
+        const lerp = (t) => a.map((v, j) => v + (b[j] - v) * t);
+        next.push(lerp(0.25), lerp(0.75));
+      }
+      next.push(points[points.length - 1]);
+      points = next;
+    }
+    // two edge points per center point, then two triangles per stretch
+    const edges = points.map(([x, z, q], k) => {
+      const [px, pz] = points[Math.max(0, k - 1)];
+      const [nx, nz] = points[Math.min(points.length - 1, k + 1)];
+      const len = Math.hypot(nx - px, nz - pz) || 1;
+      // Width in meters is 12 + 70 √Q, Q in m³/s: several times wider than real rivers, so
+      // even creeks show from across the island.
+      const half = (6 + 35 * Math.sqrt(q / 3.156e7)) / cellSize;
+      const [ox, oz] = [(-(nz - pz) / len) * half, ((nx - px) / len) * half];
+      // level across, at the height of the middle, so it lies in the valley floor
+      const y = surface(x, z) + 1.5;
+      return [
+        [x + ox, z + oz],
+        [x - ox, z - oz],
+      ].map(([gx, gz]) => [world(gx), y, world(gz)]);
+    });
+    for (let k = 0; k < edges.length - 1; k++) {
+      const [a, b] = edges[k];
+      const [c, d] = edges[k + 1];
+      out.push(...a, ...c, ...b, ...b, ...c, ...d);
+    }
+  }
+  return new Float32Array(out);
+}
+
 function send() {
   if (!dirty || !freeFrames.length) return;
   const f = freeFrames.pop();
   fillFrame(f);
   dirty = false;
+  f.rivers = buildRivers();
   postMessage({type: 'frame', frame: f}, [
+    f.rivers.buffer,
     f.height.buffer,
     f.normal.buffer,
     f.color.buffer,
@@ -181,8 +256,9 @@ onmessage = ({data}) => {
     sim = makeSim({N: data.N, cellSize: data.cellSize, seed: data.seed});
     freeFrames.length = 0;
     freeFrames.push(makeFrame(), makeFrame());
-    river = new Float32Array(data.N * data.N);
-    wide = new Float32Array(data.N * data.N);
+    isRiver = new Uint8Array(data.N * data.N);
+    visited = new Uint8Array(data.N * data.N);
+    hasRiverDonor = new Uint8Array(data.N * data.N);
     sim.route(params);
     dirty = true;
     yearsDue = 0;
