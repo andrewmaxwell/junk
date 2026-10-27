@@ -55,7 +55,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     const vertical = THREE.MathUtils.degToRad(camera.fov / 2);
     const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
     const distance =
-      (focus.radius * 0.8) / Math.tan(Math.min(vertical, horizontal));
+      (focus.radius * 0.95) / Math.tan(Math.min(vertical, horizontal));
     controls.target.set(focus.x, 0, focus.z);
     camera.position
       .copy(viewDirection)
@@ -83,7 +83,9 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   const skyScene = new THREE.Scene();
   skyScene.add(sky.clone());
   scene.environment = pmrem.fromScene(skyScene).texture;
-  // haze that turns distant land blue-grey, the main cue for how big the island is
+  // haze that turns distant land blue-grey, the main cue for how big the island is; it's set
+  // each frame from how far away the camera is, so a phone held upright, which has to stand
+  // well back to fit the island in, doesn't see it through a fog
   scene.fog = new THREE.FogExp2(0xb7c9d8, 0.55 / size);
 
   const light = new THREE.DirectionalLight(0xffe4c4, 3.2);
@@ -381,6 +383,11 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
       if (!touched) frameIsland();
     }
     controls.update(Math.min(clock.getDelta(), 0.1));
+    // about 12% haze at the point the camera looks at, more beyond
+    scene.fog.density = Math.min(
+      0.55 / size,
+      0.36 / camera.position.distanceTo(controls.target),
+    );
     uniforms.time.value = clock.elapsedTime;
     renderer.render(scene, camera);
   }
