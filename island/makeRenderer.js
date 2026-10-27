@@ -1,11 +1,18 @@
-// Draws the island with three.js: lit, shadowed terrain, lakes and rivers on their own glossy
-// mesh, and a see-through sea under a physical sky.
+// Draws the island with three.js under a low sun and a physical sky. The terrain is a mesh three
+// times finer than the simulation grid, shaped and colored on the GPU (see shaders.js); the sea
+// and lakes share a water shader, and rivers are ribbons the worker builds each frame.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {Sky} from 'three/addons/objects/Sky.js';
 import {Line2} from 'three/addons/lines/Line2.js';
 import {LineGeometry} from 'three/addons/lines/LineGeometry.js';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
+import {
+  terrainMaterial,
+  terrainDepthMaterial,
+  waterMaterial,
+  riverMaterial,
+} from './shaders.js';
 
 /**
  * @param {HTMLCanvasElement} canvas
@@ -17,9 +24,9 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.8;
-  renderer.shadowMap.enabled = !lowPower; // shadows cost about a third of the frame
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.toneMappingExposure = 0.7;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const size = (N - 1) * cellSize;
   const scene = new THREE.Scene();
@@ -57,18 +64,19 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
       .add(controls.target);
   }
 
-  // sky, and the same sky blurred into reflections and ambient light
+  // a low afternoon sun for long shadows, the sky, and the same sky blurred into reflections
+  // and ambient light
   const sun = new THREE.Vector3().setFromSphericalCoords(
     1,
-    THREE.MathUtils.degToRad(58),
-    THREE.MathUtils.degToRad(200),
+    THREE.MathUtils.degToRad(66),
+    THREE.MathUtils.degToRad(215),
   );
   const sky = new Sky();
   sky.scale.setScalar(size * 15);
   const u = sky.material.uniforms;
-  u.turbidity.value = 4;
-  u.rayleigh.value = 1.2;
-  u.mieCoefficient.value = 0.004;
+  u.turbidity.value = 3;
+  u.rayleigh.value = 1.4;
+  u.mieCoefficient.value = 0.005;
   u.mieDirectionalG.value = 0.85;
   u.sunPosition.value.copy(sun);
   scene.add(sky);
@@ -76,12 +84,13 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   const skyScene = new THREE.Scene();
   skyScene.add(sky.clone());
   scene.environment = pmrem.fromScene(skyScene).texture;
-  scene.fog = new THREE.Fog(0xa9c3d9, size * 1.2, size * 6);
+  // haze that turns distant land blue-grey, the main cue for how big the island is
+  scene.fog = new THREE.FogExp2(0xb7c9d8, 0.55 / size);
 
-  const light = new THREE.DirectionalLight(0xfff1dd, 2.2);
+  const light = new THREE.DirectionalLight(0xffe4c4, 3.2);
   light.position.copy(sun).multiplyScalar(size);
   light.castShadow = true;
-  light.shadow.mapSize.setScalar(2048);
+  light.shadow.mapSize.setScalar(lowPower ? 2048 : 4096);
   const half = size * 0.55;
   Object.assign(light.shadow.camera, {
     left: -half,
@@ -91,86 +100,113 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     near: 1,
     far: size * 3,
   });
-  light.shadow.bias = -0.0005;
-  light.shadow.normalBias = cellSize * 0.02;
+  light.shadow.bias = -0.0003;
+  light.shadow.normalBias = 3;
   scene.add(light);
-  scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x4a4030, 0.4));
+  scene.add(new THREE.HemisphereLight(0xa8c8ff, 0x5a4a35, 0.7));
 
-  /** A grid mesh whose heights, normals and colors come from the worker each frame. */
-  function makeGrid(colorSize) {
-    const geometry = new THREE.PlaneGeometry(size, size, N - 1, N - 1);
-    geometry.rotateX(-Math.PI / 2);
-    geometry.setAttribute(
-      'color',
-      new THREE.BufferAttribute(
-        new Uint8Array(N * N * colorSize),
-        colorSize,
-        true,
-      ),
+  // what the shaders read: the simulation's fields and normals as textures, one texel per point
+  const dataTexture = () => {
+    const texture = new THREE.DataTexture(
+      new Float32Array(N * N * 4),
+      N,
+      N,
+      THREE.RGBAFormat,
+      THREE.FloatType,
     );
-    return geometry;
-  }
+    texture.magFilter = texture.minFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+    return texture;
+  };
+  const uniforms = {
+    fieldsTex: {value: dataTexture()},
+    normalTex: {value: dataTexture()},
+    gridN: {value: N},
+    cellSize: {value: cellSize},
+    seaLevel: {value: 0},
+    temperature: {value: 24},
+    time: {value: 0},
+  };
 
+  // three vertices per grid cell each way; the shader adds detail finer than the simulation
+  const detail = lowPower ? 2 : 3;
+  const terrainGeometry = new THREE.PlaneGeometry(
+    size,
+    size,
+    (N - 1) * detail,
+    (N - 1) * detail,
+  ).rotateX(-Math.PI / 2);
   const terrain = new THREE.Mesh(
-    makeGrid(3),
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.95,
-      envMapIntensity: 0.5,
-    }),
+    terrainGeometry,
+    terrainMaterial(
+      new THREE.MeshStandardMaterial({roughness: 0.95, envMapIntensity: 0.6}),
+      uniforms,
+    ),
+  );
+  terrain.customDepthMaterial = terrainDepthMaterial(
+    new THREE.MeshDepthMaterial({depthPacking: THREE.RGBADepthPacking}),
+    uniforms,
   );
   terrain.castShadow = terrain.receiveShadow = true;
+  terrain.frustumCulled = false; // its heights only exist on the GPU
   scene.add(terrain);
 
-  const water = new THREE.Mesh(
-    makeGrid(4),
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      transparent: true,
-      roughness: 0.2,
-      envMapIntensity: 0.35, // lakes catch the sky at a glance and read as snow at full strength
-      depthWrite: false,
-    }),
+  const makeWater = () =>
+    waterMaterial(
+      new THREE.MeshStandardMaterial({
+        transparent: true,
+        roughness: 0.05,
+        envMapIntensity: 1,
+        depthWrite: false,
+      }),
+      uniforms,
+    );
+
+  // lakes: flat sheets at each lake's level, at the simulation's resolution
+  const lakes = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, size, N - 1, N - 1).rotateX(-Math.PI / 2),
+    makeWater(),
   );
-  water.receiveShadow = true;
-  water.renderOrder = 2;
-  scene.add(water);
+  lakes.receiveShadow = true;
+  lakes.renderOrder = 2;
+  lakes.frustumCulled = false;
+  scene.add(lakes);
 
   const sea = new THREE.Mesh(
-    new THREE.PlaneGeometry(size * 30, size * 30).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardMaterial({
-      color: 0x0a3550,
-      transparent: true,
-      opacity: 0.72,
-      roughness: 0.12,
-      depthWrite: false,
-    }),
+    new THREE.PlaneGeometry(size * 30, size * 30, 1, 1).rotateX(-Math.PI / 2),
+    makeWater(),
   );
   sea.receiveShadow = true;
   sea.renderOrder = 1;
   scene.add(sea);
 
-  // rivers, as ribbons the worker builds fresh each frame
-  const riverMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setRGB(0.12, 0.3, 0.4, THREE.SRGBColorSpace),
-    roughness: 0.15,
-    envMapIntensity: 0.6,
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
-    side: THREE.DoubleSide,
-  });
-  let rivers = null;
+  const rivers = new THREE.Mesh(
+    new THREE.BufferGeometry(),
+    riverMaterial(
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setRGB(0.1, 0.25, 0.28, THREE.SRGBColorSpace),
+        roughness: 0.15,
+        envMapIntensity: 0.9,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
+        side: THREE.DoubleSide,
+      }),
+      uniforms,
+    ),
+  );
+  rivers.receiveShadow = true;
+  rivers.frustumCulled = false;
+  rivers.renderOrder = 3;
+  scene.add(rivers);
 
   // the deep ocean floor beyond the edge of the grid
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(size * 30, size * 30).rotateX(-Math.PI / 2),
     new THREE.MeshStandardMaterial({
-      // the worker's deep-water color as it comes out of its 8-bit linear vertex colors
-      color: new THREE.Color().setRGB(
-        ...[0.05, 0.12, 0.17].map((v) => Math.floor(v ** 2.2 * 255) / 255),
-        THREE.LinearSRGBColorSpace,
-      ),
+      color: new THREE.Color().setRGB(0.01, 0.07, 0.15, THREE.SRGBColorSpace),
       roughness: 0.95,
       envMapIntensity: 0.5,
     }),
@@ -240,46 +276,37 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
    * @param {any} frame
    * @param {number} seaLevel
    */
-  function update(frame, seaLevel) {
+  function update(frame, seaLevel, temperature) {
     heights = frame.height.slice();
     if (!aimed) aimAtLand(seaLevel);
-    const setY = (mesh, ys) => {
-      const p = mesh.geometry.attributes.position;
-      for (let i = 0; i < N * N; i++) p.array[i * 3 + 1] = ys[i];
-      p.needsUpdate = true;
-    };
-    setY(terrain, frame.height);
-    setY(water, frame.waterY);
-    terrain.geometry.attributes.normal.array.set(frame.normal);
-    terrain.geometry.attributes.normal.needsUpdate = true;
-    terrain.geometry.attributes.color.array.set(frame.color);
-    terrain.geometry.attributes.color.needsUpdate = true;
-    water.geometry.attributes.color.array.set(frame.waterColor);
-    water.geometry.attributes.color.needsUpdate = true;
-    terrain.geometry.computeBoundingSphere();
-    if (rivers) {
-      scene.remove(rivers);
-      rivers.geometry.dispose();
-    }
-    const riverGeometry = new THREE.BufferGeometry();
-    riverGeometry.setAttribute(
+    uniforms.fieldsTex.value.image.data.set(frame.fields);
+    uniforms.fieldsTex.value.needsUpdate = true;
+    uniforms.normalTex.value.image.data.set(frame.normal);
+    uniforms.normalTex.value.needsUpdate = true;
+    uniforms.seaLevel.value = seaLevel;
+    uniforms.temperature.value = temperature;
+    const p = lakes.geometry.attributes.position;
+    for (let i = 0; i < N * N; i++) p.array[i * 3 + 1] = frame.waterY[i];
+    p.needsUpdate = true;
+    sea.position.y = seaLevel;
+
+    rivers.geometry.dispose();
+    const g = new THREE.BufferGeometry();
+    const count = frame.rivers.position.length / 3;
+    g.setAttribute(
       'position',
-      new THREE.BufferAttribute(frame.rivers, 3),
+      new THREE.BufferAttribute(frame.rivers.position, 3),
     );
-    riverGeometry.setAttribute(
+    g.setAttribute(
       'normal',
       new THREE.BufferAttribute(
-        new Float32Array(frame.rivers.length)
-          .fill(0)
-          .map((_, k) => +(k % 3 === 1)),
+        new Float32Array(count * 3).map((_, k) => +(k % 3 === 1)),
         3,
       ),
     );
-    rivers = new THREE.Mesh(riverGeometry, riverMaterial);
-    rivers.receiveShadow = true;
-    rivers.frustumCulled = false;
-    scene.add(rivers);
-    sea.position.y = seaLevel;
+    g.setAttribute('center', new THREE.BufferAttribute(frame.rivers.center, 2));
+    g.setAttribute('across', new THREE.BufferAttribute(frame.rivers.side, 1));
+    rivers.geometry = g;
   }
 
   /** Center the view on the land, sized to fit it. */
@@ -382,6 +409,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
       if (!touched) frameIsland();
     }
     controls.update(Math.min(clock.getDelta(), 0.1));
+    uniforms.time.value = clock.elapsedTime;
     renderer.render(scene, camera);
   }
 

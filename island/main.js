@@ -107,10 +107,9 @@ worker.onmessage = ({data}) => {
 const transfers = (f) =>
   [
     f.height,
+    f.fields,
     f.normal,
-    f.color,
     f.waterY,
-    f.waterColor,
     f.area,
     f.rain,
     f.flow,
@@ -277,7 +276,7 @@ function loop(now) {
     }
   }
   if (frame && frame !== shown) {
-    view.update(frame, settings.seaLevel);
+    view.update(frame, settings.seaLevel, settings.temperature);
     shown = frame;
     statusEl.textContent = `${formatYears(frame.time)} · peak ${fmt(Math.max(0, frame.peak - settings.seaLevel))} m${settings.speed ? '' : ' · paused'}`;
     showProbe();

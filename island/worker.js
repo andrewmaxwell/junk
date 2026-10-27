@@ -1,5 +1,5 @@
 // Runs the landscape model off the main thread and turns it into ready-to-draw vertex data.
-import {makeSim, defaults, potentialEvaporation, smooth} from './sim.js';
+import {makeSim, defaults} from './sim.js';
 
 const STEP_YEARS = 2000;
 const BUDGET_MS = 30; // longest stretch of stepping before checking for messages
@@ -20,38 +20,14 @@ let hasRiverDonor;
 /** @type {any[]} */
 const freeFrames = [];
 
-// palette in sRGB, converted to linear for three.js vertex colors
-const lin = (c) => c.map((v) => Math.pow(v, 2.2));
-const sand = lin([0.86, 0.79, 0.6]);
-const wetSand = lin([0.62, 0.6, 0.47]);
-const shelf = lin([0.35, 0.55, 0.5]);
-const deep = lin([0.05, 0.12, 0.17]);
-const rainforest = lin([0.1, 0.3, 0.09]);
-const forest = lin([0.2, 0.36, 0.14]);
-const conifer = lin([0.12, 0.24, 0.15]);
-const grass = lin([0.52, 0.55, 0.27]);
-const scrub = lin([0.62, 0.55, 0.34]);
-const desert = lin([0.84, 0.69, 0.47]);
-const tundra = lin([0.5, 0.48, 0.38]);
-const rock = lin([0.42, 0.42, 0.36]);
-const snow = lin([0.93, 0.95, 0.98]);
-const lakeColor = lin([0.06, 0.2, 0.26]);
-
-const mix = (out, a, b, t) => {
-  out[0] = a[0] + (b[0] - a[0]) * t;
-  out[1] = a[1] + (b[1] - a[1]) * t;
-  out[2] = a[2] + (b[2] - a[2]) * t;
-};
-const blend = (out, b, t) => mix(out, out, b, t);
-
 function makeFrame() {
   const num = sim.N * sim.N;
   return {
     height: new Float32Array(num),
-    normal: new Float32Array(num * 3),
-    color: new Uint8Array(num * 3),
+    // per point, for the GPU: height, rain, log10 of flow in m³/yr, and ambient occlusion
+    fields: new Float32Array(num * 4),
+    normal: new Float32Array(num * 4),
     waterY: new Float32Array(num),
-    waterColor: new Uint8Array(num * 4),
     area: new Float32Array(num),
     rain: new Float32Array(num),
     flow: new Float32Array(num),
@@ -61,11 +37,35 @@ function makeFrame() {
   };
 }
 
+// Horizon-based ambient occlusion: look out along 8 directions at distances growing to about
+// 40 cells, and darken a point by how much of the sky the highest ground in each direction hides.
+const AO_STEPS = [1, 2, 3, 5, 8, 12, 18, 27, 40];
+const AO_DIRECTIONS = Array.from({length: 8}, (_, k) => [
+  Math.cos((k * Math.PI) / 4),
+  Math.sin((k * Math.PI) / 4),
+]);
+
+function ambientOcclusion(i, x, z) {
+  const {N, cellSize, height} = sim;
+  const h = height[i];
+  let hidden = 0;
+  for (const [dx, dz] of AO_DIRECTIONS) {
+    let best = 0;
+    for (const d of AO_STEPS) {
+      const sx = Math.round(x + dx * d);
+      const sz = Math.round(z + dz * d);
+      if (sx < 0 || sz < 0 || sx >= N || sz >= N) break;
+      const slope = (height[sz * N + sx] - h) / (d * cellSize);
+      if (slope > best) best = slope;
+    }
+    hidden += best / Math.sqrt(1 + best * best); // sine of the horizon's angle
+  }
+  return 1 - hidden / AO_DIRECTIONS.length;
+}
+
 /** Fill a frame from the current state. Assumes route() has run since the last change. */
 function fillFrame(f) {
   const {N, cellSize, height, water, wet, area, rain, discharge} = sim;
-  const {seaLevel} = params;
-  const c = [0, 0, 0];
   let peak = -Infinity;
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
@@ -76,6 +76,10 @@ function fillFrame(f) {
       f.rain[i] = rain[i];
       f.flow[i] = discharge[i];
       if (h > peak) peak = h;
+      f.fields[i * 4] = h;
+      f.fields[i * 4 + 1] = rain[i];
+      f.fields[i * 4 + 2] = Math.log10(Math.max(1, discharge[i]));
+      f.fields[i * 4 + 3] = ambientOcclusion(i, x, z);
 
       const hl = height[x > 0 ? i - 1 : i];
       const hr = height[x < N - 1 ? i + 1 : i];
@@ -84,42 +88,26 @@ function fillFrame(f) {
       const nx = -(hr - hl) / (2 * cellSize);
       const nz = -(hd - hu) / (2 * cellSize);
       const len = Math.hypot(nx, 1, nz);
-      f.normal[i * 3] = nx / len;
-      f.normal[i * 3 + 1] = 1 / len;
-      f.normal[i * 3 + 2] = nz / len;
-      const steep = Math.hypot(nx, nz); // slope as rise over run
+      f.normal[i * 4] = nx / len;
+      f.normal[i * 4 + 1] = 1 / len;
+      f.normal[i * 4 + 2] = nz / len;
 
-      const above = h - seaLevel;
-      if (above < 0) {
-        mix(c, wetSand, shelf, smooth(0, 15, -above));
-        blend(c, deep, smooth(10, 250, -above));
-      } else {
-        // the same bands as biome() in sim.js, blended so they shade into each other
-        const t = params.temperature - 0.0065 * above;
-        const potential = potentialEvaporation(t);
-        const aridity = potential > 0 ? rain[i] / potential : 10;
-        mix(c, conifer, forest, smooth(4, 10, t));
-        blend(c, rainforest, smooth(15, 21, t));
-        blend(c, grass, smooth(0.9, 0.7, aridity));
-        blend(c, scrub, smooth(0.55, 0.4, aridity));
-        blend(c, desert, smooth(0.3, 0.15, aridity));
-        blend(c, tundra, smooth(5, 2, t));
-        blend(c, sand, smooth(5, 1, above) * smooth(0.4, 0.15, steep));
-        blend(c, rock, smooth(0.9, 1.6, steep) * 0.85);
-        blend(c, snow, smooth(-1, -3, t) * smooth(1.2, 0.6, steep));
+      // Lakes are flat sheets at their spill height, reaching one point past the shore so the
+      // ground cuts a clean shoreline through them. Everywhere else the sheet tucks well under
+      // the ground.
+      let level = wet[i] === 1 ? water[i] : -Infinity;
+      if (level === -Infinity) {
+        for (let dz = -1; dz <= 1; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx2 = x + dx;
+            const nz2 = z + dz;
+            if (nx2 < 0 || nz2 < 0 || nx2 >= N || nz2 >= N) continue;
+            const j = nz2 * N + nx2;
+            if (wet[j] === 1) level = Math.max(level, water[j]);
+          }
+        }
       }
-      f.color[i * 3] = c[0] * 255;
-      f.color[i * 3 + 1] = c[1] * 255;
-      f.color[i * 3 + 2] = c[2] * 255;
-
-      // Lakes are flat sheets at their spill height. Everywhere else the water mesh tucks
-      // under the ground.
-      const lake = wet[i] === 1;
-      f.waterY[i] = lake ? water[i] : h - 4;
-      f.waterColor[i * 4] = lakeColor[0] * 255;
-      f.waterColor[i * 4 + 1] = lakeColor[1] * 255;
-      f.waterColor[i * 4 + 2] = lakeColor[2] * 255;
-      f.waterColor[i * 4 + 3] = lake ? 200 : 0;
+      f.waterY[i] = level > -Infinity ? level : h - 40; // below the GPU's finer relief too
     }
   }
   f.receiver.set(sim.receiver);
@@ -165,7 +153,7 @@ function buildRivers() {
   };
   const world = (g) => (g - (N - 1) / 2) * cellSize;
 
-  const out = [];
+  const out = {position: [], center: [], side: []};
   for (let head = 0; head < num; head++) {
     if (!isRiver[head] || hasRiverDonor[head]) continue;
     // [x, z, flow] along the river
@@ -193,24 +181,34 @@ function buildRivers() {
       const [px, pz] = points[Math.max(0, k - 1)];
       const [nx, nz] = points[Math.min(points.length - 1, k + 1)];
       const len = Math.hypot(nx - px, nz - pz) || 1;
-      // Width in meters is 12 + 70 √Q, Q in m³/s: several times wider than real rivers, so
-      // even creeks show from across the island.
-      const half = (6 + 35 * Math.sqrt(q / 3.156e7)) / cellSize;
+      // Width in meters is 5 √Q, Q in m³/s (Leopold and Maddock's hydraulic geometry), at
+      // least 2 m. The shader widens far-off rivers so they don't vanish.
+      const half = Math.max(1, 2.5 * Math.sqrt(q / 3.156e7)) / cellSize;
       const [ox, oz] = [(-(nz - pz) / len) * half, ((nx - px) / len) * half];
-      // level across, at the height of the middle, so it lies in the valley floor
+      // Level across at the height of the middle, so it lies in the valley floor. Each vertex
+      // carries the middle's grid position, so the GPU can set it on the same smoothed ground
+      // the terrain uses, and which bank it's on, to soften the edges.
       const y = surface(x, z) + 1.5;
       return [
-        [x + ox, z + oz],
-        [x - ox, z - oz],
-      ].map(([gx, gz]) => [world(gx), y, world(gz)]);
+        [x + ox, z + oz, 0],
+        [x - ox, z - oz, 1],
+      ].map(([gx, gz, side]) => [world(gx), y, world(gz), x, z, side]);
     });
     for (let k = 0; k < edges.length - 1; k++) {
       const [a, b] = edges[k];
       const [c, d] = edges[k + 1];
-      out.push(...a, ...c, ...b, ...b, ...c, ...d);
+      for (const v of [a, c, b, b, c, d]) {
+        out.position.push(v[0], v[1], v[2]);
+        out.center.push(v[3], v[4]);
+        out.side.push(v[5]);
+      }
     }
   }
-  return new Float32Array(out);
+  return {
+    position: new Float32Array(out.position),
+    center: new Float32Array(out.center),
+    side: new Float32Array(out.side),
+  };
 }
 
 function send() {
@@ -220,12 +218,13 @@ function send() {
   dirty = false;
   f.rivers = buildRivers();
   postMessage({type: 'frame', frame: f}, [
-    f.rivers.buffer,
+    f.rivers.position.buffer,
+    f.rivers.center.buffer,
+    f.rivers.side.buffer,
+    f.fields.buffer,
     f.height.buffer,
     f.normal.buffer,
-    f.color.buffer,
     f.waterY.buffer,
-    f.waterColor.buffer,
     f.area.buffer,
     f.rain.buffer,
     f.flow.buffer,
