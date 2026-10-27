@@ -78,22 +78,25 @@ const PI = 3.14159265359;
 @group(0) @binding(10) var<storage, read> emitters: array<vec4f>;
 
 
-/** The radius of a ball around all of shape s */
-fn boundingRadius(s: u32) -> f32 {
-  if (isPlate(s)) { return length(vec2f(objects[s].uHalf.w, objects[s].vHalf.w)); }
-  return objects[s].centerRadius.w;
-}
-
-
 /**
- * The probability density, per steradian, of direction w from y, if it's
- * picked evenly from the cone of directions that hit the ball around shape
- * s; 0 if it isn't in it. Far away, the cone is so narrow that its cosine
- * rounds to 1 in 32-bit floats, so it's measured by its sine.
+ * The probability density, per steradian, of direction w from y, as
+ * sampleAim picks it toward shape s: for a plate, by area, so it's the
+ * distance squared over the area it covers seen from y; for anything else,
+ * evenly from the cone of directions that hit the ball around it. 0 if w
+ * misses. Far away, a ball's cone is so narrow that its cosine rounds to 1
+ * in 32-bit floats, so it's measured by its sine.
  */
-fn conePdf(y: vec3f, w: vec3f, s: u32) -> f32 {
-  let c = objects[s].centerRadius.xyz - y;
-  let r = boundingRadius(s);
+fn aimPdf(y: vec3f, w: vec3f, s: u32) -> f32 {
+  let o = objects[s];
+  let c = o.centerRadius.xyz - y;
+  if (isPlate(s)) {
+    let facing = dot(w, o.normalShape.xyz);
+    let t = dot(c, o.normalShape.xyz) / facing;
+    let h = w * t - c;
+    if (facing == 0. || t <= 0. || abs(dot(h, o.uHalf.xyz)) > o.uHalf.w || abs(dot(h, o.vHalf.xyz)) > o.vHalf.w) { return 0.; }
+    return t * t / (4. * o.uHalf.w * o.vHalf.w * abs(facing));
+  }
+  let r = o.centerRadius.w;
   let d2 = dot(c, c);
   if (d2 <= r * r) { return 1. / (4. * PI); }
   let sinSq = r * r / d2;
@@ -104,13 +107,19 @@ fn conePdf(y: vec3f, w: vec3f, s: u32) -> f32 {
 
 
 /**
- * A direction picked evenly from the cone of directions from y that hit the
- * ball around shape s, working with 1 - cos rather than cos, for the same
- * reason
+ * A direction from y toward shape s: for a plate, toward a point picked
+ * evenly over it, so photons aimed at a window's panes all reach them; for
+ * anything else, picked evenly from the cone of directions that hit the
+ * ball around it, working with 1 - cos rather than cos, as aimPdf does
  */
-fn sampleCone(y: vec3f, s: u32, u: vec2f) -> vec3f {
-  let c = objects[s].centerRadius.xyz - y;
-  let r = boundingRadius(s);
+fn sampleAim(y: vec3f, s: u32, u: vec2f) -> vec3f {
+  let o = objects[s];
+  let c = o.centerRadius.xyz - y;
+  if (isPlate(s)) {
+    let a = u * 2. - 1.;
+    return normalize(c + o.uHalf.xyz * o.uHalf.w * a.x + o.vHalf.xyz * o.vHalf.w * a.y);
+  }
+  let r = o.centerRadius.w;
   let d2 = dot(c, c);
   if (d2 <= r * r) { return directionAround(vec3f(0., 1., 0.), 1. - 2. * u.x, 2. * PI * u.y); }
   let sinSq = r * r / d2;
@@ -203,11 +212,11 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     }
     // Toward the target, and the density of that direction over every
     // target this light aims at
-    let w = sampleCone(y, u32(emitters[e].y), rand2());
+    let w = sampleAim(y, u32(emitters[e].y), rand2());
     var dirPdf = 0.;
     for (var k = 0u; k < params.pairCount; k++) {
       let other = emitters[4u * k];
-      if (other.x >= 0. && u32(other.x) == light) { dirPdf += other.w * conePdf(y, w, u32(other.y)); }
+      if (other.x >= 0. && u32(other.x) == light) { dirPdf += other.w * aimPdf(y, w, u32(other.y)); }
     }
     let cosY = select(abs(dot(n, w)), dot(n, w), isPlate(light));
     if (cosY <= 0. || dirPdf <= 0.) { return; }

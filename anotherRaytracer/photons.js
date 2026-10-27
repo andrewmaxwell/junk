@@ -37,7 +37,8 @@ const EMITTER_SIZE = 16;
 /**
  * Where photons come from: for each light and each glass or mirror object it
  * can reach, roughly how much light it sends that way (its brightness, times
- * how big it looks from there, times the object's cross section), and each
+ * how big it looks from there, times the object's cross section as the
+ * light sees it), and each
  * laser, by its power. Packed as four vec4s each, for the photon shader to
  * pick from: light index (-1 for a laser), target index, running total of
  * the shares (up to 1), and share; then for lasers, position and radius,
@@ -63,8 +64,19 @@ export const photonEmitters = (objects, lasers) => {
       ) {
         continue;
       }
-      const weight =
-        brightness * solidAngle(bounds(light), d) * Math.PI * r * r;
+      // A plate's area as the light sees it, as photons aim at it by area
+      // (sampleAim in shaders/photons.js); a ball's around anything else
+      const crossSection =
+        target.shape === PLATE
+          ? (4 *
+              target.halfWidth *
+              target.halfHeight *
+              Math.abs(
+                toTarget.reduce((sum, x, k) => sum + x * target.normal[k], 0),
+              )) /
+            d
+          : Math.PI * r * r;
+      const weight = brightness * solidAngle(bounds(light), d) * crossSection;
       if (weight > 0) emitters.push({weight, values: [i, j]});
     }
   }

@@ -790,10 +790,11 @@ function windowScene() {
   const backdrop = opening.map((w, i) => w - (light[i] * 60) / light[2]);
   /** @type {(sx: number, sy: number, color: number[]) => Shape} */
   const pane = (sx, sy, color) => {
-    // Each quarter's pane runs past the round hole, so light can't slip
-    // around its edges, and sits just outside the mullions, so the seams
-    // between them are behind those
-    const half = (radius + 4) / 2;
+    // Each quarter's pane runs a little past the round hole, so light can't
+    // slip around its edges, and sits just outside the mullions, so the
+    // seams between them are behind those. No further: photons aim at the
+    // whole pane.
+    const half = (radius + 1.5) / 2;
     return plate(
       [opening[0] + sx * half, opening[1] + sy * half, glass - 1.2],
       [0, 0, 1],
