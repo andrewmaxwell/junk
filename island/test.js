@@ -1,5 +1,11 @@
 // Checks the landscape model against things that have to be true. Run with `node island/test.js`.
-import {makeSim, defaults} from './sim.js';
+import {
+  makeSim,
+  defaults,
+  evaporation,
+  potentialEvaporation,
+  plantCover,
+} from './sim.js';
 
 let failures = 0;
 const check = (ok, message) => {
@@ -47,6 +53,40 @@ for (let i = 0; i < num; i++) {
     badLakes++;
 }
 check(badLakes === 0, 'lakes spill downhill');
+
+// Budyko's curve at its known points: where rain is ten times what the air could take,
+// evaporation nearly reaches that potential; where it's a tenth, nearly all the rain
+// evaporates; where they're equal, Budyko's formula gives 0.69.
+{
+  const p = potentialEvaporation(20);
+  const close = (a, b) => Math.abs(a - b) < 0.01;
+  check(
+    evaporation(p * 10, p) / p > 0.95 &&
+      evaporation(p / 10, p) / (p / 10) > 0.99 &&
+      close(evaporation(p, p) / p, 0.69),
+    `Budyko evaporation: wet ${(evaporation(p * 10, p) / p).toFixed(3)} of potential, dry ${(evaporation(p / 10, p) / (p / 10)).toFixed(3)} of rain, balanced ${(evaporation(p, p) / p).toFixed(3)}`,
+  );
+}
+
+// Langbein and Schumm (1958): sediment yield peaks in semi-arid climates, near 300 mm of rain a
+// year, where there's enough runoff to move soil but too little for plants to hold it. Here the
+// erosion rate per unit slope goes as erodibility × √runoff.
+{
+  const t = 24;
+  const rates = [];
+  for (let rain = 0.05; rain <= 3; rain += 0.05) {
+    const cover = plantCover(rain, t);
+    const lost = evaporation(rain, potentialEvaporation(t));
+    const runoff = Math.max(rain - lost, rain * 0.3 * (1 - cover));
+    rates.push([rain, Math.exp(-2 * cover) * Math.sqrt(runoff)]);
+  }
+  const [peak] = rates.reduce((a, b) => (b[1] > a[1] ? b : a));
+  const at = (r) => rates.find(([x]) => Math.abs(x - r) < 0.01)[1];
+  check(
+    peak > 0.2 && peak < 0.5 && at(1.2) < at(peak) / 2,
+    `erosion peaks in semi-arid climates (at ${peak.toFixed(2)} m/yr of rain, ${(at(peak) / at(1.2)).toFixed(1)}× the rate at 1.2 m/yr)`,
+  );
+}
 
 // With no uplift or creep, every m³ rivers cut away ends up in a lake, in the sea or off the
 // edge of the grid.
@@ -102,7 +142,7 @@ check(badLakes === 0, 'lakes spill downhill');
 // Run toward steady state with no soil creep, where the stream power law gives an exact answer:
 // erosion balances uplift, so S = U / (K Q^m) at every river point.
 const params = {...defaults, D: 0, marineD: 0};
-for (let t = 0; t < 800; t++) sim.step(5000, params);
+for (let t = 0; t < 2000; t++) sim.step(5000, params);
 sim.route(params);
 
 // At steady state height stops changing. A point or two can flicker when its steepest neighbor
@@ -135,7 +175,7 @@ for (let i = 0; i < num; i++) {
   const predicted =
     (sim.uplift[i] * params.upliftRate) /
     1000 /
-    (params.K * Math.pow(sim.discharge[i], params.m));
+    (sim.erodibility[i] * Math.pow(sim.discharge[i], params.m));
   ys.push(Math.log(slope / predicted));
 }
 const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;

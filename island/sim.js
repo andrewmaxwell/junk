@@ -8,15 +8,21 @@
 // What rivers cut away is carried downstream and settles where they reach still water, filling
 // lakes and building deltas. Rain is heavier where the wind climbs a slope and lighter in the
 // lee, and moist air dries out as it rains crossing the island, which leaves a rain shadow.
+// It cools 6.5 °C per km of height. Plants and soil return part of the rain to the air (the
+// Budyko curve), so only the rest runs off into rivers, and hot, dry places lose almost all of
+// it on average. But desert rain comes in storms that run straight off bare ground, so up to
+// 30% of it still reaches the rivers in flash floods. Plant cover follows how wet and warm a
+// place is, and roots hold the soil: bare ground erodes e² ≈ 7 times faster than full cover.
 
 import {makeIsland} from './terrain.js';
 
 export const defaults = {
-  rain: 1.5, // m/yr of runoff, averaged over the land
+  rain: 2.5, // m/yr of rain, averaged over the land
+  temperature: 24, // °C at sea level
   wind: 60, // degrees the wind blows from: 0 north (away from the camera), 90 east
   upliftRate: 1.5, // mm/yr at the fastest-rising point
   seaLevel: 0, // m
-  K: 1.5e-5, // river erodibility, for discharge in m³/yr
+  K: 1.2e-4, // erodibility of bare ground, for discharge in m³/yr
   m: 0.5, // discharge exponent (slope exponent n is 1)
   D: 0.03, // m²/yr soil creep on land
   marineD: 0.4, // m²/yr sediment spreading under water, which builds a shelf
@@ -33,6 +39,57 @@ const neighborOffsets = [
   [-1, -1],
 ];
 
+/** m/yr the air could take up from a well-watered surface at t °C (a rough Hamon-style fit). */
+export const potentialEvaporation = (t) => Math.max(0, 0.065 * t);
+
+/**
+ * m/yr returned to the air out of `rain`, by Budyko's curve: with plenty of rain it approaches
+ * the potential, and in a desert it approaches all of the rain.
+ * @param {number} rain
+ * @param {number} potential
+ */
+export function evaporation(rain, potential) {
+  if (rain <= 0 || potential <= 0) return 0;
+  const phi = potential / rain;
+  const fraction = Math.sqrt(phi * Math.tanh(1 / phi) * (1 - Math.exp(-phi)));
+  return Math.min(rain, potential, rain * fraction);
+}
+
+/**
+ * Plant cover from 0 to 1. It needs rain to match at least most of what the air would take
+ * (aridity below 0.15 is desert), and warmth to grow (none below freezing).
+ * @param {number} rain m/yr
+ * @param {number} t °C
+ */
+export function plantCover(rain, t) {
+  const potential = potentialEvaporation(t);
+  const aridity = potential > 0 ? rain / potential : Infinity;
+  return smooth(0.15, 0.85, aridity) * smooth(-3, 6, t);
+}
+
+/**
+ * What grows somewhere, by warmth and by how its rain compares with what the air could take
+ * (roughly Whittaker's biomes, with UNEP's aridity bands).
+ * @param {number} rain m/yr
+ * @param {number} t °C
+ */
+export function biome(rain, t) {
+  if (t < -2) return 'ice and snow';
+  if (t < 3) return 'tundra';
+  const aridity = rain / potentialEvaporation(t);
+  if (aridity < 0.2) return 'desert';
+  if (aridity < 0.5) return 'dry scrub';
+  if (aridity < 0.8) return t > 18 ? 'savanna' : 'grassland';
+  if (t > 18) return 'rainforest';
+  return t > 8 ? 'forest' : 'conifer forest';
+}
+
+/** 0 at a, 1 at b, smooth between */
+export function smooth(a, b, x) {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
 /**
  * @param {{N: number, cellSize: number, seed: number}} options
  */
@@ -47,6 +104,9 @@ export function makeSim({N, cellSize, seed}) {
   const area = new Float64Array(num); // m² draining through each point
   const rain = new Float32Array(num); // m/yr falling on each point
   const discharge = new Float64Array(num); // m³/yr flowing through each point
+  const runoff = new Float32Array(num); // m/yr of rain that isn't evaporated or used by plants
+  const cover = new Float32Array(num); // 0 bare to 1 full plant cover
+  const erodibility = new Float32Array(num); // K, lowered by plant cover
   const moisture = new Float32Array(num);
   const sediment = new Float64Array(num); // m³ carried out of each point this step
   const smoothGround = new Float64Array(num);
@@ -141,6 +201,10 @@ export function makeSim({N, cellSize, seed}) {
     }
   }
 
+  /** °C at point i */
+  const temperatureAt = (i, p) =>
+    p.temperature - 0.0065 * Math.max(0, height[i] - p.seaLevel);
+
   /** @type {Int32Array} */
   let windOrder;
   let orderedFor = NaN;
@@ -168,10 +232,10 @@ export function makeSim({N, cellSize, seed}) {
     // Looking 1.5 cells upwind, all four points around the sample are already done.
     const back = 1.5;
     // Air rises over the broad shape of the land, not over every gully, so lift comes from the
-    // ground smoothed over about 400 m.
+    // ground smoothed over about a kilometer.
     for (let i = 0; i < num; i++)
       smoothGround[i] = Math.max(height[i], p.seaLevel);
-    blur(smoothGround, Math.max(1, Math.round(200 / cellSize)));
+    blur(smoothGround, Math.max(1, Math.round(500 / cellSize)));
     const ground = (i) => smoothGround[i];
     let landRain = 0;
     let landCount = 0;
@@ -205,20 +269,28 @@ export function makeSim({N, cellSize, seed}) {
           ground(j + N + 1) * w11;
       }
       const climb = (ground(i) - upwind) / (back * cellSize);
-      const strength = Math.min(4, Math.max(0, 0.5 + 6 * climb));
+      const strength = Math.min(4, Math.max(0, 0.5 + 10 * climb));
       if (height[i] < p.seaLevel) {
         moisture[i] = Math.min(1, m + cellSize / 5000);
         rain[i] = m * 0.4;
       } else {
         // a floor of showers that don't depend on the wind, so the lee is dry, not a desert
-        rain[i] = 0.3 + m * strength;
-        moisture[i] = m * Math.exp((-strength * cellSize) / 15000);
+        rain[i] = 0.15 + m * strength;
+        moisture[i] = m * Math.exp((-strength * cellSize) / 8000);
         landRain += rain[i];
         landCount++;
       }
     }
     const scale = landCount ? (p.rain * landCount) / landRain : p.rain;
-    for (let i = 0; i < num; i++) rain[i] *= scale;
+    for (let i = 0; i < num; i++) {
+      rain[i] *= scale;
+      const t = temperatureAt(i, p);
+      const potential = potentialEvaporation(t);
+      const lost = evaporation(rain[i], potential);
+      cover[i] = plantCover(rain[i], t);
+      runoff[i] = Math.max(rain[i] - lost, rain[i] * 0.3 * (1 - cover[i]));
+      erodibility[i] = p.K * Math.exp(-2 * cover[i]);
+    }
   }
 
   /**
@@ -291,7 +363,7 @@ export function makeSim({N, cellSize, seed}) {
     }
 
     area.fill(cellArea);
-    for (let i = 0; i < num; i++) discharge[i] = rain[i] * cellArea;
+    for (let i = 0; i < num; i++) discharge[i] = runoff[i] * cellArea;
     for (let k = num - 1; k >= 0; k--) {
       const i = stack[k];
       if (receiver[i] === i) continue;
@@ -322,7 +394,9 @@ export function makeSim({N, cellSize, seed}) {
       const r = receiver[i];
       if (r === i || wet[i]) continue;
       const base = wet[r] ? water[r] : height[r];
-      const f = (p.K * dt * Math.pow(discharge[i], p.m)) / receiverDistance[i];
+      const f =
+        (erodibility[i] * dt * Math.pow(discharge[i], p.m)) /
+        receiverDistance[i];
       const next = (height[i] + f * base) / (1 + f);
       if (next < height[i]) {
         sediment[i] = (height[i] - next) * cellArea;
@@ -441,6 +515,9 @@ export function makeSim({N, cellSize, seed}) {
     wet,
     area,
     rain,
+    runoff,
+    cover,
+    erodibility,
     discharge,
     receiver,
     route,
