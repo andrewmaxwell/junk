@@ -39,6 +39,9 @@ const neighborOffsets = [
   [-1, -1],
 ];
 
+/** m: how far condensed water drifts before most of it has fallen (1/e) */
+const RAIN_DRIFT = 1000;
+
 /** m/yr the air could take up from a well-watered surface at t °C (a rough Hamon-style fit). */
 export const potentialEvaporation = (t) => Math.max(0, 0.065 * t);
 
@@ -107,7 +110,8 @@ export function makeSim({N, cellSize, seed}) {
   const runoff = new Float32Array(num); // m/yr of rain that isn't evaporated or used by plants
   const cover = new Float32Array(num); // 0 bare to 1 full plant cover
   const erodibility = new Float32Array(num); // K, lowered by plant cover
-  const moisture = new Float32Array(num);
+  const moisture = new Float32Array(num); // water vapor, 1 for air fresh off the sea
+  const cloud = new Float32Array(num); // condensed water still falling
   const sediment = new Float64Array(num); // m³ carried out of each point this step
   const smoothGround = new Float64Array(num);
   const blurTemp = new Float64Array(num);
@@ -244,6 +248,7 @@ export function makeSim({N, cellSize, seed}) {
       const ux = (i % N) - wx * back;
       const uz = ((i / N) | 0) - wz * back;
       let m = 1;
+      let c = 0;
       let upwind = ground(i);
       if (ux >= 0 && uz >= 0 && ux < N - 1 && uz < N - 1) {
         const x0 = Math.floor(ux);
@@ -262,6 +267,11 @@ export function makeSim({N, cellSize, seed}) {
           moisture[j + 1] * w10 +
           moisture[j + N] * w01 +
           moisture[j + N + 1] * w11;
+        c =
+          cloud[j] * w00 +
+          cloud[j + 1] * w10 +
+          cloud[j + N] * w01 +
+          cloud[j + N + 1] * w11;
         upwind =
           ground(j) * w00 +
           ground(j + 1) * w10 +
@@ -269,14 +279,21 @@ export function makeSim({N, cellSize, seed}) {
           ground(j + N + 1) * w11;
       }
       const climb = (ground(i) - upwind) / (back * cellSize);
-      const strength = Math.min(4, Math.max(0, 0.5 + 10 * climb));
+      const strength = Math.min(4, Math.max(0, 0.3 + 16 * climb));
+      // Rising air condenses vapor into cloud, and the cloud rains out over a few kilometers
+      // as it drifts on, so rain spills past a ridge instead of stopping at its crest.
+      const condensed = m * (1 - Math.exp((-strength * cellSize) / 8000));
+      m -= condensed;
+      c += condensed;
+      const fall = c * (1 - Math.exp((-back * cellSize) / RAIN_DRIFT));
+      cloud[i] = c - fall;
       if (height[i] < p.seaLevel) {
         moisture[i] = Math.min(1, m + cellSize / 5000);
-        rain[i] = m * 0.4;
+        rain[i] = (fall * 8000) / cellSize;
       } else {
         // a floor of showers that don't depend on the wind, so the lee is dry, not a desert
-        rain[i] = 0.15 + m * strength;
-        moisture[i] = m * Math.exp((-strength * cellSize) / 8000);
+        rain[i] = 0.15 + (fall * 8000) / cellSize;
+        moisture[i] = m;
         landRain += rain[i];
         landCount++;
       }
