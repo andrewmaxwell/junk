@@ -50,3 +50,5 @@ Files:
 - `scenes.js` the scenes, and their captions; `shapes.js` balls, panels, teapots, diamonds and fractals for the GPU and for picking; `teapot.js` the teapot's triangles and hierarchy; `diamond.js` the diamond's facets; `fractal.js` fractals' distances, for picking; `sky.js` the sky; `ggx.js` rough reflections' lost light; `vec.js` vector math
 - `photons.js` where photons come from: which lights aim at which glass and mirrors, and lasers; `shaders/photons.js` traces them
 - `shaders/` the WGSL: `trace.js` joins the path tracer's pieces (`random`, `geometry` with `fractals`, `lights`, `fog`, `materials`, `detail`); `tiles.js` adaptive sampling; `denoise.js` the denoiser, and history while moving; `glow.js`; `display.js`; `common.js` and `tone.js`, which every shader shares
+
+Without WebGPU, the page shows a picture of the shafts scene and says which browsers run it.

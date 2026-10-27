@@ -36,9 +36,15 @@ const sdrWhite = {clip: 1, ease: 4, filmic: 16};
  */
 const PHOTON_RADIUS = 1;
 
-const adapter = await navigator.gpu?.requestAdapter();
+const adapter = await navigator.gpu?.requestAdapter().catch(() => null);
 if (!adapter) {
-  stats.textContent = 'This needs WebGPU.';
+  // Show what it would have shown
+  document.body.style.background = '#111 url(image.png) center / cover';
+  canvas.style.visibility = 'hidden';
+  stats.style.fontSize = '15px';
+  stats.textContent =
+    "This path tracer runs on the GPU through WebGPU, which this browser doesn't offer. " +
+    'Try a recent Chrome, Edge or Safari. Above, a picture of what it draws.';
   throw new Error('No WebGPU');
 }
 const device = await adapter.requestDevice({
