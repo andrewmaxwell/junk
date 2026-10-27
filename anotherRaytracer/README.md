@@ -2,7 +2,7 @@ Another Raytracer - 2026 - A WebGPU path tracer with fog, rainbow glass, teapots
 
 A progressive path tracer in a WebGPU compute shader: balls, flat panels, Utah teapots, brilliant cut diamonds, Menger sponges and Mandelbulbs, in paint, varnished paint, metal, glass and light.
 
-Drag to orbit, shift-drag or right-drag to pan, scroll to zoom; on a phone, pinch to zoom and drag two fingers to pan. Click or tap anything to select it and focus on it. The URL keeps the scene, the view, any edits and any changed settings, so the address bar is a shareable link. Keys: space pauses, **r** resets the view, **d** toggles the denoiser, **t** cycles tone curves, **h** toggles HDR, **n** shows refining tiles, Esc deselects.
+Drag to orbit, shift-drag or right-drag to pan, scroll to zoom; on a phone, pinch to zoom and drag two fingers to pan. Click or tap anything to select it and focus on it. Each scene opens with a line saying what it is, with arrows to the next; ← and → do the same. The URL keeps the scene, the view, any edits and any changed settings, so the address bar is a shareable link. Keys: space pauses, **r** resets the view, **d** toggles the denoiser, **t** cycles tone curves, **h** toggles HDR, **n** shows refining tiles, Esc deselects.
 
 Scenes:
 
@@ -47,6 +47,6 @@ Files:
 
 - `main.js` starts things and runs the frame loop; `renderer.js` has the WebGPU pipelines and buffers
 - `settings.js` the settings and URL; `panel.js` the lil-gui panel; `controls.js` mouse, touch and keys; `camera.js` the orbit camera; `editor.js` editing objects; `world.js` the scene as edited
-- `scenes.js` the scenes; `shapes.js` balls, panels, teapots, diamonds and fractals for the GPU and for picking; `teapot.js` the teapot's triangles and hierarchy; `diamond.js` the diamond's facets; `fractal.js` fractals' distances, for picking; `sky.js` the sky; `ggx.js` rough reflections' lost light; `vec.js` vector math
+- `scenes.js` the scenes, and their captions; `shapes.js` balls, panels, teapots, diamonds and fractals for the GPU and for picking; `teapot.js` the teapot's triangles and hierarchy; `diamond.js` the diamond's facets; `fractal.js` fractals' distances, for picking; `sky.js` the sky; `ggx.js` rough reflections' lost light; `vec.js` vector math
 - `photons.js` where photons come from: which lights aim at which glass and mirrors, and lasers; `shaders/photons.js` traces them
 - `shaders/` the WGSL: `trace.js` joins the path tracer's pieces (`random`, `geometry` with `fractals`, `lights`, `fog`, `materials`, `detail`); `tiles.js` adaptive sampling; `denoise.js` the denoiser, and history while moving; `glow.js`; `display.js`; `common.js` and `tone.js`, which every shader shares

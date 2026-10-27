@@ -976,3 +976,24 @@ export const scenes = {
   neon: neonScene,
   window: windowScene,
 };
+
+/** What each scene shows, in a line, for the caption when it opens */
+export const captions = {
+  cornell: 'A Cornell box hallway: mirror, glass, amber, gold and glossy balls',
+  veach:
+    "Eric Veach's test: four lights, tiny to big, in four strips, rough to sharp",
+  shafts: 'Sunlight through window blinds into a foggy room',
+  caustics: 'Glass balls focusing light into their shadows',
+  teapots: 'Tea-colored glass, glazed china and gold, lit like a product photo',
+  diamond:
+    "A round brilliant in a jeweler's light tent. Most light leaves by the top",
+  fractals:
+    'A glass Menger sponge, a gold Mandelbulb, and a sponge lit down its tunnels',
+  lasers: 'Green lasers through a glass ball lens. The outer beams cross first',
+  mirrors: 'Two facing mirrors, and glowing orbs repeating into the distance',
+  bokeh: 'Fairy lights blurred into discs, behind balls on a walnut table',
+  sunset: 'A low sun in a physically based sky, glowing through hazy air',
+  rgb: 'Red, green and blue lights casting cyan, magenta and yellow shadows',
+  neon: 'A dark gallery lit by colored tubes, after Dan Flavin',
+  window: 'Late sun through stained glass into a hazy attic',
+};

@@ -4,7 +4,7 @@ import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {frameView, resetCamera} from './camera.js';
 import {addObjectsFolder, saveEdits, select} from './editor.js';
 import * as renderer from './renderer.js';
-import {scenes} from './scenes.js';
+import {captions, scenes} from './scenes.js';
 import {
   defaults,
   rememberHdr,
@@ -53,12 +53,28 @@ export const hdrChanged = () => {
   renderer.restart();
 };
 
+const caption = /** @type {HTMLElement} */ (document.querySelector('#caption'));
+let captionTimer = 0;
+/** Shows what the scene is for a few seconds, longer if hovered */
+const showCaption = () => {
+  const name = settings.scene;
+  /** @type {HTMLElement} */ (caption.querySelector('b')).textContent = name;
+  /** @type {HTMLElement} */ (caption.querySelector('span')).textContent =
+    captions[/** @type {keyof typeof captions} */ (name)] ?? '';
+  caption.classList.remove('hidden');
+  clearTimeout(captionTimer);
+  captionTimer = setTimeout(() => caption.classList.add('hidden'), 6000);
+};
+caption.addEventListener('pointerenter', () => clearTimeout(captionTimer));
+caption.addEventListener('pointerleave', showCaption);
+
 /** Shows the scene settings.scene names, from the start */
 export const showScene = () => {
   loadScene();
   resetCamera();
   select(-1);
   saveEdits();
+  showCaption();
 };
 
 /** Downloads the image as shown, as a PNG */
@@ -84,11 +100,25 @@ const useDefaults = () => {
   gui.controllersRecursive().forEach((c) => c.updateDisplay());
 };
 
-gui.add(settings, 'scene', Object.keys(scenes)).onChange(() => {
-  // Each scene starts with its own settings, not the last scene's
-  useDefaults();
-  showScene();
-});
+const sceneControl = gui
+  .add(settings, 'scene', Object.keys(scenes))
+  .name('scene (← →)')
+  .onChange(() => {
+    // Each scene starts with its own settings, not the last scene's
+    useDefaults();
+    showScene();
+  });
+
+/** Opens the scene step places after this one in the list (or before, if negative) */
+export const nextScene = (/** @type {number} */ step) => {
+  const names = Object.keys(scenes);
+  const i = names.indexOf(settings.scene) + step;
+  sceneControl.setValue(names[(i + names.length) % names.length]);
+};
+/** @type {HTMLElement} */ (caption.querySelector('.prev')).onclick = () =>
+  nextScene(-1);
+/** @type {HTMLElement} */ (caption.querySelector('.next')).onclick = () =>
+  nextScene(1);
 gui.add(view, 'paused').name('pause (space)').listen();
 gui.add({reset: resetCamera}, 'reset').name('reset view (r)');
 gui

@@ -28,6 +28,7 @@
 - Clamping samples against history (no more than 4x prior's brightness) instead of counting their distance from it as noise darkened the window scene for seconds after stopping (RMS vs reference 17 vs 9 without history), since its photon-lit haze is carried by rare bright samples. Counting it as noise: 6.7 at 1 s vs 13.9 without history.
 - Shader compile errors and uncaptured GPU errors show in the stats line, so a blank or frozen image with no message there is a logic bug, not a GPU error.
 - Scene edits live in the URL as differences from `scene.objects` by index (see `editsParam` in editor.js), so reordering or removing objects in a scene's definition changes what old links show. Add new objects at the end.
+- No `backdrop-filter` over the canvas: the scene caption's blur made the compositor wait for the GPU each frame, so the window scene dropped to 160 ms frames while it showed.
 - lil-gui stops key events from its own controls, so shortcuts don't work right after clicking a panel button.
 
 ## Measuring

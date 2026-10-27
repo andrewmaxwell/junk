@@ -12,7 +12,7 @@ import {
   zoomBy,
 } from './camera.js';
 import {objectsEdited, removeSelected, select} from './editor.js';
-import {changed, displayChanged, hdrChanged} from './panel.js';
+import {changed, displayChanged, hdrChanged, nextScene} from './panel.js';
 import {redraw, restart} from './renderer.js';
 import {settings, toneCurves, view} from './settings.js';
 import {PLATE, hitObject} from './shapes.js';
@@ -177,6 +177,8 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 't') {
     settings.tone = toneCurves[(toneCurves.indexOf(settings.tone) + 1) % 3];
     changed();
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    nextScene(e.key === 'ArrowLeft' ? -1 : 1);
   } else if (e.key === 'h') {
     view.hdr = !view.hdr;
     hdrChanged();

@@ -16,7 +16,7 @@ const stats = /** @type {HTMLElement} */ (document.querySelector('#stats'));
 const hints = matchMedia('(pointer: coarse)').matches
   ? 'drag: orbit · pinch: zoom · two fingers: pan · tap: select and focus'
   : 'drag: orbit · shift/right drag: pan · scroll: zoom · ' +
-    'click: select and focus · space: pause · r: reset view';
+    'click: select and focus · ← →: scenes · space: pause · r: reset view';
 
 const loop = () => {
   renderer.step(frameView);
