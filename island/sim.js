@@ -42,6 +42,9 @@ const neighborOffsets = [
 /** m: how far condensed water drifts before most of it has fallen (1/e) */
 const RAIN_DRIFT = 1000;
 
+/** steps between rain sweeps while time runs */
+const RAIN_EVERY = 5;
+
 /** m/yr the air could take up from a well-watered surface at t °C (a rough Hamon-style fit). */
 export const potentialEvaporation = (t) => Math.max(0, 0.065 * t);
 
@@ -310,14 +313,20 @@ export function makeSim({N, cellSize, seed}) {
     }
   }
 
+  let stepsSinceRain = Infinity;
+
   /**
    * Work out the rain, fill lakes and the sea from the edges inward, record the order points
    * were reached (which never decreases in water level) and work out where each point drains.
    * @param {typeof defaults} p
+   * @param {boolean} [freshRain] false to keep the rain from up to RAIN_EVERY steps ago
    */
-  function route(p) {
+  function route(p, freshRain = true) {
     const {seaLevel} = p;
-    updateRain(p);
+    if (freshRain || stepsSinceRain >= RAIN_EVERY) {
+      updateRain(p);
+      stepsSinceRain = 0;
+    }
     closed.fill(0);
     heapSize = 0;
     for (let i = 0; i < num; i++) {
@@ -401,7 +410,10 @@ export function makeSim({N, cellSize, seed}) {
       if (!edge[i]) height[i] += uplift[i] * upliftRate * dt;
     }
 
-    route(p);
+    // The climate follows the broad shape of the land, which barely moves in one step, and the
+    // rain sweep is a third of the step's time, so it's only redone every few steps.
+    stepsSinceRain++;
+    route(p, false);
 
     // Rivers cut toward the point they drain to, upstream from the sea. Streams that reach a
     // lake or the sea cut down to its surface, not its floor. Lake beds don't erode.

@@ -40,34 +40,57 @@ function makeFrame() {
 
 // Horizon-based ambient occlusion: look out along 8 directions at distances growing to about
 // 40 cells, and darken a point by how much of the sky the highest ground in each direction hides.
+// It was most of the frame's time, so each frame only redoes every AO_BANDS-th row; the
+// shading lags the ground by a few frames, which nobody can see.
+const AO_BANDS = 4;
 const AO_STEPS = [1, 2, 3, 5, 8, 12, 18, 27, 40];
-const AO_DIRECTIONS = Array.from({length: 8}, (_, k) => [
-  Math.cos((k * Math.PI) / 4),
-  Math.sin((k * Math.PI) / 4),
-]);
+const AO_DIRECTIONS = 8;
+// grid offsets and distances of each sample, direction by direction, in flat arrays:
+// destructuring little arrays in this loop made the whole frame several times slower
+const aoDx = new Int32Array(AO_DIRECTIONS * AO_STEPS.length);
+const aoDz = new Int32Array(aoDx.length);
+const aoDistance = new Float64Array(aoDx.length);
+for (let k = 0; k < AO_DIRECTIONS; k++) {
+  AO_STEPS.forEach((d, s) => {
+    const j = k * AO_STEPS.length + s;
+    aoDx[j] = Math.round(Math.cos((k * Math.PI) / 4) * d);
+    aoDz[j] = Math.round(Math.sin((k * Math.PI) / 4) * d);
+    aoDistance[j] = d;
+  });
+}
+let aoBand = 0;
+/** @type {Float32Array} */
+let occlusion;
 
-function ambientOcclusion(i, x, z) {
+function updateOcclusion() {
   const {N, cellSize, height} = sim;
-  const h = height[i];
-  let hidden = 0;
-  for (const [dx, dz] of AO_DIRECTIONS) {
-    let best = 0;
-    for (const d of AO_STEPS) {
-      const sx = Math.round(x + dx * d);
-      const sz = Math.round(z + dz * d);
-      if (sx < 0 || sz < 0 || sx >= N || sz >= N) break;
-      const slope = (height[sz * N + sx] - h) / (d * cellSize);
-      if (slope > best) best = slope;
+  for (let z = aoBand; z < N; z += AO_BANDS) {
+    for (let x = 0; x < N; x++) {
+      const i = z * N + x;
+      const h = height[i];
+      let hidden = 0;
+      for (let k = 0; k < AO_DIRECTIONS; k++) {
+        let best = 0;
+        for (let j = k * AO_STEPS.length; j < (k + 1) * AO_STEPS.length; j++) {
+          const sx = x + aoDx[j];
+          const sz = z + aoDz[j];
+          if (sx < 0 || sz < 0 || sx >= N || sz >= N) break;
+          const slope = (height[sz * N + sx] - h) / (aoDistance[j] * cellSize);
+          if (slope > best) best = slope;
+        }
+        hidden += best / Math.sqrt(1 + best * best); // sine of the horizon's angle
+      }
+      occlusion[i] = 1 - hidden / AO_DIRECTIONS;
     }
-    hidden += best / Math.sqrt(1 + best * best); // sine of the horizon's angle
   }
-  return 1 - hidden / AO_DIRECTIONS.length;
+  aoBand = (aoBand + 1) % AO_BANDS;
 }
 
 /** Fill a frame from the current state. Assumes route() has run since the last change. */
 function fillFrame(f) {
   const {N, cellSize, height, water, wet, area, rain, discharge} = sim;
   let peak = -Infinity;
+  updateOcclusion();
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       const i = z * N + x;
@@ -80,7 +103,7 @@ function fillFrame(f) {
       f.fields[i * 4] = h;
       f.fields[i * 4 + 1] = rain[i];
       f.fields[i * 4 + 2] = Math.log10(Math.max(1, discharge[i]));
-      f.fields[i * 4 + 3] = ambientOcclusion(i, x, z);
+      f.fields[i * 4 + 3] = occlusion[i];
 
       const hl = height[x > 0 ? i - 1 : i];
       const hr = height[x < N - 1 ? i + 1 : i];
@@ -281,7 +304,8 @@ function tick() {
     dirty = true;
   }
   if (performance.now() - now >= BUDGET_MS) yearsDue = 0; // can't keep up: go as fast as we can
-  if (dirty) sim.route(params);
+  // Each step routes the water before it erodes, so the frame shows that routing, one step
+  // behind the heights. Routing again just to draw took 40% of the worker's time.
   send();
   setTimeout(tick, yearsDue >= STEP_YEARS ? 0 : 8);
 }
@@ -295,6 +319,8 @@ onmessage = ({data}) => {
     visited = new Uint8Array(data.N * data.N);
     hasRiverDonor = new Uint8Array(data.N * data.N);
     riversDrawnAt = -Infinity;
+    occlusion = new Float32Array(data.N * data.N);
+    for (let k = 0; k < AO_BANDS; k++) updateOcclusion();
     const texels = ((data.N - 1) * RIVER_TEXELS + 1) ** 2;
     riverDistance = new Float32Array(texels);
     riverHalfWidth = new Float32Array(texels);
