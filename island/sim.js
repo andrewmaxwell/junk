@@ -1,341 +1,274 @@
-// sim.js
-import {initializeTerrain} from './terrain.js';
+// Landscape evolution: the crust rises, rivers cut down, and slopes creep, following
+//   dh/dt = U − K (P·A)^m · S + D ∇²h
+// U is uplift, P·A is river discharge (rainfall × the area draining through a point), S is the
+// slope to the next point downstream and D is how fast soil creeps downhill. River incision is
+// solved implicitly along the drainage tree (Braun & Willett 2013), so it is stable at any time
+// step. Depressions fill with lakes that drain over their lowest rim (priority flood, Barnes
+// 2014). The sea is the base level: rivers end there and can't cut below it.
+
+import {makeIsland} from './terrain.js';
+
+export const defaults = {
+  rain: 1.5, // m/yr of runoff
+  upliftRate: 1.5, // mm/yr at the fastest-rising point
+  seaLevel: 0, // m
+  K: 1.5e-5, // river erodibility, for discharge in m³/yr
+  m: 0.5, // discharge exponent (slope exponent n is 1)
+  D: 0.03, // m²/yr soil creep on land
+  marineD: 0.4, // m²/yr sediment spreading under water, which builds a shelf
+};
+
+const neighborOffsets = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [-1, 1],
+  [1, -1],
+  [-1, -1],
+];
 
 /**
- * Create the simulation state and internal scratch buffers.
- * Arrays are stable references on the returned object.
- * @param {{
- *   simSize: number,
- *   seed?: string|number,
- *   seaLevel: number,
- *   elevationScale: number,
- *   islandRadiusCells: number,
- *   cellSize: number,
- *   hillGrid?: number,
- *   hillAmp?: number
- * }} params
- * @returns {{
- *   landHeight: Float32Array,
- *   waterDepth: Float32Array,
- *   sediment: Float32Array,
- *   rockHardness: Float32Array,
- *   iterate: (stepParams: {
- *     dt: number,
- *     rainRate: number,
- *     evaporationRate: number,
- *     flowFactor: number,
- *     capacityCoeff: number,
- *     erodeRate: number,
- *     depositRate: number,
- *     maxErodePerStep: number,
- *     talusAngleDeg: number,
- *     thermalRate: number,
- *     thermalPasses: number,
- *     seaLevel?: number,
- *     streamPowerK: number,
- *     streamPowerM: number,
- *     streamPowerN: number
- *   }) => void
- * }}
+ * @param {{N: number, cellSize: number, seed: number}} options
  */
-export function makeSim(params) {
-  const N = params.simSize | 0;
+export function makeSim({N, cellSize, seed}) {
   const num = N * N;
+  const height = new Float64Array(num);
+  const uplift = new Float32Array(num); // 0..1, times upliftRate
+  const water = new Float64Array(num); // height of the lake or sea surface, or the land if dry
+  const wet = new Uint8Array(num); // 1 for lakes, 2 for the sea
+  const receiver = new Int32Array(num); // where each point drains to
+  const receiverDistance = new Float32Array(num);
+  const area = new Float64Array(num); // m² draining through each point
+  const stack = new Int32Array(num); // every point after the one it drains to
+  const floodReceiver = new Int32Array(num);
+  const closed = new Uint8Array(num);
+  const change = new Float64Array(num);
+  const heapKeys = new Float64Array(num);
+  const heapValues = new Int32Array(num);
+  const pits = new Int32Array(num);
+
+  const offsets = neighborOffsets.map(([dx, dz]) => dz * N + dx);
+  const distances = neighborOffsets.map(
+    ([dx, dz]) => Math.hypot(dx, dz) * cellSize,
+  );
+  const isEdge = (i) => {
+    const x = i % N;
+    const z = (i / N) | 0;
+    return x === 0 || z === 0 || x === N - 1 || z === N - 1;
+  };
+  const edge = Uint8Array.from({length: num}, (_, i) => +isEdge(i));
+
+  makeIsland(N, seed, height, uplift);
+  let time = 0;
+
+  // a binary min-heap of points keyed by water level
+  let heapSize = 0;
+  function push(key, value) {
+    let k = heapSize++;
+    while (k > 0) {
+      const parent = (k - 1) >> 1;
+      if (heapKeys[parent] <= key) break;
+      heapKeys[k] = heapKeys[parent];
+      heapValues[k] = heapValues[parent];
+      k = parent;
+    }
+    heapKeys[k] = key;
+    heapValues[k] = value;
+  }
+  function pop() {
+    const top = heapValues[0];
+    const key = heapKeys[--heapSize];
+    const value = heapValues[heapSize];
+    let k = 0;
+    for (;;) {
+      let child = 2 * k + 1;
+      if (child >= heapSize) break;
+      if (child + 1 < heapSize && heapKeys[child + 1] < heapKeys[child])
+        child++;
+      if (heapKeys[child] >= key) break;
+      heapKeys[k] = heapKeys[child];
+      heapValues[k] = heapValues[child];
+      k = child;
+    }
+    heapKeys[k] = key;
+    heapValues[k] = value;
+    return top;
+  }
 
   /**
-   * Row-major index of (x,z).
-   * @param {number} x
-   * @param {number} z
-   * @returns {number}
+   * Fill lakes and the sea from the edges inward, record the order points were reached (which
+   * never decreases in water level) and work out where each point drains.
+   * @param {number} seaLevel
    */
-  const indexOf = (x, z) => z * N + x;
+  function route(seaLevel) {
+    closed.fill(0);
+    heapSize = 0;
+    for (let i = 0; i < num; i++) {
+      if (!edge[i]) continue;
+      water[i] = Math.max(height[i], seaLevel);
+      floodReceiver[i] = i;
+      closed[i] = 1;
+      push(water[i], i);
+    }
+    let pitStart = 0;
+    let pitEnd = 0;
+    let count = 0;
+    while (heapSize > 0 || pitEnd > pitStart) {
+      const c = pitEnd > pitStart ? pits[pitStart++] : pop();
+      stack[count++] = c;
+      const x = c % N;
+      for (let k = 0; k < 8; k++) {
+        const nx = x + neighborOffsets[k][0];
+        if (nx < 0 || nx >= N) continue;
+        const n = c + offsets[k];
+        if (n < 0 || n >= num || closed[n]) continue;
+        closed[n] = 1;
+        floodReceiver[n] = c;
+        if (height[n] <= water[c]) {
+          water[n] = water[c];
+          pits[pitEnd++] = n;
+        } else {
+          water[n] = height[n];
+          push(water[n], n);
+        }
+      }
+      if (pitStart === pitEnd) pitStart = pitEnd = 0;
+    }
 
-  // Public state (stable references)
-  const landHeight = new Float32Array(num);
-  const waterDepth = new Float32Array(num);
-  const sediment = new Float32Array(num);
-  const rockHardness = new Float32Array(num);
+    // Dry land drains down its steepest drop in water level, so lakes and the sea
+    // look flat. Lakes and flats drain toward wherever the flood reached them from.
+    for (let i = 0; i < num; i++) {
+      wet[i] = height[i] < water[i] ? (water[i] <= seaLevel ? 2 : 1) : 0;
+      receiver[i] = i;
+      receiverDistance[i] = cellSize;
+      if (edge[i] || wet[i] === 2) continue;
+      if (!wet[i]) {
+        const x = i % N;
+        let best = 0;
+        for (let k = 0; k < 8; k++) {
+          const n = i + offsets[k];
+          const drop = (water[i] - water[n]) / distances[k];
+          if (drop > best && Math.abs((n % N) - x) <= 1) {
+            best = drop;
+            receiver[i] = n;
+            receiverDistance[i] = distances[k];
+          }
+        }
+        if (receiver[i] !== i) continue;
+      }
+      const r = floodReceiver[i];
+      receiver[i] = r;
+      receiverDistance[i] =
+        Math.hypot((r % N) - (i % N), ((r / N) | 0) - ((i / N) | 0)) * cellSize;
+    }
 
-  // Internal scratch buffers
-  const combinedHeight = new Float32Array(num);
-  const nextWaterDepth = new Float32Array(num);
-  const nextSediment = new Float32Array(num);
-  const deltaHeightTherm = new Float32Array(num);
-  const fluxNorth = new Float32Array(num);
-  const fluxSouth = new Float32Array(num);
-  const fluxEast = new Float32Array(num);
-  const fluxWest = new Float32Array(num);
-
-  // One-time terrain init
-  initializeTerrain(params, landHeight, rockHardness, waterDepth, sediment);
+    area.fill(cellSize * cellSize);
+    for (let k = num - 1; k >= 0; k--) {
+      const i = stack[k];
+      if (receiver[i] !== i) area[receiver[i]] += area[i];
+    }
+  }
 
   /**
-   * Simulate one time step: water routing, erosion/transport, thermal erosion.
-   * @param {{
-   *   dt: number,
-   *   rainRate: number,
-   *   evaporationRate: number,
-   *   flowFactor: number,
-   *   capacityCoeff: number,
-   *   erodeRate: number,
-   *   depositRate: number,
-   *   maxErodePerStep: number,
-   *   talusAngleDeg: number,
-   *   thermalRate: number,
-   *   thermalPasses: number,
-   *   seaLevel?: number,
-   *   streamPowerK: number,
-   *   streamPowerM: number,
-   *   streamPowerN: number
-   * }} stepParams
+   * Advance by dt years.
+   * @param {number} dt
+   * @param {typeof defaults} p
    */
-  function iterate(stepParams) {
-    const {
-      dt,
-      rainRate,
-      evaporationRate,
-      flowFactor,
-      capacityCoeff,
-      erodeRate,
-      depositRate,
-      maxErodePerStep,
-      talusAngleDeg,
-      thermalRate,
-      thermalPasses,
-      streamPowerK,
-      streamPowerM,
-      streamPowerN,
-    } = stepParams;
-
-    const seaLevel = stepParams.seaLevel ?? params.seaLevel;
-    const cellSize = params.cellSize;
-    const small = 1e-9;
-
-    const talusHeightThreshold =
-      Math.tan((talusAngleDeg * Math.PI) / 180) * cellSize + 1e-6;
-
-    // Rain, Evaporation, Combined Height
+  function step(dt, p) {
+    const {seaLevel} = p;
+    const upliftRate = p.upliftRate / 1000;
     for (let i = 0; i < num; i++) {
-      waterDepth[i] = Math.max(
-        0,
-        waterDepth[i] + rainRate * dt - evaporationRate * dt,
-      );
-      combinedHeight[i] = landHeight[i] + waterDepth[i];
-      nextWaterDepth[i] = 0;
-      nextSediment[i] = 0;
-      fluxNorth[i] = fluxSouth[i] = fluxEast[i] = fluxWest[i] = 0;
+      if (!edge[i]) height[i] += uplift[i] * upliftRate * dt;
     }
 
-    // Flux computation (4-neighbor) on combined height
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        const i = indexOf(x, z);
-        const hHere = combinedHeight[i];
+    route(seaLevel);
 
-        let outflow = 0;
-
-        if (z > 0) {
-          const dH = hHere - combinedHeight[indexOf(x, z - 1)];
-          if (dH > 0) {
-            fluxNorth[i] = Math.max(0, fluxNorth[i] + dt * flowFactor * dH);
-            outflow += fluxNorth[i];
-          }
-        }
-        if (z < N - 1) {
-          const dH = hHere - combinedHeight[indexOf(x, z + 1)];
-          if (dH > 0) {
-            fluxSouth[i] = Math.max(0, fluxSouth[i] + dt * flowFactor * dH);
-            outflow += fluxSouth[i];
-          }
-        }
-        if (x < N - 1) {
-          const dH = hHere - combinedHeight[indexOf(x + 1, z)];
-          if (dH > 0) {
-            fluxEast[i] = Math.max(0, fluxEast[i] + dt * flowFactor * dH);
-            outflow += fluxEast[i];
-          }
-        }
-        if (x > 0) {
-          const dH = hHere - combinedHeight[indexOf(x - 1, z)];
-          if (dH > 0) {
-            fluxWest[i] = Math.max(0, fluxWest[i] + dt * flowFactor * dH);
-            outflow += fluxWest[i];
-          }
-        }
-
-        // Conserve mass
-        const maxOut = waterDepth[i];
-        if (outflow * dt > maxOut && outflow > small) {
-          const scale = maxOut / (outflow * dt + small);
-          fluxNorth[i] *= scale;
-          fluxSouth[i] *= scale;
-          fluxEast[i] *= scale;
-          fluxWest[i] *= scale;
-        }
-      }
+    // Rivers cut toward the point they drain to, upstream from the sea. Streams that reach a
+    // lake or the sea cut down to its surface, not its floor. Lake beds don't erode.
+    const factor = p.K * dt * Math.pow(p.rain, p.m);
+    for (let k = 0; k < num; k++) {
+      const i = stack[k];
+      const r = receiver[i];
+      if (r === i || wet[i]) continue;
+      const base = wet[r] ? water[r] : height[r];
+      const f = (factor * Math.pow(area[i], p.m)) / receiverDistance[i];
+      const next = (height[i] + f * base) / (1 + f);
+      if (next < height[i]) height[i] = next;
     }
 
-    // Apply fluxes (advect water & sediment)
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        const i = indexOf(x, z);
-        const w = waterDepth[i];
-
-        const outN = fluxNorth[i] * dt;
-        const outS = fluxSouth[i] * dt;
-        const outE = fluxEast[i] * dt;
-        const outW = fluxWest[i] * dt;
-        const totalOut = outN + outS + outE + outW;
-
-        const stay = Math.max(0, w - totalOut);
-        const sedimentHere = sediment[i];
-
-        nextWaterDepth[i] += stay;
-        if (w > small) {
-          nextSediment[i] += sedimentHere * (stay / w);
-        } else {
-          nextSediment[i] += sedimentHere;
-        }
-
-        if (z > 0 && outN > 0) {
-          const j = indexOf(x, z - 1);
-          nextWaterDepth[j] += outN;
-          if (w > small) nextSediment[j] += sedimentHere * (outN / w);
-        }
-        if (z < N - 1 && outS > 0) {
-          const j = indexOf(x, z + 1);
-          nextWaterDepth[j] += outS;
-          if (w > small) nextSediment[j] += sedimentHere * (outS / w);
-        }
-        if (x < N - 1 && outE > 0) {
-          const j = indexOf(x + 1, z);
-          nextWaterDepth[j] += outE;
-          if (w > small) nextSediment[j] += sedimentHere * (outE / w);
-        }
-        if (x > 0 && outW > 0) {
-          const j = indexOf(x - 1, z);
-          nextWaterDepth[j] += outW;
-          if (w > small) nextSediment[j] += sedimentHere * (outW / w);
-        }
-      }
-    }
-
-    // Erosion / deposition (capacity model + stream-power incision)
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        const i = indexOf(x, z);
-
-        const hHere = combinedHeight[i];
-        let maxDrop = 0;
-        if (z > 0)
-          maxDrop = Math.max(
-            maxDrop,
-            hHere - combinedHeight[indexOf(x, z - 1)],
-          );
-        if (z < N - 1)
-          maxDrop = Math.max(
-            maxDrop,
-            hHere - combinedHeight[indexOf(x, z + 1)],
-          );
-        if (x > 0)
-          maxDrop = Math.max(
-            maxDrop,
-            hHere - combinedHeight[indexOf(x - 1, z)],
-          );
-        if (x < N - 1)
-          maxDrop = Math.max(
-            maxDrop,
-            hHere - combinedHeight[indexOf(x + 1, z)],
-          );
-
-        const localSlope = Math.max(0, maxDrop) / params.cellSize;
-        const outPerSec =
-          fluxNorth[i] + fluxSouth[i] + fluxEast[i] + fluxWest[i]; // discharge proxy
-        const depthHere = nextWaterDepth[i];
-        const velocityProxy = outPerSec / Math.max(depthHere, 1e-4);
-
-        const capacity = capacityCoeff * velocityProxy * localSlope;
-        const sed = nextSediment[i];
-
-        // Capacity-driven erosion/deposition (suspended load)
-        if (sed < capacity) {
-          let erode = erodeRate * (capacity - sed) * dt;
-          erode = Math.min(erode, maxErodePerStep);
-          erode *= 1 - 0.8 * rockHardness[i];
-          const minBed = seaLevel - 30;
-          erode = Math.min(erode, Math.max(0, landHeight[i] - minBed));
-          landHeight[i] -= erode;
-          nextSediment[i] += erode;
-        } else {
-          const deposit = depositRate * (sed - capacity) * dt;
-          landHeight[i] += deposit;
-          nextSediment[i] -= deposit;
-        }
-
-        // Stream-power incision (channels carve bedrock)
-        if (localSlope > 0 && outPerSec > 0) {
-          const incision =
-            Math.min(
-              maxErodePerStep,
-              streamPowerK *
-                Math.pow(outPerSec, streamPowerM) *
-                Math.pow(localSlope, streamPowerN) *
-                dt,
-            ) *
-            (1 - 0.8 * rockHardness[i]);
-          if (incision > 0) {
-            landHeight[i] -= incision;
-            nextSediment[i] += incision;
+    // Soil creep, faster under water. Explicit, in as many substeps as stability needs.
+    const fastest = Math.max(p.D, p.marineD);
+    const substeps = Math.ceil((fastest * dt) / (cellSize * cellSize) / 0.2);
+    const h = dt / substeps / (cellSize * cellSize);
+    for (let s = 0; s < substeps; s++) {
+      change.fill(0);
+      for (let z = 0; z < N; z++) {
+        for (let x = 0; x < N; x++) {
+          const i = z * N + x;
+          const Di = height[i] < seaLevel ? p.marineD : p.D;
+          if (x < N - 1) {
+            const j = i + 1;
+            const Dj = height[j] < seaLevel ? p.marineD : p.D;
+            const flow = ((Di + Dj) / 2) * (height[i] - height[j]) * h;
+            change[i] -= flow;
+            change[j] += flow;
+          }
+          if (z < N - 1) {
+            const j = i + N;
+            const Dj = height[j] < seaLevel ? p.marineD : p.D;
+            const flow = ((Di + Dj) / 2) * (height[i] - height[j]) * h;
+            change[i] -= flow;
+            change[j] += flow;
           }
         }
       }
+      for (let i = 0; i < num; i++) if (!edge[i]) height[i] += change[i];
     }
 
-    // Commit fields
-    for (let i = 0; i < num; i++) {
-      waterDepth[i] = Math.max(0, nextWaterDepth[i]);
-      sediment[i] = Math.max(0, nextSediment[i]);
-    }
+    time += dt;
+  }
 
-    // Thermal erosion (talus / landslides)
-    for (let pass = 0; pass < thermalPasses; pass++) {
-      deltaHeightTherm.fill(0);
-      for (let z = 1; z < N - 1; z++) {
-        for (let x = 1; x < N - 1; x++) {
-          const i = indexOf(x, z);
-          const bedHere = landHeight[i];
-
-          /** @type {[number,number][]} */
-          const neighbors = [
-            [x, z - 1],
-            [x, z + 1],
-            [x - 1, z],
-            [x + 1, z],
-          ];
-
-          for (let k = 0; k < neighbors.length; k++) {
-            const [nx, nz] = neighbors[k];
-            const j = indexOf(nx, nz);
-            const diff = bedHere - landHeight[j];
-            if (diff > talusHeightThreshold) {
-              const move = (diff - talusHeightThreshold) * 0.5 * thermalRate;
-              deltaHeightTherm[i] -= move;
-              deltaHeightTherm[j] += move;
-            }
-          }
-        }
-      }
-      for (let i = 0; i < num; i++) {
-        landHeight[i] += deltaHeightTherm[i];
+  /**
+   * Raise (amount > 0) or lower the ground in a soft circle.
+   * @param {number} cx grid x
+   * @param {number} cz grid z
+   * @param {number} radius grid cells
+   * @param {number} amount meters at the middle
+   */
+  function brush(cx, cz, radius, amount) {
+    const r = Math.ceil(radius * 2);
+    for (
+      let z = Math.max(1, Math.floor(cz - r));
+      z <= Math.min(N - 2, cz + r);
+      z++
+    ) {
+      for (
+        let x = Math.max(1, Math.floor(cx - r));
+        x <= Math.min(N - 2, cx + r);
+        x++
+      ) {
+        const d2 = ((x - cx) ** 2 + (z - cz) ** 2) / (radius * radius);
+        height[z * N + x] += amount * Math.exp(-d2 * 2);
       }
     }
   }
 
   return {
-    landHeight,
-    waterDepth,
-    sediment,
-    rockHardness,
-    iterate,
+    N,
+    cellSize,
+    height,
+    uplift,
+    water,
+    wet,
+    area,
+    receiver,
+    route,
+    step,
+    brush,
+    get time() {
+      return time;
+    },
   };
 }

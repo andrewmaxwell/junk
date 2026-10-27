@@ -1,382 +1,353 @@
-// makeRenderer.js
+// Draws the island with three.js: lit, shadowed terrain, lakes and rivers on their own glossy
+// mesh, and a see-through sea under a physical sky.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+import {Sky} from 'three/addons/objects/Sky.js';
+import {Line2} from 'three/addons/lines/Line2.js';
+import {LineGeometry} from 'three/addons/lines/LineGeometry.js';
+import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
 
 /**
- * Create a Three.js renderer that draws terrain + water each frame.
- * - Sea: reflective/transmissive plane at seaLevel.
- * - Inland water: separate grid surface (flat, reflective) colored by depth & sediment.
  * @param {HTMLCanvasElement} canvas
- * @returns {(sim: {
- *   landHeight: Float32Array,
- *   waterDepth: Float32Array,
- *   sediment: Float32Array
- * }, opts: {
- *   cellSize: number,
- *   seaLevel: number,
- *   showWater?: boolean,
- *   waterMinDepth?: number,
- *   waterDepthMax?: number,
- *   sedimentTintScale?: number
- * }) => void}
+ * @param {{N: number, cellSize: number, lowPower: boolean}} options
  */
-export function makeRenderer(canvas) {
+export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   const renderer = new THREE.WebGLRenderer({canvas, antialias: true});
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  // full retina resolution costs twice the frame time for little visible gain under antialiasing
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.1;
+  renderer.toneMappingExposure = 0.8;
+  renderer.shadowMap.enabled = !lowPower; // shadows cost about a third of the frame
+  renderer.shadowMap.type = THREE.PCFShadowMap;
 
+  const size = (N - 1) * cellSize;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87b8ff);
-
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const envMap = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
-  scene.environment = envMap;
-
-  const camera = new THREE.PerspectiveCamera(
-    60,
-    canvas.clientWidth / canvas.clientHeight,
-    0.1,
-    200000,
-  );
-  camera.position.set(0, 800, 800);
-
-  const controls = new OrbitControls(camera, renderer.domElement);
+  const camera = new THREE.PerspectiveCamera(45, 1, 10, size * 20);
+  const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
-  controls.target.set(0, 0, 0);
+  controls.maxPolarAngle = Math.PI * 0.47;
+  controls.minDistance = size * 0.05;
+  controls.maxDistance = size * 2.5;
+  controls.zoomToCursor = true;
+  const viewDirection = new THREE.Vector3(0.45, 0.42, 0.75).normalize();
+  let touched = false;
+  const focus = {x: 0, z: 0, radius: size * 0.42};
+  let aimed = false;
+  controls.addEventListener('start', () => (touched = true));
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-  sun.position.set(500, 1000, 500);
-  sun.castShadow = false;
-  scene.add(sun);
-
-  /** @type {THREE.Mesh | null} */
-  let terrainMesh = null;
-  /** @type {THREE.Mesh | null} */
-  let seaMesh = null;
-  /** @type {THREE.Mesh | null} */
-  let inlandWaterMesh = null;
-
-  /** @type {THREE.BufferAttribute | null} */
-  let terrainPosAttr = null;
-  /** @type {THREE.BufferAttribute | null} */
-  let terrainColorAttr = null;
-
-  /** @type {THREE.BufferAttribute | null} */
-  let waterPosAttr = null;
-  /** @type {THREE.BufferAttribute | null} */
-  let waterColorAttr = null;
-
-  let currentN = 0;
-  let planeWidth = 0;
-  let planeHeight = 0;
-
-  /**
-   * Build (or rebuild) terrain & water meshes for grid N.
-   * @param {number} N
-   * @param {number} cellSize
-   */
-  function rebuildMeshes(N, cellSize) {
-    // dispose old
-    if (terrainMesh) {
-      scene.remove(terrainMesh);
-      terrainMesh.geometry.dispose();
-      terrainMesh = null;
-    }
-    if (seaMesh) {
-      scene.remove(seaMesh);
-      seaMesh.geometry.dispose();
-      seaMesh = null;
-    }
-    if (inlandWaterMesh) {
-      scene.remove(inlandWaterMesh);
-      inlandWaterMesh.geometry.dispose();
-      inlandWaterMesh = null;
-    }
-
-    currentN = N;
-    planeWidth = (N - 1) * cellSize;
-    planeHeight = (N - 1) * cellSize;
-
-    // --- Terrain (vertex-colored) ---
-    const tGeom = new THREE.PlaneGeometry(
-      planeWidth,
-      planeHeight,
-      N - 1,
-      N - 1,
-    );
-    tGeom.rotateX(-Math.PI / 2);
-    const tColors = new Float32Array(N * N * 3);
-    terrainColorAttr = new THREE.BufferAttribute(tColors, 3);
-    tGeom.setAttribute('color', terrainColorAttr);
-    terrainPosAttr = tGeom.getAttribute('position');
-
-    const tMat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 1.0,
-      metalness: 0.0,
-      envMap,
-      envMapIntensity: 0.3,
-    });
-
-    terrainMesh = new THREE.Mesh(tGeom, tMat);
-    terrainMesh.receiveShadow = true;
-    scene.add(terrainMesh);
-
-    // --- Inland water surface (grid, vertex-colored) ---
-    const wGeom = new THREE.PlaneGeometry(
-      planeWidth,
-      planeHeight,
-      N - 1,
-      N - 1,
-    );
-    wGeom.rotateX(-Math.PI / 2);
-    const wColors = new Float32Array(N * N * 3);
-    waterColorAttr = new THREE.BufferAttribute(wColors, 3);
-    wGeom.setAttribute('color', waterColorAttr);
-    waterPosAttr = wGeom.getAttribute('position');
-
-    const waterMat = new THREE.MeshPhysicalMaterial({
-      vertexColors: true,
-      transmission: 0.8, // glass-like refraction
-      transparent: true,
-      opacity: 0.95,
-      ior: 1.333,
-      thickness: 10,
-      roughness: 0.06,
-      metalness: 0.0,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.05,
-      envMap,
-      envMapIntensity: 1.0,
-      depthWrite: false,
-    });
-
-    inlandWaterMesh = new THREE.Mesh(wGeom, waterMat);
-    inlandWaterMesh.renderOrder = 1;
-    scene.add(inlandWaterMesh);
-
-    // --- Sea plane ---
-    const seaGeom = new THREE.PlaneGeometry(planeWidth, planeHeight, 1, 1);
-    seaGeom.rotateX(-Math.PI / 2);
-    const seaMat = new THREE.MeshPhysicalMaterial({
-      color: 0x3aa7ff,
-      transmission: 0.8,
-      transparent: true,
-      opacity: 0.95,
-      ior: 1.333,
-      thickness: 20,
-      roughness: 0.05,
-      metalness: 0.0,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.03,
-      envMap,
-      envMapIntensity: 1.2,
-      depthWrite: false,
-    });
-    seaMesh = new THREE.Mesh(seaGeom, seaMat);
-    seaMesh.renderOrder = 0;
-    scene.add(seaMesh);
-
-    // Frame camera
-    camera.position.set(
-      0,
-      Math.max(planeWidth, planeHeight) * 0.9,
-      Math.max(planeWidth, planeHeight) * 0.9,
-    );
-    controls.target.set(0, 0, 0);
-    controls.update();
+  /** Back the camera off until the island fits the screen's width and height. */
+  function frameIsland() {
+    const vertical = THREE.MathUtils.degToRad(camera.fov / 2);
+    const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
+    const distance =
+      (focus.radius * 0.8) / Math.tan(Math.min(vertical, horizontal));
+    controls.target.set(focus.x, 0, focus.z);
+    camera.position
+      .copy(viewDirection)
+      .multiplyScalar(Math.min(distance, size * 2.4))
+      .add(controls.target);
   }
 
+  // sky, and the same sky blurred into reflections and ambient light
+  const sun = new THREE.Vector3().setFromSphericalCoords(
+    1,
+    THREE.MathUtils.degToRad(58),
+    THREE.MathUtils.degToRad(200),
+  );
+  const sky = new Sky();
+  sky.scale.setScalar(size * 15);
+  const u = sky.material.uniforms;
+  u.turbidity.value = 4;
+  u.rayleigh.value = 1.2;
+  u.mieCoefficient.value = 0.004;
+  u.mieDirectionalG.value = 0.85;
+  u.sunPosition.value.copy(sun);
+  scene.add(sky);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const skyScene = new THREE.Scene();
+  skyScene.add(sky.clone());
+  scene.environment = pmrem.fromScene(skyScene).texture;
+  scene.fog = new THREE.Fog(0xa9c3d9, size * 1.2, size * 6);
+
+  const light = new THREE.DirectionalLight(0xfff1dd, 2.2);
+  light.position.copy(sun).multiplyScalar(size);
+  light.castShadow = true;
+  light.shadow.mapSize.setScalar(2048);
+  const half = size * 0.55;
+  Object.assign(light.shadow.camera, {
+    left: -half,
+    right: half,
+    top: half,
+    bottom: -half,
+    near: 1,
+    far: size * 3,
+  });
+  light.shadow.bias = -0.0005;
+  light.shadow.normalBias = cellSize * 0.02;
+  scene.add(light);
+  scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x4a4030, 0.4));
+
+  /** A grid mesh whose heights, normals and colors come from the worker each frame. */
+  function makeGrid(colorSize) {
+    const geometry = new THREE.PlaneGeometry(size, size, N - 1, N - 1);
+    geometry.rotateX(-Math.PI / 2);
+    geometry.setAttribute(
+      'color',
+      new THREE.BufferAttribute(
+        new Uint8Array(N * N * colorSize),
+        colorSize,
+        true,
+      ),
+    );
+    return geometry;
+  }
+
+  const terrain = new THREE.Mesh(
+    makeGrid(3),
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.95,
+      envMapIntensity: 0.5,
+    }),
+  );
+  terrain.castShadow = terrain.receiveShadow = true;
+  scene.add(terrain);
+
+  const water = new THREE.Mesh(
+    makeGrid(4),
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      transparent: true,
+      roughness: 0.2,
+      envMapIntensity: 0.35, // lakes catch the sky at a glance and read as snow at full strength
+      depthWrite: false,
+    }),
+  );
+  water.receiveShadow = true;
+  water.renderOrder = 2;
+  scene.add(water);
+
+  const sea = new THREE.Mesh(
+    new THREE.PlaneGeometry(size * 30, size * 30).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({
+      color: 0x0a3550,
+      transparent: true,
+      opacity: 0.72,
+      roughness: 0.12,
+      depthWrite: false,
+    }),
+  );
+  sea.receiveShadow = true;
+  sea.renderOrder = 1;
+  scene.add(sea);
+
+  // the deep ocean floor beyond the edge of the grid
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(size * 30, size * 30).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({
+      // the worker's deep-water color as it comes out of its 8-bit linear vertex colors
+      color: new THREE.Color().setRGB(
+        ...[0.05, 0.12, 0.17].map((v) => Math.floor(v ** 2.2 * 255) / 255),
+        THREE.LinearSRGBColorSpace,
+      ),
+      roughness: 0.95,
+      envMapIntensity: 0.5,
+    }),
+  );
+  floor.position.y = -1201;
+  floor.renderOrder = -1;
+  scene.add(floor);
+
+  // a raindrop's path to the sea, and a dot where it starts
+  const pathMaterial = new LineMaterial({
+    color: 0xffd23f,
+    linewidth: 3,
+    depthTest: false,
+    transparent: true,
+    fog: false,
+  });
+  let path = null;
+  const dot = new THREE.Points(
+    new THREE.BufferGeometry().setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([0, 0, 0], 3),
+    ),
+    new THREE.PointsMaterial({
+      color: 0xffd23f,
+      size: 12,
+      sizeAttenuation: false,
+      depthTest: false,
+      fog: false,
+    }),
+  );
+  dot.renderOrder = 3;
+  dot.visible = false;
+  scene.add(dot);
+
   /**
-   * Update terrain vertices/colors.
-   * @param {Float32Array} landHeight
+   * Draw a line through grid points, just above the ground or water.
+   * @param {number[]} cells
+   * @param {Float32Array} ys surface height at each cell
+   */
+  function showPath(cells, ys) {
+    if (path) {
+      scene.remove(path);
+      path.geometry.dispose();
+      path = null;
+    }
+    dot.visible = cells.length > 0;
+    if (!cells.length) return;
+    const points = cells.flatMap((i) => [
+      gridToWorld(i % N),
+      ys[i] + 3,
+      gridToWorld(Math.floor(i / N)),
+    ]);
+    dot.position.set(points[0], points[1], points[2]);
+    if (cells.length < 2) return;
+    const geometry = new LineGeometry();
+    geometry.setPositions(points);
+    path = new Line2(geometry, pathMaterial);
+    path.renderOrder = 3;
+    scene.add(path);
+  }
+
+  /** @type {Float32Array} */
+  let heights = new Float32Array(N * N);
+
+  /**
+   * Show a frame from the worker. Returns the frame's buffers for reuse.
+   * @param {any} frame
    * @param {number} seaLevel
    */
-  function updateTerrain(landHeight, seaLevel) {
-    if (!terrainPosAttr || !terrainColorAttr || !terrainMesh) return;
-    const verts = /** @type {Float32Array} */ (terrainPosAttr.array);
-    const colors = /** @type {Float32Array} */ (terrainColorAttr.array);
-    const N = currentN;
-
-    /**
-     * @param {number} i
-     * @param {number} r
-     * @param {number} g
-     * @param {number} b
-     */
-    function setColor(i, r, g, b) {
-      const k = i * 3;
-      colors[k] = r;
-      colors[k + 1] = g;
-      colors[k + 2] = b;
-    }
-
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        const i = z * N + x;
-        const vyIndex = i * 3 + 1;
-        const h = landHeight[i];
-        verts[vyIndex] = h;
-
-        // Simple elevation palette
-        const rel = h - seaLevel;
-        if (rel < -2) {
-          setColor(i, 0.1, 0.2, 0.35);
-        } else if (rel < 2) {
-          setColor(i, 0.92, 0.86, 0.62);
-        } else if (rel < 40) {
-          setColor(i, 0.32, 0.55, 0.25);
-        } else if (rel < 120) {
-          setColor(i, 0.55, 0.55, 0.55);
-        } else {
-          setColor(i, 1.0, 1.0, 1.0);
-        }
-      }
-    }
-
-    terrainPosAttr.needsUpdate = true;
-    terrainColorAttr.needsUpdate = true;
-    terrainMesh.geometry.computeVertexNormals();
+  function update(frame, seaLevel) {
+    heights = frame.height.slice();
+    if (!aimed) aimAtLand(seaLevel);
+    const setY = (mesh, ys) => {
+      const p = mesh.geometry.attributes.position;
+      for (let i = 0; i < N * N; i++) p.array[i * 3 + 1] = ys[i];
+      p.needsUpdate = true;
+    };
+    setY(terrain, frame.height);
+    setY(water, frame.waterY);
+    terrain.geometry.attributes.normal.array.set(frame.normal);
+    terrain.geometry.attributes.normal.needsUpdate = true;
+    terrain.geometry.attributes.color.array.set(frame.color);
+    terrain.geometry.attributes.color.needsUpdate = true;
+    water.geometry.attributes.color.array.set(frame.waterColor);
+    water.geometry.attributes.color.needsUpdate = true;
+    terrain.geometry.computeBoundingSphere();
+    sea.position.y = seaLevel;
   }
 
-  /**
-   * Update inland water surface (flat, reflective) with color by depth & sediment.
-   * @param {Float32Array} landHeight
-   * @param {Float32Array} waterDepth
-   * @param {Float32Array} sediment
-   * @param {number} seaLevel
-   * @param {number} waterMinDepth
-   * @param {number} waterDepthMax
-   * @param {number} sedimentTintScale
-   */
-  function updateInlandWater(
-    landHeight,
-    waterDepth,
-    sediment,
-    seaLevel,
-    waterMinDepth,
-    waterDepthMax,
-    sedimentTintScale,
-  ) {
-    if (!waterPosAttr || !waterColorAttr || !inlandWaterMesh) return;
-    const verts = /** @type {Float32Array} */ (waterPosAttr.array);
-    const colors = /** @type {Float32Array} */ (waterColorAttr.array);
-    const N = currentN;
-
-    const deepBlue = [0.05, 0.25, 0.6];
-    const shallowBlue = [0.55, 0.85, 1.0];
-    const tanSed = [0.74, 0.62, 0.4];
-
-    /**
-     * @param {number[]} a
-     * @param {number[]} b
-     * @param {number} t
-     * @returns {number[]}
-     */
-    function mix(a, b, t) {
-      return [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-      ];
+  /** Center the view on the land, sized to fit it. */
+  function aimAtLand(seaLevel) {
+    let count = 0;
+    let sx = 0;
+    let sz = 0;
+    for (let i = 0; i < N * N; i++) {
+      if (heights[i] <= seaLevel) continue;
+      sx += i % N;
+      sz += Math.floor(i / N);
+      count++;
     }
-
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        const i = z * N + x;
-        const vyIndex = i * 3 + 1;
-        const d = waterDepth[i];
-
-        if (d > waterMinDepth) {
-          const surface = landHeight[i] + d;
-          verts[vyIndex] = surface;
-
-          // Depth-based blue
-          const tDepth = Math.max(
-            0,
-            Math.min(1, d / Math.max(1e-3, waterDepthMax)),
-          );
-          let c = mix(shallowBlue, deepBlue, tDepth);
-
-          // Sediment tint toward tan/brown
-          const sed = sediment[i];
-          const tSed = Math.max(0, Math.min(1, sed * sedimentTintScale));
-          c = mix(c, tanSed, tSed);
-
-          const k = i * 3;
-          colors[k] = c[0];
-          colors[k + 1] = c[1];
-          colors[k + 2] = c[2];
-        } else {
-          // Hide vertex by sinking below sea plane; keep color same
-          verts[vyIndex] = seaLevel - 1000;
-          const k = i * 3;
-          colors[k] = colors[k] || 0;
-          colors[k + 1] = colors[k + 1] || 0;
-          colors[k + 2] = colors[k + 2] || 0;
-        }
-      }
+    aimed = true;
+    if (!count) return;
+    const cx = sx / count;
+    const cz = sz / count;
+    let r2 = 0;
+    for (let i = 0; i < N * N; i++) {
+      if (heights[i] > seaLevel)
+        r2 = Math.max(r2, ((i % N) - cx) ** 2 + (Math.floor(i / N) - cz) ** 2);
     }
-
-    waterPosAttr.needsUpdate = true;
-    waterColorAttr.needsUpdate = true;
-    inlandWaterMesh.geometry.computeVertexNormals();
+    Object.assign(focus, {
+      x: gridToWorld(cx),
+      z: gridToWorld(cz),
+      radius: Math.sqrt(r2) * cellSize,
+    });
+    frameIsland();
   }
 
+  /** Height at fractional grid coordinates, or undefined off the grid. */
+  function heightAt(gx, gz) {
+    if (gx < 0 || gz < 0 || gx > N - 1 || gz > N - 1) return undefined;
+    const x = Math.min(Math.floor(gx), N - 2);
+    const z = Math.min(Math.floor(gz), N - 2);
+    const fx = gx - x;
+    const fz = gz - z;
+    const i = z * N + x;
+    const a = heights[i] + (heights[i + 1] - heights[i]) * fx;
+    const b = heights[i + N] + (heights[i + N + 1] - heights[i + N]) * fx;
+    return a + (b - a) * fz;
+  }
+
+  const gridToWorld = (g) => (g - (N - 1) / 2) * cellSize;
+  const toGrid = (v) => v / cellSize + (N - 1) / 2;
+  const raycaster = new THREE.Raycaster();
+
   /**
-   * Render call. Rebuilds meshes if sim size changed.
-   * @param {{ landHeight: Float32Array, waterDepth: Float32Array, sediment: Float32Array }} sim
-   * @param {{ cellSize: number, seaLevel: number, showWater?: boolean, waterMinDepth?: number, waterDepthMax?: number, sedimentTintScale?: number }} opts
+   * Where a point on screen hits the ground, in grid coordinates, by marching along the ray.
+   * @param {number} clientX
+   * @param {number} clientY
+   * @returns {{x: number, z: number} | null}
    */
-  function render(sim, opts) {
-    const N = Math.round(Math.sqrt(sim.landHeight.length)) | 0;
-    const waterMinDepth = opts.waterMinDepth ?? 0.02;
-    const waterDepthMax = opts.waterDepthMax ?? 5.0;
-    const sedimentTintScale = opts.sedimentTintScale ?? 0.5;
-
-    if (N !== currentN) rebuildMeshes(N, opts.cellSize);
-
-    if (seaMesh) {
-      seaMesh.position.y = opts.seaLevel;
-      seaMesh.visible = opts.showWater !== false;
-    }
-
-    updateTerrain(sim.landHeight, opts.seaLevel);
-    updateInlandWater(
-      sim.landHeight,
-      sim.waterDepth,
-      sim.sediment,
-      opts.seaLevel,
-      waterMinDepth,
-      waterDepthMax,
-      sedimentTintScale,
+  function pick(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
     );
+    raycaster.setFromCamera(ndc, camera);
+    const {origin, direction} = raycaster.ray;
+    const stepLength = cellSize * 0.5;
+    let wasAbove = false;
+    for (let t = 0, prev = 0; t < size * 4; prev = t, t += stepLength) {
+      const p = origin.clone().addScaledVector(direction, t);
+      const h = heightAt(toGrid(p.x), toGrid(p.z));
+      if (h === undefined) {
+        if (wasAbove) return null; // left the grid
+        continue;
+      }
+      if (p.y >= h) {
+        wasAbove = true;
+        continue;
+      }
+      if (!wasAbove) continue;
+      // narrow down between the last point above ground and this one
+      let lo = prev;
+      let hi = t;
+      for (let k = 0; k < 12; k++) {
+        const mid = (lo + hi) / 2;
+        const q = origin.clone().addScaledVector(direction, mid);
+        if (q.y >= (heightAt(toGrid(q.x), toGrid(q.z)) ?? -Infinity)) lo = mid;
+        else hi = mid;
+      }
+      const q = origin.clone().addScaledVector(direction, hi);
+      return {x: toGrid(q.x), z: toGrid(q.z)};
+    }
+    return null;
+  }
 
+  function render() {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
-    if (canvas.width !== w || canvas.height !== h) {
+    if (canvas.width !== Math.round(w * renderer.getPixelRatio())) {
       renderer.setSize(w, h, false);
+      pathMaterial.resolution.set(w, h);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+      if (!touched) frameIsland();
     }
-
     controls.update();
     renderer.render(scene, camera);
   }
 
-  function onResize() {
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-  }
-  window.addEventListener('resize', onResize);
-
-  return render;
+  return {
+    update,
+    render,
+    pick,
+    showPath,
+    controls,
+    reframe: () => (aimed = false),
+  };
 }

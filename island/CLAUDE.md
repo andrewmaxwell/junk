@@ -1,0 +1,7 @@
+# island
+
+- `sim.js` is the model and has no DOM, so `node island/test.js` runs it. `worker.js` steps it and fills ready-to-draw vertex buffers (heights, normals, colors, lake surfaces), which ping-pong between the worker and `main.js` as transferables: the worker only builds a frame when the main thread has handed one back.
+- Receivers can't form loops because dry land drains strictly down the filled water surface and lakes and flats drain to the point the priority flood reached them from, so (water level, flood order) strictly decreases along every path. The flood order is therefore also a valid upstream order for the implicit solve and for summing drainage area.
+- Vertex colors are 8-bit and linear, so dark colors are coarsely quantized. The deep-ocean floor plane copies the quantized deep color exactly, or the grid's edge shows through the sea.
+- Speed (measured on an M4, 1200×760 window): the model takes about 5 ms per step at 256², 16 ms at 384² and 26 ms at 512² in Node. Drawing is GPU-bound: about 20 ms per frame at pixel ratio 1.5, 24 to 28 ms at 2, and shadows cost about 6 ms, so the pixel ratio is capped at 1.5 and phones skip shadows. The main thread is nearly idle.
+- Rivers used to be drawn as a strip on the water mesh, one cell wide, which read as dashed white specular lines. They are now painted into the terrain colors, and big rivers spread into neighboring cells.
