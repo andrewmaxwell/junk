@@ -114,9 +114,11 @@ const glowPipelines = ['downsample', 'blurRows', 'blurColumns'].map((entry) =>
   computePipeline(glowModule, entry),
 );
 const denoiseModule = compile(denoiseShader);
-const [preparePipeline, blurPipeline] = ['prepare', 'blur'].map((entry) =>
-  computePipeline(denoiseModule, entry),
-);
+const [preparePipeline, blurPipeline, reprojectPipeline] = [
+  'prepare',
+  'blur',
+  'reproject',
+].map((entry) => computePipeline(denoiseModule, entry));
 
 /** @type {(data: ArrayBufferView, usage: number) => GPUBuffer} */
 const bufferWith = (data, usage) => {
@@ -143,6 +145,20 @@ const paramsBuffer = device.createBuffer({
   size: paramsData.byteLength,
   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 });
+
+/** Temporal in shaders/denoise.js: the camera history was seen from, and more */
+const temporalData = new ArrayBuffer(64);
+const temporalF32 = new Float32Array(temporalData);
+const temporalU32 = new Uint32Array(temporalData);
+const temporalBuffer = device.createBuffer({
+  size: temporalData.byteLength,
+  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+});
+/**
+ * Prior fades out over this many samples after a restart, so from then on
+ * the image is only its own samples
+ */
+const PRIOR_SAMPLES = 16;
 
 /** Caustic photons, traced afresh each frame; see photonGrid in shaders/photons.js */
 const photonBuffer = device.createBuffer({
@@ -201,6 +217,8 @@ let glowBindGroups = [];
 /** The denoiser's prepare pass, then its blur passes */
 /** @type {GPUBindGroup[]} */
 let denoiseBindGroups = [];
+/** @type {GPUBindGroup} */
+let reprojectBindGroup;
 export let width = 0;
 export let height = 0;
 export let tileCount = 0;
@@ -279,6 +297,17 @@ const bind = () => {
       }),
     ),
   ];
+  reprojectBindGroup = bindGroup(reprojectPipeline, {
+    0: paramsBuffer,
+    1: sums,
+    5: normalDepth,
+    9: filtered[0],
+    10: pixelBuffers.history,
+    11: pixelBuffers.historyGuide,
+    12: pixelBuffers.prior,
+    13: pixelBuffers.nextHistory,
+    14: temporalBuffer,
+  });
   displayBindGroup = bindGroup(displayPipeline, [
     paramsBuffer,
     sums,
@@ -299,7 +328,13 @@ export const resize = () => {
   for (const b of Object.values(pixelBuffers)) b.destroy();
   /** @type {(size: number) => GPUBuffer} */
   const storage = (size) =>
-    device.createBuffer({size, usage: GPUBufferUsage.STORAGE});
+    device.createBuffer({
+      size,
+      usage:
+        GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
+    });
   const pixels = width * height * 16;
   pixelBuffers = {
     sums: storage(pixels),
@@ -317,7 +352,14 @@ export const resize = () => {
     albedoSlope: storage(pixels),
     filtered0: storage(pixels),
     filtered1: storage(pixels),
+    // The last frame, moved along as the camera moves; see reproject in
+    // shaders/denoise.js
+    history: storage(pixels),
+    historyGuide: storage(pixels),
+    prior: storage(pixels),
+    nextHistory: storage(pixels),
   };
+  historyView = null;
   bind();
   restart();
 };
@@ -404,6 +446,12 @@ export let startTime = performance.now();
 let lastDenoise = 0;
 // Whether sampling was done or paused as of the last frame
 let wasStopped = false;
+/**
+ * The view the denoiser's history was seen from, or null when there's no
+ * history to use
+ * @type {FrameView | null}
+ */
+let historyView = null;
 
 /**
  * Throws the samples away and starts again. While something is moving,
@@ -447,21 +495,22 @@ export const isDone = () =>
  * }} FrameView
  */
 
+/** The camera's right and up vectors, scaled to the image plane at distance 1 */
+const imagePlane = (/** @type {FrameView} */ v) => ({
+  right: v.right.map((r) => (r * v.zoom * width) / height),
+  up: v.up.map((u) => u * v.zoom),
+});
+
 /** Fills in Params in shaders/common.js */
 const writeParams = (/** @type {FrameView} */ v) => {
   paramsF32.set(v.position, 0);
   paramsU32[3] = frame;
   paramsF32.set(v.forward, 4);
   paramsU32[7] = randomSeed++;
-  paramsF32.set(
-    v.right.map((r) => (r * v.zoom * width) / height),
-    8,
-  );
+  const {right, up} = imagePlane(v);
+  paramsF32.set(right, 8);
   paramsU32[11] = samplesPerFrame;
-  paramsF32.set(
-    v.up.map((u) => u * v.zoom),
-    12,
-  );
+  paramsF32.set(up, 12);
   paramsU32[15] = ['mis', 'light', 'bsdf'].indexOf(settings.sampling);
   paramsF32[16] = settings.clamp || 1e30;
   paramsU32[17] = objectCount;
@@ -541,13 +590,39 @@ const render = (/** @type {FrameView} */ v, trace = true) => {
     (!trace || samplesPerPixel < 64 || now - lastDenoise > 150)
   ) {
     lastDenoise = now;
+    // At a restart, move the last frame's image to this view; see
+    // reproject in shaders/denoise.js
+    const reproject = trace && frame === 0;
+    if (!historyView) encoder.clearBuffer(pixelBuffers.prior);
+    const then = historyView ?? v;
+    temporalF32.set(then.position, 0);
+    temporalU32[3] = +(reproject && !!historyView);
+    temporalF32.set(then.forward, 4);
+    const samples = samplesPerPixel + (trace ? samplesPerFrame : 0);
+    temporalF32[7] = Math.max(0, 1 - samples / PRIOR_SAMPLES);
+    temporalF32.set(imagePlane(then).right, 8);
+    temporalF32.set(imagePlane(then).up, 12);
+    device.queue.writeBuffer(temporalBuffer, 0, temporalData);
+    historyView = v;
+
     const pass = encoder.beginComputePass();
     for (const [i, group] of denoiseBindGroups.entries()) {
       pass.setPipeline(i ? blurPipeline : preparePipeline);
       pass.setBindGroup(0, group);
       pass.dispatchWorkgroups(...groups);
+      if (i === 0) {
+        pass.setPipeline(reprojectPipeline);
+        pass.setBindGroup(0, reprojectBindGroup);
+        pass.dispatchWorkgroups(...groups);
+      }
     }
     pass.end();
+    const {history, historyGuide, nextHistory, normalDepth} = pixelBuffers;
+    encoder.copyBufferToBuffer(nextHistory, 0, history, 0, history.size);
+    encoder.copyBufferToBuffer(normalDepth, 0, historyGuide, 0, history.size);
+  } else if (!settings.denoise) {
+    // The camera may move while the denoiser is off
+    historyView = null;
   }
 
   if (settings.glow > 0) {
