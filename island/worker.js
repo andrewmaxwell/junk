@@ -27,6 +27,7 @@ const deep = lin([0.05, 0.12, 0.17]);
 const lowland = lin([0.24, 0.45, 0.17]);
 const forest = lin([0.13, 0.3, 0.12]);
 const upland = lin([0.42, 0.45, 0.26]);
+const dry = lin([0.6, 0.53, 0.33]); // grass and scrub where little rain falls
 const alpine = lin([0.52, 0.49, 0.41]);
 const rock = lin([0.42, 0.42, 0.36]);
 const snow = lin([0.93, 0.95, 0.98]);
@@ -54,6 +55,8 @@ function makeFrame() {
     waterY: new Float32Array(num),
     waterColor: new Uint8Array(num * 4),
     area: new Float32Array(num),
+    rain: new Float32Array(num),
+    flow: new Float32Array(num),
     receiver: new Int32Array(num),
     time: 0,
     peak: 0,
@@ -62,16 +65,16 @@ function makeFrame() {
 
 /** Fill a frame from the current state. Assumes route() has run since the last change. */
 function fillFrame(f) {
-  const {N, cellSize, height, water, wet, area} = sim;
+  const {N, cellSize, height, water, wet, area, rain, discharge} = sim;
   const num = N * N;
-  const {seaLevel, rain} = params;
+  const {seaLevel} = params;
   const c = [0, 0, 0];
   let peak = -Infinity;
 
   // How river-like each point is, from its discharge. Big rivers spread into the points beside
   // them, since a single grid cell is narrower than a pixel from most views.
   for (let i = 0; i < num; i++) {
-    const q = Math.log10(area[i] * rain);
+    const q = Math.log10(discharge[i]);
     river[i] = wet[i] || height[i] < seaLevel ? 0 : smooth(5.5, 6.3, q);
     wide[i] = river[i] * smooth(6.6, 7.6, q);
   }
@@ -81,6 +84,8 @@ function fillFrame(f) {
       const h = height[i];
       f.height[i] = h;
       f.area[i] = area[i];
+      f.rain[i] = rain[i];
+      f.flow[i] = discharge[i];
       if (h > peak) peak = h;
 
       const hl = height[x > 0 ? i - 1 : i];
@@ -101,6 +106,7 @@ function fillFrame(f) {
         blend(c, deep, smooth(10, 250, -above));
       } else {
         mix(c, lowland, forest, smooth(20, 200, above) * 0.8);
+        blend(c, dry, smooth(1.1, 0.35, rain[i]) * 0.85);
         blend(c, upland, smooth(300, 900, above));
         blend(c, alpine, smooth(900, 1500, above));
         blend(c, sand, smooth(5, 1, above) * smooth(0.4, 0.15, steep));
@@ -146,6 +152,8 @@ function send() {
     f.waterY.buffer,
     f.waterColor.buffer,
     f.area.buffer,
+    f.rain.buffer,
+    f.flow.buffer,
     f.receiver.buffer,
   ]);
 }
@@ -163,7 +171,7 @@ function tick() {
     dirty = true;
   }
   if (performance.now() - now >= BUDGET_MS) yearsDue = 0; // can't keep up: go as fast as we can
-  if (dirty) sim.route(params.seaLevel);
+  if (dirty) sim.route(params);
   send();
   setTimeout(tick, yearsDue >= STEP_YEARS ? 0 : 8);
 }
@@ -175,18 +183,18 @@ onmessage = ({data}) => {
     freeFrames.push(makeFrame(), makeFrame());
     river = new Float32Array(data.N * data.N);
     wide = new Float32Array(data.N * data.N);
-    sim.route(params.seaLevel);
+    sim.route(params);
     dirty = true;
     yearsDue = 0;
     if (!data.restart) tick();
   } else if (data.type === 'params') {
     params = {...params, ...data.params};
     speed = data.speed;
-    sim.route(params.seaLevel);
+    sim.route(params);
     dirty = true;
   } else if (data.type === 'brush') {
     sim.brush(data.x, data.z, data.radius, data.amount);
-    sim.route(params.seaLevel);
+    sim.route(params);
     dirty = true;
   } else if (data.type === 'frame') {
     if (data.frame.height.length === sim.N * sim.N) freeFrames.push(data.frame);

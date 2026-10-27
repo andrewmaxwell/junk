@@ -14,7 +14,7 @@ const num = N * N;
 
 // Every point drains somewhere lower or level, and following receivers always ends at the edge
 // or in the sea, never in a loop.
-sim.route(defaults.seaLevel);
+sim.route(defaults);
 let loops = 0;
 let uphill = 0;
 for (let i = 0; i < num; i++) {
@@ -48,32 +48,86 @@ for (let i = 0; i < num; i++) {
 }
 check(badLakes === 0, 'lakes spill downhill');
 
-// Run toward steady state with no soil creep, where the stream power law gives an exact answer:
-// erosion balances uplift, so S = U / (K (P A)^m) at every river point.
-const params = {...defaults, D: 0, marineD: 0};
-for (let t = 0; t < 400; t++) sim.step(5000, params);
-sim.route(params.seaLevel);
+// With no uplift or creep, every m³ rivers cut away ends up in a lake, in the sea or off the
+// edge of the grid.
+{
+  const fresh = makeSim({N, cellSize, seed: 7});
+  const still = {...defaults, upliftRate: 0, D: 0, marineD: 0};
+  const sum = (a) => a.reduce((s, v) => s + v, 0);
+  const start = sum(fresh.height);
+  let eroded = 0;
+  for (let t = 0; t < 50; t++) {
+    const h = fresh.height.slice();
+    fresh.step(5000, still);
+    for (let i = 0; i < num; i++) eroded += Math.max(0, h[i] - fresh.height[i]);
+  }
+  const change =
+    (sum(fresh.height) - start) * cellSize * cellSize + fresh.lostSediment;
+  check(
+    Math.abs(change) < 1e-6 * eroded * cellSize * cellSize,
+    `sediment is conserved (${change.toExponential(2)} m³ unaccounted of ${(eroded * cellSize * cellSize).toExponential(2)} m³ moved)`,
+  );
+}
 
-// At steady state height stops changing.
+// The side of the island facing the wind gets more rain than the side away from it.
+{
+  sim.route(defaults);
+  const angle = (defaults.wind * Math.PI) / 180;
+  const [wx, wz] = [-Math.sin(angle), Math.cos(angle)];
+  let cx = 0;
+  let land = 0;
+  for (let i = 0; i < num; i++) {
+    if (sim.height[i] <= defaults.seaLevel) continue;
+    cx += (i % N) * wx + ((i / N) | 0) * wz;
+    land++;
+  }
+  cx /= land;
+  const sides = [
+    [0, 0],
+    [0, 0],
+  ];
+  for (let i = 0; i < num; i++) {
+    if (sim.height[i] <= defaults.seaLevel) continue;
+    const lee = (i % N) * wx + ((i / N) | 0) * wz > cx ? 1 : 0;
+    sides[lee][0] += sim.rain[i];
+    sides[lee][1]++;
+  }
+  const [windward, leeward] = sides.map(([r, n]) => r / n);
+  check(
+    windward > leeward * 1.3,
+    `windward side is wetter (${windward.toFixed(2)} vs ${leeward.toFixed(2)} m/yr)`,
+  );
+}
+
+// Run toward steady state with no soil creep, where the stream power law gives an exact answer:
+// erosion balances uplift, so S = U / (K Q^m) at every river point.
+const params = {...defaults, D: 0, marineD: 0};
+for (let t = 0; t < 800; t++) sim.step(5000, params);
+sim.route(params);
+
+// At steady state height stops changing. A point or two can flicker when its steepest neighbor
+// is nearly tied, so allow one in a thousand.
 const before = sim.height.slice();
 sim.step(5000, params);
-let maxRate = 0;
-let maxUplift = params.upliftRate / 1000;
+const maxUplift = params.upliftRate / 1000;
+let moving = 0;
+let dry = 0;
 for (let i = 0; i < num; i++) {
   if (sim.wet[i] || sim.receiver[i] === i) continue;
-  maxRate = Math.max(maxRate, Math.abs(sim.height[i] - before[i]) / 5000);
+  dry++;
+  if (Math.abs(sim.height[i] - before[i]) / 5000 > maxUplift * 0.05) moving++;
 }
 check(
-  maxRate < maxUplift * 0.05,
-  `steady state: land changes under 5% of uplift (${((maxRate / maxUplift) * 100).toFixed(2)}%)`,
+  moving <= dry / 1000,
+  `steady state: ${moving} of ${dry} land points change by more than 5% of uplift`,
 );
 
 // Erosion balancing uplift is local, so each dry point's slope must match its own uplift.
 const ys = [];
-sim.route(params.seaLevel);
+sim.route(params);
 for (let i = 0; i < num; i++) {
   const r = sim.receiver[i];
-  if (r === i || sim.wet[i] || sim.wet[r]) continue;
+  if (r === i || sim.wet[i] || sim.wet[r] || sim.uplift[i] === 0) continue;
   const slope =
     (sim.height[i] - sim.height[r]) /
     (Math.hypot((r % N) - (i % N), ((r / N) | 0) - ((i / N) | 0)) * cellSize);
@@ -81,7 +135,7 @@ for (let i = 0; i < num; i++) {
   const predicted =
     (sim.uplift[i] * params.upliftRate) /
     1000 /
-    (params.K * Math.pow(params.rain * sim.area[i], params.m));
+    (params.K * Math.pow(sim.discharge[i], params.m));
   ys.push(Math.log(slope / predicted));
 }
 const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
@@ -89,7 +143,7 @@ const errors = ys.map(Math.abs).sort((a, b) => a - b);
 const median = errors[errors.length >> 1];
 check(
   ys.length > 100 && median < 0.05,
-  `slope matches U/(K(PA)^m) at ${ys.length} points (median error ${(median * 100).toFixed(2)}%, mean log ratio ${mean(ys).toFixed(4)})`,
+  `slope matches U/(K Q^m) at ${ys.length} points (median error ${(median * 100).toFixed(2)}%, mean log ratio ${mean(ys).toFixed(4)})`,
 );
 
 process.exit(failures ? 1 : 0);

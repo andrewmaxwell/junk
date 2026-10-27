@@ -26,6 +26,7 @@ const url = new URLSearchParams(location.search);
 const settings = {
   tool: 'Look',
   rain: +(url.get('rain') ?? defaults.rain),
+  wind: +(url.get('wind') ?? defaults.wind),
   upliftRate: +(url.get('uplift') ?? defaults.upliftRate),
   seaLevel: +(url.get('sea') ?? defaults.seaLevel),
   speed: 100, // thousand years per second
@@ -39,6 +40,7 @@ function newSeed() {
 function saveUrl() {
   const q = new URLSearchParams({seed: String(settings.seed)});
   if (settings.rain !== defaults.rain) q.set('rain', String(settings.rain));
+  if (settings.wind !== defaults.wind) q.set('wind', String(settings.wind));
   if (settings.upliftRate !== defaults.upliftRate)
     q.set('uplift', String(settings.upliftRate));
   if (settings.seaLevel !== defaults.seaLevel)
@@ -65,6 +67,7 @@ function sendParams() {
     type: 'params',
     params: {
       rain: settings.rain,
+      wind: settings.wind,
       upliftRate: settings.upliftRate,
       seaLevel: settings.seaLevel,
     },
@@ -95,9 +98,17 @@ worker.onmessage = ({data}) => {
   frame = data.frame;
 };
 const transfers = (f) =>
-  [f.height, f.normal, f.color, f.waterY, f.waterColor, f.area, f.receiver].map(
-    (a) => a.buffer,
-  );
+  [
+    f.height,
+    f.normal,
+    f.color,
+    f.waterY,
+    f.waterColor,
+    f.area,
+    f.rain,
+    f.flow,
+    f.receiver,
+  ].map((a) => a.buffer);
 
 // ---------- controls ----------
 const gui = new GUI({title: 'Island', width: innerWidth < 600 ? 170 : 245});
@@ -106,6 +117,7 @@ gui
   .name('Tool')
   .onChange(setTool);
 gui.add(settings, 'rain', 0, 4, 0.1).name('Rain (m/yr)').onChange(sendParams);
+gui.add(settings, 'wind', 0, 355, 5).name('Wind from (°)').onChange(sendParams);
 gui
   .add(settings, 'upliftRate', 0, 5, 0.1)
   .name('Uplift (mm/yr)')
@@ -149,6 +161,7 @@ let probe = null; // grid cell the reader tapped
 canvas.addEventListener('pointerdown', (e) => {
   pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
   hintEl.classList.add('gone');
+  view.controls.autoRotate = false;
   const single = pointers.size === 1 && e.button === 0;
   painting =
     single && settings.tool !== 'Look' ? {x: e.clientX, y: e.clientY} : null;
@@ -210,14 +223,15 @@ function showProbe() {
   view.showPath(cells, surface);
 
   const h = frame.height[probe];
-  const lake = frame.waterY[probe] - h; // rivers sit 0.6 m up, lakes higher
+  const lake = frame.waterY[probe] - h; // the water surface tucks under dry land
   const area = frame.area[probe];
-  const flow = (settings.rain * area) / 3.156e7;
+  const flow = frame.flow[probe] / 3.156e7; // m³/s
   const lines =
     h < settings.seaLevel
       ? [`${fmt(settings.seaLevel - h)} m under the sea`]
       : [
           `${fmt(h)} m above sea level${lake > 1 ? `, under ${fmt(lake)} m of lake` : ''}`,
+          `${fmt(frame.rain[probe], 1)} m of rain a year`,
           area < 1e6
             ? `${fmt(area / 1e4, 1)} hectares drain through here`
             : `${fmt(area / 1e6, 1)} km² drains through here`,

@@ -1,15 +1,19 @@
 // Landscape evolution: the crust rises, rivers cut down, and slopes creep, following
-//   dh/dt = U − K (P·A)^m · S + D ∇²h
-// U is uplift, P·A is river discharge (rainfall × the area draining through a point), S is the
-// slope to the next point downstream and D is how fast soil creeps downhill. River incision is
-// solved implicitly along the drainage tree (Braun & Willett 2013), so it is stable at any time
-// step. Depressions fill with lakes that drain over their lowest rim (priority flood, Barnes
-// 2014). The sea is the base level: rivers end there and can't cut below it.
+//   dh/dt = U − K Q^m · S + D ∇²h
+// U is uplift, Q is river discharge (the rain falling on everything upstream of a point), S is
+// the slope to the next point downstream and D is how fast soil creeps downhill. River incision
+// is solved implicitly along the drainage tree (Braun & Willett 2013), so it is stable at any
+// time step. Depressions fill with lakes that drain over their lowest rim (priority flood,
+// Barnes 2014). The sea is the base level: rivers end there and can't cut below it.
+// What rivers cut away is carried downstream and settles where they reach still water, filling
+// lakes and building deltas. Rain is heavier where the wind climbs a slope and lighter in the
+// lee, and moist air dries out as it rains crossing the island, which leaves a rain shadow.
 
 import {makeIsland} from './terrain.js';
 
 export const defaults = {
-  rain: 1.5, // m/yr of runoff
+  rain: 1.5, // m/yr of runoff, averaged over the land
+  wind: 60, // degrees the wind blows from: 0 north (away from the camera), 90 east
   upliftRate: 1.5, // mm/yr at the fastest-rising point
   seaLevel: 0, // m
   K: 1.5e-5, // river erodibility, for discharge in m³/yr
@@ -41,6 +45,12 @@ export function makeSim({N, cellSize, seed}) {
   const receiver = new Int32Array(num); // where each point drains to
   const receiverDistance = new Float32Array(num);
   const area = new Float64Array(num); // m² draining through each point
+  const rain = new Float32Array(num); // m/yr falling on each point
+  const discharge = new Float64Array(num); // m³/yr flowing through each point
+  const moisture = new Float32Array(num);
+  const sediment = new Float64Array(num); // m³ carried out of each point this step
+  const smoothGround = new Float64Array(num);
+  const blurTemp = new Float64Array(num);
   const stack = new Int32Array(num); // every point after the one it drains to
   const floodReceiver = new Int32Array(num);
   const closed = new Uint8Array(num);
@@ -62,6 +72,8 @@ export function makeSim({N, cellSize, seed}) {
 
   makeIsland(N, seed, height, uplift);
   let time = 0;
+  let lostSediment = 0; // m³ carried off the edge of the grid
+  const cellArea = cellSize * cellSize;
 
   // a binary min-heap of points keyed by water level
   let heapSize = 0;
@@ -98,11 +110,125 @@ export function makeSim({N, cellSize, seed}) {
   }
 
   /**
-   * Fill lakes and the sea from the edges inward, record the order points were reached (which
-   * never decreases in water level) and work out where each point drains.
-   * @param {number} seaLevel
+   * Box blur over a square of side 2r+1, in place, by running sums along rows then columns.
+   * @param {Float64Array} a
+   * @param {number} r
    */
-  function route(seaLevel) {
+  function blur(a, r) {
+    for (const [stride, step] of [
+      [N, 1],
+      [1, N],
+    ]) {
+      blurTemp.set(a);
+      for (let line = 0; line < N; line++) {
+        const start = line * stride;
+        let sum = 0;
+        let count = 0;
+        for (let k = 0; k < r && k < N; k++, count++)
+          sum += blurTemp[start + k * step];
+        for (let k = 0; k < N; k++) {
+          if (k + r < N) {
+            sum += blurTemp[start + (k + r) * step];
+            count++;
+          }
+          if (k - r - 1 >= 0) {
+            sum -= blurTemp[start + (k - r - 1) * step];
+            count--;
+          }
+          a[start + k * step] = sum / count;
+        }
+      }
+    }
+  }
+
+  /** @type {Int32Array} */
+  let windOrder;
+  let orderedFor = NaN;
+
+  /**
+   * Sweep moist air across the grid with the wind. Rising over a slope wrings rain out of it in
+   * proportion to how steeply it climbs; sinking down the far side, it barely rains. Over the
+   * sea the air picks moisture back up. Rain is then scaled so the land averages p.rain.
+   * @param {typeof defaults} p
+   */
+  function updateRain(p) {
+    const angle = (p.wind * Math.PI) / 180;
+    const wx = -Math.sin(angle); // the way the wind blows, in grid steps
+    const wz = Math.cos(angle);
+    if (orderedFor !== p.wind) {
+      const along = Float64Array.from(
+        {length: num},
+        (_, i) => (i % N) * wx + ((i / N) | 0) * wz,
+      );
+      windOrder = Int32Array.from({length: num}, (_, i) => i).sort(
+        (a, b) => along[a] - along[b],
+      );
+      orderedFor = p.wind;
+    }
+    // Looking 1.5 cells upwind, all four points around the sample are already done.
+    const back = 1.5;
+    // Air rises over the broad shape of the land, not over every gully, so lift comes from the
+    // ground smoothed over about 400 m.
+    for (let i = 0; i < num; i++)
+      smoothGround[i] = Math.max(height[i], p.seaLevel);
+    blur(smoothGround, Math.max(1, Math.round(200 / cellSize)));
+    const ground = (i) => smoothGround[i];
+    let landRain = 0;
+    let landCount = 0;
+    for (let k = 0; k < num; k++) {
+      const i = windOrder[k];
+      const ux = (i % N) - wx * back;
+      const uz = ((i / N) | 0) - wz * back;
+      let m = 1;
+      let upwind = ground(i);
+      if (ux >= 0 && uz >= 0 && ux < N - 1 && uz < N - 1) {
+        const x0 = Math.floor(ux);
+        const z0 = Math.floor(uz);
+        const fx = ux - x0;
+        const fz = uz - z0;
+        const j = z0 * N + x0;
+        const [w00, w10, w01, w11] = [
+          (1 - fx) * (1 - fz),
+          fx * (1 - fz),
+          (1 - fx) * fz,
+          fx * fz,
+        ];
+        m =
+          moisture[j] * w00 +
+          moisture[j + 1] * w10 +
+          moisture[j + N] * w01 +
+          moisture[j + N + 1] * w11;
+        upwind =
+          ground(j) * w00 +
+          ground(j + 1) * w10 +
+          ground(j + N) * w01 +
+          ground(j + N + 1) * w11;
+      }
+      const climb = (ground(i) - upwind) / (back * cellSize);
+      const strength = Math.min(4, Math.max(0, 0.5 + 6 * climb));
+      if (height[i] < p.seaLevel) {
+        moisture[i] = Math.min(1, m + cellSize / 5000);
+        rain[i] = m * 0.4;
+      } else {
+        // a floor of showers that don't depend on the wind, so the lee is dry, not a desert
+        rain[i] = 0.3 + m * strength;
+        moisture[i] = m * Math.exp((-strength * cellSize) / 15000);
+        landRain += rain[i];
+        landCount++;
+      }
+    }
+    const scale = landCount ? (p.rain * landCount) / landRain : p.rain;
+    for (let i = 0; i < num; i++) rain[i] *= scale;
+  }
+
+  /**
+   * Work out the rain, fill lakes and the sea from the edges inward, record the order points
+   * were reached (which never decreases in water level) and work out where each point drains.
+   * @param {typeof defaults} p
+   */
+  function route(p) {
+    const {seaLevel} = p;
+    updateRain(p);
     closed.fill(0);
     heapSize = 0;
     for (let i = 0; i < num; i++) {
@@ -164,10 +290,13 @@ export function makeSim({N, cellSize, seed}) {
         Math.hypot((r % N) - (i % N), ((r / N) | 0) - ((i / N) | 0)) * cellSize;
     }
 
-    area.fill(cellSize * cellSize);
+    area.fill(cellArea);
+    for (let i = 0; i < num; i++) discharge[i] = rain[i] * cellArea;
     for (let k = num - 1; k >= 0; k--) {
       const i = stack[k];
-      if (receiver[i] !== i) area[receiver[i]] += area[i];
+      if (receiver[i] === i) continue;
+      area[receiver[i]] += area[i];
+      discharge[receiver[i]] += discharge[i];
     }
   }
 
@@ -183,19 +312,46 @@ export function makeSim({N, cellSize, seed}) {
       if (!edge[i]) height[i] += uplift[i] * upliftRate * dt;
     }
 
-    route(seaLevel);
+    route(p);
 
     // Rivers cut toward the point they drain to, upstream from the sea. Streams that reach a
     // lake or the sea cut down to its surface, not its floor. Lake beds don't erode.
-    const factor = p.K * dt * Math.pow(p.rain, p.m);
+    sediment.fill(0);
     for (let k = 0; k < num; k++) {
       const i = stack[k];
       const r = receiver[i];
       if (r === i || wet[i]) continue;
       const base = wet[r] ? water[r] : height[r];
-      const f = (factor * Math.pow(area[i], p.m)) / receiverDistance[i];
+      const f = (p.K * dt * Math.pow(discharge[i], p.m)) / receiverDistance[i];
       const next = (height[i] + f * base) / (1 + f);
-      if (next < height[i]) height[i] = next;
+      if (next < height[i]) {
+        sediment[i] = (height[i] - next) * cellArea;
+        height[i] = next;
+      }
+    }
+
+    // Carry it downstream. It passes over dry land and settles in still water. Lakes fill up to
+    // their surface from where rivers enter, then pass the rest on toward their outlet. At the
+    // sea it fills to a meter below sea level and slides on down the steepest slope, so deltas
+    // build out from river mouths.
+    for (let k = num - 1; k >= 0; k--) {
+      const i = stack[k];
+      let q = sediment[i];
+      if (q <= 0) continue;
+      if (wet[i] === 2) {
+        settleInSea(i, q, seaLevel - 1);
+        continue;
+      }
+      if (wet[i]) {
+        const settled = Math.min(
+          q,
+          Math.max(0, water[i] - height[i]) * cellArea,
+        );
+        height[i] += settled / cellArea;
+        q -= settled;
+      }
+      if (receiver[i] === i) lostSediment += q;
+      else sediment[receiver[i]] += q;
     }
 
     // Soil creep, faster under water. Explicit, in as many substeps as stability needs.
@@ -231,6 +387,27 @@ export function makeSim({N, cellSize, seed}) {
   }
 
   /**
+   * Fill from point i up to `top`, then move on down the steepest slope, settling on a 2% slope
+   * that deepens away from the river mouth, until the sediment runs out or leaves the grid. On a
+   * flat or in a hollow it heads out toward the open sea the way the flood came in.
+   */
+  function settleInSea(i, q, top) {
+    for (let steps = 0; q > 0 && !edge[i] && steps < N * 4; steps++) {
+      const settled = Math.min(q, Math.max(0, top - height[i]) * cellArea);
+      height[i] += settled / cellArea;
+      q -= settled;
+      let next = floodReceiver[i];
+      for (let k = 0; k < 8; k++) {
+        const n = i + offsets[k];
+        if (height[n] < height[next] && height[n] < height[i]) next = n;
+      }
+      top -= cellSize * 0.02;
+      i = next;
+    }
+    lostSediment += q;
+  }
+
+  /**
    * Raise (amount > 0) or lower the ground in a soft circle.
    * @param {number} cx grid x
    * @param {number} cz grid z
@@ -263,12 +440,17 @@ export function makeSim({N, cellSize, seed}) {
     water,
     wet,
     area,
+    rain,
+    discharge,
     receiver,
     route,
     step,
     brush,
     get time() {
       return time;
+    },
+    get lostSediment() {
+      return lostSediment;
     },
   };
 }

@@ -34,7 +34,13 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   let touched = false;
   const focus = {x: 0, z: 0, radius: size * 0.42};
   let aimed = false;
-  controls.addEventListener('start', () => (touched = true));
+  // drift slowly around the island until someone takes the camera
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.8; // turns per minute
+  controls.addEventListener('start', () => {
+    touched = true;
+    controls.autoRotate = false;
+  });
 
   /** Back the camera off until the island fits the screen's width and height. */
   function frameIsland() {
@@ -328,6 +334,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     return null;
   }
 
+  const clock = new THREE.Clock();
   function render() {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
@@ -338,7 +345,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
       camera.updateProjectionMatrix();
       if (!touched) frameIsland();
     }
-    controls.update();
+    controls.update(Math.min(clock.getDelta(), 0.1));
     renderer.render(scene, camera);
   }
 
