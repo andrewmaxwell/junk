@@ -32,6 +32,7 @@ function makeFrame() {
     rain: new Float32Array(num),
     flow: new Float32Array(num),
     receiver: new Int32Array(num),
+    rivers: new Uint8Array(((sim.N - 1) * RIVER_TEXELS + 1) ** 2 * 4),
     time: 0,
     peak: 0,
   };
@@ -116,18 +117,32 @@ function fillFrame(f) {
 }
 
 const RIVER_MIN_FLOW = 0.02 * 3.156e7; // m³/yr, about 20 liters a second
+const RIVER_TEXELS = 4; // river texture texels per grid cell, each way
+const RIVER_REACH = 63; // m: how far from a river the texture keeps track of it
+
+let riversDrawnAt = -Infinity;
+/** @type {Float32Array} */
+let riverDistance;
+/** @type {Float32Array} */
+let riverHalfWidth;
 
 /**
- * Smooth ribbons along every river, as triangles in world coordinates: trace each river from
- * its head down to where it joins a bigger one or reaches still water, round off the grid's
- * zigzags (Chaikin's corner cutting), and give it a width that grows with its flow.
+ * A texture four times finer than the grid that says, at each texel, how far it is to the
+ * nearest river and how wide that river is, so the terrain shader can cut smooth channels and
+ * draw banks, gravel bars and green strips along them; plus how much of it is lake. Each river
+ * is traced from its head down to where it joins a bigger one or reaches still water, and the
+ * grid's zigzags are rounded off with Chaikin's corner cutting.
+ * Channels: distance (m, /63), half width (m, /31.5), lake (0..1), unused.
  */
-function buildRivers() {
-  const {N, cellSize, height, water, wet, discharge, receiver} = sim;
+function drawRivers(out) {
+  const {N, cellSize, height, wet, discharge, receiver} = sim;
   const num = N * N;
+  const M = (N - 1) * RIVER_TEXELS + 1;
   const {seaLevel} = params;
   hasRiverDonor.fill(0);
   visited.fill(0);
+  riverDistance.fill(RIVER_REACH);
+  riverHalfWidth.fill(1);
   for (let i = 0; i < num; i++) {
     isRiver[i] = +(
       !wet[i] &&
@@ -138,35 +153,60 @@ function buildRivers() {
   }
   for (let i = 0; i < num; i++) if (isRiver[i]) hasRiverDonor[receiver[i]] = 1;
 
-  // water surface or ground, bilinear, at fractional grid coordinates
-  const surface = (gx, gz) => {
-    const x = Math.min(Math.max(Math.floor(gx), 0), N - 2);
-    const z = Math.min(Math.max(Math.floor(gz), 0), N - 2);
-    const fx = Math.min(1, Math.max(0, gx - x));
-    const fz = Math.min(1, Math.max(0, gz - z));
-    const at = (i) => Math.max(height[i], wet[i] ? water[i] : -Infinity);
-    const i = z * N + x;
-    return (
-      (at(i) * (1 - fx) + at(i + 1) * fx) * (1 - fz) +
-      (at(i + N) * (1 - fx) + at(i + N + 1) * fx) * fz
+  /** Mark texels near the stretch from a to b, given as [grid x, grid z, half width in m]. */
+  const stroke = ([ax, az, ah], [bx, bz, bh]) => {
+    const reach = Math.min(RIVER_REACH, 8 + 6 * Math.max(ah, bh)) / cellSize;
+    const x0 = Math.max(
+      0,
+      Math.floor((Math.min(ax, bx) - reach) * RIVER_TEXELS),
     );
+    const x1 = Math.min(
+      M - 1,
+      Math.ceil((Math.max(ax, bx) + reach) * RIVER_TEXELS),
+    );
+    const z0 = Math.max(
+      0,
+      Math.floor((Math.min(az, bz) - reach) * RIVER_TEXELS),
+    );
+    const z1 = Math.min(
+      M - 1,
+      Math.ceil((Math.max(az, bz) + reach) * RIVER_TEXELS),
+    );
+    const dx = bx - ax;
+    const dz = bz - az;
+    const length2 = dx * dx + dz * dz || 1e-9;
+    for (let tz = z0; tz <= z1; tz++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        const px = tx / RIVER_TEXELS - ax;
+        const pz = tz / RIVER_TEXELS - az;
+        const t = Math.min(1, Math.max(0, (px * dx + pz * dz) / length2));
+        const d = Math.hypot(px - t * dx, pz - t * dz) * cellSize;
+        const half = ah + (bh - ah) * t;
+        const k = tz * M + tx;
+        // keep whichever river's edge is nearest
+        if (d - half < riverDistance[k] - riverHalfWidth[k]) {
+          riverDistance[k] = d;
+          riverHalfWidth[k] = half;
+        }
+      }
+    }
   };
-  const world = (g) => (g - (N - 1) / 2) * cellSize;
 
-  const out = {position: [], center: [], side: []};
   for (let head = 0; head < num; head++) {
     if (!isRiver[head] || hasRiverDonor[head]) continue;
-    // [x, z, flow] along the river
+    // Width in meters is 5 √Q, Q in m³/s (Leopold and Maddock's hydraulic geometry), at least
+    // 2 m.
     let points = [];
     let i = head;
     for (;;) {
-      points.push([i % N, Math.floor(i / N), discharge[i]]);
+      const half = Math.max(1, 2.5 * Math.sqrt(discharge[i] / 3.156e7));
+      points.push([i % N, Math.floor(i / N), Math.min(30, half)]);
       if (!isRiver[i] || visited[i]) break;
       visited[i] = 1;
       i = receiver[i];
     }
     if (points.length < 2) continue;
-    for (let pass = 0; pass < 2; pass++) {
+    for (let pass = 0; pass < 3; pass++) {
       const next = [points[0]];
       for (let k = 0; k < points.length - 1; k++) {
         const [a, b] = [points[k], points[k + 1]];
@@ -176,39 +216,31 @@ function buildRivers() {
       next.push(points[points.length - 1]);
       points = next;
     }
-    // two edge points per center point, then two triangles per stretch
-    const edges = points.map(([x, z, q], k) => {
-      const [px, pz] = points[Math.max(0, k - 1)];
-      const [nx, nz] = points[Math.min(points.length - 1, k + 1)];
-      const len = Math.hypot(nx - px, nz - pz) || 1;
-      // Width in meters is 5 √Q, Q in m³/s (Leopold and Maddock's hydraulic geometry), at
-      // least 2 m. The shader widens far-off rivers so they don't vanish.
-      const half = Math.max(1, 2.5 * Math.sqrt(q / 3.156e7)) / cellSize;
-      const [ox, oz] = [(-(nz - pz) / len) * half, ((nx - px) / len) * half];
-      // Level across at the height of the middle, so it lies in the valley floor. Each vertex
-      // carries the middle's grid position, so the GPU can set it on the same smoothed ground
-      // the terrain uses, and which bank it's on, to soften the edges.
-      const y = surface(x, z) + 1.5;
-      return [
-        [x + ox, z + oz, 0],
-        [x - ox, z - oz, 1],
-      ].map(([gx, gz, side]) => [world(gx), y, world(gz), x, z, side]);
-    });
-    for (let k = 0; k < edges.length - 1; k++) {
-      const [a, b] = edges[k];
-      const [c, d] = edges[k + 1];
-      for (const v of [a, c, b, b, c, d]) {
-        out.position.push(v[0], v[1], v[2]);
-        out.center.push(v[3], v[4]);
-        out.side.push(v[5]);
-      }
+    for (let k = 0; k < points.length - 1; k++)
+      stroke(points[k], points[k + 1]);
+  }
+
+  for (let tz = 0; tz < M; tz++) {
+    for (let tx = 0; tx < M; tx++) {
+      const k = tz * M + tx;
+      // how much of this texel is lake, from the four grid points around it
+      const gx = Math.min(tx / RIVER_TEXELS, N - 1.001);
+      const gz = Math.min(tz / RIVER_TEXELS, N - 1.001);
+      const x = Math.floor(gx);
+      const z = Math.floor(gz);
+      const fx = gx - x;
+      const fz = gz - z;
+      const j = z * N + x;
+      const lake = (w) => +(wet[w] === 1);
+      const lakeness =
+        (lake(j) * (1 - fx) + lake(j + 1) * fx) * (1 - fz) +
+        (lake(j + N) * (1 - fx) + lake(j + N + 1) * fx) * fz;
+      out[k * 4] = (riverDistance[k] / RIVER_REACH) * 255;
+      out[k * 4 + 1] = (riverHalfWidth[k] / 31.5) * 255;
+      out[k * 4 + 2] = lakeness * 255;
+      out[k * 4 + 3] = 255;
     }
   }
-  return {
-    position: new Float32Array(out.position),
-    center: new Float32Array(out.center),
-    side: new Float32Array(out.side),
-  };
 }
 
 function send() {
@@ -216,11 +248,15 @@ function send() {
   const f = freeFrames.pop();
   fillFrame(f);
   dirty = false;
-  f.rivers = buildRivers();
+  // Rivers move slowly, and the texture is big, so redraw it at most twice a second.
+  const now = performance.now();
+  f.riversFresh = now - riversDrawnAt > 500;
+  if (f.riversFresh) {
+    drawRivers(f.rivers);
+    riversDrawnAt = now;
+  }
   postMessage({type: 'frame', frame: f}, [
-    f.rivers.position.buffer,
-    f.rivers.center.buffer,
-    f.rivers.side.buffer,
+    f.rivers.buffer,
     f.fields.buffer,
     f.height.buffer,
     f.normal.buffer,
@@ -258,6 +294,10 @@ onmessage = ({data}) => {
     isRiver = new Uint8Array(data.N * data.N);
     visited = new Uint8Array(data.N * data.N);
     hasRiverDonor = new Uint8Array(data.N * data.N);
+    riversDrawnAt = -Infinity;
+    const texels = ((data.N - 1) * RIVER_TEXELS + 1) ** 2;
+    riverDistance = new Float32Array(texels);
+    riverHalfWidth = new Float32Array(texels);
     sim.route(params);
     dirty = true;
     yearsDue = 0;

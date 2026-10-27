@@ -98,10 +98,7 @@ let frame = null;
 let shown = null;
 worker.onmessage = ({data}) => {
   if (data.type !== 'frame') return;
-  if (frame) {
-    frame.rivers = null; // the worker builds new ones
-    worker.postMessage({type: 'frame', frame}, transfers(frame));
-  }
+  if (frame) worker.postMessage({type: 'frame', frame}, transfers(frame));
   frame = data.frame;
 };
 const transfers = (f) =>
@@ -114,6 +111,7 @@ const transfers = (f) =>
     f.rain,
     f.flow,
     f.receiver,
+    f.rivers,
   ].map((a) => a.buffer);
 
 // ---------- controls ----------

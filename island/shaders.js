@@ -6,6 +6,8 @@
 const common = /* glsl */ `
 uniform sampler2D fieldsTex;
 uniform sampler2D normalTex;
+uniform sampler2D riverTex;
+uniform float riverN;
 uniform float gridN;
 uniform float cellSize;
 uniform float seaLevel;
@@ -64,13 +66,24 @@ float fbm(vec2 p, float octaves) {
   return sum;
 }
 
+// distance to the nearest river (m), its half width (m), and how much of here is lake
+vec3 riverAt(vec2 g) {
+  // a little wander, so channels meander instead of running in straight stretches
+  g += vec2(gnoise(g * 0.9), gnoise(g * 0.9 + 17.3)) * 0.3;
+  vec4 r = texture2D(riverTex, (g * (riverN - 1.0) / (gridN - 1.0) + 0.5) / riverN);
+  return vec3(r.r * 63.0, max(r.g * 31.5, 1.0), r.b);
+}
+
 // Meters of fine relief on top of the simulated ground: most on steep slopes, little on valley
 // floors where rivers run, and on beaches.
 float detailAmp(vec2 g, float h) {
   vec3 n = baseNormalAt(g);
   float steep = length(n.xz) / max(n.y, 0.05);
   float amp = mix(2.0, 16.0, smoothstep(0.15, 1.0, steep));
-  amp *= 1.0 - 0.9 * smoothstep(4.5, 5.6, fieldsAt(g).b);
+  // flat valley floors along rivers, and smooth lake beds
+  vec3 river = riverAt(g);
+  amp *= mix(0.08, 1.0, smoothstep(river.y + 2.0, 3.0 * river.y + 30.0, river.x));
+  amp *= 1.0 - 0.9 * river.z;
   amp *= mix(0.25, 1.0, smoothstep(2.0, 20.0, abs(h - seaLevel)));
   return amp;
 }
@@ -80,8 +93,11 @@ float detailHeight(vec2 w, float amp, float octaves) {
   float ridged = 0.25 - abs(fbm(w / 70.0 + 5.2, octaves - 1.0));
   return amp * (n + 0.6 * ridged);
 }
-// a shallow channel where water collects, so rivers sit down in the ground
-float channelDepth(vec2 g) { return 3.0 * smoothstep(4.6, 6.3, fieldsAt(g).b); }
+// a channel cut along each river, deeper for bigger ones, with sloping banks
+float channelDepth(vec2 g) {
+  vec3 river = riverAt(g);
+  return (0.8 + 0.5 * river.y) * (1.0 - smoothstep(0.6 * river.y, 2.0 * river.y + 2.0, river.x));
+}
 float groundHeight(vec2 g, vec2 w) {
   float h = baseHeight(g);
   return h + detailHeight(w, detailAmp(g, h), 6.0) - channelDepth(g);
@@ -99,7 +115,7 @@ vWorld = transformed;
 // Color, roughness and small-scale bumps for every kind of ground, from the same climate as the
 // simulation: temperature from height, aridity from rain over potential evaporation.
 const terrainSurface = /* glsl */ `
-void terrainSurface(vec3 w, vec3 n, vec4 f, float fade,
+void terrainSurface(vec3 w, vec3 n, vec4 f, vec3 river, float fade,
     out vec3 color, out float rough, out float bumpHeight, out float bumpScale) {
   float above = w.y - seaLevel;
   float t = temperature - 0.0065 * max(above, 0.0);
@@ -112,7 +128,9 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, float fade,
   float fine = gnoise(w.xz / 5.0) * fade;
 
   // trees thin out with dryness and cold, in clumps
-  float trees = smoothstep(0.55, 0.95, aridity + 0.45 * clumps + 0.2 * broad) * smoothstep(1.0, 7.0, t);
+  // a strip of thicker growth along rivers, wider for bigger ones
+  float bankside = 1.0 - smoothstep(river.y + 3.0, 4.0 * river.y + 25.0, river.x);
+  float trees = smoothstep(0.4, 1.2, aridity + 0.45 * clumps + 0.2 * broad + 0.6 * bankside) * smoothstep(1.0, 7.0, t);
   vec3 forest = mix(lin(vec3(0.11, 0.2, 0.12)), lin(vec3(0.19, 0.31, 0.12)), smoothstep(4.0, 10.0, t));
   forest = mix(forest, lin(vec3(0.1, 0.27, 0.08)), smoothstep(15.0, 21.0, t));
   forest *= 0.6 + 0.8 * smoothstep(-0.35, 0.45, clumps); // sunlit crowns and dark gaps
@@ -120,8 +138,10 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, float fade,
   vec3 soil = mix(lin(vec3(0.82, 0.68, 0.47)), lin(vec3(0.68, 0.45, 0.3)), smoothstep(-0.2, 0.35, broad));
   color = mix(soil, grass, smoothstep(0.05, 0.55, cover + 0.25 * broad + 0.15 * clumps));
   color = mix(color, forest, trees);
-  // green ribbons along watercourses where it's otherwise dry
-  color = mix(color, lin(vec3(0.2, 0.33, 0.12)), smoothstep(4.8, 5.8, f.b) * (1.0 - trees) * 0.75);
+  color = mix(color, lin(vec3(0.2, 0.33, 0.12)), bankside * (1.0 - trees) * 0.6);
+  // gravel and sand bars just outside the water
+  float bar = (1.0 - smoothstep(1.2 * river.y + 1.0, 1.8 * river.y + 4.0, river.x)) * smoothstep(0.1, 0.3, clumps) * smoothstep(1.5, 4.0, river.y);
+  color = mix(color, mix(lin(vec3(0.45, 0.43, 0.38)), lin(vec3(0.6, 0.55, 0.45)), smoothstep(-0.2, 0.3, fine)), bar);
   // tundra, then snow on gentler slopes where it's cold
   vec3 tundra = mix(lin(vec3(0.36, 0.38, 0.26)), lin(vec3(0.58, 0.54, 0.44)), smoothstep(-0.3, 0.35, clumps + 0.5 * broad));
   color = mix(color, tundra, smoothstep(4.0, 1.0, t + 1.5 * broad));
@@ -129,7 +149,7 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, float fade,
   bumpScale = mix(4.0, 9.0, trees);
 
   // bare rock on steep slopes, in layers
-  float rock = smoothstep(0.9, 1.4, steep + 0.4 * clumps);
+  float rock = smoothstep(0.9, 1.4, steep + 0.4 * clumps) * (1.0 - bar);
   // faint layering that wanders, rather than contour lines
   float strata = fbm(vec2(w.y / 14.0 + 3.0 * broad + 1.5 * clumps, 0.37), 3.0);
   vec3 rockColor = mix(lin(vec3(0.4, 0.37, 0.33)), lin(vec3(0.5, 0.46, 0.4)), smoothstep(-0.3, 0.3, strata));
@@ -137,7 +157,10 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, float fade,
   color = mix(color, rockColor, rock);
   bumpHeight = mix(bumpHeight, 1.5, rock);
   bumpScale = mix(bumpScale, 5.0, rock);
+  bumpHeight *= 1.0 - bar;
   rough = 0.95;
+  // lake beds are mud
+  color = mix(color, lin(vec3(0.33, 0.3, 0.24)), smoothstep(0.3, 0.8, river.z));
 
   // beaches, wet sand at the waterline, and the sea floor
   float beach = smoothstep(3.5 + 2.5 * broad, 1.0, above) * smoothstep(0.5, 0.25, steep);
@@ -163,6 +186,7 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, float fade,
 const terrainFragment = /* glsl */ `
 vec2 grid = toGrid(vWorld.xz);
 vec4 fields = fieldsAt(grid);
+vec3 river = riverAt(grid);
 float viewDist = length(vViewPosition);
 // how much fine detail this pixel can show without shimmering
 float footprint = max(length(fwidth(vWorld.xz)), 0.5);
@@ -186,7 +210,22 @@ vec3 surfaceColor;
 float surfaceRough;
 float bumpHeight;
 float bumpScale;
-terrainSurface(vWorld, shapeNormal, fields, fade, surfaceColor, surfaceRough, bumpHeight, bumpScale);
+terrainSurface(vWorld, shapeNormal, fields, river, fade, surfaceColor, surfaceRough, bumpHeight, bumpScale);
+
+// the river itself, never thinner than about half a pixel so it doesn't break up far away
+float waterEdge = max(river.y, 0.5 * footprint);
+float inWater = (1.0 - smoothstep(waterEdge - 0.5 * footprint, waterEdge + 0.5 * footprint, river.x)) * (1.0 - river.z);
+if (inWater > 0.0) {
+  float middle = 1.0 - smoothstep(0.0, waterEdge, river.x);
+  vec3 riverColor = mix(lin(vec3(0.24, 0.32, 0.28)), lin(vec3(0.07, 0.2, 0.22)), middle);
+  surfaceColor = mix(surfaceColor, riverColor, inWater);
+  surfaceRough = mix(surfaceRough, 0.08, inWater);
+  bumpHeight *= 1.0 - inWater;
+  // water lies flat across, with ripples running on it
+  vec2 q = vWorld.xz / 4.0;
+  vec2 ripple = vec2(gnoise(q + time * 0.8), gnoise(q.yx - time * 0.7)) * 0.12 * fade;
+  slope = mix(slope, ripple, inWater);
+}
 
 // tree crowns, tussocks and rubble, too small for the mesh
 if (fade > 0.0) {
@@ -277,7 +316,7 @@ vec3 water = mix(lin(vec3(0.16, 0.6, 0.64)), lin(vec3(0.03, 0.33, 0.46)), smooth
 water = mix(water, lin(vec3(0.01, 0.07, 0.15)), smoothstep(8.0, 90.0, depth));
 float alpha = mix(0.55, 0.97, smoothstep(0.0, 30.0, depth));
 float swash = gnoise(p / 8.0 + vec2(time * 0.25, -time * 0.18)) + 0.5 * gnoise(p / 3.0 - time * 0.3);
-float foam = smoothstep(2.5, 0.3, depth) * smoothstep(-0.1, 0.45, swash + 0.5 * sin(depth * 3.5 - time * 1.4)) * calm;
+float foam = SURF * smoothstep(2.5, 0.3, depth) * smoothstep(-0.1, 0.45, swash + 0.5 * sin(depth * 3.5 - time * 1.4)) * calm;
 water = mix(water, vec3(0.9), foam);
 alpha = max(alpha, foam * 0.95);
 diffuseColor = vec4(water, alpha);
@@ -287,8 +326,10 @@ roughnessFactor = mix(0.04, 0.7, foam);
 /**
  * @param {import('three').MeshStandardMaterial} material
  * @param {object} uniforms
+ * @param {{surf: boolean}} options waves break on the sea's shores, not on lakes
  */
-export function waterMaterial(material, uniforms) {
+export function waterMaterial(material, uniforms, {surf}) {
+  material.defines = {SURF: surf ? '1.0' : '0.0'};
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
@@ -305,52 +346,6 @@ export function waterMaterial(material, uniforms) {
       .replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>\n${waterFragment}`,
-      );
-  };
-  return material;
-}
-
-/**
- * Rivers: set on the same smoothed ground as the terrain, with soft banks and running ripples.
- * @param {import('three').MeshStandardMaterial} material
- * @param {object} uniforms
- */
-export function riverMaterial(material, uniforms) {
-  material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, uniforms);
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>\n${common}\nattribute vec2 center;\nattribute float across;\nvarying float vSide;\nvarying vec3 vRiver;\nvarying float vAboveSea;`,
-      )
-      .replace(
-        '#include <begin_vertex>',
-        `vec3 transformed = vec3(position);
-        // true width up close, but never thinner than about a pixel and a half from afar
-        vec2 middle = (center - (gridN - 1.0) * 0.5) * cellSize;
-        vec2 offset = position.xz - middle;
-        float distance = -(modelViewMatrix * vec4(middle.x, 0.0, middle.y, 1.0)).z;
-        offset *= max(1.0, distance * 0.0012 / max(length(offset), 0.01));
-        transformed.xz = middle + offset;
-        float ground = groundHeight(center, middle);
-        transformed.y = ground + 0.8;
-        vAboveSea = ground - seaLevel;
-        vSide = across;
-        vRiver = transformed;`,
-      );
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <common>',
-        `#include <common>\n${common}\nvarying float vSide;\nvarying vec3 vRiver;\nvarying float vAboveSea;`,
-      )
-      .replace(
-        '#include <normal_fragment_begin>',
-        `#include <normal_fragment_begin>
-        vec2 q = vRiver.xz / 6.0;
-        vec2 ripple = vec2(gnoise(q + time * 0.6), gnoise(q.yx - time * 0.5)) * 0.25;
-        normal = normalize((viewMatrix * vec4(normalize(vec3(ripple.x, 1.0, ripple.y)), 0.0)).xyz);
-        float bank = min(vSide, 1.0 - vSide);
-        diffuseColor.a = smoothstep(0.0, 0.3, bank) * smoothstep(-0.5, 1.0, vAboveSea);`,
       );
   };
   return material;

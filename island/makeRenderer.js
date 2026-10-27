@@ -1,6 +1,6 @@
 // Draws the island with three.js under a low sun and a physical sky. The terrain is a mesh three
-// times finer than the simulation grid, shaped and colored on the GPU (see shaders.js); the sea
-// and lakes share a water shader, and rivers are ribbons the worker builds each frame.
+// times finer than the simulation grid, shaped and colored on the GPU (see shaders.js), with
+// rivers cut into it from a texture finer still; the sea and lakes share a water shader.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {Sky} from 'three/addons/objects/Sky.js';
@@ -11,7 +11,6 @@ import {
   terrainMaterial,
   terrainDepthMaterial,
   waterMaterial,
-  riverMaterial,
 } from './shaders.js';
 
 /**
@@ -106,13 +105,16 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   scene.add(new THREE.HemisphereLight(0xa8c8ff, 0x5a4a35, 0.7));
 
   // what the shaders read: the simulation's fields and normals as textures, one texel per point
-  const dataTexture = () => {
+  const riverN = (N - 1) * 4 + 1; // matches RIVER_TEXELS in worker.js
+  const dataTexture = (n = N, type = THREE.FloatType) => {
     const texture = new THREE.DataTexture(
-      new Float32Array(N * N * 4),
-      N,
-      N,
+      type === THREE.FloatType
+        ? new Float32Array(n * n * 4)
+        : new Uint8Array(n * n * 4),
+      n,
+      n,
       THREE.RGBAFormat,
-      THREE.FloatType,
+      type,
     );
     texture.magFilter = texture.minFilter = THREE.LinearFilter;
     texture.needsUpdate = true;
@@ -121,6 +123,8 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   const uniforms = {
     fieldsTex: {value: dataTexture()},
     normalTex: {value: dataTexture()},
+    riverTex: {value: dataTexture(riverN, THREE.UnsignedByteType)},
+    riverN: {value: riverN},
     gridN: {value: N},
     cellSize: {value: cellSize},
     seaLevel: {value: 0},
@@ -151,21 +155,24 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   terrain.frustumCulled = false; // its heights only exist on the GPU
   scene.add(terrain);
 
-  const makeWater = () =>
+  // Lakes mirror less of the sky than the sea: the reflection only has sky in it, no hills,
+  // and inland at a glance that read as ice.
+  const makeWater = (surf) =>
     waterMaterial(
       new THREE.MeshStandardMaterial({
         transparent: true,
         roughness: 0.05,
-        envMapIntensity: 1,
+        envMapIntensity: surf ? 1 : 0.4,
         depthWrite: false,
       }),
       uniforms,
+      {surf},
     );
 
   // lakes: flat sheets at each lake's level, at the simulation's resolution
   const lakes = new THREE.Mesh(
     new THREE.PlaneGeometry(size, size, N - 1, N - 1).rotateX(-Math.PI / 2),
-    makeWater(),
+    makeWater(false),
   );
   lakes.receiveShadow = true;
   lakes.renderOrder = 2;
@@ -174,33 +181,11 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
 
   const sea = new THREE.Mesh(
     new THREE.PlaneGeometry(size * 30, size * 30, 1, 1).rotateX(-Math.PI / 2),
-    makeWater(),
+    makeWater(true),
   );
   sea.receiveShadow = true;
   sea.renderOrder = 1;
   scene.add(sea);
-
-  const rivers = new THREE.Mesh(
-    new THREE.BufferGeometry(),
-    riverMaterial(
-      new THREE.MeshStandardMaterial({
-        color: new THREE.Color().setRGB(0.1, 0.25, 0.28, THREE.SRGBColorSpace),
-        roughness: 0.15,
-        envMapIntensity: 0.9,
-        transparent: true,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -4,
-        polygonOffsetUnits: -4,
-        side: THREE.DoubleSide,
-      }),
-      uniforms,
-    ),
-  );
-  rivers.receiveShadow = true;
-  rivers.frustumCulled = false;
-  rivers.renderOrder = 3;
-  scene.add(rivers);
 
   // the deep ocean floor beyond the edge of the grid
   const floor = new THREE.Mesh(
@@ -290,23 +275,10 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     p.needsUpdate = true;
     sea.position.y = seaLevel;
 
-    rivers.geometry.dispose();
-    const g = new THREE.BufferGeometry();
-    const count = frame.rivers.position.length / 3;
-    g.setAttribute(
-      'position',
-      new THREE.BufferAttribute(frame.rivers.position, 3),
-    );
-    g.setAttribute(
-      'normal',
-      new THREE.BufferAttribute(
-        new Float32Array(count * 3).map((_, k) => +(k % 3 === 1)),
-        3,
-      ),
-    );
-    g.setAttribute('center', new THREE.BufferAttribute(frame.rivers.center, 2));
-    g.setAttribute('across', new THREE.BufferAttribute(frame.rivers.side, 1));
-    rivers.geometry = g;
+    if (frame.riversFresh) {
+      uniforms.riverTex.value.image.data.set(frame.rivers);
+      uniforms.riverTex.value.needsUpdate = true;
+    }
   }
 
   /** Center the view on the land, sized to fit it. */
