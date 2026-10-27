@@ -136,6 +136,11 @@ struct Params {
   paneCount: u32,
   /** How many of a path's scatters gather photons (Scene.gathers in scenes.js) */
   gathers: u32,
+  /**
+   * Where the balls' and plates' hierarchy starts in objects
+   * (packHierarchy in shapes.js), or NONE to test them one by one
+   */
+  objectNodes: u32,
 }
 
 const NONE = 0xffffffffu;

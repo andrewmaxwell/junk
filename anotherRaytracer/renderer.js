@@ -3,7 +3,14 @@
 
 import {albedoTable} from './ggx.js';
 import {settings, toneCurves, view} from './settings.js';
-import {GLASS, LIGHT, PLATE, isBounded, packObjects} from './shapes.js';
+import {
+  GLASS,
+  LIGHT,
+  PLATE,
+  isBounded,
+  packHierarchy,
+  packObjects,
+} from './shapes.js';
 import {denoiseShader} from './shaders/denoise.js';
 import {displayShader} from './shaders/display.js';
 import {glowShader} from './shaders/glow.js';
@@ -192,6 +199,13 @@ let photonBindGroup;
 /** @type {GPUBuffer | undefined} */
 let objectBuffer;
 let objectCount = 0;
+/** Where the objects' hierarchy starts in objectBuffer, or NONE */
+let objectNodes = 0xffffffff;
+/**
+ * With fewer balls and plates than this, testing each is quicker than
+ * walking a hierarchy
+ */
+const HIERARCHY_MIN = 40;
 let lightCount = 0;
 let boundedCount = 0;
 /**
@@ -420,7 +434,13 @@ export const resize = () => {
  * @type {(objects: import('./shapes.js').Shape[], lasers?: import('./photons.js').Laser[]) => void}
  */
 export const setObjects = (objects, lasers = []) => {
-  const data = packObjects(objects);
+  const simple = objects.filter((o) => !isBounded(o)).length;
+  objectNodes = simple >= HIERARCHY_MIN ? objects.length : 0xffffffff;
+  const objectData = packObjects(objects);
+  const data =
+    simple >= HIERARCHY_MIN
+      ? new Float32Array([...objectData, ...packHierarchy(objects, simple)])
+      : objectData;
   const pairs = photonEmitters(objects, lasers);
   pairCount = pairs.count;
   photonPower = pairs.power;
@@ -599,6 +619,7 @@ const writeParams = (/** @type {FrameView} */ v) => {
   paramsF32[47] = photonPower / PHOTONS;
   paramsU32[48] = paneCount;
   paramsU32[49] = v.gathers;
+  paramsU32[50] = objectNodes;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 };
 

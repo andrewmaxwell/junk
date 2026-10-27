@@ -3,6 +3,7 @@
 
 import {DIAMOND_BOTTOM, hitDiamond} from './diamond.js';
 import {BULB_BOTTOM, SPONGE_HALF, hitFractal} from './fractal.js';
+import {buildHierarchy} from './hierarchy.js';
 import {TEAPOT_BOTTOM, hitTeapot} from './teapot.js';
 import {cross, dot} from './vec.js';
 
@@ -322,6 +323,51 @@ export const packObjects = (objects) =>
       ];
     }),
   );
+
+/** Objects per leaf of the objects' hierarchy */
+const OBJECT_LEAF = 1;
+/** The most a leaf can hold: its node's last four vec4s, one index in each channel */
+const MAX_OBJECT_LEAF = 16;
+
+/**
+ * A hierarchy of boxes around the balls and plates (the first `count`
+ * objects), as `Shape` structs to go after the objects in the same buffer:
+ * box min with `left` in w, box max with how many objects a leaf has in w
+ * (0 for others), then a leaf's objects' indexes. See intersect in
+ * shaders/geometry.js.
+ * @type {(objects: Shape[], count: number) => Float32Array} */
+export const packHierarchy = (objects, count) => {
+  const items = objects.slice(0, count).map((s, index) => {
+    const reach =
+      s.shape === SPHERE
+        ? [s.radius, s.radius, s.radius]
+        : [0, 1, 2].map(
+            (a) =>
+              Math.abs(s.u[a]) * s.halfWidth + Math.abs(s.v[a]) * s.halfHeight,
+          );
+    // A little extra, so rounding never misses a flat plate's box
+    const pad = 1e-3;
+    return {
+      index,
+      min: s.center.map((c, a) => c - reach[a] - pad),
+      max: s.center.map((c, a) => c + reach[a] + pad),
+      centroid: s.center,
+    };
+  });
+  const nodes = buildHierarchy(items, OBJECT_LEAF, MAX_OBJECT_LEAF);
+  const data = new Float32Array(nodes.length * 24);
+  const asU32 = new Uint32Array(data.buffer);
+  for (const [i, node] of nodes.entries()) {
+    data.set(node.min, i * 24);
+    asU32[i * 24 + 3] = node.left;
+    data.set(node.max, i * 24 + 4);
+    asU32[i * 24 + 7] = node.count;
+    for (let k = 0; k < node.count; k++) {
+      asU32[i * 24 + 8 + k] = items[node.first + k].index;
+    }
+  }
+  return data;
+};
 
 /**
  * The closest shape a ray (from o in unit direction d) hits, as its index in

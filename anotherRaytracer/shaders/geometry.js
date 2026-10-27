@@ -208,39 +208,124 @@ fn diamondNormal(s: Shape, facet: u32) -> vec3f {
 }
 
 
+/** Where a ray hits ball or plate i, or 1e30 if it misses */
+fn hitSimple(i: u32, o: vec3f, d: vec3f) -> f32 {
+  let s = objects[i];
+  let p = s.centerRadius.xyz - o;
+  var t: f32;
+  if (i32(s.normalShape.w) == SPHERE) {
+    let r = s.centerRadius.w;
+    let b = dot(p, d);
+    var det = b * b - dot(p, p) + r * r;
+    if (det < 0.) { return 1e30; }
+    det = sqrt(det);
+    t = b - det;
+    if (t <= EPSILON) { t = b + det; }
+  } else {
+    // Where the ray crosses the plate's plane, if that's within the plate
+    // and not in its hole
+    let n = s.normalShape.xyz;
+    let facing = dot(d, n);
+    if (facing == 0. || (s.surface.z > 0. && facing > 0.)) { return 1e30; }
+    t = dot(p, n) / facing;
+    let h = d * t - p;
+    if (
+      abs(dot(h, s.uHalf.xyz)) > s.uHalf.w ||
+      abs(dot(h, s.vHalf.xyz)) > s.vHalf.w ||
+      dot(h, h) < s.surface.w * s.surface.w
+    ) { return 1e30; }
+  }
+  return select(1e30, t, t > EPSILON);
+}
+
+
+/**
+ * Where a ray enters node of the objects' hierarchy, or 1e30 if it misses it
+ * or only gets there after tMax; like boxEntry
+ */
+fn objectBoxEntry(o: vec3f, inv: vec3f, node: u32, tMax: f32) -> f32 {
+  // Only the box, not the whole node
+  let t0 = (objects[params.objectNodes + node].centerRadius.xyz - o) * inv;
+  let t1 = (objects[params.objectNodes + node].normalShape.xyz - o) * inv;
+  let near = min(t0, t1);
+  let far = max(t0, t1);
+  let enter = max(max(near.x, near.y), max(near.z, 0.));
+  let leave = min(min(far.x, far.y), min(far.z, tMax));
+  return select(1e30, enter, enter <= leave);
+}
+
+
+/** Leaf node's kth index, as a float's bits */
+fn leafIndex(node: u32, k: u32) -> f32 {
+  let q = k / 4u;
+  if (q == 0u) { return objects[node].uHalf[k % 4u]; }
+  if (q == 1u) { return objects[node].vHalf[k % 4u]; }
+  if (q == 2u) { return objects[node].colorMaterial[k % 4u]; }
+  return objects[node].surface[k % 4u];
+}
+
+
+/**
+ * Index of the closest ball or plate hit by a ray, or -1, by their
+ * hierarchy (packHierarchy in shapes.js), nearer box first, as in
+ * intersectTeapot. Sets hitDist.
+ */
+fn intersectHierarchy(o: vec3f, d: vec3f) -> i32 {
+  var hit = -1;
+  let inv = 1. / d;
+  var stack: array<u32, 32>;
+  var top = 0u;
+  var node = 0u;
+  var entry = objectBoxEntry(o, inv, 0u, hitDist);
+  loop {
+    if (entry < hitDist) {
+      let at = params.objectNodes + node;
+      let count = bitcast<u32>(objects[at].normalShape.w);
+      if (count == 0u) {
+        let left = bitcast<u32>(objects[at].centerRadius.w);
+        let a = objectBoxEntry(o, inv, left, hitDist);
+        let b = objectBoxEntry(o, inv, left + 1u, hitDist);
+        let aFirst = a <= b;
+        if (max(a, b) < 1e30) {
+          stack[top] = select(left, left + 1u, aFirst);
+          top++;
+        }
+        node = select(left + 1u, left, aFirst);
+        entry = min(a, b);
+        continue;
+      }
+      // A leaf's objects, one index per channel of its last four vec4s
+      for (var k = 0u; k < count; k++) {
+        let i = bitcast<u32>(leafIndex(at, k));
+        let t = hitSimple(i, o, d);
+        if (t < hitDist) {
+          hitDist = t;
+          hit = i32(i);
+        }
+      }
+    }
+    if (top == 0u) { break; }
+    top--;
+    node = stack[top];
+    entry = objectBoxEntry(o, inv, node, hitDist);
+  }
+  return hit;
+}
+
+
 /** Index of the closest object hit by a ray, or -1. Sets hitDist. */
 fn intersect(o: vec3f, d: vec3f) -> i32 {
   var hit = -1;
   hitDist = 1e30;
-  for (var i = 0u; i < params.objectCount; i++) {
-    let s = objects[i];
-    let p = s.centerRadius.xyz - o;
-    var t: f32;
-    if (i32(s.normalShape.w) == SPHERE) {
-      let r = s.centerRadius.w;
-      let b = dot(p, d);
-      var det = b * b - dot(p, p) + r * r;
-      if (det < 0.) { continue; }
-      det = sqrt(det);
-      t = b - det;
-      if (t <= EPSILON) { t = b + det; }
-    } else {
-      // Where the ray crosses the plate's plane, if that's within the plate
-      // and not in its hole
-      let n = s.normalShape.xyz;
-      let facing = dot(d, n);
-      if (facing == 0. || (s.surface.z > 0. && facing > 0.)) { continue; }
-      t = dot(p, n) / facing;
-      let h = d * t - p;
-      if (
-        abs(dot(h, s.uHalf.xyz)) > s.uHalf.w ||
-        abs(dot(h, s.vHalf.xyz)) > s.vHalf.w ||
-        dot(h, h) < s.surface.w * s.surface.w
-      ) { continue; }
-    }
-    if (t > EPSILON && t < hitDist) {
-      hitDist = t;
-      hit = i32(i);
+  if (params.objectNodes != NONE) {
+    hit = intersectHierarchy(o, d);
+  } else {
+    for (var i = 0u; i < params.objectCount; i++) {
+      let t = hitSimple(i, o, d);
+      if (t < hitDist) {
+        hitDist = t;
+        hit = i32(i);
+      }
     }
   }
   // Teapots, diamonds and fractals, in a loop of their own: a third kind of shape in

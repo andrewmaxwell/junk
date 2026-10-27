@@ -2,6 +2,7 @@
 // into triangles, with a bounding volume hierarchy so a ray only tests the
 // few it might hit. The shader traces it as `intersectTeapot` in shaders/geometry.js.
 
+import {buildHierarchy} from './hierarchy.js';
 import {cross, dot, normalize, sub} from './vec.js';
 
 /**
@@ -200,102 +201,15 @@ const bounds = (corners) => ({
 });
 
 /**
- * @typedef {{min: number[], max: number[], left: number, first: number, count: number}} Node
- * Leaves have triangles first to first + count; others have children left
- * and left + 1.
- */
-
-/** Triangles' bounding box, or of their centroids */
-const boxOf = (
-  /** @type {Triangle[]} */ list,
-  /** @type {(t: Triangle) => number[][]} */ points = (t) => [t.min, t.max],
-) => {
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
-  for (const t of list) {
-    for (const p of points(t)) {
-      for (let a = 0; a < 3; a++) {
-        min[a] = Math.min(min[a], p[a]);
-        max[a] = Math.max(max[a], p[a]);
-      }
-    }
-  }
-  return {min, max};
-};
-
-/** Half a box's surface area: how likely a ray through its parent is to hit it */
-const area = (/** @type {{min: number[], max: number[]}} */ {min, max}) => {
-  const [x, y, z] = sub(max, min);
-  return x * y + y * z + z * x;
-};
-
-/** Places tried along an axis when splitting a box */
-const BINS = 12;
-
-/**
- * Splits triangles into a hierarchy of boxes, each split where the surface
- * area heuristic expects rays to do the least work, among BINS places along
- * the longest axis. Reorders triangles so each leaf's are together.
- * @type {(triangles: Triangle[]) => Node[]}
- */
-const buildHierarchy = (triangles) => {
-  /** @type {Node[]} */
-  const nodes = [];
-  /** @type {(index: number, first: number, count: number) => void} */
-  const build = (index, first, count) => {
-    const list = triangles.slice(first, first + count);
-    const box = boxOf(list);
-    nodes[index] = {...box, left: 0, first, count};
-    if (count <= LEAF_SIZE) return;
-    const centers = boxOf(list, (t) => [t.centroid]);
-    const extent = sub(centers.max, centers.min);
-    const axis = [0, 1, 2].reduce((a, b) => (extent[b] > extent[a] ? b : a));
-    if (!extent[axis]) return;
-    const binOf = (/** @type {Triangle} */ t) =>
-      Math.min(
-        BINS - 1,
-        Math.floor(
-          ((t.centroid[axis] - centers.min[axis]) / extent[axis]) * BINS,
-        ),
-      );
-    /** @type {Triangle[][]} */
-    const bins = Array.from({length: BINS}, () => []);
-    for (const t of list) bins[binOf(t)].push(t);
-    let best = {cost: area(box) * count, bin: 0};
-    for (let k = 1; k < BINS; k++) {
-      const below = bins.slice(0, k).flat();
-      const above = bins.slice(k).flat();
-      if (!below.length || !above.length) continue;
-      const cost =
-        area(boxOf(below)) * below.length + area(boxOf(above)) * above.length;
-      if (cost < best.cost) best = {cost, bin: k};
-    }
-    // Not worth splitting
-    if (!best.bin) return;
-    const below = bins.slice(0, best.bin).flat();
-    const above = bins.slice(best.bin).flat();
-    triangles.splice(first, count, ...below, ...above);
-    const left = nodes.length;
-    nodes[index].left = left;
-    nodes[index].count = 0;
-    nodes.push(nodes[index], nodes[index]);
-    build(left, first, below.length);
-    build(left + 1, first + below.length, above.length);
-  };
-  build(0, 0, triangles.length);
-  return nodes;
-};
-
-/**
  * Where a ray from o in direction d (need not be unit length) first hits
  * the triangles, as a multiple of d, or Infinity. Matches intersectTeapot in
  * shaders/geometry.js.
- * @type {(triangles: Triangle[], nodes: Node[], o: number[], d: number[]) => number}
+ * @type {(triangles: Triangle[], nodes: import('./hierarchy.js').Node[], o: number[], d: number[]) => number}
  */
 const hitTriangles = (triangles, nodes, o, d) => {
   let closest = Infinity;
   /** Where the ray enters a box, or Infinity if it misses */
-  const enter = (/** @type {Node} */ node) => {
+  const enter = (/** @type {import('./hierarchy.js').Node} */ node) => {
     let near = 0;
     let far = closest;
     for (let a = 0; a < 3; a++) {
@@ -379,7 +293,7 @@ for (const t of triangles) {
   t.p = t.p.map((c) => sub(c, middle).map((x) => x / reach));
   Object.assign(t, bounds(t.p));
 }
-const nodes = buildHierarchy(triangles);
+const nodes = buildHierarchy(triangles, LEAF_SIZE);
 
 /** Where the teapot's base is: it sits on the floor at center y - bottom × radius */
 export const TEAPOT_BOTTOM = (lo[1] - middle[1]) / reach;
