@@ -19,7 +19,7 @@ export function makeRandom(seed) {
  * Smooth value noise with several octaves, roughly in [-1, 1].
  * @param {() => number} random
  */
-function makeFractalNoise(random) {
+export function makeFractalNoise(random) {
   const size = 256;
   const values = Float32Array.from(
     {length: size * size},

@@ -14,7 +14,7 @@
 // 30% of it still reaches the rivers in flash floods. Plant cover follows how wet and warm a
 // place is, and roots hold the soil: bare ground erodes e² ≈ 7 times faster than full cover.
 
-import {makeIsland} from './terrain.js';
+import {makeIsland, makeRandom, makeFractalNoise} from './terrain.js';
 
 export const defaults = {
   rain: 2.5, // m/yr of rain, averaged over the land
@@ -26,6 +26,7 @@ export const defaults = {
   m: 0.5, // discharge exponent (slope exponent n is 1)
   D: 0.03, // m²/yr soil creep on land
   marineD: 0.4, // m²/yr sediment spreading under water, which builds a shelf
+  reefGrowth: 0.008, // m/yr, the fastest a coral reef builds upward, in shallow, clear water
 };
 
 const neighborOffsets = [
@@ -41,6 +42,31 @@ const neighborOffsets = [
 
 /** m: how far condensed water drifts before most of it has fallen (1/e) */
 const RAIN_DRIFT = 1000;
+
+// Coral reefs build up toward sea level where the sea is warm and shallow enough for light,
+// clear of river mud, and flushed by the open ocean. Growth falls off with depth as light
+// does (Bosscher & Schlager 1992: G = Gmax tanh(I0 e^(−kz) / Ik)), so reefs grow down to
+// about 50 m.
+const REEF_LIGHT_FALLOFF = 0.08; // per m of depth
+const REEF_SURFACE_LIGHT = 20; // surface light over what corals need to grow at full speed
+/** m: reef growth falls off by 1/e this far from the deep, open ocean */
+const REEF_FLUSHING = 400;
+/** m of depth that counts as open ocean */
+const OPEN_OCEAN_DEPTH = 60;
+/** m/yr of mud settling that cuts reef growth by 1/e (about 10 mg/cm² a day, the usual limit) */
+const REEF_MUD_LIMIT = 0.005;
+/** m: how far a river's muddy plume spreads around where it settles */
+const MUD_SPREAD = 300;
+
+// Storms break coral off a reef's edge and throw it up onto the flat behind it, building low
+// islands of rubble and sand (motus), most on the side the wind and waves come from. Where they
+// pile up is patchy, which leaves passes between them.
+/** m above the sea that storm waves can pile rubble */
+const MOTU_HEIGHT = 3;
+/** m/yr rubble builds up behind a fully living reef edge, on the windward side */
+const RUBBLE_RATE = 0.003;
+/** m: how far behind the reef's edge rubble is thrown */
+const RUBBLE_REACH = 250;
 
 /** steps between rain sweeps while time runs */
 const RAIN_EVERY = 5;
@@ -116,6 +142,9 @@ export function makeSim({N, cellSize, seed}) {
   const moisture = new Float32Array(num); // water vapor, 1 for air fresh off the sea
   const cloud = new Float32Array(num); // condensed water still falling
   const sediment = new Float64Array(num); // m³ carried out of each point this step
+  const mud = new Float64Array(num); // m/yr of sediment settling in the sea
+  const coral = new Float32Array(num); // 0..1, how fast reef is growing here, over the fastest
+  const openDistance = new Float64Array(num); // m to the deep, open ocean
   const smoothGround = new Float64Array(num);
   const blurTemp = new Float64Array(num);
   const stack = new Int32Array(num); // every point after the one it drains to
@@ -136,10 +165,23 @@ export function makeSim({N, cellSize, seed}) {
     return x === 0 || z === 0 || x === N - 1 || z === N - 1;
   };
   const edge = Uint8Array.from({length: num}, (_, i) => +isEdge(i));
+  // 1 except near the grid's edges, which stay put
+  const sinking = Float32Array.from({length: num}, (_, i) => {
+    const x = i % N;
+    const z = (i / N) | 0;
+    return smooth(0, 0.08, Math.min(x, z, N - 1 - x, N - 1 - z) / (N - 1));
+  });
 
   makeIsland(N, seed, height, uplift);
+  const stormNoise = makeFractalNoise(makeRandom(seed + 1));
+  // 0..1, how much of the rubble that storms throw up stays at each point
+  const storminess = Float32Array.from({length: num}, (_, i) =>
+    smooth(-0.15, 0.25, stormNoise(((i % N) / N) * 6, (((i / N) | 0) / N) * 6)),
+  );
+  const rubble = new Float64Array(num); // scratch for how much reef is near each point
   let time = 0;
   let lostSediment = 0; // m³ carried off the edge of the grid
+  let reefVolume = 0; // m³ of reef built
   const cellArea = cellSize * cellSize;
 
   // a binary min-heap of points keyed by water level
@@ -406,8 +448,10 @@ export function makeSim({N, cellSize, seed}) {
   function step(dt, p) {
     const {seaLevel} = p;
     const upliftRate = p.upliftRate / 1000;
+    // Rising is local, where the crust is pushed up, but sinking is the whole plate cooling as
+    // it moves away from where the island formed, so it's even across the grid.
     for (let i = 0; i < num; i++) {
-      if (!edge[i]) height[i] += uplift[i] * upliftRate * dt;
+      height[i] += (upliftRate > 0 ? uplift[i] : sinking[i]) * upliftRate * dt;
     }
 
     // The climate follows the broad shape of the land, which barely moves in one step, and the
@@ -418,6 +462,7 @@ export function makeSim({N, cellSize, seed}) {
     // Rivers cut toward the point they drain to, upstream from the sea. Streams that reach a
     // lake or the sea cut down to its surface, not its floor. Lake beds don't erode.
     sediment.fill(0);
+    mud.fill(0);
     for (let k = 0; k < num; k++) {
       const i = stack[k];
       const r = receiver[i];
@@ -442,7 +487,7 @@ export function makeSim({N, cellSize, seed}) {
       let q = sediment[i];
       if (q <= 0) continue;
       if (wet[i] === 2) {
-        settleInSea(i, q, seaLevel - 1);
+        settleInSea(i, q, seaLevel - 1, dt);
         continue;
       }
       if (wet[i]) {
@@ -457,6 +502,8 @@ export function makeSim({N, cellSize, seed}) {
       else sediment[receiver[i]] += q;
     }
 
+    growReefs(dt, p);
+
     // Soil creep, faster under water. Explicit, in as many substeps as stability needs.
     const fastest = Math.max(p.D, p.marineD);
     const substeps = Math.ceil((fastest * dt) / (cellSize * cellSize) / 0.2);
@@ -466,17 +513,17 @@ export function makeSim({N, cellSize, seed}) {
       for (let z = 0; z < N; z++) {
         for (let x = 0; x < N; x++) {
           const i = z * N + x;
-          const Di = height[i] < seaLevel ? p.marineD : p.D;
+          const Di = height[i] < seaLevel ? p.marineD * (1 - coral[i]) : p.D;
           if (x < N - 1) {
             const j = i + 1;
-            const Dj = height[j] < seaLevel ? p.marineD : p.D;
+            const Dj = height[j] < seaLevel ? p.marineD * (1 - coral[j]) : p.D;
             const flow = ((Di + Dj) / 2) * (height[i] - height[j]) * h;
             change[i] -= flow;
             change[j] += flow;
           }
           if (z < N - 1) {
             const j = i + N;
-            const Dj = height[j] < seaLevel ? p.marineD : p.D;
+            const Dj = height[j] < seaLevel ? p.marineD * (1 - coral[j]) : p.D;
             const flow = ((Di + Dj) / 2) * (height[i] - height[j]) * h;
             change[i] -= flow;
             change[j] += flow;
@@ -490,14 +537,96 @@ export function makeSim({N, cellSize, seed}) {
   }
 
   /**
+   * Grow coral reefs for dt years. Reef is rock, so living reef doesn't creep (see the soil
+   * creep loop) and isn't counted as sediment.
+   * @param {number} dt
+   * @param {typeof defaults} p
+   */
+  function growReefs(dt, p) {
+    const {seaLevel} = p;
+    const warmth = smooth(17, 22, p.temperature);
+    coral.fill(0);
+    if (!warmth || p.reefGrowth <= 0) return;
+    // distance to the open ocean, by two chamfer passes over the grid (its edges are open ocean)
+    for (let i = 0; i < num; i++)
+      openDistance[i] =
+        height[i] < seaLevel - OPEN_OCEAN_DEPTH || edge[i] ? 0 : Infinity;
+    const diagonal = Math.SQRT2 * cellSize;
+    for (let z = 1; z < N - 1; z++) {
+      for (let x = 1; x < N - 1; x++) {
+        const i = z * N + x;
+        openDistance[i] = Math.min(
+          openDistance[i],
+          openDistance[i - 1] + cellSize,
+          openDistance[i - N] + cellSize,
+          openDistance[i - N - 1] + diagonal,
+          openDistance[i - N + 1] + diagonal,
+        );
+      }
+    }
+    for (let z = N - 2; z > 0; z--) {
+      for (let x = N - 2; x > 0; x--) {
+        const i = z * N + x;
+        openDistance[i] = Math.min(
+          openDistance[i],
+          openDistance[i + 1] + cellSize,
+          openDistance[i + N] + cellSize,
+          openDistance[i + N + 1] + diagonal,
+          openDistance[i + N - 1] + diagonal,
+        );
+      }
+    }
+    blur(mud, Math.max(1, Math.round(MUD_SPREAD / cellSize)));
+    for (let i = 0; i < num; i++) {
+      const depth = seaLevel - 1 - height[i];
+      // below 100 m there's under 1% of the light reefs need
+      if (depth <= 0 || depth > 100 || wet[i] !== 2) continue;
+      const rate =
+        warmth *
+        Math.tanh(REEF_SURFACE_LIGHT * Math.exp(-REEF_LIGHT_FALLOFF * depth)) *
+        Math.exp(-openDistance[i] / REEF_FLUSHING - mud[i] / REEF_MUD_LIMIT);
+      coral[i] = rate;
+      const grown = Math.min(depth, rate * p.reefGrowth * dt);
+      height[i] += grown;
+      reefVolume += grown * cellArea;
+    }
+
+    // motus: rubble from the reef's edge thrown up onto the flat, highest to windward
+    rubble.set(coral);
+    blur(rubble, Math.max(1, Math.round(RUBBLE_REACH / cellSize)));
+    const angle = (p.wind * Math.PI) / 180;
+    const upwind = Math.round(600 / cellSize);
+    const ux = Math.round(Math.sin(angle) * upwind); // toward where the wind comes from
+    const uz = Math.round(-Math.cos(angle) * upwind);
+    for (let i = 0; i < num; i++) {
+      const top = seaLevel + MOTU_HEIGHT;
+      if (wet[i] === 1 || height[i] < seaLevel - 1.5 || height[i] >= top)
+        continue;
+      const x = (i % N) + ux;
+      const z = ((i / N) | 0) + uz;
+      const windward =
+        x < 0 || z < 0 || x >= N || z >= N || openDistance[z * N + x] === 0
+          ? 1
+          : 0.5;
+      const grown = Math.min(
+        top - height[i],
+        RUBBLE_RATE * rubble[i] * windward * storminess[i] * dt,
+      );
+      height[i] += grown;
+      reefVolume += grown * cellArea;
+    }
+  }
+
+  /**
    * Fill from point i up to `top`, then move on down the steepest slope, settling on a 2% slope
    * that deepens away from the river mouth, until the sediment runs out or leaves the grid. On a
    * flat or in a hollow it heads out toward the open sea the way the flood came in.
    */
-  function settleInSea(i, q, top) {
+  function settleInSea(i, q, top, dt) {
     for (let steps = 0; q > 0 && !edge[i] && steps < N * 4; steps++) {
       const settled = Math.min(q, Math.max(0, top - height[i]) * cellArea);
       height[i] += settled / cellArea;
+      mud[i] += settled / cellArea / dt;
       q -= settled;
       let next = floodReceiver[i];
       for (let k = 0; k < 8; k++) {
@@ -549,6 +678,7 @@ export function makeSim({N, cellSize, seed}) {
     erodibility,
     discharge,
     receiver,
+    coral,
     route,
     step,
     brush,
@@ -557,6 +687,9 @@ export function makeSim({N, cellSize, seed}) {
     },
     get lostSediment() {
       return lostSediment;
+    },
+    get reefVolume() {
+      return reefVolume;
     },
   };
 }

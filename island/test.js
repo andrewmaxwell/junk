@@ -102,7 +102,9 @@ check(badLakes === 0, 'lakes spill downhill');
     for (let i = 0; i < num; i++) eroded += Math.max(0, h[i] - fresh.height[i]);
   }
   const change =
-    (sum(fresh.height) - start) * cellSize * cellSize + fresh.lostSediment;
+    (sum(fresh.height) - start) * cellSize * cellSize +
+    fresh.lostSediment -
+    fresh.reefVolume;
   check(
     Math.abs(change) < 1e-6 * eroded * cellSize * cellSize,
     `sediment is conserved (${change.toExponential(2)} m³ unaccounted of ${(eroded * cellSize * cellSize).toExponential(2)} m³ moved)`,
@@ -136,6 +138,32 @@ check(badLakes === 0, 'lakes spill downhill');
   check(
     windward > leeward * 1.3,
     `windward side is wetter (${windward.toFixed(2)} vs ${leeward.toFixed(2)} m/yr)`,
+  );
+}
+
+// Darwin (1842): as an island sinks, reefs on its flanks keep growing up to the sea and are
+// left as a ring around a lagoon, an atoll. If it sinks faster than reefs can grow, they
+// drown and only a flat-topped seamount is left (a guyot).
+{
+  const sink = (rate, steps, reefGrowth = defaults.reefGrowth) => {
+    const s = makeSim({N, cellSize, seed: 7});
+    let peak = 0;
+    for (let i = 0; i < num; i++) if (s.height[i] > s.height[peak]) peak = i;
+    const p = {...defaults, upliftRate: -rate, reefGrowth};
+    for (let t = 0; t < steps; t++) s.step(2000, p);
+    const top = s.height.reduce((a, b) => Math.max(a, b), -Infinity);
+    return {top, lagoon: s.height[peak]};
+  };
+  const atoll = sink(0.5, 300);
+  const bare = sink(0.5, 300, 0);
+  check(
+    atoll.top > -2 && atoll.top <= 3 && atoll.lagoon < -10 && bare.top < -100,
+    `sinking 0.5 mm/yr for 600,000 years makes an atoll: its highest point is ${atoll.top.toFixed(1)} m (storm-built islets), with ${(-atoll.lagoon).toFixed(0)} m of lagoon over the old peak; without reefs the top is ${(-bare.top).toFixed(0)} m down`,
+  );
+  const guyot = sink(defaults.reefGrowth * 1000 * 1.5, 50);
+  check(
+    guyot.top < -50,
+    `sinking 1.5× faster than reefs grow drowns them (after 100,000 years the shallowest point is ${(-guyot.top).toFixed(0)} m deep)`,
   );
 }
 

@@ -1,7 +1,7 @@
 // GLSL patched into three.js's standard material, so the terrain, sea, lakes and rivers keep its
 // lighting, shadows, reflections and fog but get their shape and color from the simulation on
 // the GPU. The worker sends two textures per frame: fields (height, rain, log10 flow, ambient
-// occlusion) and smooth normals, both one texel per grid point.
+// occlusion) and smooth normals with how fast coral grows in w, both one texel per grid point.
 
 const common = /* glsl */ `
 uniform sampler2D fieldsTex;
@@ -18,6 +18,7 @@ vec2 toGrid(vec2 w) { return w / cellSize + (gridN - 1.0) * 0.5; }
 bool onGrid(vec2 g) { return g.x >= 0.0 && g.y >= 0.0 && g.x <= gridN - 1.0 && g.y <= gridN - 1.0; }
 vec4 fieldsAt(vec2 g) { return texture2D(fieldsTex, (g + 0.5) / gridN); }
 vec3 baseNormalAt(vec2 g) { return normalize(texture2D(normalTex, (g + 0.5) / gridN).xyz); }
+float coralAt(vec2 g) { return texture2D(normalTex, (g + 0.5) / gridN).w; }
 
 float texelHeight(ivec2 p) {
   return texelFetch(fieldsTex, clamp(p, ivec2(0), ivec2(int(gridN) - 1)), 0).r;
@@ -115,7 +116,7 @@ vWorld = transformed;
 // Color, roughness and small-scale bumps for every kind of ground, from the same climate as the
 // simulation: temperature from height, aridity from rain over potential evaporation.
 const terrainSurface = /* glsl */ `
-void terrainSurface(vec3 w, vec3 n, vec4 f, vec3 river, float fade,
+void terrainSurface(vec3 w, vec3 n, vec4 f, vec3 river, float coral, float fade,
     out vec3 color, out float rough, out float bumpHeight, out float bumpScale) {
   float above = w.y - seaLevel;
   float t = temperature - 0.0065 * max(above, 0.0);
@@ -171,8 +172,16 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec3 river, float fade,
   if (above < 0.0) {
     vec3 floorColor = mix(lin(vec3(0.7, 0.66, 0.52)), lin(vec3(0.22, 0.3, 0.16)), smoothstep(0.0, 0.45, clumps) * smoothstep(1.0, 6.0, -above));
     floorColor = mix(floorColor, lin(vec3(0.35, 0.36, 0.33)), smoothstep(30.0, 150.0, -above));
+    // living reef: coral heads in browns, ochres and mauves between channels of white sand,
+    // densest where it grows fastest
+    float heads = 0.9 * smoothstep(0.6, 0.05, coral) + 0.2 - 0.6 * clumps - 0.35 * fine;
+    vec3 reefColor = mix(lin(vec3(0.55, 0.36, 0.2)), lin(vec3(0.45, 0.28, 0.38)), smoothstep(-0.3, 0.3, broad));
+    reefColor = mix(reefColor, lin(vec3(0.62, 0.52, 0.3)), smoothstep(0.0, 0.4, clumps * fine + 0.3 * fine));
+    float reef = smoothstep(0.03, 0.1, coral) * smoothstep(0.1, -0.1, heads) * smoothstep(-0.3, -1.0, above);
+    floorColor = mix(floorColor, reefColor, reef);
     color = mix(color, floorColor, smoothstep(0.0, -1.0, above));
-    bumpHeight = mix(bumpHeight, 0.3, smoothstep(0.0, -1.0, above));
+    bumpHeight = mix(bumpHeight, mix(0.3, 1.2, reef), smoothstep(0.0, -1.0, above));
+    bumpScale = mix(bumpScale, 3.0, reef * smoothstep(0.0, -1.0, above));
   }
 
   float snow = smoothstep(-1.0, -3.0, t + 2.0 * broad) * smoothstep(0.5, 0.75, n.y);
@@ -210,7 +219,7 @@ vec3 surfaceColor;
 float surfaceRough;
 float bumpHeight;
 float bumpScale;
-terrainSurface(vWorld, shapeNormal, fields, river, fade, surfaceColor, surfaceRough, bumpHeight, bumpScale);
+terrainSurface(vWorld, shapeNormal, fields, river, coralAt(grid), fade, surfaceColor, surfaceRough, bumpHeight, bumpScale);
 
 // the river itself, never thinner than about half a pixel so it doesn't break up far away
 float waterEdge = max(river.y, 0.5 * footprint);
@@ -312,11 +321,24 @@ vec2 waveSlope = vec2(WAVES(p + vec2(e, 0.0)) - w0, WAVES(p + vec2(0.0, e)) - w0
 vec3 waterNormal = normalize(vec3(-waveSlope.x, 1.0, -waveSlope.y));
 normal = normalize((viewMatrix * vec4(waterNormal, 0.0)).xyz);
 
-vec3 water = mix(lin(vec3(0.16, 0.6, 0.64)), lin(vec3(0.03, 0.33, 0.46)), smoothstep(0.0, 10.0, depth));
+vec3 water = mix(lin(vec3(0.3, 0.82, 0.8)), lin(vec3(0.1, 0.6, 0.7)), smoothstep(0.0, 4.0, depth));
+water = mix(water, lin(vec3(0.03, 0.33, 0.46)), smoothstep(3.0, 20.0, depth));
 water = mix(water, lin(vec3(0.01, 0.07, 0.15)), smoothstep(8.0, 90.0, depth));
-float alpha = mix(0.55, 0.97, smoothstep(0.0, 30.0, depth));
+float alpha = mix(0.4, 0.97, smoothstep(0.0, 30.0, depth));
 float swash = gnoise(p / 8.0 + vec2(time * 0.25, -time * 0.18)) + 0.5 * gnoise(p / 3.0 - time * 0.3);
-float foam = SURF * smoothstep(2.5, 0.3, depth) * smoothstep(-0.1, 0.45, swash + 0.5 * sin(depth * 3.5 - time * 1.4)) * calm;
+// Waves break where the bottom shoals suddenly, at a beach or a reef's edge, not across the
+// broad flats behind them.
+float deepest = depth;
+float highest = ground;
+for (int k = 0; k < 4; k++) {
+  vec2 o = vec2(k == 0 ? 50.0 : k == 1 ? -50.0 : 0.0, k == 2 ? 50.0 : k == 3 ? -50.0 : 0.0);
+  vec2 gk = toGrid(p + o);
+  float hk = onGrid(gk) ? baseHeight(gk) : -1200.0;
+  deepest = max(deepest, vWater.y - hk);
+  highest = max(highest, hk);
+}
+float breaking = max(smoothstep(4.0, 15.0, deepest - depth), smoothstep(-1.0, 0.5, highest - vWater.y));
+float foam = SURF * breaking * smoothstep(2.5, 0.3, depth) * smoothstep(-0.1, 0.45, swash + 0.5 * sin(depth * 3.5 - time * 1.4)) * calm;
 water = mix(water, vec3(0.9), foam);
 alpha = max(alpha, foam * 0.95);
 diffuseColor = vec4(water, alpha);

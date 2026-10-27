@@ -115,6 +115,7 @@ function fillFrame(f) {
       f.normal[i * 4] = nx / len;
       f.normal[i * 4 + 1] = 1 / len;
       f.normal[i * 4 + 2] = nz / len;
+      f.normal[i * 4 + 3] = sim.coral[i];
 
       // Lakes are flat sheets at their spill height, reaching one point past the shore so the
       // ground cuts a clean shoreline through them. Everywhere else the sheet tucks well under
