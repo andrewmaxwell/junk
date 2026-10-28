@@ -166,6 +166,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     seaLevel: {value: 0},
     temperature: {value: 24},
     time: {value: 0},
+    plateShift: {value: new THREE.Vector2()}, // m the plate has moved, for plate-fixed detail
     sunDirection: {value: new THREE.Vector3(0, 1, 0)},
     wind: {value: new THREE.Vector2(0, 1)}, // which way it blows
     cloudTex: {value: cloudTexture},
@@ -384,6 +385,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     uniforms.groundTex.value.image.data.set(frame.ground);
     uniforms.groundTex.value.needsUpdate = true;
     uniforms.seaLevel.value = seaLevel;
+    uniforms.plateShift.value.fromArray(frame.plateShift);
     uniforms.temperature.value = temperature;
     const angle = THREE.MathUtils.degToRad(wind);
     uniforms.wind.value.set(-Math.sin(angle), Math.cos(angle));

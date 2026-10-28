@@ -126,7 +126,7 @@ const transfers = (f) =>
 // ---------- controls ----------
 // Each changes the world and keeps the island, so you can watch it adjust.
 const presets = {
-  'Life of an island': {},
+  'Island chain': {},
   'Sinking: atoll': {upliftRate: -0.4, speed: 30},
   // a cycle takes a second and a half at full speed, which is a blur
   'Ice-age cycles': {iceAges: true, speed: 20},

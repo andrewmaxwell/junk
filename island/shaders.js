@@ -19,6 +19,10 @@ uniform float cellSize;
 uniform float seaLevel;
 uniform float temperature;
 uniform float time;
+// m the plate has carried the land since the start: noise for detail too fine for the model is
+// looked up where a point started (w - plateShift), so it moves with the land instead of
+// crawling over it
+uniform vec2 plateShift;
 
 vec2 toGrid(vec2 w) { return w / cellSize + (gridN - 1.0) * 0.5; }
 bool onGrid(vec2 g) { return g.x >= 0.0 && g.y >= 0.0 && g.x <= gridN - 1.0 && g.y <= gridN - 1.0; }
@@ -78,7 +82,8 @@ float fbm(vec2 p, float octaves) {
 // steeply the river drops (m per m, up to 1)
 vec4 riverAt(vec2 g) {
   // a little wander, so channels meander instead of running in straight stretches
-  g += vec2(gnoise(g * 0.9), gnoise(g * 0.9 + 17.3)) * 0.3;
+  vec2 pg = g - plateShift / cellSize;
+  g += vec2(gnoise(pg * 0.9), gnoise(pg * 0.9 + 17.3)) * 0.3;
   vec4 r = texture2D(riverTex, (g * (riverN - 1.0) / (gridN - 1.0) + 0.5) / riverN);
   return vec4(r.r * 63.0, max(r.g * 31.5, 1.0), r.b, r.a);
 }
@@ -98,6 +103,7 @@ float detailAmp(vec2 g, float h) {
 }
 // ridged on top, so rock breaks into crests and gullies rather than blobs
 float detailHeight(vec2 w, float amp, float octaves) {
+  w -= plateShift;
   float n = fbm(w / 110.0, octaves);
   float ridged = 0.25 - abs(fbm(w / 70.0 + 5.2, octaves - 1.0));
   return amp * (n + 0.6 * ridged);
@@ -159,9 +165,10 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec4 ground, vec4 river, float coral
   float aridity = pet > 0.0 ? f.g / pet : 10.0;
   float cover = smoothstep(0.15, 0.85, aridity) * smoothstep(-3.0, 6.0, t);
   float steep = length(n.xz) / max(n.y, 0.05);
-  float broad = fbm(w.xz / 260.0, 3.0);
-  float clumps = fbm(w.xz / 30.0, 3.0 * fade);
-  float fine = gnoise(w.xz / 5.0) * fade;
+  vec2 pw = w.xz - plateShift;
+  float broad = fbm(pw / 260.0, 3.0);
+  float clumps = fbm(pw / 30.0, 3.0 * fade);
+  float fine = gnoise(pw / 5.0) * fade;
 
   // trees thin out with dryness and cold, in clumps
   // a strip of thicker growth along rivers, wider for bigger ones
@@ -170,7 +177,7 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec4 ground, vec4 river, float coral
   vec3 forest = mix(lin(vec3(0.11, 0.2, 0.12)), lin(vec3(0.19, 0.31, 0.12)), smoothstep(4.0, 10.0, t));
   forest = mix(forest, lin(vec3(0.15, 0.31, 0.09)), smoothstep(15.0, 21.0, t));
   // crowns of different trees: some yellower, some bluer, some in flower or turning
-  float crowns = gnoise(w.xz / 9.0) * fade;
+  float crowns = gnoise(pw / 9.0) * fade;
   forest = mix(forest, forest * vec3(1.35, 1.2, 0.8), smoothstep(0.1, 0.4, crowns));
   forest = mix(forest, forest * vec3(0.8, 0.95, 1.1), smoothstep(-0.1, -0.4, crowns));
   forest *= 0.6 + 0.8 * smoothstep(-0.35, 0.45, clumps); // sunlit crowns and dark gaps
@@ -207,12 +214,20 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec4 ground, vec4 river, float coral
   rockColor = mix(rockColor, lin(vec3(0.14, 0.15, 0.16)), dike);
   rockColor *= 0.75 + 0.35 * smoothstep(-0.2, 0.5, clumps);
   color = mix(color, rockColor, rock);
+  // Fresh lava flows are bare: glassy black at first, weathering brown, and grown over within a
+  // few tens of thousands of years. (Ferns take decades on a real flow, but at 2,000 years a step
+  // the flows would never show.)
+  float years = ground.a + 8e3 * clumps;
+  float fresh = (1.0 - smoothstep(4e3, 3e4, years)) * (1.0 - sediment);
+  vec3 freshLava = mix(lin(vec3(0.06, 0.06, 0.07)), lin(vec3(0.25, 0.2, 0.17)), smoothstep(3e3, 2.5e4, years));
+  freshLava *= 0.8 + 0.4 * smoothstep(-0.3, 0.3, fine);
+  color = mix(color, freshLava, fresh);
   // landslide scars and fresh debris on steep sediment: bare gravel
   color = mix(color, lin(vec3(0.5, 0.45, 0.38)), sediment * smoothstep(0.6, 0.9, steep) * (1.0 - bar));
   bumpHeight = mix(bumpHeight, 1.5, rock);
   bumpScale = mix(bumpScale, 5.0, rock);
   bumpHeight *= 1.0 - bar;
-  rough = 0.95;
+  rough = mix(0.95, 0.55, fresh * smoothstep(1e4, 2e3, years));
   // lake beds are mud
   color = mix(color, lin(vec3(0.33, 0.3, 0.24)), smoothstep(0.3, 0.8, river.z));
 
@@ -311,15 +326,27 @@ if (inWater > 0.0) {
 
 // tree crowns, tussocks and rubble, too small for the mesh
 if (fade > 0.0) {
-  float b0 = fbm(vWorld.xz / bumpScale, 3.0 * fade);
+  vec2 pb = vWorld.xz - plateShift;
+  float b0 = fbm(pb / bumpScale, 3.0 * fade);
   float eb = bumpScale * 0.25;
-  slope += bumpHeight * fade * vec2(fbm((vWorld.xz + vec2(eb, 0.0)) / bumpScale, 3.0 * fade) - b0,
-                                    fbm((vWorld.xz + vec2(0.0, eb)) / bumpScale, 3.0 * fade) - b0) / eb;
+  slope += bumpHeight * fade * vec2(fbm((pb + vec2(eb, 0.0)) / bumpScale, 3.0 * fade) - b0,
+                                    fbm((pb + vec2(0.0, eb)) / bumpScale, 3.0 * fade) - b0) / eb;
 }
 vec3 worldNormal = normalize(vec3(-slope.x, 1.0, -slope.y));
 normal = normalize((viewMatrix * vec4(worldNormal, 0.0)).xyz);
 diffuseColor.rgb = surfaceColor;
 roughnessFactor = surfaceRough;
+// The newest flows still glow through the cracks in their crust, which only shows once the sun
+// is low.
+float lavaYears = groundAt(grid).a;
+if (lavaYears < 6e3 && vWorld.y > seaLevel) {
+  vec2 pl = vWorld.xz - plateShift;
+  // fine cracks fade to an even glow where a pixel covers several (they glittered as dots)
+  float cracks = smoothstep(-0.05, 0.25, fbm(pl / 60.0, 1.0 + 2.0 * fade))
+    * mix(0.5, smoothstep(-0.1, 0.2, gnoise(pl / 9.0)), fade);
+  float dusk = 0.15 + 0.85 * smoothstep(0.35, 0.05, sunDirection.y);
+  totalEmissiveRadiance += lin(vec3(1.0, 0.32, 0.06)) * 3.0 * dusk * cracks * (1.0 - smoothstep(2e3, 6e3, lavaYears));
+}
 float terrainAO = fields.a;
 float sunThrough = cloudShadow(vWorld);
 // the rippling net of light that waves focus onto a shallow floor

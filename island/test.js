@@ -93,7 +93,14 @@ check(badLakes === 0, 'lakes spill downhill');
 // edge of the grid.
 {
   const fresh = makeSim({N, cellSize, seed: 7});
-  const still = {...defaults, upliftRate: 0, sinkRate: 0, D: 0, marineD: 0};
+  const still = {
+    ...defaults,
+    upliftRate: 0,
+    sinkRate: 0,
+    plateSpeed: 0,
+    D: 0,
+    marineD: 0,
+  };
   const sum = (a) => a.reduce((s, v) => s + v, 0);
   const start = sum(fresh.height);
   let eroded = 0;
@@ -152,7 +159,13 @@ check(badLakes === 0, 'lakes spill downhill');
     ((i % N) - N / 2) * wx + (((i / N) | 0) - N / 2) * wz > 0 ? 1 : 0;
   const landLost = (waveErosion) => {
     const s = makeSim({N, cellSize, seed: 7});
-    const p = {...defaults, temperature: 5, upliftRate: 0, waveErosion};
+    const p = {
+      ...defaults,
+      temperature: 5,
+      upliftRate: 0,
+      plateSpeed: 0,
+      waveErosion,
+    };
     const before = s.height.slice();
     for (let t = 0; t < 100; t++) s.step(2000, p);
     const lost = [0, 0]; // windward, lee
@@ -182,6 +195,38 @@ check(badLakes === 0, 'lakes spill downhill');
       iceAgeSeaLevel(100e3 - 1) > -1 &&
       iceAgeSeaLevel(88e3) < -110,
     `ice-age sea level: mean ${mean.toFixed(0)} m, lowest ${Math.min(...levels).toFixed(0)} m`,
+  );
+}
+
+// Lava flows carry all of a volcano's growth: with nothing else moving rock, growing by flows
+// adds as much as swelling from inside. (Flows once reused marks the routing left set and
+// stopped at their vents, adding a tenth of their lava.)
+{
+  const added = (eruptions) => {
+    const s = makeSim({N, cellSize, seed: 7});
+    const p = {
+      ...defaults,
+      eruptions,
+      K: 0,
+      D: 0,
+      marineD: 0,
+      waveErosion: 0,
+      criticalSlope: 0,
+      reefGrowth: 0,
+      sinkRate: 0,
+      flexure: 0,
+      plateSpeed: 0,
+    };
+    const sum = () => s.height.reduce((a, b) => a + b, 0);
+    const before = sum();
+    for (let t = 0; t < 10; t++) s.step(2000, p);
+    return (sum() - before) * cellSize * cellSize;
+  };
+  const swelling = added(0);
+  const flows = added(1);
+  check(
+    Math.abs(flows - swelling) < 1e-6 * swelling,
+    `lava flows add what the volcanoes grow by (${(flows / 1e9).toFixed(3)} vs ${(swelling / 1e9).toFixed(3)} km³)`,
   );
 }
 
@@ -222,7 +267,7 @@ check(badLakes === 0, 'lakes spill downhill');
     const s = makeSim({N, cellSize, seed: 7});
     let peak = 0;
     for (let i = 0; i < num; i++) if (s.height[i] > s.height[peak]) peak = i;
-    const p = {...defaults, upliftRate: -rate, reefGrowth};
+    const p = {...defaults, upliftRate: -rate, plateSpeed: 0, reefGrowth};
     for (let t = 0; t < steps; t++) s.step(2000, p);
     const top = s.height.reduce((a, b) => Math.max(a, b), -Infinity);
     return {top, lagoon: s.height[peak]};
@@ -240,10 +285,10 @@ check(badLakes === 0, 'lakes spill downhill');
   );
 }
 
-// Run toward steady state with steady uplift and no sinking, soil creep, waves, landslides or
-// layered rock, where the stream power law
-// with deposition gives an exact answer (Yuan et al. 2019): everything uplifted upstream
-// passes through, so rivers drop G Qs / A = G Ū (Ū the mean uplift upstream), and cutting
+// Run toward steady state with steady uplift and no lava flows, drifting plate, sinking,
+// bending, reefs, soil creep, waves, landslides or layered rock (reefs building up coastal
+// flats kept river mouths moving), where the stream power law with deposition gives an exact
+// answer (Yuan et al. 2019): everything uplifted upstream passes through, so rivers drop G Qs / A = G Ū (Ū the mean uplift upstream), and cutting
 // balances both: S = (U + G Ū) / (K Q^m) at every river point.
 const params = {
   ...defaults,
@@ -252,8 +297,11 @@ const params = {
   waveErosion: 0,
   layering: 0,
   criticalSlope: 0,
-  growthTime: Infinity,
+  eruptions: 0,
+  plateSpeed: 0,
   sinkRate: 0,
+  flexure: 0,
+  reefGrowth: 0,
 };
 for (let t = 0; t < 2000; t++) sim.step(5000, params);
 sim.route(params);

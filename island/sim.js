@@ -19,15 +19,23 @@
 // straight in; lava flows alternate with soft beds of ash and rubble, and dikes are hard. Waves
 // cut the coast back into cliffs, fastest where they arrive across deep water.
 
-import {makeIsland, makeRandom, makeFractalNoise} from './terrain.js';
+import {
+  makeIsland,
+  makeRandom,
+  makeFractalNoise,
+  edgeCap,
+  DEEP_FLOOR,
+} from './terrain.js';
 
 export const defaults = {
   rain: 2.5, // m/yr of rain, averaged over the land
   temperature: 24, // °C at sea level
   wind: 60, // degrees the wind blows from: 0 north (away from the camera), 90 east
-  upliftRate: 1.5, // mm/yr at the fastest-rising point when the volcano is most active
-  growthTime: 1e6, // years the volcano grows at full speed, and then for it to fade by 1/e (Infinity: forever)
+  upliftRate: 3, // mm/yr a volcano grows at its summit while it sits right over the hotspot
+  eruptions: 0.5, // how much of that growth comes as lava flows; the rest swells it from inside
+  plateSpeed: 2, // mm/yr (km per million years) the plate carries the islands off the hotspot
   sinkRate: 0.03, // mm/yr the plate sinks as it cools, drifting away from the hotspot
+  flexure: 1, // how much of the volcanoes' new rock the plate bends down under (0..1)
   seaLevel: 0, // m
   K: 1.2e-4, // erodibility of bare ground, for discharge in m³/yr
   m: 0.5, // discharge exponent (slope exponent n is 1)
@@ -78,6 +86,30 @@ const MOTU_HEIGHT = 3;
 const RUBBLE_RATE = 0.003;
 /** m: how far behind the reef's edge rubble is thrown */
 const RUBBLE_REACH = 250;
+
+// The hotspot stays put while the plate slides over it, so it builds a chain of volcanoes, each
+// growing while it's near the hotspot and dying as the plate carries it away. Hawaii's plate
+// moves 90 mm/yr and its volcanoes are 40 to 50 km apart; here they're 3 to 4.5 km apart and the
+// plate moves 2 mm/yr, so each volcano still spends about a million years over the hotspot, as
+// Hawaii's do. (At 1 mm/yr only one high island stood at a time, since this model's erosion is
+// fast; at 2 there's usually a young one with an older one or an atoll beside it.)
+/** grid halves: a volcano's growth falls off by 1/e this far from the hotspot */
+const HOTSPOT_REACH = 0.3;
+/** grid halves between one volcano and the next, at least and at most */
+const VOLCANO_GAP = [0.45, 0.7];
+/** years for the plate to bend down under a new volcano's weight (taking all of it back) */
+const FLEX_TIME = 300e3;
+/** m: how thick a lava flow piles up where it runs */
+const FLOW_THICKNESS = 10;
+// Lava cools as it runs, so it only keeps going down slopes steeper than these; on gentler
+// ground it piles up instead, which is what gives a shield volcano its slopes of a few degrees.
+// In the sea it chills fast and piles up in a pillow mound or a lava delta's steep front.
+/** the gentlest slope lava runs down on land (about 9°) */
+const LAVA_SLOPE = 0.15;
+/** the gentlest slope lava runs down in the sea (about 27°) */
+const LAVA_FRONT = 0.5;
+/** lava flows erupting from each volcano in a step, at full activity */
+const FLOWS_PER_STEP = 10;
 
 /** steps between rain sweeps while time runs */
 const RAIN_EVERY = 5;
@@ -187,7 +219,7 @@ export function smooth(a, b, x) {
 export function makeSim({N, cellSize, seed}) {
   const num = N * N;
   const height = new Float64Array(num);
-  const uplift = new Float32Array(num); // 0..1, times upliftRate
+  const uplift = new Float32Array(num); // 0..1, how fast each point is growing over upliftRate
   const water = new Float64Array(num); // height of the lake or sea surface, or the land if dry
   const wet = new Uint8Array(num); // 1 for lakes, 2 for the sea
   const receiver = new Int32Array(num); // where each point drains to
@@ -220,6 +252,7 @@ export function makeSim({N, cellSize, seed}) {
   const stack = new Int32Array(num); // every point after the one it drains to
   const floodReceiver = new Int32Array(num);
   const closed = new Uint8Array(num);
+  const covered = new Uint8Array(num); // where a lava flow has reached, while it runs
   const change = new Float64Array(num);
   const heapKeys = new Float64Array(num);
   const heapValues = new Int32Array(num);
@@ -243,29 +276,65 @@ export function makeSim({N, cellSize, seed}) {
     return smooth(0, 0.08, Math.min(x, z, N - 1 - x, N - 1 - z) / (N - 1));
   });
 
-  makeIsland(N, seed, height, uplift, age, dikes);
-  // The lava layers stay where they are: the volcano grows by piling new flows on top rather
-  // than lifting the old ones. (Layers that rode up with the rock crawled uphill on screen,
-  // meters a second.) They dip gently away from the middle, as a shield's flows do, and wander
-  // up and down, since flows aren't even sheets. This many meters are added to a point's
-  // height to find its bed; the terrain shader draws the beds from the same numbers.
+  const island = makeIsland(N, seed, height, age, dikes);
+  // The plate has carried everything this many cells since the start; plate coordinates (where
+  // the volcanoes and rock layers are) are grid coordinates minus these.
+  let shiftX = 0;
+  let shiftZ = 0;
+  let driftX = 0; // m the plate has moved toward the next cell
+  let driftZ = 0;
+  const chainX = Math.cos(island.chain); // toward the young end, which is upstream
+  const chainZ = Math.sin(island.chain);
+  const half = (N - 1) / 2;
+  const volcanoes = island.volcanoes.map(withFootprint);
+  // the hotspot sits under the youngest volcano at the start, in grid cells
+  const hotspotX = volcanoes[volcanoes.length - 1].cx;
+  const hotspotZ = volcanoes[volcanoes.length - 1].cz;
+  const volcanoRandom = makeRandom(seed + 3);
+  const lavaRandom = makeRandom(seed + 4);
+  // The lava layers stay where they are on the plate: the volcano grows by piling new flows on
+  // top rather than lifting the old ones. (Layers that rode up with the rock crawled uphill on
+  // screen, meters a second.) They wander up and down, since flows aren't even sheets. This many
+  // meters are added to a point's height to find its bed; the terrain shader draws the beds
+  // from the same numbers.
   const layerNoise = makeFractalNoise(makeRandom(seed + 2));
-  const layerOffset = Float32Array.from({length: num}, (_, i) => {
-    const x = (i % N) / N;
-    const z = ((i / N) | 0) / N;
-    const fromMiddle = Math.hypot(x - 0.5, z - 0.5) * N * cellSize;
-    return 0.06 * fromMiddle + LAYER_THICKNESS * layerNoise(x * 5, z * 5);
-  });
+  const layerAt = (px, pz) =>
+    LAYER_THICKNESS * layerNoise((px / N) * 5, (pz / N) * 5);
+  const layerOffset = Float32Array.from({length: num}, (_, i) =>
+    layerAt(i % N, (i / N) | 0),
+  );
   const stormNoise = makeFractalNoise(makeRandom(seed + 1));
   // 0..1, how much of the rubble that storms throw up stays at each point
+  const stormAt = (px, pz) =>
+    smooth(-0.15, 0.25, stormNoise((px / N) * 6, (pz / N) * 6));
   const storminess = Float32Array.from({length: num}, (_, i) =>
-    smooth(-0.15, 0.25, stormNoise(((i % N) / N) * 6, (((i / N) | 0) / N) * 6)),
+    stormAt(i % N, (i / N) | 0),
   );
+  let bent = 0; // cells' worth of the grid that bends
+  for (let i = 0; i < num; i++) bent += sinking[i];
+  // The plate carries the old islands into cooler water, where reefs can't keep up and drown
+  // (Hawaii's last atoll, Kure, is at this "Darwin point"), so reef growth fades over the last
+  // stretch downstream, and old reefs sink out of sight before the grid's edge. (Without it,
+  // the edge cut old lagoons off in a straight line.)
+  const darwin = Float32Array.from({length: num}, (_, i) => {
+    const along =
+      -(((i % N) - half) * chainX + (((i / N) | 0) - half) * chainZ) / half;
+    return 1 - smooth(0.55, 0.95, along);
+  });
+  // no growth near the grid's edges, which stay deep
+  const edgeFade = Float32Array.from({length: num}, (_, i) => {
+    const e = Math.min(
+      i % N,
+      (i / N) | 0,
+      N - 1 - (i % N),
+      N - 1 - ((i / N) | 0),
+    );
+    return Math.min(1, Math.max(0, (e / (N - 1) - 0.06) / 0.06));
+  });
   const rubble = new Float64Array(num); // scratch for how much reef is near each point
   let time = 0;
-  let growthSetting = NaN; // the upliftRate the volcano last started growing at
-  let growthStart = 0; // year it was set
   let lostSediment = 0; // m³ carried off the edge of the grid or out to the deep sea
+  let unbent = 0; // m³ the volcanoes have added that the plate hasn't yet bent down under
   let reefVolume = 0; // m³ of reef built
   const cellArea = cellSize * cellSize;
 
@@ -553,19 +622,29 @@ export function makeSim({N, cellSize, seed}) {
    */
   function step(dt, p) {
     const {seaLevel} = p;
-    // A volcano grows only while it sits over the hotspot. The plate carries it off within
-    // about a million years of the uplift being set, then its growth fades, and the
-    // plate under it keeps sinking as it cools, for tens of millions of years. Growth is local,
-    // where the lava piles up, but sinking is the whole plate, so it's even across the grid.
-    // A negative upliftRate skips the volcano and just sinks the plate that fast.
-    if (p.upliftRate !== growthSetting) {
-      growthSetting = p.upliftRate;
-      growthStart = time;
-    }
-    const grow = growthRate(p) / 1000;
+    drift(dt, p);
+    // Volcanoes grow while they're near the hotspot, partly swelling from inside as magma
+    // fills dikes and chambers, and partly in lava flows. The plate sinks as it cools, evenly
+    // across the grid. A negative upliftRate skips the volcanoes and just sinks that fast.
+    measureGrowth();
+    const grow = Math.max(0, p.upliftRate) / 1000;
     const sink = (p.upliftRate < 0 ? -p.upliftRate : p.sinkRate) / 1000;
-    for (let i = 0; i < num; i++)
-      height[i] += (uplift[i] * grow - sinking[i] * sink) * dt;
+    // The plate also bends down under the weight of the new rock. The bend is hundreds of km
+    // across, so here it's even over the grid, and it takes the rock's whole volume back:
+    // the real ocean is 5 km deep and swallows Hawaii's volcanoes, but this one is 1.2 km deep,
+    // and without the bend each new volcano raised the whole sea floor until reefs grew over
+    // it.
+    const bend = (Math.max(0, unbent) / (bent * cellArea)) * (dt / FLEX_TIME);
+    unbent -= bend * bent * cellArea;
+    const swell = grow * (1 - p.eruptions);
+    for (let i = 0; i < num; i++) {
+      height[i] += uplift[i] * swell * dt - sinking[i] * (sink * dt + bend);
+      unbent += p.flexure * uplift[i] * swell * dt * cellArea;
+    }
+    if (grow > 0 && p.eruptions > 0) {
+      for (const vol of volcanoes)
+        unbent += p.flexure * erupt(vol, grow * p.eruptions * dt, p.seaLevel);
+    }
 
     // The climate follows the broad shape of the land, which barely moves in one step, and the
     // rain sweep is a third of the step's time, so it's only redone every few steps.
@@ -682,13 +761,228 @@ export function makeSim({N, cellSize, seed}) {
   }
 
   /**
-   * mm/yr the youngest volcano is growing at its fastest point now.
+   * mm/yr the most active volcano is growing at its summit now.
    * @param {typeof defaults} p
    */
   function growthRate(p) {
     if (!(p.upliftRate > 0)) return 0;
-    const since = growthSetting === p.upliftRate ? time - growthStart : 0;
-    return p.upliftRate * Math.exp(-Math.max(0, since / p.growthTime - 1));
+    return p.upliftRate * Math.max(...volcanoes.map(activity));
+  }
+
+  /** 0..1, how close a volcano is to the hotspot, which is how fast it grows. */
+  function activity(vol) {
+    const dx = hotspotX - shiftX - vol.cx;
+    const dz = hotspotZ - shiftZ - vol.cz;
+    return Math.exp(-((Math.hypot(dx, dz) / (HOTSPOT_REACH * half)) ** 2));
+  }
+
+  /**
+   * Work out a volcano's footprint once, in plate cells: how much of its growth lands at each
+   * point of a box around it.
+   */
+  function withFootprint(vol) {
+    const reach = Math.ceil(2 * vol.coast * half);
+    const size = 2 * reach + 1;
+    const x0 = Math.round(vol.cx) - reach;
+    const z0 = Math.round(vol.cz) - reach;
+    const lift = new Float32Array(size * size);
+    const dike = new Float32Array(size * size);
+    for (let bz = 0; bz < size; bz++) {
+      for (let bx = 0; bx < size; bx++) {
+        const here = island.shapeAt(
+          vol,
+          (x0 + bx) / half - 1,
+          (z0 + bz) / half - 1,
+        );
+        lift[bz * size + bx] = here.lift;
+        dike[bz * size + bx] = here.dike;
+      }
+    }
+    // vents open where the footprint is highest: the summit, and the axes of the rift zones
+    const vents = new Float64Array(lift.length); // running total of each point's chance
+    for (let k = 0; k < lift.length; k++)
+      vents[k] = (k ? vents[k - 1] : 0) + lift[k] ** 4;
+    // onGrid: how much of the footprint is on the grid, where it can grow
+    return {...vol, x0, z0, size, lift, dike, vents, onGrid: 0};
+  }
+
+  /** Fill `uplift` from every volcano's footprint and how near the hotspot it is. */
+  function measureGrowth() {
+    uplift.fill(0);
+    for (const vol of volcanoes) {
+      const a = activity(vol);
+      vol.onGrid = 0;
+      if (a < 1e-3) continue;
+      const {x0, z0, size, lift} = vol;
+      for (let bz = 0; bz < size; bz++) {
+        const z = z0 + bz + shiftZ;
+        if (z < 0 || z >= N) continue;
+        for (let bx = 0; bx < size; bx++) {
+          const x = x0 + bx + shiftX;
+          if (x < 0 || x >= N) continue;
+          const i = z * N + x;
+          const here = lift[bz * size + bx] * edgeFade[i];
+          uplift[i] += a * here;
+          vol.onGrid += here;
+        }
+      }
+    }
+  }
+
+  /**
+   * Lava flows: from vents at the summit and along the rift zones, each runs down the steepest
+   * way, piling up FLOW_THICKNESS as it goes, so it fills hollows and valleys before running on
+   * past them, until its lava runs out. Fresh lava buries any sediment and starts weathering
+   * from scratch.
+   * @param {number} perArea m the volcano's summit would grow if it were right over the hotspot
+   * @param {number} seaLevel
+   * @returns {number} m³ of lava erupted
+   */
+  function erupt(vol, perArea, seaLevel) {
+    const a = activity(vol);
+    if (a < 0.02) return 0;
+    const {x0, z0, size} = vol;
+    // as much lava as the volcano's footprint would grow by
+    const flows = Math.max(1, Math.round(FLOWS_PER_STEP * a));
+    const volume = (a * perArea * vol.onGrid * cellArea) / flows;
+    let erupted = 0;
+    for (let f = 0; f < flows; f++) {
+      const k = pickVent(vol.vents);
+      const x = x0 + (k % size) + shiftX;
+      const z = z0 + Math.floor(k / size) + shiftZ;
+      if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1) continue;
+      runLava(z * N + x, volume, seaLevel);
+      erupted += volume;
+    }
+    return erupted;
+  }
+
+  /** A random point of a volcano's box, by the running totals of their chances. */
+  function pickVent(vents) {
+    const target = lavaRandom() * vents[vents.length - 1];
+    let lo = 0;
+    let hi = vents.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (vents[mid] < target) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /**
+   * One flow of `volume` m³ from point i. It always covers the lowest ground next to what it
+   * has covered so far, counting the ground as higher the further the lava has run to get there,
+   * since it cools as it goes (LAVA_SLOPE, LAVA_FRONT), and give or take a little, so it braids
+   * and widens on gentle slopes. So it pools in hollows and fills valleys, runs down steep slopes
+   * in a narrow tongue, fans out and stops on gentle ones, and in the sea builds a delta or a
+   * pillow mound near where it went in. (Following only the steepest way down built long,
+   * narrow causeways across lagoons, and lava that ran on down to the deep floor left young
+   * volcanoes stuck below the sea.)
+   */
+  function runLava(vent, volume, seaLevel) {
+    let left = volume;
+    let marked = 0;
+    heapSize = 0;
+    push(height[vent], vent);
+    covered[vent] = 1;
+    pits[marked++] = vent;
+    change[vent] = 0; // m it has cooled by: m traveled times the slope it can run down
+    while (left > 0 && heapSize > 0) {
+      const i = pop();
+      if (edge[i]) continue;
+      const depth = seaLevel + 1 - height[i];
+      const thickness =
+        depth > 0
+          ? Math.min(4 * FLOW_THICKNESS, Math.max(FLOW_THICKNESS, depth))
+          : FLOW_THICKNESS;
+      const added = Math.min(left / cellArea, thickness);
+      height[i] += added;
+      soil[i] = 0;
+      age[i] = -time;
+      left -= added * cellArea;
+      for (let d = 0; d < 8; d++) {
+        const n = i + offsets[d];
+        if (covered[n]) continue;
+        covered[n] = 1;
+        pits[marked++] = n;
+        change[n] =
+          change[i] +
+          distances[d] * (height[n] < seaLevel ? LAVA_FRONT : LAVA_SLOPE);
+        push(height[n] + change[n] + lavaRandom() * 2 * FLOW_THICKNESS, n);
+      }
+    }
+    for (let k = 0; k < marked; k++) covered[pits[k]] = 0;
+    heapSize = 0;
+  }
+
+  /**
+   * Move the plate on by dt years, which carries everything on it one cell at a time; new, deep
+   * sea floor comes in on the side the plate comes from. The hotspot stays where it is, so it
+   * starts the next volcano upstream once it has passed the youngest.
+   * @param {number} dt
+   * @param {typeof defaults} p
+   */
+  function drift(dt, p) {
+    const speed = p.plateSpeed / 1000; // m/yr
+    if (!(speed > 0)) return;
+    driftX -= chainX * speed * dt;
+    driftZ -= chainZ * speed * dt;
+    while (Math.abs(driftX) >= cellSize || Math.abs(driftZ) >= cellSize) {
+      const dx = Math.abs(driftX) >= cellSize ? Math.sign(driftX) : 0;
+      const dz = Math.abs(driftZ) >= cellSize ? Math.sign(driftZ) : 0;
+      driftX -= dx * cellSize;
+      driftZ -= dz * cellSize;
+      shiftX += dx;
+      shiftZ += dz;
+      shiftGrid(height, N, dx, dz, () => DEEP_FLOOR);
+      shiftGrid(soil, N, dx, dz, () => 0);
+      shiftGrid(age, N, dx, dz, () => 80e6);
+      shiftGrid(dikes, N, dx, dz, () => 0);
+      shiftGrid(incoming, N, dx, dz, () => 0);
+      shiftGrid(layerOffset, N, dx, dz, (x, z) =>
+        layerAt(x - shiftX, z - shiftZ),
+      );
+      shiftGrid(storminess, N, dx, dz, (x, z) =>
+        stormAt(x - shiftX, z - shiftZ),
+      );
+      // what reaches the far edge sinks out of sight
+      for (let i = 0; i < num; i++) {
+        const cap = edgeCap(N, i % N, (i / N) | 0);
+        if (height[i] > cap) {
+          lostSediment += (height[i] - cap) * cellArea;
+          height[i] = cap;
+        }
+      }
+      stepsSinceRain = Infinity; // the clouds and rain move with the land
+    }
+    // the next volcano, once the hotspot is past the youngest
+    const young = volcanoes[volcanoes.length - 1];
+    const hx = hotspotX - shiftX;
+    const hz = hotspotZ - shiftZ;
+    if ((hx - young.cx) * chainX + (hz - young.cz) * chainZ > 0) {
+      const gap =
+        VOLCANO_GAP[0] + volcanoRandom() * (VOLCANO_GAP[1] - VOLCANO_GAP[0]);
+      const side = (volcanoRandom() - 0.5) * 0.2 * gap; // not quite in a line
+      const u = young.x + chainX * gap - chainZ * side;
+      const v = young.z + chainZ * gap + chainX * side;
+      const vol = withFootprint(island.makeVolcano(volcanoRandom, u, v, true));
+      vol.caldera = false;
+      volcanoes.push(vol);
+      // its dikes are in place before it grows over them
+      for (let bz = 0; bz < vol.size; bz++) {
+        for (let bx = 0; bx < vol.size; bx++) {
+          const x = vol.x0 + bx + shiftX;
+          const z = vol.z0 + bz + shiftZ;
+          if (x < 0 || z < 0 || x >= N || z >= N) continue;
+          const i = z * N + x;
+          dikes[i] = Math.max(dikes[i], vol.dike[bz * vol.size + bx]);
+        }
+      }
+      // the old ones are done once they're far past the hotspot
+      while (volcanoes.length > 2 && activity(volcanoes[0]) < 1e-4)
+        volcanoes.shift();
+    }
   }
 
   /**
@@ -760,6 +1054,7 @@ export function makeSim({N, cellSize, seed}) {
       if (depth <= 0 || depth > 100 || wet[i] !== 2) continue;
       const rate =
         warmth *
+        (p.plateSpeed > 0 ? darwin[i] : 1) *
         Math.tanh(REEF_SURFACE_LIGHT * Math.exp(-REEF_LIGHT_FALLOFF * depth)) *
         Math.exp(-openDistance[i] / REEF_FLUSHING - mud[i] / REEF_MUD_LIMIT);
       coral[i] = rate;
@@ -970,6 +1265,7 @@ export function makeSim({N, cellSize, seed}) {
     erodibility,
     rock,
     soil,
+    age,
     dikes,
     layerOffset,
     wave,
@@ -985,6 +1281,17 @@ export function makeSim({N, cellSize, seed}) {
       return time;
     },
     growthRate,
+    /** each volcano's center in grid cells, and how active it is (0..1) */
+    get volcanoes() {
+      return volcanoes.map((vol) => ({
+        x: vol.cx + shiftX,
+        z: vol.cz + shiftZ,
+        activity: activity(vol),
+      }));
+    },
+    get shift() {
+      return [shiftX, shiftZ];
+    },
     get lostSediment() {
       return lostSediment;
     },
@@ -992,4 +1299,25 @@ export function makeSim({N, cellSize, seed}) {
       return reefVolume;
     },
   };
+}
+
+/**
+ * Move a grid's values dx and dz cells (each −1, 0 or 1), filling the cells that come in from
+ * the edge with fill(x, z).
+ * @param {Float32Array | Float64Array} a
+ * @param {number} N
+ * @param {number} dx
+ * @param {number} dz
+ * @param {(x: number, z: number) => number} fill
+ */
+export function shiftGrid(a, N, dx, dz, fill) {
+  const copy = a.slice();
+  for (let z = 0; z < N; z++) {
+    for (let x = 0; x < N; x++) {
+      const sx = x - dx;
+      const sz = z - dz;
+      a[z * N + x] =
+        sx < 0 || sz < 0 || sx >= N || sz >= N ? fill(x, z) : copy[sz * N + sx];
+    }
+  }
 }
