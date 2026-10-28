@@ -11,6 +11,16 @@ let speed = 0; // years per real second
 let yearsDue = 0;
 let lastTick = performance.now();
 let dirty = true;
+// Some things change from one step (2,000 years) to the next in ways that flickered at full
+// speed: river mud arrives in pulses and cuts reef growth, and ponds on coastal flats come and
+// go. What's drawn eases toward them, so a lake only shows once it has lasted a few steps.
+const SHOWN_EASE = 0.25; // per step
+/** @type {Float32Array} 0..1, how much each point is shown as lake */
+let lakeShown;
+/** @type {Float32Array} m, the last level of the lake at each point */
+let lakeLevel;
+/** @type {Float32Array} reef growth rate as drawn */
+let coralShown;
 /** @type {Uint8Array} */
 let isRiver;
 /** @type {Uint8Array} */
@@ -89,7 +99,7 @@ function updateOcclusion() {
 
 /** Fill a frame from the current state. Assumes route() has run since the last change. */
 function fillFrame(f) {
-  const {N, cellSize, height, water, wet, area, rain, discharge} = sim;
+  const {N, cellSize, height, area, rain, discharge} = sim;
   let peak = -Infinity;
   updateOcclusion();
   for (let z = 0; z < N; z++) {
@@ -116,12 +126,12 @@ function fillFrame(f) {
       f.normal[i * 4] = nx / len;
       f.normal[i * 4 + 1] = 1 / len;
       f.normal[i * 4 + 2] = nz / len;
-      f.normal[i * 4 + 3] = sim.coral[i];
+      f.normal[i * 4 + 3] = coralShown[i];
 
       // Lakes are flat sheets at their spill height, reaching one point past the shore so the
       // ground cuts a clean shoreline through them. Everywhere else the sheet tucks well under
       // the ground.
-      let level = wet[i] === 1 ? water[i] : -Infinity;
+      let level = lakeShown[i] > 0.5 ? lakeLevel[i] : -Infinity;
       if (level === -Infinity) {
         for (let dz = -1; dz <= 1; dz++) {
           for (let dx = -1; dx <= 1; dx++) {
@@ -129,7 +139,7 @@ function fillFrame(f) {
             const nz2 = z + dz;
             if (nx2 < 0 || nz2 < 0 || nx2 >= N || nz2 >= N) continue;
             const j = nz2 * N + nx2;
-            if (wet[j] === 1) level = Math.max(level, water[j]);
+            if (lakeShown[j] > 0.5) level = Math.max(level, lakeLevel[j]);
           }
         }
       }
@@ -257,7 +267,7 @@ function drawRivers(out) {
       const fx = gx - x;
       const fz = gz - z;
       const j = z * N + x;
-      const lake = (w) => +(wet[w] === 1);
+      const lake = (w) => lakeShown[w];
       const lakeness =
         (lake(j) * (1 - fx) + lake(j + 1) * fx) * (1 - fz) +
         (lake(j + N) * (1 - fx) + lake(j + N + 1) * fx) * fz;
@@ -295,6 +305,17 @@ function send() {
   ]);
 }
 
+/** Ease lakes and reefs as drawn toward the model's (ease 1 snaps). */
+function updateShown(ease) {
+  const {wet, water, coral} = sim;
+  for (let i = 0; i < lakeShown.length; i++) {
+    const isLake = wet[i] === 1;
+    if (isLake) lakeLevel[i] = water[i];
+    lakeShown[i] += (+isLake - lakeShown[i]) * ease;
+    coralShown[i] += (coral[i] - coralShown[i]) * ease;
+  }
+}
+
 function tick() {
   const now = performance.now();
   yearsDue = Math.min(
@@ -304,6 +325,7 @@ function tick() {
   lastTick = now;
   while (yearsDue >= STEP_YEARS && performance.now() - now < BUDGET_MS) {
     sim.step(STEP_YEARS, params);
+    updateShown(SHOWN_EASE);
     yearsDue -= STEP_YEARS;
     dirty = true;
   }
@@ -329,6 +351,10 @@ onmessage = ({data}) => {
     riverDistance = new Float32Array(texels);
     riverHalfWidth = new Float32Array(texels);
     sim.route(params);
+    lakeShown = new Float32Array(data.N * data.N);
+    lakeLevel = new Float32Array(data.N * data.N);
+    coralShown = new Float32Array(data.N * data.N);
+    updateShown(1);
     dirty = true;
     yearsDue = 0;
     if (!data.restart) tick();
@@ -340,6 +366,7 @@ onmessage = ({data}) => {
   } else if (data.type === 'brush') {
     sim.brush(data.x, data.z, data.radius, data.amount);
     sim.route(params);
+    updateShown(1); // a dam the reader just built fills at once
     dirty = true;
   } else if (data.type === 'frame') {
     if (data.frame.height.length === sim.N * sim.N) freeFrames.push(data.frame);

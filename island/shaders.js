@@ -355,6 +355,14 @@ vec2 grid = toGrid(vWater.xz);
 float ground = onGrid(grid) ? baseHeight(grid) : -1200.0;
 float depth = max(vWater.y - ground, 0.0);
 float viewDist = length(vViewPosition);
+// Flats can lie within centimeters of sea level, closer than the depth buffer can tell water
+// from ground 10 km away, and the surface flickered on and off over them as the land shifted
+// by millimeters. So it fades out over the thinnest water, measured to the ground as drawn,
+// and looks the same whichever wins.
+float film = 1.0;
+if (depth < 8.0 && onGrid(grid)) {
+  film = smoothstep(0.0, 0.15 + 2e-9 * viewDist * viewDist, vWater.y - groundHeight(grid, vWater.xz));
+}
 
 vec2 p = vWater.xz;
 float calm = 1.0 - smoothstep(3000.0, 25000.0, viewDist);
@@ -421,7 +429,7 @@ roughnessFactor = mix(0.04, 0.7, foam);
 // and reflections add on top at full strength, so a nearly clear sea still mirrors the sky.
 const waterOutput = /* glsl */ `
 // the sun's glints are capped, or single bright pixels bloom into squares
-gl_FragColor = vec4(totalDiffuse * diffuseColor.a + min(totalSpecular, vec3(12.0)), diffuseColor.a);
+gl_FragColor = vec4(totalDiffuse * diffuseColor.a + min(totalSpecular, vec3(12.0)), diffuseColor.a) * film;
 `;
 const waterFog = /* glsl */ `
 #ifdef USE_FOG
