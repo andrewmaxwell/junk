@@ -185,6 +185,35 @@ check(badLakes === 0, 'lakes spill downhill');
   );
 }
 
+// Landslides keep ground from standing steeper than it can hold: after rivers and waves have
+// cut into it, almost nothing is left steeper than the critical slope.
+{
+  const s = makeSim({N, cellSize, seed: 7});
+  for (let t = 0; t < 100; t++) s.step(2000, defaults);
+  let steep = 0;
+  let pairs = 0;
+  for (let z = 1; z < N - 1; z++) {
+    for (let x = 1; x < N - 1; x++) {
+      const i = z * N + x;
+      for (const [dx, dz] of [
+        [1, 0],
+        [0, 1],
+        [1, 1],
+        [1, -1],
+      ]) {
+        const drop = Math.abs(s.height[i] - s.height[i + dz * N + dx]);
+        pairs++;
+        if (drop > defaults.criticalSlope * Math.hypot(dx, dz) * cellSize * 1.1)
+          steep++;
+      }
+    }
+  }
+  check(
+    steep < pairs / 1000,
+    `landslides: ${steep} of ${pairs} neighbor pairs are more than 10% steeper than the critical slope`,
+  );
+}
+
 // Darwin (1842): as an island sinks, reefs on its flanks keep growing up to the sea and are
 // left as a ring around a lagoon, an atoll. If it sinks faster than reefs can grow, they
 // drown and only a flat-topped seamount is left (a guyot).
@@ -211,11 +240,18 @@ check(badLakes === 0, 'lakes spill downhill');
   );
 }
 
-// Run toward steady state with no soil creep, waves or layered rock, where the stream power law
+// Run toward steady state with no soil creep, waves, landslides or layered rock, where the stream power law
 // with deposition gives an exact answer (Yuan et al. 2019): everything uplifted upstream
 // passes through, so rivers drop G Qs / A = G Ū (Ū the mean uplift upstream), and cutting
 // balances both: S = (U + G Ū) / (K Q^m) at every river point.
-const params = {...defaults, D: 0, marineD: 0, waveErosion: 0, layering: 0};
+const params = {
+  ...defaults,
+  D: 0,
+  marineD: 0,
+  waveErosion: 0,
+  layering: 0,
+  criticalSlope: 0,
+};
 for (let t = 0; t < 2000; t++) sim.step(5000, params);
 sim.route(params);
 

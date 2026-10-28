@@ -113,6 +113,7 @@ const transfers = (f) =>
     f.height,
     f.fields,
     f.normal,
+    f.ground,
     f.waterY,
     f.area,
     f.rain,

@@ -130,6 +130,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   const uniforms = {
     fieldsTex: {value: dataTexture()},
     normalTex: {value: dataTexture()},
+    groundTex: {value: dataTexture()},
     riverTex: {value: dataTexture(riverN, THREE.UnsignedByteType)},
     riverN: {value: riverN},
     gridN: {value: N},
@@ -352,6 +353,8 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     uniforms.fieldsTex.value.needsUpdate = true;
     uniforms.normalTex.value.image.data.set(frame.normal);
     uniforms.normalTex.value.needsUpdate = true;
+    uniforms.groundTex.value.image.data.set(frame.ground);
+    uniforms.groundTex.value.needsUpdate = true;
     uniforms.seaLevel.value = seaLevel;
     uniforms.temperature.value = temperature;
     const angle = THREE.MathUtils.degToRad(wind);

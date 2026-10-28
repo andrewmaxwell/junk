@@ -1,13 +1,16 @@
 // GLSL patched into three.js's standard material, so the terrain, sea, lakes and rivers keep its
 // lighting, shadows, reflections and fog but get their shape and color from the simulation on
-// the GPU. The worker sends two textures per frame: fields (height, rain, log10 flow, ambient
-// occlusion) and smooth normals with how fast coral grows in w, both one texel per grid point.
+// the GPU. The worker sends three textures per frame: fields (height, rain, log10 flow, ambient
+// occlusion), smooth normals with how fast coral grows in w, and the ground (where the lava
+// layers lie, dikes, sediment depth), all one texel per grid point.
 import * as THREE from 'three';
 import {cloudCommon} from './clouds.js';
+import {LAYER_THICKNESS} from './sim.js';
 
 const common = /* glsl */ `
 uniform sampler2D fieldsTex;
 uniform sampler2D normalTex;
+uniform sampler2D groundTex;
 uniform sampler2D riverTex;
 uniform float riverN;
 uniform float gridN;
@@ -21,6 +24,7 @@ bool onGrid(vec2 g) { return g.x >= 0.0 && g.y >= 0.0 && g.x <= gridN - 1.0 && g
 vec4 fieldsAt(vec2 g) { return texture2D(fieldsTex, (g + 0.5) / gridN); }
 vec3 baseNormalAt(vec2 g) { return normalize(texture2D(normalTex, (g + 0.5) / gridN).xyz); }
 float coralAt(vec2 g) { return texture2D(normalTex, (g + 0.5) / gridN).w; }
+vec4 groundAt(vec2 g) { return texture2D(groundTex, (g + 0.5) / gridN); }
 
 float texelHeight(ivec2 p) {
   return texelFetch(fieldsTex, clamp(p, ivec2(0), ivec2(int(gridN) - 1)), 0).r;
@@ -139,7 +143,7 @@ vWorld = transformed;
 // Color, roughness and small-scale bumps for every kind of ground, from the same climate as the
 // simulation: temperature from height, aridity from rain over potential evaporation.
 const terrainSurface = /* glsl */ `
-void terrainSurface(vec3 w, vec3 n, vec4 f, vec3 river, float coral, float fade,
+void terrainSurface(vec3 w, vec3 n, vec4 f, vec4 ground, vec3 river, float coral, float fade,
     out vec3 color, out float rough, out float bumpHeight, out float bumpScale) {
   float above = w.y - seaLevel;
   float t = temperature - 0.0065 * max(above, 0.0);
@@ -176,13 +180,26 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec3 river, float coral, float fade,
   bumpHeight = mix(0.4, 3.5, trees);
   bumpScale = mix(4.0, 9.0, trees);
 
-  // bare rock on steep slopes, in layers
-  float rock = smoothstep(0.9, 1.4, steep + 0.4 * clumps) * (1.0 - bar);
-  // faint layering that wanders, rather than contour lines
-  float strata = fbm(vec2(w.y / 14.0 + 3.0 * broad + 1.5 * clumps, 0.37), 3.0);
-  vec3 rockColor = mix(lin(vec3(0.4, 0.37, 0.33)), lin(vec3(0.5, 0.46, 0.4)), smoothstep(-0.3, 0.3, strata));
-  rockColor = mix(rockColor, lin(vec3(0.2, 0.2, 0.2)), 0.5 * smoothstep(0.1, 0.5, clumps));
+  // Bare rock on steep slopes, as the model has it: dark lava flows with red-brown beds of ash
+  // and rubble between them where the simulation puts them, black dikes, which stand bare on
+  // gentler slopes than the rest, and none where sediment lies deep.
+  float sediment = smoothstep(0.5, 4.0, ground.b);
+  float dike = smoothstep(0.3, 0.7, ground.g);
+  float rock = smoothstep(0.65, 1.05, steep + 0.4 * clumps + 0.4 * dike) * (1.0 - bar) * (1.0 - sediment);
+  float bed = fract((ground.r - w.y) / ${LAYER_THICKNESS.toFixed(1)});
+  float bedBlur = min(0.2, fwidth((ground.r - w.y) / ${LAYER_THICKNESS.toFixed(1)}));
+  float ash = smoothstep(0.6 - bedBlur, 0.75 + bedBlur, bed) * smoothstep(1.0 + bedBlur, 0.97 - bedBlur, bed);
+  vec3 lava = mix(lin(vec3(0.3, 0.29, 0.28)), lin(vec3(0.42, 0.39, 0.35)), smoothstep(-0.3, 0.3, broad + 0.5 * clumps));
+  // within each flow, thinner flows a few meters thick, each with a paler rubbly top
+  float layer = (ground.r - w.y) / 5.0 + 0.3 * clumps;
+  float flowTop = smoothstep(0.75, 0.95, fract(layer)) * (1.0 - smoothstep(0.3, 1.0, fwidth(layer)));
+  lava = mix(lava, lava * 1.35, flowTop);
+  vec3 rockColor = mix(lava, lin(vec3(0.52, 0.36, 0.27)), 0.85 * ash);
+  rockColor = mix(rockColor, lin(vec3(0.14, 0.15, 0.16)), dike);
+  rockColor *= 0.75 + 0.35 * smoothstep(-0.2, 0.5, clumps);
   color = mix(color, rockColor, rock);
+  // landslide scars and fresh debris on steep sediment: bare gravel
+  color = mix(color, lin(vec3(0.5, 0.45, 0.38)), sediment * smoothstep(0.6, 0.9, steep) * (1.0 - bar));
   bumpHeight = mix(bumpHeight, 1.5, rock);
   bumpScale = mix(bumpScale, 5.0, rock);
   bumpHeight *= 1.0 - bar;
@@ -246,7 +263,7 @@ vec3 surfaceColor;
 float surfaceRough;
 float bumpHeight;
 float bumpScale;
-terrainSurface(vWorld, shapeNormal, fields, river, coralAt(grid), fade, surfaceColor, surfaceRough, bumpHeight, bumpScale);
+terrainSurface(vWorld, shapeNormal, fields, groundAt(grid), river, coralAt(grid), fade, surfaceColor, surfaceRough, bumpHeight, bumpScale);
 
 // the river itself, never thinner than about half a pixel so it doesn't break up far away
 float waterEdge = max(river.y, 0.5 * footprint);

@@ -34,6 +34,7 @@ export const defaults = {
   G: 1, // how readily rivers drop what they carry (Yuan et al. 2019's G)
   layering: 1, // how much harder lava flows are than the ash beds between them (0 for none)
   waveErosion: 0.01, // m/yr a basalt sea cliff retreats in the full force of the waves
+  criticalSlope: 1.1, // the steepest rock stands (about 48°) before it slides
   reefGrowth: 0.008, // m/yr, the fastest a coral reef builds upward, in shallow, clear water
 };
 
@@ -84,9 +85,14 @@ const SEDIMENT_SOFTNESS = 2;
 /** m of sediment that counts as covering the rock */
 const COVERED = 0.5;
 /** m: one lava flow plus the bed of ash and rubble on top of it */
-const LAYER_THICKNESS = 40;
+export const LAYER_THICKNESS = 40;
 /** years for weathering to clog young lava's cracks so rain runs off instead of soaking in */
 const SEAL_TIME = 150e3;
+/** the steepest loose sediment lies, its angle of repose (about 33°) */
+const REPOSE_SLOPE = 0.65;
+/** m of sediment that slides at its own angle; a thin skin rests on the rock's (switching at
+ * COVERED made slides flip points back and forth into a checkerboard) */
+const DEEP_DEBRIS = 5;
 /** m below sea level waves cut the shore down to */
 const WAVE_BASE = 2;
 /** m of fetch over deep water for waves to build to full size */
@@ -190,6 +196,7 @@ export function makeSim({N, cellSize, seed}) {
   const original = new Float64Array(num); // where the island's first surface is now, m
   const start = new Float64Array(num); // heights before rivers work on them, each step
   const incoming = new Float64Array(num); // m³ arriving from upstream in a step
+  const excess = new Float64Array(8); // how much too steep each neighbor is, in a landslide
   const flowPower = new Float64Array(num); // K Q^m dt
   const wave = new Float32Array(num); // 0..1, wave energy, from the wind and open sea
   const upwind = new Int32Array(num); // the point one step upwind, or -1 off the grid
@@ -210,6 +217,7 @@ export function makeSim({N, cellSize, seed}) {
   const pits = new Int32Array(num);
 
   const offsets = neighborOffsets.map(([dx, dz]) => dz * N + dx);
+  const offsetX = Int8Array.from(neighborOffsets, ([dx]) => dx);
   const distances = neighborOffsets.map(
     ([dx, dz]) => Math.hypot(dx, dz) * cellSize,
   );
@@ -648,7 +656,59 @@ export function makeSim({N, cellSize, seed}) {
       }
     }
 
+    slide(p);
     time += dt;
+  }
+
+  /**
+   * Landslides: wherever ground stands steeper than it can hold (rock up to criticalSlope,
+   * deep sediment only to its angle of repose), the excess slides to the lowest neighbor and
+   * stays there as loose debris. Going from the highest water levels down lets a slide's
+   * debris set off the next one below it in the same step.
+   * @param {typeof defaults} p
+   */
+  function slide(p) {
+    if (!(p.criticalSlope > 0)) return;
+    // The sea floor is in flood order, not height order, so slides there don't chain within a
+    // pass; a second pass in plain grid order (quicker: it reads memory in order) catches most
+    // of what the first left.
+    slidePass(p, true);
+    slidePass(p, false);
+  }
+
+  /**
+   * @param {typeof defaults} p
+   * @param {boolean} downhill in flood order from the top, or else in grid order
+   */
+  function slidePass(p, downhill) {
+    for (let k = num - 1; k >= 0; k--) {
+      const i = downhill ? stack[k] : k;
+      if (edge[i]) continue;
+      const critical = soil[i] > DEEP_DEBRIS ? REPOSE_SLOPE : p.criticalSlope;
+      const x = i % N;
+      let most = 0;
+      let total = 0;
+      const h = height[i];
+      for (let d = 0; d < 8; d++) {
+        const nx = x + offsetX[d];
+        const e = h - height[i + offsets[d]] - critical * distances[d];
+        excess[d] = nx >= 0 && nx < N && e > 0 ? e : 0;
+        most = Math.max(most, excess[d]);
+        total += excess[d];
+      }
+      if (most <= 0) continue;
+      // half the worst excess, shared among every neighbor it's too steep toward (sending it
+      // all down the steepest one left a checkerboard)
+      const moved = most / 2;
+      height[i] -= moved;
+      soil[i] = Math.max(0, soil[i] - moved);
+      for (let d = 0; d < 8; d++) {
+        if (!excess[d]) continue;
+        const n = i + offsets[d];
+        height[n] += (moved * excess[d]) / total;
+        soil[n] += (moved * excess[d]) / total;
+      }
+    }
   }
 
   /**
@@ -881,6 +941,9 @@ export function makeSim({N, cellSize, seed}) {
     erodibility,
     rock,
     soil,
+    dikes,
+    original,
+    layerPhase,
     wave,
     discharge,
     stack,
