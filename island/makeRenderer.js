@@ -1,4 +1,5 @@
-// Draws the island with three.js under a low sun and a physical sky. The terrain is a mesh three
+// Draws the island with three.js under a physical sky, with the sun set by the time of day and
+// clouds from the model's condensation (see clouds.js). The terrain is a mesh three
 // times finer than the simulation grid, shaped and colored on the GPU (see shaders.js), with
 // rivers cut into it from a texture finer still; the sea and lakes share a water shader.
 import * as THREE from 'three';
@@ -7,6 +8,11 @@ import {Sky} from 'three/addons/objects/Sky.js';
 import {Line2} from 'three/addons/lines/Line2.js';
 import {LineGeometry} from 'three/addons/lines/LineGeometry.js';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+import {CloudPass, makeCloudNoise} from './clouds.js';
 import {
   terrainMaterial,
   terrainDepthMaterial,
@@ -23,7 +29,6 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.7;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -63,13 +68,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
       .add(controls.target);
   }
 
-  // a low afternoon sun for long shadows, the sky, and the same sky blurred into reflections
-  // and ambient light
-  const sun = new THREE.Vector3().setFromSphericalCoords(
-    1,
-    THREE.MathUtils.degToRad(66),
-    THREE.MathUtils.degToRad(215),
-  );
+  // the sky, and the same sky blurred into reflections and ambient light; setHour moves the sun
   const sky = new Sky();
   sky.scale.setScalar(size * 15);
   const u = sky.material.uniforms;
@@ -77,19 +76,16 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   u.rayleigh.value = 1.4;
   u.mieCoefficient.value = 0.005;
   u.mieDirectionalG.value = 0.85;
-  u.sunPosition.value.copy(sun);
   scene.add(sky);
   const pmrem = new THREE.PMREMGenerator(renderer);
   const skyScene = new THREE.Scene();
-  skyScene.add(sky.clone());
-  scene.environment = pmrem.fromScene(skyScene).texture;
+  skyScene.add(sky.clone()); // shares the sky's material
   // haze that turns distant land blue-grey, the main cue for how big the island is; it's set
   // each frame from how far away the camera is, so a phone held upright, which has to stand
   // well back to fit the island in, doesn't see it through a fog
   scene.fog = new THREE.FogExp2(0xb7c9d8, 0.55 / size);
 
-  const light = new THREE.DirectionalLight(0xffe4c4, 3.2);
-  light.position.copy(sun).multiplyScalar(size);
+  const light = new THREE.DirectionalLight(0xffffff, 3.2);
   light.castShadow = true;
   light.shadow.mapSize.setScalar(lowPower ? 2048 : 4096);
   const half = size * 0.55;
@@ -104,7 +100,8 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   light.shadow.bias = -0.0003;
   light.shadow.normalBias = 3;
   scene.add(light);
-  scene.add(new THREE.HemisphereLight(0xa8c8ff, 0x5a4a35, 0.7));
+  const skyLight = new THREE.HemisphereLight(0xa8c8ff, 0x5a4a35, 0.7);
+  scene.add(skyLight);
 
   // what the shaders read: the simulation's fields and normals as textures, one texel per point
   const riverN = (N - 1) * 4 + 1; // matches RIVER_TEXELS in worker.js
@@ -122,6 +119,14 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     texture.needsUpdate = true;
     return texture;
   };
+  const cloudTexture = new THREE.DataTexture(
+    new Float32Array(N * N),
+    N,
+    N,
+    THREE.RedFormat,
+    THREE.FloatType,
+  );
+  cloudTexture.magFilter = cloudTexture.minFilter = THREE.LinearFilter;
   const uniforms = {
     fieldsTex: {value: dataTexture()},
     normalTex: {value: dataTexture()},
@@ -132,6 +137,17 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     seaLevel: {value: 0},
     temperature: {value: 24},
     time: {value: 0},
+    sunDirection: {value: new THREE.Vector3(0, 1, 0)},
+    wind: {value: new THREE.Vector2(0, 1)}, // which way it blows
+    cloudTex: {value: cloudTexture},
+    noiseTex: {value: makeCloudNoise()},
+    cloudsOn: {value: 1},
+    deepWater: {value: new THREE.Color()},
+    // for the clouds
+    sunColor: {value: new THREE.Color()},
+    skyLight: {value: new THREE.Color()},
+    fogColor: {value: scene.fog.color},
+    fogDensity: {value: 0},
   };
 
   // three vertices per grid cell each way; the shader adds detail finer than the simulation
@@ -192,12 +208,9 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   // the deep ocean floor beyond the edge of the grid
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(size * 30, size * 30).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setRGB(0.01, 0.07, 0.15, THREE.SRGBColorSpace),
-      roughness: 0.95,
-      envMapIntensity: 0.5,
-    }),
+    new THREE.MeshBasicMaterial(),
   );
+  floor.material.color = uniforms.deepWater.value; // shared, so it follows the time of day
   floor.position.y = -1201;
   floor.renderOrder = -1;
   scene.add(floor);
@@ -255,6 +268,75 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     scene.add(path);
   }
 
+  // Sunlight reddens through more air as the sun drops (Kasten and Young's air mass, with blue
+  // scattered about 7 times as much as red), and the sky's light dims with it.
+  const sun = new THREE.Vector3();
+  const sunColor = new THREE.Color();
+  let skyDirty = true;
+  /** @param {number} hour 6 (sunrise) to 18 (sunset) */
+  function setHour(hour) {
+    const elevation = 62 * Math.sin((Math.PI * (hour - 6)) / 12); // degrees
+    const azimuth = 215 + (hour - 16.5) * 15;
+    sun.setFromSphericalCoords(
+      1,
+      THREE.MathUtils.degToRad(90 - Math.max(elevation, 0.5)),
+      THREE.MathUtils.degToRad(azimuth),
+    );
+    const e = Math.max(elevation, 0);
+    const airMass =
+      1 /
+      (Math.sin(THREE.MathUtils.degToRad(e)) +
+        0.50572 * (e + 6.07995) ** -1.6364);
+    const thick = airMass - 1;
+    sunColor.setRGB(
+      Math.exp(-0.05 * thick),
+      Math.exp(-0.15 * thick),
+      Math.exp(-0.35 * thick),
+    );
+    const up = THREE.MathUtils.smoothstep(elevation, -1, 12);
+    light.color.copy(sunColor);
+    light.intensity = 3.4 * up;
+    light.position.copy(sun).multiplyScalar(size);
+    uniforms.sunDirection.value.copy(sun);
+    const daylight = 0.25 + 0.75 * THREE.MathUtils.smoothstep(elevation, 0, 30);
+    skyLight.intensity = 0.7 * daylight;
+    // the haze picks up the sun's color near sunset
+    scene.fog.color
+      .setRGB(0.48, 0.58, 0.69)
+      .lerp(
+        new THREE.Color(0.62, 0.42, 0.33),
+        THREE.MathUtils.smoothstep(elevation, 25, 3),
+      )
+      .multiplyScalar(daylight);
+    uniforms.deepWater.value
+      .setRGB(0.002, 0.016, 0.05)
+      .multiplyScalar(daylight);
+    uniforms.sunColor.value
+      .copy(sunColor)
+      .multiplyScalar(light.intensity * 0.5);
+    uniforms.skyLight.value.setRGB(0.32, 0.4, 0.52).multiplyScalar(daylight);
+    // eyes adjust to the dimmer light of evening
+    renderer.toneMappingExposure = 0.7 / (0.55 + 0.45 * daylight);
+    u.sunPosition.value.copy(sun);
+    skyDirty = true;
+  }
+
+  // Draw the scene into a floating-point target with depth, add clouds and a glow around the
+  // brightest highlights, then tone map for the screen.
+  const target = new THREE.WebGLRenderTarget(1, 1, {
+    type: THREE.HalfFloatType,
+    samples: 4,
+    depthTexture: new THREE.DepthTexture(1, 1),
+  });
+  const composer = new EffectComposer(renderer, target);
+  composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(new CloudPass(camera, uniforms, {lowPower}));
+  if (!lowPower)
+    composer.addPass(
+      new UnrealBloomPass(new THREE.Vector2(256, 256), 0.25, 0.4, 3),
+    );
+  composer.addPass(new OutputPass());
+
   /** @type {Float32Array} */
   let heights = new Float32Array(N * N);
 
@@ -263,7 +345,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
    * @param {any} frame
    * @param {number} seaLevel
    */
-  function update(frame, seaLevel, temperature) {
+  function update(frame, seaLevel, temperature, wind) {
     heights = frame.height.slice();
     if (!aimed) aimAtLand(seaLevel);
     uniforms.fieldsTex.value.image.data.set(frame.fields);
@@ -272,6 +354,10 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     uniforms.normalTex.value.needsUpdate = true;
     uniforms.seaLevel.value = seaLevel;
     uniforms.temperature.value = temperature;
+    const angle = THREE.MathUtils.degToRad(wind);
+    uniforms.wind.value.set(-Math.sin(angle), Math.cos(angle));
+    cloudTexture.image.data.set(frame.cloud);
+    cloudTexture.needsUpdate = true;
     const p = lakes.geometry.attributes.position;
     for (let i = 0; i < N * N; i++) p.array[i * 3 + 1] = frame.waterY[i];
     p.needsUpdate = true;
@@ -377,6 +463,8 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     const h = canvas.clientHeight;
     if (canvas.width !== Math.round(w * renderer.getPixelRatio())) {
       renderer.setSize(w, h, false);
+      composer.setPixelRatio(renderer.getPixelRatio());
+      composer.setSize(w, h);
       pathMaterial.resolution.set(w, h);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
@@ -388,8 +476,14 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
       0.55 / size,
       0.36 / camera.position.distanceTo(controls.target),
     );
+    uniforms.fogDensity.value = scene.fog.density;
     uniforms.time.value = clock.elapsedTime;
-    renderer.render(scene, camera);
+    if (skyDirty) {
+      scene.environment?.dispose();
+      scene.environment = pmrem.fromScene(skyScene).texture;
+      skyDirty = false;
+    }
+    composer.render();
   }
 
   return {
@@ -398,6 +492,8 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     pick,
     showPath,
     controls,
+    setHour,
+    setClouds: (on) => (uniforms.cloudsOn.value = on ? 1 : 0),
     reframe: () => (aimed = false),
   };
 }

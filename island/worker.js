@@ -30,6 +30,7 @@ function makeFrame() {
     waterY: new Float32Array(num),
     area: new Float32Array(num),
     rain: new Float32Array(num),
+    cloud: new Float32Array(num), // condensed water in the air, for drawing clouds
     flow: new Float32Array(num),
     receiver: new Int32Array(num),
     rivers: new Uint8Array(((sim.N - 1) * RIVER_TEXELS + 1) ** 2 * 4),
@@ -136,6 +137,7 @@ function fillFrame(f) {
     }
   }
   f.receiver.set(sim.receiver);
+  f.cloud.set(sim.cloud);
   f.time = sim.time;
   f.peak = peak;
 }
@@ -287,6 +289,7 @@ function send() {
     f.waterY.buffer,
     f.area.buffer,
     f.rain.buffer,
+    f.cloud.buffer,
     f.flow.buffer,
     f.receiver.buffer,
   ]);

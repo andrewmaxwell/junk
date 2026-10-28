@@ -679,6 +679,7 @@ export function makeSim({N, cellSize, seed}) {
     discharge,
     receiver,
     coral,
+    cloud,
     route,
     step,
     brush,

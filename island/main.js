@@ -31,6 +31,8 @@ const settings = {
   upliftRate: +(url.get('uplift') ?? defaults.upliftRate),
   seaLevel: +(url.get('sea') ?? defaults.seaLevel),
   speed: 100, // thousand years per second
+  hour: +(url.get('hour') ?? 16.5),
+  clouds: url.get('clouds') !== '0',
   seed: +(url.get('seed') ?? 0) || newSeed(),
 };
 
@@ -48,6 +50,8 @@ function saveUrl() {
     q.set('uplift', String(settings.upliftRate));
   if (settings.seaLevel !== defaults.seaLevel)
     q.set('sea', String(settings.seaLevel));
+  if (settings.hour !== 16.5) q.set('hour', String(settings.hour));
+  if (!settings.clouds) q.set('clouds', '0');
   history.replaceState(null, '', '?' + q);
 }
 
@@ -109,6 +113,7 @@ const transfers = (f) =>
     f.waterY,
     f.area,
     f.rain,
+    f.cloud,
     f.flow,
     f.receiver,
     f.rivers,
@@ -175,6 +180,20 @@ gui
   .add(settings, 'seaLevel', -300, 300, 5)
   .name('Sea level (m)')
   .onChange(changeClimate);
+gui
+  .add(settings, 'hour', 6, 18, 0.1)
+  .name('Time of day (h)')
+  .onChange(() => {
+    view.setHour(settings.hour);
+    saveUrl();
+  });
+gui
+  .add(settings, 'clouds')
+  .name('Clouds')
+  .onChange(() => {
+    view.setClouds(settings.clouds);
+    saveUrl();
+  });
 const speedController = gui
   .add(settings, 'speed', 0, 500, 10)
   .name('Speed (kyr/s)')
@@ -331,7 +350,7 @@ function loop(now) {
     }
   }
   if (frame && frame !== shown) {
-    view.update(frame, settings.seaLevel, settings.temperature);
+    view.update(frame, settings.seaLevel, settings.temperature, settings.wind);
     shown = frame;
     statusEl.textContent = `${formatYears(frame.time)} · peak ${fmt(Math.max(0, frame.peak - settings.seaLevel))} m${settings.speed ? '' : ' · paused'}`;
     showProbe();
@@ -341,5 +360,7 @@ function loop(now) {
 }
 
 setTool();
+view.setHour(settings.hour);
+view.setClouds(settings.clouds);
 newIsland(settings.seed);
 requestAnimationFrame(loop);

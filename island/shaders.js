@@ -2,6 +2,8 @@
 // lighting, shadows, reflections and fog but get their shape and color from the simulation on
 // the GPU. The worker sends two textures per frame: fields (height, rain, log10 flow, ambient
 // occlusion) and smooth normals with how fast coral grows in w, both one texel per grid point.
+import * as THREE from 'three';
+import {cloudCommon} from './clouds.js';
 
 const common = /* glsl */ `
 uniform sampler2D fieldsTex;
@@ -104,6 +106,27 @@ float groundHeight(vec2 g, vec2 w) {
   return h + detailHeight(w, detailAmp(g, h), 6.0) - channelDepth(g);
 }
 vec3 lin(vec3 c) { return pow(c, vec3(2.2)); }
+${cloudCommon}
+`;
+
+// Sea water absorbs red within a few meters and blue over tens, and scatters some light back
+// up: sand under a meter of water stays pale aqua, under five it turns turquoise, and past
+// thirty only the deep blue of the water itself is left. These are for clear tropical water
+// (Jerlov type I), per meter.
+const underwater = /* glsl */ `
+uniform vec3 deepWater; // light scattered back up out of bottomless water
+const vec3 WATER_ABSORPTION = vec3(0.45, 0.07, 0.022);
+vec3 throughWater(vec3 light, vec3 w) {
+  float depth = seaLevel - w.y;
+  if (depth <= 0.0) return light;
+  // the path down from the surface to here and back up, bent steeper by refraction
+  vec3 v = normalize(cameraPosition - w);
+  float viewCos = sqrt(1.0 - (1.0 - v.y * v.y) / 1.77);
+  float sunCos = sqrt(1.0 - (1.0 - sunDirection.y * sunDirection.y) / 1.77);
+  vec3 up = exp(-WATER_ABSORPTION * depth / viewCos);
+  vec3 down = exp(-WATER_ABSORPTION * depth / sunCos);
+  return light * down * up + deepWater * (1.0 - up);
+}
 `;
 
 const terrainVertex = /* glsl */ `
@@ -133,7 +156,11 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec3 river, float coral, float fade,
   float bankside = 1.0 - smoothstep(river.y + 3.0, 4.0 * river.y + 25.0, river.x);
   float trees = smoothstep(0.4, 1.2, aridity + 0.45 * clumps + 0.2 * broad + 0.6 * bankside) * smoothstep(1.0, 7.0, t);
   vec3 forest = mix(lin(vec3(0.11, 0.2, 0.12)), lin(vec3(0.19, 0.31, 0.12)), smoothstep(4.0, 10.0, t));
-  forest = mix(forest, lin(vec3(0.1, 0.27, 0.08)), smoothstep(15.0, 21.0, t));
+  forest = mix(forest, lin(vec3(0.15, 0.31, 0.09)), smoothstep(15.0, 21.0, t));
+  // crowns of different trees: some yellower, some bluer, some in flower or turning
+  float crowns = gnoise(w.xz / 9.0) * fade;
+  forest = mix(forest, forest * vec3(1.35, 1.2, 0.8), smoothstep(0.1, 0.4, crowns));
+  forest = mix(forest, forest * vec3(0.8, 0.95, 1.1), smoothstep(-0.1, -0.4, crowns));
   forest *= 0.6 + 0.8 * smoothstep(-0.35, 0.45, clumps); // sunlit crowns and dark gaps
   vec3 grass = mix(lin(vec3(0.6, 0.55, 0.3)), lin(vec3(0.35, 0.45, 0.17)), smoothstep(0.45, 0.9, aridity + 0.2 * broad));
   vec3 soil = mix(lin(vec3(0.82, 0.68, 0.47)), lin(vec3(0.68, 0.45, 0.3)), smoothstep(-0.2, 0.35, broad));
@@ -170,7 +197,7 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec3 river, float coral, float fade,
   color = mix(color, lin(vec3(0.62, 0.56, 0.44)), wet * beach);
   rough = mix(rough, 0.45, wet * beach);
   if (above < 0.0) {
-    vec3 floorColor = mix(lin(vec3(0.7, 0.66, 0.52)), lin(vec3(0.22, 0.3, 0.16)), smoothstep(0.0, 0.45, clumps) * smoothstep(1.0, 6.0, -above));
+    vec3 floorColor = mix(lin(vec3(0.86, 0.82, 0.7)), lin(vec3(0.22, 0.3, 0.16)), smoothstep(0.0, 0.45, clumps) * smoothstep(1.0, 6.0, -above));
     floorColor = mix(floorColor, lin(vec3(0.35, 0.36, 0.33)), smoothstep(30.0, 150.0, -above));
     // living reef: coral heads in browns, ochres and mauves between channels of white sand,
     // densest where it grows fastest
@@ -248,9 +275,22 @@ normal = normalize((viewMatrix * vec4(worldNormal, 0.0)).xyz);
 diffuseColor.rgb = surfaceColor;
 roughnessFactor = surfaceRough;
 float terrainAO = fields.a;
+float sunThrough = cloudShadow(vWorld);
+// the rippling net of light that waves focus onto a shallow floor
+float caustics = 0.0;
+float underDepth = seaLevel - vWorld.y;
+// only where a pixel is small enough to show the net, or it turns to glittering streaks
+float causticFade = smoothstep(3.0, 1.0, footprint);
+if (underDepth > 0.0 && causticFade > 0.0) {
+  vec2 cq = vWorld.xz / 5.0;
+  float lines = 1.0 - abs(gnoise(cq + time * vec2(0.21, 0.13)) + gnoise(cq * 1.7 - time * vec2(0.11, 0.19)));
+  caustics = 3.0 * pow(clamp(lines, 0.0, 1.0), 8.0) * smoothstep(0.0, 0.8, underDepth) * exp(-underDepth / 10.0) * causticFade;
+}
 `;
 
 const terrainAO = /* glsl */ `
+reflectedLight.directDiffuse *= sunThrough * (1.0 + caustics);
+reflectedLight.directSpecular *= sunThrough;
 reflectedLight.indirectDiffuse *= terrainAO;
 reflectedLight.indirectSpecular *= terrainAO;
 reflectedLight.directDiffuse *= mix(1.0, terrainAO, 0.35);
@@ -273,13 +313,17 @@ export function terrainMaterial(material, uniforms) {
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        `#include <common>\n${common}\n${terrainSurface}\nvarying vec3 vWorld;`,
+        `#include <common>\n${common}\n${underwater}\n${terrainSurface}\nvarying vec3 vWorld;`,
       )
       .replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>\n${terrainFragment}`,
       )
-      .replace('#include <aomap_fragment>', terrainAO);
+      .replace('#include <aomap_fragment>', terrainAO)
+      .replace(
+        '#include <opaque_fragment>',
+        'outgoingLight = throughWater(outgoingLight, vWorld);\n#include <opaque_fragment>',
+      );
   };
   return material;
 }
@@ -302,8 +346,10 @@ export function terrainDepthMaterial(material, uniforms) {
   return material;
 }
 
-// Water, for the sea and lakes alike: clear over sand in the shallows, deep blue offshore,
-// rippled by drifting waves, with foam where it laps the shore.
+// Water, for the sea and lakes alike. The sea's surface only reflects the sky and the sun and
+// carries foam; the color under it comes from the terrain shader, which lets the light through
+// the water to the floor and back. Lakes are murkier and get their color here. The swell rolls
+// in on the wind, is calmer in the island's lee, and breaks where the bottom shoals suddenly.
 const waterFragment = /* glsl */ `
 vec2 grid = toGrid(vWater.xz);
 float ground = onGrid(grid) ? baseHeight(grid) : -1200.0;
@@ -317,17 +363,35 @@ float e = max(2.0, length(fwidth(p)));
 float ripples = 1.0 - smoothstep(2.0, 6.0, e);
 #define WAVES(q) (0.9 * gnoise(q / 60.0 + time * vec2(0.03, 0.02)) + 0.45 * gnoise(q / 21.0 - time * vec2(0.05, -0.04)) + 0.2 * ripples * gnoise(q / 7.0 + time * 0.09))
 float w0 = WAVES(p);
-vec2 waveSlope = vec2(WAVES(p + vec2(e, 0.0)) - w0, WAVES(p + vec2(0.0, e)) - w0) / e * 1.6 * calm;
+vec2 waveSlope = vec2(WAVES(p + vec2(e, 0.0)) - w0, WAVES(p + vec2(0.0, e)) - w0) / e * 1.2 * calm;
+
+// land upwind shelters the water behind it
+float shelter = 0.0;
+for (int k = 1; k <= 4; k++) {
+  vec2 gu = toGrid(p - wind * 300.0 * float(k * k));
+  if (onGrid(gu)) shelter = max(shelter, smoothstep(seaLevel - 3.0, seaLevel + 10.0, fieldsAt(gu).r));
+}
+// three long swells from about the wind's direction, with sharp crests and broad troughs, at
+// the speed deep-water waves of their length really travel
+float swellAmp = SURF * (1.0 - 0.85 * shelter) * (1.0 - smoothstep(10.0, 40.0, e)) * smoothstep(0.5, 6.0, depth);
+float crest = 0.0;
+for (int k = 0; k < 3; k++) {
+  float angle = (float(k) - 1.0) * 0.35;
+  vec2 d = mat2(cos(angle), sin(angle), -sin(angle), cos(angle)) * wind;
+  float len = k == 0 ? 95.0 : k == 1 ? 140.0 : 70.0;
+  float amp = k == 1 ? 0.022 : 0.015; // crest height over wavelength
+  float kw = 6.2832 / len;
+  float ph = kw * dot(d, p) - sqrt(9.81 * kw) * time + float(k) * 1.7;
+  float s = 0.5 + 0.5 * sin(ph);
+  if (k == 1) crest = s;
+  waveSlope += swellAmp * amp * 6.2832 * s * cos(ph) * d;
+}
 vec3 waterNormal = normalize(vec3(-waveSlope.x, 1.0, -waveSlope.y));
 normal = normalize((viewMatrix * vec4(waterNormal, 0.0)).xyz);
 
-vec3 water = mix(lin(vec3(0.3, 0.82, 0.8)), lin(vec3(0.1, 0.6, 0.7)), smoothstep(0.0, 4.0, depth));
-water = mix(water, lin(vec3(0.03, 0.33, 0.46)), smoothstep(3.0, 20.0, depth));
-water = mix(water, lin(vec3(0.01, 0.07, 0.15)), smoothstep(8.0, 90.0, depth));
-float alpha = mix(0.4, 0.97, smoothstep(0.0, 30.0, depth));
 float swash = gnoise(p / 8.0 + vec2(time * 0.25, -time * 0.18)) + 0.5 * gnoise(p / 3.0 - time * 0.3);
 // Waves break where the bottom shoals suddenly, at a beach or a reef's edge, not across the
-// broad flats behind them.
+// broad flats behind them, and hardest where the swell comes straight in.
 float deepest = depth;
 float highest = ground;
 for (int k = 0; k < 4; k++) {
@@ -337,12 +401,33 @@ for (int k = 0; k < 4; k++) {
   deepest = max(deepest, vWater.y - hk);
   highest = max(highest, hk);
 }
-float breaking = max(smoothstep(4.0, 15.0, deepest - depth), smoothstep(-1.0, 0.5, highest - vWater.y));
-float foam = SURF * breaking * smoothstep(2.5, 0.3, depth) * smoothstep(-0.1, 0.45, swash + 0.5 * sin(depth * 3.5 - time * 1.4)) * calm;
-water = mix(water, vec3(0.9), foam);
-alpha = max(alpha, foam * 0.95);
-diffuseColor = vec4(water, alpha);
+// Over broad flats next to land only the thin line of swash at the water's edge foams, and
+// only where there's water deep enough nearby for waves to arrive.
+float breaking = smoothstep(4.0, 15.0, deepest - depth) * smoothstep(2.5, 0.3, depth);
+float swashLine = smoothstep(-1.0, 0.5, highest - vWater.y) * smoothstep(0.6, 0.1, depth) * smoothstep(1.0, 3.0, deepest);
+float foam = SURF * max(breaking, swashLine) * calm * (1.0 - 0.6 * shelter)
+  * smoothstep(-0.1, 0.45, swash + 0.5 * sin(depth * 3.5 - time * 1.4) + 0.3 * crest);
+vec4 water = vec4(vec3(0.9), 0.95 * foam);
+if (SURF == 0.0) {
+  // lakes: tea-colored in the shallows, dark green deeper
+  vec3 lake = mix(lin(vec3(0.35, 0.4, 0.3)), lin(vec3(0.04, 0.12, 0.12)), smoothstep(0.0, 8.0, depth));
+  water = vec4(lake, mix(0.5, 0.97, smoothstep(0.0, 6.0, depth)));
+}
+diffuseColor = water;
 roughnessFactor = mix(0.04, 0.7, foam);
+`;
+
+// The surface is drawn premultiplied: foam and lake color cover what's below by their alpha,
+// and reflections add on top at full strength, so a nearly clear sea still mirrors the sky.
+const waterOutput = /* glsl */ `
+// the sun's glints are capped, or single bright pixels bloom into squares
+gl_FragColor = vec4(totalDiffuse * diffuseColor.a + min(totalSpecular, vec3(12.0)), diffuseColor.a);
+`;
+const waterFog = /* glsl */ `
+#ifdef USE_FOG
+float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor * gl_FragColor.a, fogFactor);
+#endif
 `;
 
 /**
@@ -352,6 +437,9 @@ roughnessFactor = mix(0.04, 0.7, foam);
  */
 export function waterMaterial(material, uniforms, {surf}) {
   material.defines = {SURF: surf ? '1.0' : '0.0'};
+  material.blending = THREE.CustomBlending;
+  material.blendSrc = THREE.OneFactor;
+  material.blendDst = THREE.OneMinusSrcAlphaFactor;
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
@@ -368,7 +456,13 @@ export function waterMaterial(material, uniforms, {surf}) {
       .replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>\n${waterFragment}`,
-      );
+      )
+      .replace(
+        '#include <aomap_fragment>',
+        'reflectedLight.directSpecular *= cloudShadow(vWater);',
+      )
+      .replace('#include <opaque_fragment>', waterOutput)
+      .replace('#include <fog_fragment>', waterFog);
   };
   return material;
 }
