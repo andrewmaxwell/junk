@@ -1,6 +1,6 @@
 """
-Write a single Bambu Studio .3mf: both frame halves, on two plates, with the
-colours already assigned to AMS slots.
+Write a single Bambu Studio .3mf: both frame halves, interlocked on one plate,
+with the colours already assigned to AMS slots.
 
 Getting Bambu Studio to accept this as a *project* (rather than silently
 falling back to "load geometry data only") needs two things that are easy to
@@ -29,23 +29,30 @@ mesh plus one container <object> per piece whose <components> reference them.
 **part id must equal the component's objectid** -- and it is the part's
 `extruder` value that assigns the colour.
 
-Run:  python export_3mf.py   ->  chiang_mai_honda_frame.3mf
+Run:  python export_3mf.py   ->  chiang_mai_honda_frame_v3.3mf + plate_preview.png
 """
 import json
 import math
 import os
 import re
-import sys
 import zipfile
 from xml.sax.saxutils import escape
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import shapely.affinity as aff
 import trimesh
+from shapely.geometry import box
+from shapely.ops import unary_union
 
-from split import pieces, colour_specs, COLOURS, check
+from split import pieces, colour_specs, COLOURS, COLOUR_HEX, check
+from plate_lib import plot_layers
 from mesh_util import extrude_layers, BED_X, BED_Y
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "chiang_mai_honda_frame.3mf")
+OUT = os.path.join(HERE, "chiang_mai_honda_frame_v3.3mf")
+PREVIEW = os.path.join(HERE, "plate_preview.png")
 TEMPLATE = os.path.join(HERE, "bambu_a1_project.json")
 FILAMENT_JSON = os.path.join(HERE, "generic_petg_a1.json")
 FILAMENT_PRESET = "Generic PETG @BBL A1"
@@ -60,6 +67,20 @@ BAMBU_APP_VERSION = "02.08.02.61"
 
 PLATE_W, PLATE_D = BED_X, BED_Y  # A1 build plate
 PLATE_PITCH = 307.2              # Bambu spaces plates this far apart in X
+
+# ------------------------------------------------------------ one-plate layout
+# Each half is a C, so the two interlock on one A1 plate, unrotated: the left
+# half's top rail runs inside the right half's opening and the right half's
+# bottom rail inside the left's. RIGHT_OFFSET is the right half's bounding-box
+# corner relative to the left's, found by a search over offsets for the widest
+# gap between the halves (~32 mm) that still leaves bed margin all round; the
+# pair is then centred on the bed. The free top-left corner takes the prime
+# tower. False puts each half on its own plate instead.
+ONE_PLATE = True
+RIGHT_OFFSET = (56.0, 70.0)
+MIN_PIECE_GAP = 20.0             # asserted: closest approach between the halves
+TOWER_W = 35.0                   # prime_tower_width in the template
+TOWER_ROOM = 50.0                # depth kept free for it (it grows with purge)
 IDENTITY3 = "1 0 0 0 1 0 0 0 1 0 0 0"
 IDENTITY4 = "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"
 
@@ -121,6 +142,15 @@ PROCESS = {
     # line width inside it -- which is the difference between the tabs seating
     # and the tabs rattling.
     "precise_outer_wall": "1",
+    # The white frame face is the largest thing anyone looks at, and v1 (not
+    # ironed) came out with visible monotonic line texture. Ironing flattens it.
+    # Measured cost: +40 min per half. 88% of that is layer 16, the top of the
+    # white base -- which is a single-colour layer, so there is no chance of
+    # dragging red or black across it. The other 12% is the artwork tops.
+    # NB the config value is the enum key "top", not the UI label "top
+    # surfaces": BambuStudio silently falls back to "no ironing" on a bad enum,
+    # which is exactly what it did the first time this was tried.
+    "ironing_type": "top",
 }
 
 # ------------------------------------------------- filament overrides
@@ -142,33 +172,6 @@ FILAMENT = {
     # 0.8 mm speed lines -- so almost every travel on the show surface crosses
     # open air. Strings there land on the only face anyone looks at.
     "filament_retraction_length": "1",
-}
-
-# ---------------------------------------------------- v2 finish (opt-in)
-# `python export_3mf.py --v2` writes chiang_mai_honda_frame_v2.3mf with these on
-# top of everything above. Kept OUT of the default build on purpose: v1 is what
-# the first pair of halves was printed with, and two halves that get glued into
-# one frame have to come off identical settings or the seam shows a finish
-# change straight down the middle.
-#
-# Set FLOW_RATIO from Bambu Studio's *flow rate* calibration (Calibration menu).
-# The auto-cali the printer runs before a print is flow DYNAMICS (pressure
-# advance / K) -- a different thing, and it does not touch this number.
-FLOW_RATIO = None                  # e.g. "0.98"; None keeps the profile's 0.95
-
-V2_PROCESS = {
-    # The white frame face is the largest thing anyone looks at, and on v1 it
-    # came out with visible monotonic line texture. Ironing flattens it.
-    # Measured cost: +40 min per plate. 88% of that is layer 16, the top of the
-    # white base -- which is a single-colour layer, so there is no chance of
-    # dragging red or black across it. The other 12% is the artwork tops.
-    # NB the config value is the enum key "top", not the UI label "top
-    # surfaces": BambuStudio silently falls back to "no ironing" on a bad enum,
-    # which is exactly what it did the first time this was tried.
-    "ironing_type": "top",
-}
-
-V2_FILAMENT = {
     # Bambu's PETG profile runs 40-90% part cooling, inherited from a profile
     # that cares about overhangs. This part has none -- it is a flat plate --
     # and PETG fuses line-to-line much better with less air on it. Softer
@@ -177,6 +180,13 @@ V2_FILAMENT = {
     "fan_min_speed": "20",
     "fan_max_speed": "50",
 }
+
+# Set FLOW_RATIO from Bambu Studio's *flow rate* calibration (Calibration menu).
+# The auto-cali the printer runs before a print is flow DYNAMICS (pressure
+# advance / K) -- a different thing, and it does not touch this number.
+FLOW_RATIO = None                  # e.g. "0.98"; None keeps the profile's 0.95
+if FLOW_RATIO:
+    FILAMENT["filament_flow_ratio"] = FLOW_RATIO
 
 # Per-filament options get one entry per filament. These same-length options do
 # not: machine_* are per motion-mode (normal/stealth), wipe_tower_* are
@@ -269,7 +279,7 @@ RELS = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
-def project_settings(n_plates):
+def project_settings(n_plates, tower=None):
     """Stock A1 profile + Generic PETG, expanded to our four filaments."""
     cfg = json.load(open(TEMPLATE))
     petg = json.load(open(FILAMENT_JSON))
@@ -311,8 +321,77 @@ def project_settings(n_plates):
     for key in ("wipe_tower_x", "wipe_tower_y"):
         if key in cfg:
             cfg[key] = [cfg[key][0]] * n_plates
+    if tower:
+        cfg["wipe_tower_x"] = [f"{tower[0]:.3f}"] * n_plates
+        cfg["wipe_tower_y"] = [f"{tower[1]:.3f}"] * n_plates
     cfg["version"] = BAMBU_APP_VERSION
     return json.dumps(cfg, indent=4)
+
+
+def layout(P, meshes, order):
+    """Where each piece's container goes: {name: (x, y)}, {name: plate index},
+    and the prime tower's corner (None to keep the template's)."""
+    if not ONE_PLATE:
+        return ({name: (PLATE_W / 2 + i * PLATE_PITCH, PLATE_D / 2)
+                 for i, name in enumerate(order)},
+                {name: i for i, name in enumerate(order)}, None)
+
+    # bounds of each piece's meshes, which are already centred on its outline
+    lo = {name: trimesh.util.concatenate([m for _c, m, _ in meshes[name]]).bounds
+          for name in order}
+    corner = {"left": (0.0, 0.0), "right": RIGHT_OFFSET}
+    ext = [max(corner[n][0] + lo[n][1][0] - lo[n][0][0] for n in order),
+           max(corner[n][1] + lo[n][1][1] - lo[n][0][1] for n in order)]
+    shift = ((PLATE_W - ext[0]) / 2, (PLATE_D - ext[1]) / 2)
+    xy = {n: (shift[0] + corner[n][0] - lo[n][0][0],
+              shift[1] + corner[n][1] - lo[n][0][1]) for n in order}
+
+    # the same placement in 2D, to measure the gap and find room for the tower
+    sil = {n: aff.translate(unary_union([g for _c, g, _z, _h in P[n]["layers"]]),
+                            xy[n][0] - _centre(P[n])[0], xy[n][1] - _centre(P[n])[1])
+           for n in order}
+    gap = sil["left"].distance(sil["right"])
+    check(shift[0] >= 5 and shift[1] >= 5, "both halves fit one plate with margin",
+          f"{ext[0]:.1f} x {ext[1]:.1f} mm, margins {shift[0]:.1f} / {shift[1]:.1f} mm")
+    check(gap >= MIN_PIECE_GAP, "halves keep clear of each other", f"{gap:.1f} mm")
+    # top-left: above the left half, left of the right half
+    tx = 15.0
+    ty = sil["left"].bounds[3] + 10
+    room = box(tx, ty, tx + TOWER_W, min(ty + TOWER_ROOM, PLATE_D))
+    check(room.distance(unary_union(list(sil.values()))) >= 5 and ty + 35 <= PLATE_D,
+          "prime tower has room", f"at ({tx:.0f}, {ty:.0f}), "
+          f"{min(TOWER_ROOM, PLATE_D - ty):.0f} mm deep free")
+    return xy, {n: 0 for n in order}, (tx, ty)
+
+
+def preview(P, item_xy, tower):
+    """plate_preview.png: the one plate as the slicer will see it, from above."""
+    fig, ax = plt.subplots(figsize=(6.5, 6.5), dpi=120)
+    ax.add_patch(plt.Rectangle((0, 0), PLATE_W, PLATE_D, fc="#cfcfcf", ec="k"))
+    regions = []
+    for name, (x, y) in item_xy.items():
+        cx, cy = _centre(P[name])
+        for c, g, z0, _h in P[name]["layers"]:
+            if z0 == 0 and c != "white":
+                c = "white"         # only the top face shows from above
+            regions.append((z0, aff.translate(g, x - cx, y - cy), COLOUR_HEX[c]))
+    plot_layers(ax, [(g, hexc) for _z, g, hexc in sorted(regions, key=lambda r: r[0])],
+                bg="#cfcfcf")
+    ax.add_patch(plt.Rectangle(tower, TOWER_W, TOWER_W, fc="#99aabb", ec="k"))
+    ax.text(tower[0] + TOWER_W / 2, tower[1] + TOWER_W / 2, "prime\ntower",
+            ha="center", va="center", fontsize=8)
+    ax.set_xlim(-3, PLATE_W + 3)
+    ax.set_ylim(-3, PLATE_D + 3)
+    ax.set_aspect(1)
+    ax.set_title(f"both halves on the A1's {PLATE_W:.0f} mm plate", fontsize=10)
+    plt.savefig(PREVIEW, bbox_inches="tight")
+    plt.close(fig)
+    print(f"saved {os.path.relpath(PREVIEW, HERE)}")
+
+
+def _centre(piece):
+    minx, miny, maxx, maxy = piece["_outline"].bounds
+    return (minx + maxx) / 2, (miny + maxy) / 2
 
 
 def mesh_xml(mesh, oid):
@@ -335,8 +414,7 @@ def build():
     for name in order:
         piece = P[name]
         entries = []
-        minx, miny, maxx, maxy = piece["_outline"].bounds
-        cx, cy = (minx + maxx) / 2, (miny + maxy) / 2     # centre on its plate
+        cx, cy = _centre(piece)                           # centre on its plate
         for c in COLOURS:
             specs = colour_specs(piece["layers"], c)
             if not specs:
@@ -350,6 +428,9 @@ def build():
         meshes[name] = entries
 
     container_id = {name: next_id + i for i, name in enumerate(order)}
+    item_xy, plate_of, tower = layout(P, meshes, order)
+    if ONE_PLATE:
+        preview(P, item_xy, tower)
 
     # ---------------- 3dmodel.model ----------------
     parts = ['<?xml version="1.0" encoding="UTF-8"?>',
@@ -371,10 +452,10 @@ def build():
         parts.append('  </object>')
     parts.append(' </resources>')
     parts.append(' <build>')
-    for i, name in enumerate(order):
-        x = PLATE_W / 2 + i * PLATE_PITCH
+    for name in order:
+        x, y = item_xy[name]
         parts.append(f'  <item objectid="{container_id[name]}"'
-                     f' transform="1 0 0 0 1 0 0 0 1 {x:.4f} {PLATE_D/2:.4f} 0"'
+                     f' transform="1 0 0 0 1 0 0 0 1 {x:.4f} {y:.4f} 0"'
                      ' printable="1"/>')
     parts.append(' </build>')
     parts.append('</model>')
@@ -398,16 +479,20 @@ def build():
                        ' facets_reversed="0" backwards_edges="0"/>')
             cfg.append('    </part>')
         cfg.append('  </object>')
-    for i, name in enumerate(order):
+    n_plates = max(plate_of.values()) + 1
+    for i in range(n_plates):
+        on = [name for name in order if plate_of[name] == i]
+        label = "both halves" if len(on) > 1 else f"{on[0]} half"
         cfg.append('  <plate>')
         cfg.append(f'    <metadata key="plater_id" value="{i+1}"/>')
-        cfg.append(f'    <metadata key="plater_name" value="{escape(name)} half"/>')
+        cfg.append(f'    <metadata key="plater_name" value="{label}"/>')
         cfg.append('    <metadata key="locked" value="false"/>')
         cfg.append('    <metadata key="filament_map_mode" value="Auto For Flush"/>')
-        cfg.append('    <model_instance>')
-        cfg.append(f'      <metadata key="object_id" value="{container_id[name]}"/>')
-        cfg.append('      <metadata key="instance_id" value="0"/>')
-        cfg.append('    </model_instance>')
+        for name in on:
+            cfg.append('    <model_instance>')
+            cfg.append(f'      <metadata key="object_id" value="{container_id[name]}"/>')
+            cfg.append('      <metadata key="instance_id" value="0"/>')
+            cfg.append('    </model_instance>')
         cfg.append('  </plate>')
     cfg.append('</config>')
     settings_xml = "\n".join(cfg) + "\n"
@@ -417,16 +502,16 @@ def build():
         z.writestr("_rels/.rels", RELS)
         z.writestr("3D/3dmodel.model", model_xml)
         z.writestr("Metadata/model_settings.config", settings_xml)
-        z.writestr("Metadata/project_settings.config", project_settings(len(order)))
+        z.writestr("Metadata/project_settings.config", project_settings(n_plates, tower))
 
     print(f"wrote {os.path.relpath(OUT, HERE)} ({os.path.getsize(OUT)/1024:.0f} KB)")
     print(f"  Application = BambuStudio-{BAMBU_APP_VERSION}  (must start "
           f'"BambuStudio-" or the config is ignored)\n')
-    for i, name in enumerate(order):
+    for name in order:
         allm = trimesh.util.concatenate([m for _c, m, _ in meshes[name]])
         lo, hi = allm.bounds
         w, d = hi[0]-lo[0], hi[1]-lo[1]
-        print(f"plate {i+1}: {name:5s}  {w:6.1f} x {d:6.1f} x {hi[2]-lo[2]:.2f} mm  "
+        print(f"plate {plate_of[name]+1}: {name:5s}  {w:6.1f} x {d:6.1f} x {hi[2]-lo[2]:.2f} mm  "
               f"{'fits' if w <= PLATE_W and d <= PLATE_D else '*** TOO BIG ***'}")
         for c, m, _mid in meshes[name]:
             print(f"           {c:6s} -> AMS slot {EXTRUDER[c]}  "
@@ -480,32 +565,37 @@ def verify(path=OUT):
     bad = [k for k, g in scene.geometry.items() if not g.is_watertight]
     check(not bad, "all meshes watertight after round-trip", str(bad))
 
-    for i, item in enumerate(re.findall(r'<item [^>]*transform="([^"]*)"', model)):
-        x, y = (float(v) for v in item.split()[9:11])
-        check(abs(x - (PLATE_W / 2 + i * PLATE_PITCH)) < 1e-3 and abs(y - PLATE_D / 2) < 1e-3,
-              f"plate {i+1} object sits at its plate centre", f"({x:.1f}, {y:.1f})")
+    items = re.findall(r'<item [^>]*transform="([^"]*)"', model)
+    item_xy = [tuple(float(v) for v in t.split()[9:11]) for t in items]
+    n_plates = len(re.findall(r"<plate>", settings))
+    if n_plates == len(items):
+        for i, (x, y) in enumerate(item_xy):
+            check(abs(x - (PLATE_W / 2 + i * PLATE_PITCH)) < 1e-3 and abs(y - PLATE_D / 2) < 1e-3,
+                  f"plate {i+1} object sits at its plate centre", f"({x:.1f}, {y:.1f})")
+    else:
+        check(n_plates == 1 and settings.count("<model_instance>") == len(items),
+              "every piece is on the one plate", f"{len(items)} pieces")
 
     # group the meshes back into pieces the way the file itself does: by which
     # container <object> lists them as components
     containers = re.findall(
         r'<object id="(\d+)" type="model">\s*<components>(.*?)</components>', model, re.S)
-    for (oid, body), name in zip(containers, ("left", "right")):
+    for k, ((oid, body), name) in enumerate(zip(containers, ("left", "right"))):
         ids = re.findall(r'objectid="(\d+)"', body)
         b = trimesh.util.concatenate([scene.geometry[i] for i in ids]).bounds
         w, d = b[1][0] - b[0][0], b[1][1] - b[0][1]
         check(w <= PLATE_W and d <= PLATE_D,
               f"{name} (object {oid}) fits the build plate", f"{w:.1f} x {d:.1f} mm")
+        if n_plates == 1:       # placed, not centred: check where it lands
+            x, y = item_xy[k]
+            x0, y0, x1, y1 = b[0][0] + x, b[0][1] + y, b[1][0] + x, b[1][1] + y
+            check(x0 >= 0 and y0 >= 0 and x1 <= PLATE_W and y1 <= PLATE_D,
+                  f"{name} lies inside the bed",
+                  f"x {x0:.1f}..{x1:.1f}, y {y0:.1f}..{y1:.1f}")
 
 
 if __name__ == "__main__":
-    if "--v2" in sys.argv:
-        PROCESS.update(V2_PROCESS)
-        FILAMENT.update(V2_FILAMENT)
-        if FLOW_RATIO:
-            FILAMENT["filament_flow_ratio"] = FLOW_RATIO
-        OUT = OUT.replace(".3mf", "_v2.3mf")
-        print(f"v2 finish: ironing on, fan {V2_FILAMENT['fan_min_speed']}-"
-              f"{V2_FILAMENT['fan_max_speed']}%, flow "
-              f"{FLOW_RATIO or 'unchanged (calibrate it!)'}\n")
+    if not FLOW_RATIO:
+        print("flow ratio: the profile's 0.95 (calibrate it, see FLOW_RATIO)\n")
     build()
-    verify()
+    verify(OUT)

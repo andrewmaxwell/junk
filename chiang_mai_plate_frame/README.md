@@ -11,11 +11,17 @@ RFID, so at print time map the project's four filaments onto the slots by hand �
 **1 = white, 2 = red, 3 = black, 4 = green**. Getting that order wrong is the one
 mistake the file cannot catch for you.
 
-`chiang_mai_honda_frame.3mf` opens in Bambu Studio with both halves laid out on
-two plates and every color already assigned to an AMS slot. All six meshes are
-watertight; the colors form an exact partition. It has also been put through the
-BambuStudio CLI slicer, which slices both plates clean — no warnings, and the
-weights, times and color-change counts below are that slicer's own numbers.
+`chiang_mai_honda_frame_v3.3mf` opens in Bambu Studio with both halves
+interlocked on one plate (`plate_preview.png`) and every color already assigned
+to an AMS slot. All six meshes are watertight; the colors form an exact
+partition. It has also been put through the BambuStudio CLI slicer, which slices
+it clean — no warnings, and the weights, times and color-change counts below are
+that slicer's own numbers.
+
+It is v3. v1 (two plates, no ironing) is what the first pair of halves was
+printed with; v2 (v1 + ironing) was never printed. Both are in git history. Never
+glue a v3 half to an older one: the right half's URL differs, and so does the
+finish.
 
 Opening it applies the project's print profile: **0.20mm Standard @BBL A1** with
 four **Generic PETG** filaments, plus the tweaks in `export_3mf.PROCESS`. That is
@@ -28,10 +34,10 @@ else.
 |---|---|
 | Frame size | 328.8 × 170.4 mm (**12.94 × 6.71 in**), bottom rail 34 mm |
 | Thickness | **4.2 mm** — 3.2 mm base (`FRAME_THK`) + 1.0 mm emboss (`EMBOSS_H`) |
-| Pieces | 2 — cut exactly in half at x=164.4 mm, each on its own plate |
-| Filament | **60.0 g PETG** total, purge and prime tower included (30.5 g + 29.5 g) |
-| Print time | **2 h 50 m** total (1 h 28 m + 1 h 22 m) |
-| Colour changes | **6 per plate** |
+| Pieces | 2 — cut exactly in half at x=164.4 mm, both on one plate |
+| Filament | **59.2 g PETG**, purge and prime tower included |
+| Print time | **3 h 55 m**, 1 h 18 m of it ironing |
+| Colour changes | **11** (the minimum: 2 on each of the 5 emboss layers, plus 1 off white) |
 | AMS slots | **1 = white, 2 = red, 3 = black, 4 = green** |
 
 ## Setup
@@ -44,7 +50,8 @@ python3 -m venv .venv
 .venv/bin/python measure_holes.py   # -> holes_verify.png   (re-derives the hole positions)
 .venv/bin/python verify_overlay.py  # -> verify_overlay.png
 .venv/bin/python split.py           # -> split_preview.png + stl/pieces/*.stl
-.venv/bin/python export_3mf.py      # -> chiang_mai_honda_frame.3mf   <- the deliverable
+.venv/bin/python export_3mf.py      # -> chiang_mai_honda_frame_v3.3mf  <- the deliverable
+                                    #    + plate_preview.png
 ```
 
 The modules import each other, so `export_3mf.py` alone rebuilds the deliverable
@@ -69,7 +76,7 @@ identical), DejaVu as a last resort.
 | `svg_import.py` | Loads SVG artwork as shapely geometry grouped by color. Handles painter's order (the logo's "HONDA" is white paths drawn *over* the red bar, not holes in it) and even-odd hole nesting. |
 | `build_frame.py` | The frame: outline, plate opening, mounting holes + bosses, and the content row. **All key dimensions are constants at the top.** |
 | `split.py` | Cuts the frame in half and adds the locating tabs on the seam. Also writes STL fallbacks. |
-| `export_3mf.py` | Writes the Bambu Studio `.3mf` — colors assigned to AMS slots, pieces on separate plates. |
+| `export_3mf.py` | Writes the Bambu Studio `.3mf` — colors assigned to AMS slots, both pieces on one plate. |
 | `mesh_util.py` | Turns 2D regions into watertight solids (`clean_for_mesh`, `extrude`). Deliberately has no dependency on the frame geometry. |
 | `measure_holes.py` | Measures the plate's 4 pre-punched holes off the sample image by sub-pixel Hough circle fit; renders `holes_verify.png`. |
 | `verify_overlay.py` | Overlays the design on the real plate to confirm no required plate content is covered. |
@@ -77,7 +84,7 @@ identical), DejaVu as a last resort.
 | `*.svg` | Source artwork — `chiang-mai-honda-logo-smooth.svg`, `chiang-mai-honda-script.svg`. |
 | `chiang_mai_honda_logo_source.png` | Lloyd's original logo. Superseded by the SVG and unused by any code, but it is the only copy — kept as the reference to re-trace from. |
 | `missouri_plate_sample.png` | MO DMV sample plate; the input to `measure_holes.py` and `verify_overlay.py`. |
-| `*_preview.png`, `holes_verify.png`, `verify_overlay.png` | Regenerated renders — open these first. `emboss_preview.png` is a cross-section showing the relief. |
+| `*_preview.png`, `holes_verify.png`, `verify_overlay.png` | Regenerated renders — open these first; `plate_preview.png` is the print plate. `emboss_preview.png` is a cross-section showing the relief. |
 
 ## Layout
 
@@ -89,7 +96,7 @@ clear for a bolt head or washer):
 |---|---|---|
 | logo | 62.3 × 32.2 mm | x 6.0 – 68.3, y 0.9 – 33.1 |
 | "Chiang Mai Honda" script (red) | 167.5 × 40.3 mm | x 80.6 – 248.2, top on the rail edge |
-| "cmhonda.com" (green) | 74.7 × 8.1 mm (8.0 mm cap) | x 248.1 – 322.8, y 2.5 – 10.6 |
+| "cmhonda.com" (green) | 56.0 × 6.1 mm (6.0 mm cap) | x 266.8 – 322.8, y 2.5 – 8.6 |
 
 Closest artwork to any hole edge: **3.02 mm**.
 
@@ -102,6 +109,8 @@ vertical band:
   centreline, which buys ~5 mm of extra width over the naive estimate.
 - "cmhonda.com" sits *below* the right hole rather than beside it, so the
   keepout no longer caps its width at all — it grew from a 5.15 mm cap to 8.0 mm.
+  It is then printed at `URL_SCALE` = 75% of that fit (6.0 mm cap), still
+  right-aligned 6 mm from the edge, so it reads as secondary to the script.
 
 The logo fills the rail to within 0.9 mm top and bottom. It cannot fill it
 completely: at its 1.93:1 aspect a full 34 mm-tall logo would be 65.7 mm wide
@@ -226,8 +235,8 @@ one vertical cut suffices.
 | `right` | 164.4 × 170.4 mm | white, red, green |
 
 The left half is bigger on both axes — wider by the locating tabs it carries,
-taller because the script's descender hangs off the bottom edge. The halves
-cannot share one plate, so the 3MF puts them on plate 1 and 2.
+taller because the script's descender hangs off the bottom edge. Neither fits
+beside the other, but they interlock on one plate — see "One plate".
 
 ### The joint
 
@@ -418,13 +427,14 @@ against is silent:
 - `<part id>` == `<component objectid>` for every part (this mapping is what
   makes Bambu apply the right extruder), extruders 1–4 as above
 - the file round-trips through a 3MF reader with all 6 meshes still watertight
-- both pieces within 256 × 256 mm, placed at plate centres (128, 128) and
-  (435.2, 128) — Bambu's 307.2 mm plate pitch
+- both pieces on the one plate and inside the 256 × 256 mm bed (`layout()` has
+  already asserted the gap between them and room for the prime tower)
 
 Beyond that, the deliverable has been round-tripped through the BambuStudio CLI
-(`BambuStudio --slice 0`): both plates slice with `return_code 0`, an empty
-warning message, and exactly the numbers quoted above — 6 colour changes per
-plate, 30.53 g + 29.47 g, 1 h 28 m 03 s + 1 h 22 m 12 s.
+(`BambuStudio --slice 0`): it slices with `return_code 0`, an empty warning
+message, and exactly the numbers quoted above — 11 colour changes, 59.2 g,
+3 h 54 m 47 s — with `; ironing_type = top` and `fan_max_speed = 50` in the
+G-code.
 
 Five mesh traps worth knowing about, all handled:
 
@@ -448,24 +458,19 @@ Five mesh traps worth knowing about, all handled:
   lines are on the logo's right edge, nearest the screw hole, so fattening them
   after fitting ate into the keepout the fit had just satisfied.
 
-## If you print a v2
+## Finish
 
-`python export_3mf.py --v2` writes `chiang_mai_honda_frame_v2.3mf`. It is a
-separate file on purpose: v1 is what the first pair of halves was printed with,
-and two halves glued into one frame have to come off identical settings or the
-seam shows a finish change straight down the middle. Never mix a v1 half with a
-v2 half.
+Two settings added since v1, for a smoother show face. Measured on two plates,
+they took the print from 2 h 50 m to 4 h 08 m and 60.0 g to 60.5 g.
 
-| | v1 | v2 |
+| | v1 | now |
 |---|---|---|
 | ironing | off | **on** (`ironing_type: top`) |
 | part cooling fan | 40–90% | **20–50%** |
-| print time, both plates | 2 h 50 m | **4 h 08 m** |
-| filament | 60.0 g | 60.5 g |
 
 **Ironing.** The white frame face is the largest surface anyone looks at, and v1
 came off with visible monotonic line texture. Measured cost is +40 min per
-plate, and **88% of it is layer 16** — the top of the white base, which is a
+half, and **88% of it is layer 16** — the top of the white base, which is a
 single-colour layer, so there is no chance of dragging red or black across it.
 The remaining 12% is the artwork tops.
 
@@ -498,18 +503,46 @@ cannot be got out. Chemical smoothing is out too: acetone does nothing to PETG,
 and the solvents that do work on it would attack four colours unevenly and bleed
 the boundaries.
 
+## One plate
+
+Both halves print on **one plate** (`plate_preview.png`). Each half is a C, so
+they interlock unrotated: the left half's top
+rail runs inside the right half's opening and the right half's bottom rail
+inside the left's. `RIGHT_OFFSET` in `export_3mf.py` sets the right half's
+corner relative to the left's; the pair is centred, and `layout()` asserts the
+gap between the halves (28.3 mm), the bed margins (17.8 mm / 7.8 mm) and room
+for the prime tower in the free top-left corner.
+
+Sliced with the BambuStudio CLI against the same settings on two plates
+(`ONE_PLATE = False` in `export_3mf.py` still builds that):
+
+| | two plates | **one plate** |
+|---|---|---|
+| print time | 4 h 06 m (2 h 07 m + 2 h 00 m) | **3 h 55 m** |
+| filament | 60.4 g | **59.2 g** |
+| colour changes | 12 | **11** |
+
+The real gain is not the 11 minutes: both halves come off the same print,
+same spool state and same bed, so the finish matches across the seam, and it
+saves a plate swap and a second warm-up. The cost is that a failure takes
+both halves with it.
+
+Colour changes are already at their minimum, and the only ways to cut them were
+measured and not taken: printing the URL black instead of green (6 changes,
+−8 min, −1.4 g) or a 0.6 mm emboss instead of 1.0 mm (7 changes, −11 min,
+−1.7 g). Ironing, at 78 minutes, is where the time goes.
+
 ## Next steps
 
-1. **Open `chiang_mai_honda_frame.3mf` in Bambu Studio** and confirm two plates,
-   four project filaments, and the color assignments. If anything is off, the
-   STLs in `stl/pieces/` are a manual fallback — import them together and assign
-   filaments by hand.
+1. **Open `chiang_mai_honda_frame_v3.3mf` in Bambu Studio** and confirm one
+   plate with both halves, four project filaments, and the color assignments.
+   If anything is off, the STLs in `stl/pieces/` (written by `split.py`) are a
+   manual fallback — import them together and assign filaments by hand.
 2. **Dry the PETG first** if the spools have been open — PETG picks up moisture
    and it shows on the fine logo detail more than anywhere else. Overture's label
    says 60 °C for 5 h.
-3. **Test print the `left` piece first.** It is the smaller one and carries the
-   whole logo, so it answers the real open risk: whether the thickened speed
-   lines and the tiny "HONDA AUTOMOBILE" wordmark come out legible.
-4. Dry-fit the joint and check the bolt holes against Lloyd's actual
-   plate and bracket before printing the second half.
-5. Print the right half, glue up, mount.
+3. Print. Ironing is new since v1 and untested on this spool; if the white face
+   looks starved or rough, calibrate the flow rate (above) before reprinting.
+4. Dry-fit the joint, then glue face-down on something flat. The bottom tab is
+   only 4.4 mm, so press that end flat while the CA sets.
+5. Mount with hex-washer-head plate screws.

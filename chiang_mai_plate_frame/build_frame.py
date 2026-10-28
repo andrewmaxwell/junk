@@ -230,7 +230,13 @@ SCRIPT_DANGLE = script_h - RAIL_H
 
 # --- "cmhonda.com": low and right, tucked under the right screw hole ---
 # Sitting below the hole rather than beside it means the keepout no longer caps
-# its width, so it can be a good deal larger than when it sat on the centreline.
+# its width. The fit grows it right-aligned to the largest size that clears the
+# script; it is then printed at URL_SCALE of that, still right-aligned, SIDE_MARGIN
+# from the edge like the logo on the left, so it reads as secondary to the script
+# rather than competing with it.
+URL_SCALE = 0.75
+
+
 def _place_url(cap):
     t = text_polygon("cmhonda.com", FONT_BOLD, cap, tracking=1.0)
     b = t.bounds
@@ -246,8 +252,10 @@ def _url_ok(t):
             and g.difference(frame_outline).area < 1e-6)
 
 
-URL_CAP_H = _grow(_place_url, _url_ok, 3.0, 20.0)
+URL_FIT_CAP = _grow(_place_url, _url_ok, 3.0, 20.0)
+URL_CAP_H = URL_FIT_CAP * URL_SCALE
 url_text, url_w, url_h = _place_url(URL_CAP_H)
+assert _url_ok((url_text,)), "the scaled url no longer fits"
 
 # ================= colour groups =================
 # Artwork is embossed, not inlaid: the frame is a solid white plate and the
@@ -316,7 +324,8 @@ def report():
     print(f"  emboss {EMBOSS_H} mm proud -> total part thickness "
           f"{FRAME_THK + EMBOSS_H} mm")
     ub = url_text.bounds
-    print(f"  url    {url_w:6.1f} x {url_h:5.1f} mm  cap {URL_CAP_H:.2f} mm  "
+    print(f"  url    {url_w:6.1f} x {url_h:5.1f} mm  cap {URL_CAP_H:.2f} mm "
+          f"({URL_SCALE:.0%} of the {URL_FIT_CAP:.2f} mm fit)  "
           f"x {ub[0]:.1f}..{ub[2]:.1f}  y {ub[1]:.1f}..{ub[3]:.1f}"
           f"  (below the hole at y {HOLE_Y_BOT:.1f})")
     print(f"  thickened {n_thick} speed-line slivers to {SPEEDLINE_MIN_W} mm")
