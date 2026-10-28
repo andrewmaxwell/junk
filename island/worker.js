@@ -1,5 +1,5 @@
 // Runs the landscape model off the main thread and turns it into ready-to-draw vertex data.
-import {makeSim, defaults, iceAgeSeaLevel, shiftGrid} from './sim.js';
+import {makeSim, defaults, iceAgeSeaLevel} from './sim.js';
 
 const STEP_YEARS = 2000;
 const BUDGET_MS = 30; // longest stretch of stepping before checking for messages
@@ -54,7 +54,6 @@ function makeFrame() {
     peak: 0,
     seaLevel: 0,
     rise: 0, // mm/yr the summit is rising (negative: sinking), not counting erosion
-    plateShift: [0, 0], // m the plate has carried everything since the start, in x and z
   };
 }
 
@@ -176,7 +175,6 @@ function fillFrame(f) {
   f.time = sim.time;
   f.peak = peak;
   f.seaLevel = params.seaLevel;
-  f.plateShift = sim.shift.map((s) => s * cellSize);
   f.rise =
     sim.growthRate(params) -
     (params.upliftRate < 0 ? -params.upliftRate : params.sinkRate);
@@ -368,7 +366,6 @@ function tick() {
   while (yearsDue >= STEP_YEARS && performance.now() - now < BUDGET_MS) {
     setSeaLevel();
     sim.step(STEP_YEARS, params);
-    followPlate();
     updateShown(SHOWN_EASE);
     yearsDue -= STEP_YEARS;
     dirty = true;
@@ -378,21 +375,6 @@ function tick() {
   // behind the heights. Routing again just to draw took 40% of the worker's time.
   send();
   setTimeout(tick, yearsDue >= STEP_YEARS ? 0 : 8);
-}
-
-// The plate carries the land a cell at a time; what's drawn of it moves along too.
-let shownShift = [0, 0];
-function followPlate() {
-  const [sx, sz] = sim.shift;
-  while (shownShift[0] !== sx || shownShift[1] !== sz) {
-    const dx = Math.sign(sx - shownShift[0]);
-    const dz = Math.sign(sz - shownShift[1]);
-    for (const a of [lakeShown, coralShown, occlusion])
-      shiftGrid(a, sim.N, dx, dz, () => 0);
-    shiftGrid(lakeLevel, sim.N, dx, dz, () => -Infinity);
-    shownShift = [shownShift[0] + dx, shownShift[1] + dz];
-    riversDrawnAt = -Infinity;
-  }
 }
 
 function setSeaLevel() {
@@ -408,7 +390,6 @@ onmessage = ({data}) => {
     visited = new Uint8Array(data.N * data.N);
     hasRiverDonor = new Uint8Array(data.N * data.N);
     riversDrawnAt = -Infinity;
-    shownShift = [0, 0];
     occlusion = new Float32Array(data.N * data.N);
     for (let k = 0; k < AO_BANDS; k++) updateOcclusion();
     const texels = ((data.N - 1) * RIVER_TEXELS + 1) ** 2;

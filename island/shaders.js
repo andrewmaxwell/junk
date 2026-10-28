@@ -19,10 +19,6 @@ uniform float cellSize;
 uniform float seaLevel;
 uniform float temperature;
 uniform float time;
-// m the plate has carried the land since the start: noise for detail too fine for the model is
-// looked up where a point started (w - plateShift), so it moves with the land instead of
-// crawling over it
-uniform vec2 plateShift;
 
 vec2 toGrid(vec2 w) { return w / cellSize + (gridN - 1.0) * 0.5; }
 bool onGrid(vec2 g) { return g.x >= 0.0 && g.y >= 0.0 && g.x <= gridN - 1.0 && g.y <= gridN - 1.0; }
@@ -82,8 +78,7 @@ float fbm(vec2 p, float octaves) {
 // steeply the river drops (m per m, up to 1)
 vec4 riverAt(vec2 g) {
   // a little wander, so channels meander instead of running in straight stretches
-  vec2 pg = g - plateShift / cellSize;
-  g += vec2(gnoise(pg * 0.9), gnoise(pg * 0.9 + 17.3)) * 0.3;
+  g += vec2(gnoise(g * 0.9), gnoise(g * 0.9 + 17.3)) * 0.3;
   vec4 r = texture2D(riverTex, (g * (riverN - 1.0) / (gridN - 1.0) + 0.5) / riverN);
   return vec4(r.r * 63.0, max(r.g * 31.5, 1.0), r.b, r.a);
 }
@@ -103,7 +98,6 @@ float detailAmp(vec2 g, float h) {
 }
 // ridged on top, so rock breaks into crests and gullies rather than blobs
 float detailHeight(vec2 w, float amp, float octaves) {
-  w -= plateShift;
   float n = fbm(w / 110.0, octaves);
   float ridged = 0.25 - abs(fbm(w / 70.0 + 5.2, octaves - 1.0));
   return amp * (n + 0.6 * ridged);
@@ -165,7 +159,7 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec4 ground, vec4 river, float coral
   float aridity = pet > 0.0 ? f.g / pet : 10.0;
   float cover = smoothstep(0.15, 0.85, aridity) * smoothstep(-3.0, 6.0, t);
   float steep = length(n.xz) / max(n.y, 0.05);
-  vec2 pw = w.xz - plateShift;
+  vec2 pw = w.xz;
   float broad = fbm(pw / 260.0, 3.0);
   float clumps = fbm(pw / 30.0, 3.0 * fade);
   float fine = gnoise(pw / 5.0) * fade;
@@ -326,7 +320,7 @@ if (inWater > 0.0) {
 
 // tree crowns, tussocks and rubble, too small for the mesh
 if (fade > 0.0) {
-  vec2 pb = vWorld.xz - plateShift;
+  vec2 pb = vWorld.xz;
   float b0 = fbm(pb / bumpScale, 3.0 * fade);
   float eb = bumpScale * 0.25;
   slope += bumpHeight * fade * vec2(fbm((pb + vec2(eb, 0.0)) / bumpScale, 3.0 * fade) - b0,
@@ -340,7 +334,7 @@ roughnessFactor = surfaceRough;
 // is low.
 float lavaYears = groundAt(grid).a;
 if (lavaYears < 6e3 && vWorld.y > seaLevel) {
-  vec2 pl = vWorld.xz - plateShift;
+  vec2 pl = vWorld.xz;
   // fine cracks fade to an even glow where a pixel covers several (they glittered as dots)
   float cracks = smoothstep(-0.05, 0.25, fbm(pl / 60.0, 1.0 + 2.0 * fade))
     * mix(0.5, smoothstep(-0.1, 0.2, gnoise(pl / 9.0)), fade);
