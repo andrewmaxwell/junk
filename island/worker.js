@@ -39,7 +39,8 @@ function makeFrame() {
     // per point, for the GPU: height, rain, log10 of flow in m³/yr, and ambient occlusion
     fields: new Float32Array(num * 4),
     normal: new Float32Array(num * 4),
-    // per point, for drawing the rock: dikes (0..1), sediment depth (m), and two unused
+    // per point, for drawing the rock: dikes (0..1), sediment depth (m), the lava layers'
+    // offset (m, as sim.layerOffset), and one unused
     ground: new Float32Array(num * 4),
     waterY: new Float32Array(num),
     area: new Float32Array(num),
@@ -104,7 +105,8 @@ function updateOcclusion() {
 
 /** Fill a frame from the current state. Assumes route() has run since the last change. */
 function fillFrame(f) {
-  const {N, cellSize, height, area, rain, discharge, soil, dikes} = sim;
+  const {N, cellSize, height, area, rain, discharge, soil, dikes, layerOffset} =
+    sim;
   let peak = -Infinity;
   updateOcclusion();
   for (let z = 0; z < N; z++) {
@@ -134,6 +136,7 @@ function fillFrame(f) {
       f.normal[i * 4 + 3] = coralShown[i];
       f.ground[i * 4] = dikes[i];
       f.ground[i * 4 + 1] = soil[i];
+      f.ground[i * 4 + 2] = layerOffset[i];
 
       // Lakes are flat sheets at their spill height, reaching one point past the shore so the
       // ground cuts a clean shoreline through them. Everywhere else the sheet tucks well under
@@ -169,6 +172,8 @@ let riversDrawnAt = -Infinity;
 let riverDistance;
 /** @type {Float32Array} */
 let riverHalfWidth;
+/** @type {Float32Array} how steeply the nearest river drops, over its run */
+let riverDrop;
 
 /**
  * A texture four times finer than the grid that says, at each texel, how far it is to the
@@ -187,6 +192,7 @@ function drawRivers(out) {
   visited.fill(0);
   riverDistance.fill(RIVER_REACH);
   riverHalfWidth.fill(1);
+  riverDrop.fill(0);
   for (let i = 0; i < num; i++) {
     isRiver[i] = +(
       !wet[i] &&
@@ -197,8 +203,11 @@ function drawRivers(out) {
   }
   for (let i = 0; i < num; i++) if (isRiver[i]) hasRiverDonor[receiver[i]] = 1;
 
-  /** Mark texels near the stretch from a to b, given as [grid x, grid z, half width in m]. */
-  const stroke = ([ax, az, ah], [bx, bz, bh]) => {
+  /**
+   * Mark texels near the stretch from a to b, given as [grid x, grid z, half width in m, drop
+   * per meter].
+   */
+  const stroke = ([ax, az, ah, as], [bx, bz, bh, bs]) => {
     const reach = Math.min(RIVER_REACH, 8 + 6 * Math.max(ah, bh)) / cellSize;
     const x0 = Math.max(
       0,
@@ -231,6 +240,7 @@ function drawRivers(out) {
         if (d - half < riverDistance[k] - riverHalfWidth[k]) {
           riverDistance[k] = d;
           riverHalfWidth[k] = half;
+          riverDrop[k] = as + (bs - as) * t;
         }
       }
     }
@@ -244,7 +254,10 @@ function drawRivers(out) {
     let i = head;
     for (;;) {
       const half = Math.max(1, 2.5 * Math.sqrt(discharge[i] / 3.156e7));
-      points.push([i % N, Math.floor(i / N), Math.min(30, half)]);
+      const r = receiver[i];
+      const run = Math.hypot((r % N) - (i % N), ((r / N) | 0) - ((i / N) | 0));
+      const drop = run ? (height[i] - height[r]) / (run * cellSize) : 0;
+      points.push([i % N, Math.floor(i / N), Math.min(30, half), drop]);
       if (!isRiver[i] || visited[i]) break;
       visited[i] = 1;
       i = receiver[i];
@@ -282,7 +295,8 @@ function drawRivers(out) {
       out[k * 4] = (riverDistance[k] / RIVER_REACH) * 255;
       out[k * 4 + 1] = (riverHalfWidth[k] / 31.5) * 255;
       out[k * 4 + 2] = lakeness * 255;
-      out[k * 4 + 3] = 255;
+      // drop per meter, up to 1
+      out[k * 4 + 3] = Math.min(1, Math.max(0, riverDrop[k])) * 255;
     }
   }
 }
@@ -364,6 +378,7 @@ onmessage = ({data}) => {
     const texels = ((data.N - 1) * RIVER_TEXELS + 1) ** 2;
     riverDistance = new Float32Array(texels);
     riverHalfWidth = new Float32Array(texels);
+    riverDrop = new Float32Array(texels);
     sim.route(params);
     lakeShown = new Float32Array(data.N * data.N);
     lakeLevel = new Float32Array(data.N * data.N);

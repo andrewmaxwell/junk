@@ -85,7 +85,7 @@ const SEDIMENT_SOFTNESS = 2;
 /** m of sediment that counts as covering the rock */
 const COVERED = 0.5;
 /** m: one lava flow plus the bed of ash and rubble on top of it */
-const LAYER_THICKNESS = 40;
+export const LAYER_THICKNESS = 40;
 /** years for weathering to clog young lava's cracks so rain runs off instead of soaking in */
 const SEAL_TIME = 150e3;
 /** the steepest loose sediment lies, its angle of repose (about 33°) */
@@ -165,6 +165,14 @@ export function biome(rain, t) {
   return t > 8 ? 'forest' : 'conifer forest';
 }
 
+/**
+ * 0..1, how much ash and rubble there is at fraction f (0..1) of the way up through a layer:
+ * the top third or so of each, between one lava flow and the next. The terrain shader has the
+ * same bands.
+ * @param {number} f
+ */
+export const ashBed = (f) => smooth(0.6, 0.7, f) * (1 - smooth(0.9, 1, f));
+
 /** 0 at a, 1 at b, smooth between */
 export function smooth(a, b, x) {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -193,7 +201,6 @@ export function makeSim({N, cellSize, seed}) {
   const age = new Float32Array(num); // years since the surface lava erupted, at the start
   const dikes = new Float32Array(num); // 0..1, how much of the rock is hard dikes
   const soil = new Float64Array(num); // m of loose sediment over the rock
-  const original = new Float64Array(num); // where the island's first surface is now, m
   const start = new Float64Array(num); // heights before rivers work on them, each step
   const incoming = new Float64Array(num); // m³ arriving from upstream in a step
   const excess = new Float64Array(8); // how much too steep each neighbor is, in a landslide
@@ -235,12 +242,18 @@ export function makeSim({N, cellSize, seed}) {
   });
 
   makeIsland(N, seed, height, uplift, age, dikes);
-  original.set(height);
+  // The lava layers stay where they are: the volcano grows by piling new flows on top rather
+  // than lifting the old ones. (Layers that rode up with the rock crawled uphill on screen,
+  // meters a second.) They dip gently away from the middle, as a shield's flows do, and wander
+  // up and down, since flows aren't even sheets. This many meters are added to a point's
+  // height to find its bed; the terrain shader draws the beds from the same numbers.
   const layerNoise = makeFractalNoise(makeRandom(seed + 2));
-  // lava flows aren't perfectly even sheets, so the layers wander up and down
-  const layerPhase = Float32Array.from({length: num}, (_, i) =>
-    layerNoise(((i % N) / N) * 5, (((i / N) | 0) / N) * 5),
-  );
+  const layerOffset = Float32Array.from({length: num}, (_, i) => {
+    const x = (i % N) / N;
+    const z = ((i / N) | 0) / N;
+    const fromMiddle = Math.hypot(x - 0.5, z - 0.5) * N * cellSize;
+    return 0.06 * fromMiddle + LAYER_THICKNESS * layerNoise(x * 5, z * 5);
+  });
   const stormNoise = makeFractalNoise(makeRandom(seed + 1));
   // 0..1, how much of the rubble that storms throw up stays at each point
   const storminess = Float32Array.from({length: num}, (_, i) =>
@@ -512,9 +525,8 @@ export function makeSim({N, cellSize, seed}) {
       if (soil[i] > COVERED) {
         rock[i] = SEDIMENT_SOFTNESS;
       } else {
-        const depth = original[i] - height[i] + soil[i];
-        const bed = depth / LAYER_THICKNESS + layerPhase[i];
-        const ash = smooth(0.6, 0.75, bed - Math.floor(bed));
+        const bed = (height[i] - soil[i] + layerOffset[i]) / LAYER_THICKNESS;
+        const ash = ashBed(bed - Math.floor(bed));
         rock[i] = (1 + p.layering * (2.4 * ash - 0.55)) * (1 - 0.8 * dikes[i]);
       }
       erodibility[i] = plantK[i] * rock[i];
@@ -543,7 +555,6 @@ export function makeSim({N, cellSize, seed}) {
     for (let i = 0; i < num; i++) {
       const rise = (upliftRate > 0 ? uplift[i] : sinking[i]) * upliftRate * dt;
       height[i] += rise;
-      original[i] += rise;
     }
 
     // The climate follows the broad shape of the land, which barely moves in one step, and the
@@ -734,7 +745,6 @@ export function makeSim({N, cellSize, seed}) {
       coral[i] = rate;
       const grown = Math.min(depth, rate * p.reefGrowth * dt);
       height[i] += grown;
-      original[i] += grown; // reef rock is a fresh surface
       reefVolume += grown * cellArea;
     }
 
@@ -920,9 +930,8 @@ export function makeSim({N, cellSize, seed}) {
         const i = z * N + x;
         const change = amount * Math.exp(-d2 * 2);
         height[i] += change;
-        // what's raised is fresh rock; what's dug away takes the sediment first
-        if (change > 0) original[i] += change;
-        else soil[i] = Math.max(0, soil[i] + change);
+        // what's dug away takes the sediment first
+        if (change < 0) soil[i] = Math.max(0, soil[i] + change);
       }
     }
   }
@@ -942,6 +951,7 @@ export function makeSim({N, cellSize, seed}) {
     rock,
     soil,
     dikes,
+    layerOffset,
     wave,
     discharge,
     stack,

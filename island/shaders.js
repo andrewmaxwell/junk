@@ -1,10 +1,11 @@
 // GLSL patched into three.js's standard material, so the terrain, sea, lakes and rivers keep its
 // lighting, shadows, reflections and fog but get their shape and color from the simulation on
 // the GPU. The worker sends three textures per frame: fields (height, rain, log10 flow, ambient
-// occlusion), smooth normals with how fast coral grows in w, and the ground (dikes and
-// sediment depth), all one texel per grid point.
+// occlusion), smooth normals with how fast coral grows in w, and the ground (dikes, sediment
+// depth and where the lava layers lie), all one texel per grid point.
 import * as THREE from 'three';
 import {cloudCommon} from './clouds.js';
+import {LAYER_THICKNESS} from './sim.js';
 
 const common = /* glsl */ `
 uniform sampler2D fieldsTex;
@@ -72,12 +73,13 @@ float fbm(vec2 p, float octaves) {
   return sum;
 }
 
-// distance to the nearest river (m), its half width (m), and how much of here is lake
-vec3 riverAt(vec2 g) {
+// distance to the nearest river (m), its half width (m), how much of here is lake, and how
+// steeply the river drops (m per m, up to 1)
+vec4 riverAt(vec2 g) {
   // a little wander, so channels meander instead of running in straight stretches
   g += vec2(gnoise(g * 0.9), gnoise(g * 0.9 + 17.3)) * 0.3;
   vec4 r = texture2D(riverTex, (g * (riverN - 1.0) / (gridN - 1.0) + 0.5) / riverN);
-  return vec3(r.r * 63.0, max(r.g * 31.5, 1.0), r.b);
+  return vec4(r.r * 63.0, max(r.g * 31.5, 1.0), r.b, r.a);
 }
 
 // Meters of fine relief on top of the simulated ground: most on steep slopes, little on valley
@@ -87,7 +89,7 @@ float detailAmp(vec2 g, float h) {
   float steep = length(n.xz) / max(n.y, 0.05);
   float amp = mix(2.0, 16.0, smoothstep(0.15, 1.0, steep));
   // flat valley floors along rivers, and smooth lake beds
-  vec3 river = riverAt(g);
+  vec4 river = riverAt(g);
   amp *= mix(0.08, 1.0, smoothstep(river.y + 2.0, 3.0 * river.y + 30.0, river.x));
   amp *= 1.0 - 0.9 * river.z;
   amp *= mix(0.25, 1.0, smoothstep(2.0, 20.0, abs(h - seaLevel)));
@@ -101,7 +103,7 @@ float detailHeight(vec2 w, float amp, float octaves) {
 }
 // a channel cut along each river, deeper for bigger ones, with sloping banks
 float channelDepth(vec2 g) {
-  vec3 river = riverAt(g);
+  vec4 river = riverAt(g);
   return (0.8 + 0.5 * river.y) * (1.0 - smoothstep(0.6 * river.y, 2.0 * river.y + 2.0, river.x));
 }
 float groundHeight(vec2 g, vec2 w) {
@@ -148,7 +150,7 @@ vWorld = transformed;
 // Color, roughness and small-scale bumps for every kind of ground, from the same climate as the
 // simulation: temperature from height, aridity from rain over potential evaporation.
 const terrainSurface = /* glsl */ `
-void terrainSurface(vec3 w, vec3 n, vec4 f, vec4 ground, vec3 river, float coral, float fade,
+void terrainSurface(vec3 w, vec3 n, vec4 f, vec4 ground, vec4 river, float coral, float fade,
     out vec3 color, out float rough, out float bumpHeight, out float bumpScale) {
   float above = w.y - seaLevel;
   float t = temperature - 0.0065 * max(above, 0.0);
@@ -185,18 +187,18 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec4 ground, vec3 river, float coral
   bumpHeight = mix(0.4, 3.5, trees);
   bumpScale = mix(4.0, 9.0, trees);
 
-  // Bare rock on steep slopes: dark lava flows with red-brown beds of ash and rubble between
-  // them, dipping gently out to sea as a shield volcano's flows do, black dikes from the model,
-  // which stand bare on gentler slopes than the rest, and none where the model's sediment lies
-  // deep. The beds are fixed in place rather than in the rock: uplift carries rock up through
-  // the surface about 3 m a step, which made them crawl uphill several times a second.
+  // Bare rock on steep slopes, as the model has it: dark lava flows with red-brown beds of ash
+  // and rubble between them, at the heights the model's beds lie (dipping gently out to sea,
+  // as a shield volcano's flows do), black dikes, which stand bare on gentler slopes than the
+  // rest, and none where sediment lies deep.
   float sediment = smoothstep(0.5, 4.0, ground.g);
   float dike = smoothstep(0.3, 0.7, ground.r);
   float rock = smoothstep(0.65, 1.05, steep + 0.4 * clumps + 0.4 * dike) * (1.0 - bar) * (1.0 - sediment);
-  float strataY = (w.y + 0.06 * length(w.xz) + 30.0 * broad + 6.0 * clumps) / 40.0;
+  // the same bands as ashBed in sim.js
+  float strataY = (w.y + ground.b) / ${LAYER_THICKNESS.toFixed(1)};
   float bed = fract(strataY);
   float bedBlur = min(0.25, fwidth(strataY));
-  float ash = smoothstep(0.62 - bedBlur, 0.72 + bedBlur, bed) * smoothstep(0.95 + bedBlur, 0.85 - bedBlur, bed);
+  float ash = smoothstep(0.6 - bedBlur, 0.7 + bedBlur, bed) * smoothstep(1.0 + bedBlur, 0.9 - bedBlur, bed);
   // faint layering within the flows that wanders, rather than contour lines
   float flows = fbm(vec2(w.y / 9.0 + 3.0 * broad + 1.5 * clumps, 0.37), 3.0 * fade);
   vec3 lava = mix(lin(vec3(0.3, 0.29, 0.28)), lin(vec3(0.44, 0.41, 0.37)), smoothstep(-0.3, 0.3, flows));
@@ -245,7 +247,7 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec4 ground, vec3 river, float coral
 const terrainFragment = /* glsl */ `
 vec2 grid = toGrid(vWorld.xz);
 vec4 fields = fieldsAt(grid);
-vec3 river = riverAt(grid);
+vec4 river = riverAt(grid);
 float viewDist = length(vViewPosition);
 // how much fine detail this pixel can show without shimmering
 float footprint = max(length(fwidth(vWorld.xz)), 0.5);
@@ -280,18 +282,30 @@ float soaked = (1.0 - smoothstep(2.5 * river.y + 2.0, 6.0 * river.y + 10.0, rive
 surfaceColor *= 1.0 - 0.35 * soaked;
 surfaceRough = mix(surfaceRough, 0.5, soaked);
 // the river itself, never thinner than about half a pixel so it doesn't break up far away
-float waterEdge = max(river.y * (1.0 + 1.5 * mouth), 0.5 * footprint);
+// Waterfalls: where a river drops steeply (over a hard lava flow or a sea cliff, mostly) it
+// spreads into white water streaming downhill, with spray around it.
+// (Fully white from a drop of 0.15 turned every small stream on a hillside into white lines;
+// from 0.25 to 0.5 left about two dozen points on the whole island.)
+float fall = smoothstep(0.18, 0.4, river.w) * (1.0 - river.z);
+float waterEdge = max(river.y * (1.0 + 1.5 * mouth + 2.0 * fall), 0.5 * footprint);
+float spray = fall * (1.0 - smoothstep(waterEdge, 3.0 * waterEdge + 8.0, river.x));
+surfaceColor = mix(surfaceColor, lin(vec3(0.75, 0.8, 0.78)), 0.4 * spray);
 float inWater = (1.0 - smoothstep(waterEdge - 0.5 * footprint, waterEdge + 0.5 * footprint, river.x)) * (1.0 - river.z);
 if (inWater > 0.0) {
   float middle = 1.0 - smoothstep(0.0, waterEdge, river.x);
   vec3 riverColor = mix(lin(vec3(0.24, 0.32, 0.28)), lin(vec3(0.07, 0.2, 0.22)), middle);
+  // white water in streaks drawn out downhill, running down
+  vec2 down = normalize(nb.xz + 1e-5);
+  vec2 sq = vec2(dot(vWorld.xz, vec2(-down.y, down.x)) / 1.5, dot(vWorld.xz, down) / 8.0 - time * 2.5);
+  float foam = fall * smoothstep(-0.3, 0.3, gnoise(sq) + 0.5 * gnoise(sq * 2.3) + 0.6 * fall - 0.2);
+  riverColor = mix(riverColor, lin(vec3(0.92, 0.95, 0.95)), foam);
   surfaceColor = mix(surfaceColor, riverColor, inWater);
-  surfaceRough = mix(surfaceRough, 0.08, inWater);
+  surfaceRough = mix(surfaceRough, mix(0.08, 0.5, foam), inWater);
   bumpHeight *= 1.0 - inWater;
-  // water lies flat across, with ripples running on it
+  // water lies flat across, with ripples running on it, except where it falls
   vec2 q = vWorld.xz / 4.0;
   vec2 ripple = vec2(gnoise(q + time * 0.8), gnoise(q.yx - time * 0.7)) * 0.12 * fade;
-  slope = mix(slope, ripple, inWater);
+  slope = mix(slope, ripple, inWater * (1.0 - fall));
 }
 
 // tree crowns, tussocks and rubble, too small for the mesh
