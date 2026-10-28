@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import {cloudCommon} from './clouds.js';
 import {LAYER_THICKNESS} from './sim.js';
+import {DEEP_FLOOR} from './terrain.js';
 
 const common = /* glsl */ `
 uniform sampler2D fieldsTex;
@@ -397,7 +398,7 @@ export function terrainDepthMaterial(material, uniforms) {
 // in on the wind, is calmer in the island's lee, and breaks where the bottom shoals suddenly.
 const waterFragment = /* glsl */ `
 vec2 grid = toGrid(vWater.xz);
-float ground = onGrid(grid) ? baseHeight(grid) : -1200.0;
+float ground = onGrid(grid) ? baseHeight(grid) : ${DEEP_FLOOR.toFixed(1)};
 float depth = max(vWater.y - ground, 0.0);
 float viewDist = length(vViewPosition);
 // Flats can lie within centimeters of sea level, closer than the depth buffer can tell water
@@ -450,7 +451,7 @@ float highest = ground;
 for (int k = 0; k < 4; k++) {
   vec2 o = vec2(k == 0 ? 50.0 : k == 1 ? -50.0 : 0.0, k == 2 ? 50.0 : k == 3 ? -50.0 : 0.0);
   vec2 gk = toGrid(p + o);
-  float hk = onGrid(gk) ? baseHeight(gk) : -1200.0;
+  float hk = onGrid(gk) ? baseHeight(gk) : ${DEEP_FLOOR.toFixed(1)};
   deepest = max(deepest, vWater.y - hk);
   highest = max(highest, hk);
 }

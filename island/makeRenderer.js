@@ -18,6 +18,7 @@ import {
   terrainDepthMaterial,
   waterMaterial,
 } from './shaders.js';
+import {DEEP_FLOOR} from './terrain.js';
 
 /**
  * @param {HTMLCanvasElement} canvas
@@ -239,7 +240,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     new THREE.MeshBasicMaterial(),
   );
   floor.material.color = uniforms.deepWater.value; // shared, so it follows the time of day
-  floor.position.y = -1201;
+  floor.position.y = DEEP_FLOOR - 1;
   floor.renderOrder = -1;
   scene.add(floor);
 

@@ -1,6 +1,9 @@
 // The starting island: seeded fractal noise shaped into an island, and a matching uplift map that
 // says where the crust is rising.
 
+/** m: the deep ocean floor around the island, where it meets the grid's edges */
+export const DEEP_FLOOR = -1200;
+
 /**
  * Seeded random numbers in [0, 1) (mulberry32).
  * @param {number} seed
@@ -120,7 +123,7 @@ export function makeIsland(N, seed, height, uplift, age, dikes) {
         let h =
           r < 1
             ? vol.top * (1 - r ** 1.4) * (0.9 + 0.2 * relief(u * 3, v * 3, 3))
-            : -1200 * Math.min(1, (r - 1) * 1.6);
+            : Math.max(DEEP_FLOOR, -1920 * (r - 1));
         if (h > best) {
           best = h;
           age[i] = vol.age;
@@ -145,7 +148,10 @@ export function makeIsland(N, seed, height, uplift, age, dikes) {
       }
       // the grid's edges are always deep ocean
       const edge = Math.min(x, z, N - 1 - x, N - 1 - z) / (N - 1);
-      height[i] = Math.min(-1200 + 20000 * edge, Math.max(-1200, best));
+      height[i] = Math.min(
+        DEEP_FLOOR + 20000 * edge,
+        Math.max(DEEP_FLOOR, best),
+      );
       uplift[i] =
         Math.min(1, 0.15 + lift) *
         Math.min(1, Math.max(0, (edge - 0.06) / 0.06)) *

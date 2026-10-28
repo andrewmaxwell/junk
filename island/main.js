@@ -126,7 +126,7 @@ const transfers = (f) =>
 // ---------- controls ----------
 // Each changes the world and keeps the island, so you can watch it adjust.
 const presets = {
-  'Rising island': {},
+  'Life of an island': {},
   'Sinking: atoll': {upliftRate: -0.4, speed: 30},
   // a cycle takes a second and a half at full speed, which is a blur
   'Ice-age cycles': {iceAges: true, speed: 20},
@@ -362,7 +362,9 @@ function loop(now) {
     view.update(frame, frame.seaLevel, settings.temperature, settings.wind);
     shown = frame;
     const seaShift = frame.seaLevel - settings.seaLevel;
-    statusEl.textContent = `${formatYears(frame.time)} · peak ${fmt(Math.max(0, frame.peak - frame.seaLevel))} m${settings.iceAges ? ` · sea ${seaShift < -0.5 ? '−' + fmt(-seaShift) : '0'} m` : ''}${settings.speed ? '' : ' · paused'}`;
+    const speed = Math.abs(frame.rise);
+    const rate = speed >= 0.95 ? speed.toFixed(1) : speed.toPrecision(1);
+    statusEl.textContent = `${formatYears(frame.time)} · peak ${fmt(Math.max(0, frame.peak - frame.seaLevel))} m · ${frame.rise > 0 ? 'volcano growing' : 'sinking'} ${rate} mm/yr${settings.iceAges ? ` · sea ${seaShift < -0.5 ? '−' + fmt(-seaShift) : '0'} m` : ''}${settings.speed ? '' : ' · paused'}`;
     showProbe();
   }
   view.render();

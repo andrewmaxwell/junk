@@ -25,7 +25,9 @@ export const defaults = {
   rain: 2.5, // m/yr of rain, averaged over the land
   temperature: 24, // °C at sea level
   wind: 60, // degrees the wind blows from: 0 north (away from the camera), 90 east
-  upliftRate: 1.5, // mm/yr at the fastest-rising point
+  upliftRate: 1.5, // mm/yr at the fastest-rising point when the volcano is most active
+  growthTime: 1e6, // years the volcano grows at full speed, and then for it to fade by 1/e (Infinity: forever)
+  sinkRate: 0.03, // mm/yr the plate sinks as it cools, drifting away from the hotspot
   seaLevel: 0, // m
   K: 1.2e-4, // erodibility of bare ground, for discharge in m³/yr
   m: 0.5, // discharge exponent (slope exponent n is 1)
@@ -261,6 +263,8 @@ export function makeSim({N, cellSize, seed}) {
   );
   const rubble = new Float64Array(num); // scratch for how much reef is near each point
   let time = 0;
+  let growthSetting = NaN; // the upliftRate the volcano last started growing at
+  let growthStart = 0; // year it was set
   let lostSediment = 0; // m³ carried off the edge of the grid or out to the deep sea
   let reefVolume = 0; // m³ of reef built
   const cellArea = cellSize * cellSize;
@@ -549,13 +553,19 @@ export function makeSim({N, cellSize, seed}) {
    */
   function step(dt, p) {
     const {seaLevel} = p;
-    const upliftRate = p.upliftRate / 1000;
-    // Rising is local, where the crust is pushed up, but sinking is the whole plate cooling as
-    // it moves away from where the island formed, so it's even across the grid.
-    for (let i = 0; i < num; i++) {
-      const rise = (upliftRate > 0 ? uplift[i] : sinking[i]) * upliftRate * dt;
-      height[i] += rise;
+    // A volcano grows only while it sits over the hotspot. The plate carries it off within
+    // about a million years of the uplift being set, then its growth fades, and the
+    // plate under it keeps sinking as it cools, for tens of millions of years. Growth is local,
+    // where the lava piles up, but sinking is the whole plate, so it's even across the grid.
+    // A negative upliftRate skips the volcano and just sinks the plate that fast.
+    if (p.upliftRate !== growthSetting) {
+      growthSetting = p.upliftRate;
+      growthStart = time;
     }
+    const grow = growthRate(p) / 1000;
+    const sink = (p.upliftRate < 0 ? -p.upliftRate : p.sinkRate) / 1000;
+    for (let i = 0; i < num; i++)
+      height[i] += (uplift[i] * grow - sinking[i] * sink) * dt;
 
     // The climate follows the broad shape of the land, which barely moves in one step, and the
     // rain sweep is a third of the step's time, so it's only redone every few steps.
@@ -669,6 +679,16 @@ export function makeSim({N, cellSize, seed}) {
 
     slide(p);
     time += dt;
+  }
+
+  /**
+   * mm/yr the youngest volcano is growing at its fastest point now.
+   * @param {typeof defaults} p
+   */
+  function growthRate(p) {
+    if (!(p.upliftRate > 0)) return 0;
+    const since = growthSetting === p.upliftRate ? time - growthStart : 0;
+    return p.upliftRate * Math.exp(-Math.max(0, since / p.growthTime - 1));
   }
 
   /**
@@ -964,6 +984,7 @@ export function makeSim({N, cellSize, seed}) {
     get time() {
       return time;
     },
+    growthRate,
     get lostSediment() {
       return lostSediment;
     },

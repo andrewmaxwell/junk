@@ -93,7 +93,7 @@ check(badLakes === 0, 'lakes spill downhill');
 // edge of the grid.
 {
   const fresh = makeSim({N, cellSize, seed: 7});
-  const still = {...defaults, upliftRate: 0, D: 0, marineD: 0};
+  const still = {...defaults, upliftRate: 0, sinkRate: 0, D: 0, marineD: 0};
   const sum = (a) => a.reduce((s, v) => s + v, 0);
   const start = sum(fresh.height);
   let eroded = 0;
@@ -240,7 +240,8 @@ check(badLakes === 0, 'lakes spill downhill');
   );
 }
 
-// Run toward steady state with no soil creep, waves, landslides or layered rock, where the stream power law
+// Run toward steady state with steady uplift and no sinking, soil creep, waves, landslides or
+// layered rock, where the stream power law
 // with deposition gives an exact answer (Yuan et al. 2019): everything uplifted upstream
 // passes through, so rivers drop G Qs / A = G Ū (Ū the mean uplift upstream), and cutting
 // balances both: S = (U + G Ū) / (K Q^m) at every river point.
@@ -251,6 +252,8 @@ const params = {
   waveErosion: 0,
   layering: 0,
   criticalSlope: 0,
+  growthTime: Infinity,
+  sinkRate: 0,
 };
 for (let t = 0; t < 2000; t++) sim.step(5000, params);
 sim.route(params);

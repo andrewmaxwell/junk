@@ -52,6 +52,7 @@ function makeFrame() {
     time: 0,
     peak: 0,
     seaLevel: 0,
+    rise: 0, // mm/yr the summit is rising (negative: sinking), not counting erosion
   };
 }
 
@@ -161,6 +162,9 @@ function fillFrame(f) {
   f.time = sim.time;
   f.peak = peak;
   f.seaLevel = params.seaLevel;
+  f.rise =
+    sim.growthRate(params) -
+    (params.upliftRate < 0 ? -params.upliftRate : params.sinkRate);
 }
 
 const RIVER_MIN_FLOW = 0.02 * 3.156e7; // m³/yr, about 20 liters a second
