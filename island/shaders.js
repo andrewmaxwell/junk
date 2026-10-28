@@ -1,11 +1,10 @@
 // GLSL patched into three.js's standard material, so the terrain, sea, lakes and rivers keep its
 // lighting, shadows, reflections and fog but get their shape and color from the simulation on
 // the GPU. The worker sends three textures per frame: fields (height, rain, log10 flow, ambient
-// occlusion), smooth normals with how fast coral grows in w, and the ground (where the lava
-// layers lie, dikes, sediment depth), all one texel per grid point.
+// occlusion), smooth normals with how fast coral grows in w, and the ground (dikes and
+// sediment depth), all one texel per grid point.
 import * as THREE from 'three';
 import {cloudCommon} from './clouds.js';
-import {LAYER_THICKNESS} from './sim.js';
 
 const common = /* glsl */ `
 uniform sampler2D fieldsTex;
@@ -107,7 +106,11 @@ float channelDepth(vec2 g) {
 }
 float groundHeight(vec2 g, vec2 w) {
   float h = baseHeight(g);
-  return h + detailHeight(w, detailAmp(g, h), 6.0) - channelDepth(g);
+  float ground = h + detailHeight(w, detailAmp(g, h), 6.0);
+  // A channel crossing a beach stops half a meter above the sea: cut below it, the sea surface
+  // showed through the riverbed in patches, and at 10 cm the depth buffer still couldn't tell
+  // them apart from afar.
+  return max(ground - channelDepth(g), min(ground, seaLevel + 0.5));
 }
 vec3 lin(vec3 c) { return pow(c, vec3(2.2)); }
 ${cloudCommon}
@@ -120,7 +123,8 @@ ${cloudCommon}
 const underwater = /* glsl */ `
 uniform vec3 deepWater; // light scattered back up out of bottomless water
 const vec3 WATER_ABSORPTION = vec3(0.45, 0.07, 0.022);
-vec3 throughWater(vec3 light, vec3 w) {
+// sun: how much sunlight reaches the water here, past the clouds
+vec3 throughWater(vec3 light, vec3 w, float sun) {
   float depth = seaLevel - w.y;
   if (depth <= 0.0) return light;
   // the path down from the surface to here and back up, bent steeper by refraction
@@ -129,7 +133,8 @@ vec3 throughWater(vec3 light, vec3 w) {
   float sunCos = sqrt(1.0 - (1.0 - sunDirection.y * sunDirection.y) / 1.77);
   vec3 up = exp(-WATER_ABSORPTION * depth / viewCos);
   vec3 down = exp(-WATER_ABSORPTION * depth / sunCos);
-  return light * down * up + deepWater * (1.0 - up);
+  // the light scattered back up is mostly sunlight, so cloud shadows darken the sea too
+  return light * down * up + deepWater * (1.0 - up) * (0.35 + 0.65 * sun);
 }
 `;
 
@@ -180,21 +185,22 @@ void terrainSurface(vec3 w, vec3 n, vec4 f, vec4 ground, vec3 river, float coral
   bumpHeight = mix(0.4, 3.5, trees);
   bumpScale = mix(4.0, 9.0, trees);
 
-  // Bare rock on steep slopes, as the model has it: dark lava flows with red-brown beds of ash
-  // and rubble between them where the simulation puts them, black dikes, which stand bare on
-  // gentler slopes than the rest, and none where sediment lies deep.
-  float sediment = smoothstep(0.5, 4.0, ground.b);
-  float dike = smoothstep(0.3, 0.7, ground.g);
+  // Bare rock on steep slopes: dark lava flows with red-brown beds of ash and rubble between
+  // them, dipping gently out to sea as a shield volcano's flows do, black dikes from the model,
+  // which stand bare on gentler slopes than the rest, and none where the model's sediment lies
+  // deep. The beds are fixed in place rather than in the rock: uplift carries rock up through
+  // the surface about 3 m a step, which made them crawl uphill several times a second.
+  float sediment = smoothstep(0.5, 4.0, ground.g);
+  float dike = smoothstep(0.3, 0.7, ground.r);
   float rock = smoothstep(0.65, 1.05, steep + 0.4 * clumps + 0.4 * dike) * (1.0 - bar) * (1.0 - sediment);
-  float bed = fract((ground.r - w.y) / ${LAYER_THICKNESS.toFixed(1)});
-  float bedBlur = min(0.2, fwidth((ground.r - w.y) / ${LAYER_THICKNESS.toFixed(1)}));
-  float ash = smoothstep(0.6 - bedBlur, 0.75 + bedBlur, bed) * smoothstep(1.0 + bedBlur, 0.97 - bedBlur, bed);
-  vec3 lava = mix(lin(vec3(0.3, 0.29, 0.28)), lin(vec3(0.42, 0.39, 0.35)), smoothstep(-0.3, 0.3, broad + 0.5 * clumps));
-  // within each flow, thinner flows a few meters thick, each with a paler rubbly top
-  float layer = (ground.r - w.y) / 5.0 + 0.3 * clumps;
-  float flowTop = smoothstep(0.75, 0.95, fract(layer)) * (1.0 - smoothstep(0.3, 1.0, fwidth(layer)));
-  lava = mix(lava, lava * 1.35, flowTop);
-  vec3 rockColor = mix(lava, lin(vec3(0.52, 0.36, 0.27)), 0.85 * ash);
+  float strataY = (w.y + 0.06 * length(w.xz) + 30.0 * broad + 6.0 * clumps) / 40.0;
+  float bed = fract(strataY);
+  float bedBlur = min(0.25, fwidth(strataY));
+  float ash = smoothstep(0.62 - bedBlur, 0.72 + bedBlur, bed) * smoothstep(0.95 + bedBlur, 0.85 - bedBlur, bed);
+  // faint layering within the flows that wanders, rather than contour lines
+  float flows = fbm(vec2(w.y / 9.0 + 3.0 * broad + 1.5 * clumps, 0.37), 3.0 * fade);
+  vec3 lava = mix(lin(vec3(0.3, 0.29, 0.28)), lin(vec3(0.44, 0.41, 0.37)), smoothstep(-0.3, 0.3, flows));
+  vec3 rockColor = mix(lava, lin(vec3(0.5, 0.36, 0.28)), 0.7 * ash * smoothstep(-0.4, 0.2, clumps));
   rockColor = mix(rockColor, lin(vec3(0.14, 0.15, 0.16)), dike);
   rockColor *= 0.75 + 0.35 * smoothstep(-0.2, 0.5, clumps);
   color = mix(color, rockColor, rock);
@@ -255,8 +261,10 @@ float d0 = detailHeight(vWorld.xz, amp, octaves);
 slope += vec2(detailHeight(vWorld.xz + vec2(e, 0.0), amp, octaves) - d0,
               detailHeight(vWorld.xz + vec2(0.0, e), amp, octaves) - d0) / e;
 float c0 = channelDepth(grid);
+// (no banks where groundHeight kept the channel from cutting below the sea)
 slope -= vec2(channelDepth(grid + vec2(e / cellSize, 0.0)) - c0,
-              channelDepth(grid + vec2(0.0, e / cellSize)) - c0) / e;
+              channelDepth(grid + vec2(0.0, e / cellSize)) - c0) / e
+         * smoothstep(0.5, 2.5, vWorld.y + c0 - seaLevel);
 vec3 shapeNormal = normalize(vec3(-slope.x, 1.0, -slope.y));
 
 vec3 surfaceColor;
@@ -265,8 +273,14 @@ float bumpHeight;
 float bumpScale;
 terrainSurface(vWorld, shapeNormal, fields, groundAt(grid), river, coralAt(grid), fade, surfaceColor, surfaceRough, bumpHeight, bumpScale);
 
+// Crossing a beach, a stream spreads out shallow and wide and soaks the sand on either side;
+// drawn at its width upstream it had no banks or greenery there and broke into dashes.
+float mouth = smoothstep(3.0, 0.6, vWorld.y - seaLevel) * smoothstep(0.0, 0.4, vWorld.y + 0.5 - seaLevel) * (1.0 - river.z);
+float soaked = (1.0 - smoothstep(2.5 * river.y + 2.0, 6.0 * river.y + 10.0, river.x)) * mouth;
+surfaceColor *= 1.0 - 0.35 * soaked;
+surfaceRough = mix(surfaceRough, 0.5, soaked);
 // the river itself, never thinner than about half a pixel so it doesn't break up far away
-float waterEdge = max(river.y, 0.5 * footprint);
+float waterEdge = max(river.y * (1.0 + 1.5 * mouth), 0.5 * footprint);
 float inWater = (1.0 - smoothstep(waterEdge - 0.5 * footprint, waterEdge + 0.5 * footprint, river.x)) * (1.0 - river.z);
 if (inWater > 0.0) {
   float middle = 1.0 - smoothstep(0.0, waterEdge, river.x);
@@ -339,7 +353,7 @@ export function terrainMaterial(material, uniforms) {
       .replace('#include <aomap_fragment>', terrainAO)
       .replace(
         '#include <opaque_fragment>',
-        'outgoingLight = throughWater(outgoingLight, vWorld);\n#include <opaque_fragment>',
+        'outgoingLight = throughWater(outgoingLight, vWorld, sunThrough);\n#include <opaque_fragment>',
       );
   };
   return material;

@@ -1,5 +1,5 @@
 // Runs the landscape model off the main thread and turns it into ready-to-draw vertex data.
-import {makeSim, defaults, iceAgeSeaLevel, LAYER_THICKNESS} from './sim.js';
+import {makeSim, defaults, iceAgeSeaLevel} from './sim.js';
 
 const STEP_YEARS = 2000;
 const BUDGET_MS = 30; // longest stretch of stepping before checking for messages
@@ -39,8 +39,7 @@ function makeFrame() {
     // per point, for the GPU: height, rain, log10 of flow in m³/yr, and ambient occlusion
     fields: new Float32Array(num * 4),
     normal: new Float32Array(num * 4),
-    // per point, for drawing the rock: where the layers lie (m, the height a layer boundary
-    // would be at here), dikes (0..1), and sediment depth (m)
+    // per point, for drawing the rock: dikes (0..1), sediment depth (m), and two unused
     ground: new Float32Array(num * 4),
     waterY: new Float32Array(num),
     area: new Float32Array(num),
@@ -105,8 +104,7 @@ function updateOcclusion() {
 
 /** Fill a frame from the current state. Assumes route() has run since the last change. */
 function fillFrame(f) {
-  const {N, cellSize, height, area, rain, discharge, soil, dikes, original} =
-    sim;
+  const {N, cellSize, height, area, rain, discharge, soil, dikes} = sim;
   let peak = -Infinity;
   updateOcclusion();
   for (let z = 0; z < N; z++) {
@@ -134,9 +132,8 @@ function fillFrame(f) {
       f.normal[i * 4 + 1] = 1 / len;
       f.normal[i * 4 + 2] = nz / len;
       f.normal[i * 4 + 3] = coralShown[i];
-      f.ground[i * 4] = original[i] + LAYER_THICKNESS * sim.layerPhase[i];
-      f.ground[i * 4 + 1] = dikes[i];
-      f.ground[i * 4 + 2] = soil[i];
+      f.ground[i * 4] = dikes[i];
+      f.ground[i * 4 + 1] = soil[i];
 
       // Lakes are flat sheets at their spill height, reaching one point past the shore so the
       // ground cuts a clean shoreline through them. Everywhere else the sheet tucks well under

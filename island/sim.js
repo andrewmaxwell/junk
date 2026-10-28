@@ -85,7 +85,7 @@ const SEDIMENT_SOFTNESS = 2;
 /** m of sediment that counts as covering the rock */
 const COVERED = 0.5;
 /** m: one lava flow plus the bed of ash and rubble on top of it */
-export const LAYER_THICKNESS = 40;
+const LAYER_THICKNESS = 40;
 /** years for weathering to clog young lava's cracks so rain runs off instead of soaking in */
 const SEAL_TIME = 150e3;
 /** the steepest loose sediment lies, its angle of repose (about 33°) */
@@ -942,8 +942,6 @@ export function makeSim({N, cellSize, seed}) {
     rock,
     soil,
     dikes,
-    original,
-    layerPhase,
     wave,
     discharge,
     stack,

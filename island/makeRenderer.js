@@ -99,7 +99,34 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
   });
   light.shadow.bias = -0.0003;
   light.shadow.normalBias = 3;
-  scene.add(light);
+  scene.add(light, light.target);
+  let shadowReach = 0;
+  /**
+   * Fit the shadow map to what the camera is looking at, so close up a texel covers well under
+   * a meter instead of the 3.4 m it does spread over the whole island. Its size goes in steps,
+   * since shadow edges shimmer while it changes, and the orbit keeps the target still.
+   */
+  function fitShadows() {
+    const distance = camera.position.distanceTo(controls.target);
+    const reach = Math.min(
+      size * 0.55,
+      1.25 **
+        Math.ceil(Math.log(Math.max(800, distance * 1.3)) / Math.log(1.25)),
+    );
+    if (reach !== shadowReach) {
+      shadowReach = reach;
+      Object.assign(light.shadow.camera, {
+        left: -reach,
+        right: reach,
+        top: reach,
+        bottom: -reach,
+      });
+      light.shadow.camera.updateProjectionMatrix();
+      light.shadow.normalBias = (3 * reach) / half;
+    }
+    light.target.position.copy(controls.target);
+    light.position.copy(sun).multiplyScalar(size).add(controls.target);
+  }
   const skyLight = new THREE.HemisphereLight(0xa8c8ff, 0x5a4a35, 0.7);
   scene.add(skyLight);
 
@@ -474,6 +501,7 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
       if (!touched) frameIsland();
     }
     controls.update(Math.min(clock.getDelta(), 0.1));
+    fitShadows();
     // about 12% haze at the point the camera looks at, more beyond
     scene.fog.density = Math.min(
       0.55 / size,

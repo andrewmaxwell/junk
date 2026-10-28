@@ -41,13 +41,18 @@ float cloudDensity(vec3 p, float cover, float detail) {
   if (detail > 0.0) d -= (1.0 - texture(noiseTex, q * 4.3 + 0.37).g) * 0.45 * (1.0 - d);
   return clamp(d, 0.0, 1.0);
 }
-// how much sunlight gets through the clouds to the ground at w
+// how much sunlight gets through the clouds to the ground at w, from the densest of three
+// heights along the way to the sun (one, at the middle of the cloud base, missed most of the
+// small cumulus, which are thin there)
 float cloudShadow(vec3 w) {
   if (cloudsOn == 0.0 || sunDirection.y <= 0.02) return 1.0;
-  float mid = seaLevel + CLOUD_BASE + 350.0;
-  vec3 p = w + sunDirection * max(mid - w.y, 0.0) / sunDirection.y;
-  float d = cloudDensity(p, cloudCover(p.xz), 0.0);
-  return 1.0 - 0.8 * smoothstep(0.0, 0.25, d);
+  float d = 0.0;
+  for (int k = 0; k < 3; k++) {
+    float height = seaLevel + CLOUD_BASE + 150.0 + 450.0 * float(k);
+    vec3 p = w + sunDirection * max(height - w.y, 0.0) / sunDirection.y;
+    d = max(d, cloudDensity(p, cloudCover(p.xz), 0.0));
+  }
+  return 1.0 - 0.8 * smoothstep(0.0, 0.2, d);
 }
 `;
 
