@@ -30,6 +30,7 @@ const settings = {
   temperature: +(url.get('temp') ?? defaults.temperature),
   upliftRate: +(url.get('uplift') ?? defaults.upliftRate),
   seaLevel: +(url.get('sea') ?? defaults.seaLevel),
+  iceAges: url.get('ice') === '1',
   speed: 100, // thousand years per second
   hour: +(url.get('hour') ?? 16.5),
   clouds: url.get('clouds') !== '0',
@@ -50,6 +51,7 @@ function saveUrl() {
     q.set('uplift', String(settings.upliftRate));
   if (settings.seaLevel !== defaults.seaLevel)
     q.set('sea', String(settings.seaLevel));
+  if (settings.iceAges) q.set('ice', '1');
   if (settings.hour !== 16.5) q.set('hour', String(settings.hour));
   if (!settings.clouds) q.set('clouds', '0');
   history.replaceState(null, '', '?' + q);
@@ -78,6 +80,7 @@ function sendParams() {
       temperature: settings.temperature,
       upliftRate: settings.upliftRate,
       seaLevel: settings.seaLevel,
+      iceAges: settings.iceAges,
     },
     speed: settings.speed * 1000,
   });
@@ -124,6 +127,8 @@ const transfers = (f) =>
 const presets = {
   'Rising island': {},
   'Sinking: atoll': {upliftRate: -0.4, speed: 30},
+  // a cycle takes a second and a half at full speed, which is a blur
+  'Ice-age cycles': {iceAges: true, speed: 20},
   'Ice age': {seaLevel: -120, temperature: 18},
   Desert: {rain: 0.3, temperature: 28},
   'Arctic island': {temperature: -2, rain: 1},
@@ -134,6 +139,7 @@ const presetSettings = (name) => ({
   temperature: defaults.temperature,
   upliftRate: defaults.upliftRate,
   seaLevel: defaults.seaLevel,
+  iceAges: false,
   speed: 100,
   ...presets[name],
 });
@@ -180,6 +186,7 @@ gui
   .add(settings, 'seaLevel', -300, 300, 5)
   .name('Sea level (m)')
   .onChange(changeClimate);
+gui.add(settings, 'iceAges').name('Ice-age cycles').onChange(changeClimate);
 gui
   .add(settings, 'hour', 6, 18, 0.1)
   .name('Time of day (h)')
@@ -294,7 +301,7 @@ function showProbe() {
     i = r;
   }
   const surface = frame.height.map((h, i) =>
-    Math.max(h, frame.waterY[i], settings.seaLevel),
+    Math.max(h, frame.waterY[i], frame.seaLevel),
   );
   view.showPath(cells, surface);
 
@@ -303,21 +310,22 @@ function showProbe() {
   const area = frame.area[probe];
   const flow = frame.flow[probe] / 3.156e7; // m³/s
   const coral = frame.normal[probe * 4 + 3];
+  const sea = frame.seaLevel;
   const lines =
-    h < settings.seaLevel
+    h < sea
       ? [
-          `${fmt(settings.seaLevel - h)} m under the sea`,
+          `${fmt(sea - h)} m under the sea`,
           coral > 0.02
             ? `coral reef, building up ${fmt(coral * defaults.reefGrowth * 1000, 1)} mm a year`
             : settings.temperature <= 17
               ? 'too cold for coral'
-              : settings.seaLevel - h > 50
+              : sea - h > 50
                 ? 'too deep and dark for coral'
                 : 'no coral: too muddy, or too far from the open sea',
         ]
       : [
           `${fmt(h)} m above sea level${lake > 1 ? `, under ${fmt(lake)} m of lake` : ''}`,
-          `${capitalize(biome(frame.rain[probe], settings.temperature - 0.0065 * (h - settings.seaLevel)))}, ${fmt(frame.rain[probe], 1)} m of rain a year`,
+          `${capitalize(biome(frame.rain[probe], settings.temperature - 0.0065 * (h - sea)))}, ${fmt(frame.rain[probe], 1)} m of rain a year`,
           area < 1e6
             ? `${fmt(area / 1e4, 1)} hectares drain through here`
             : `${fmt(area / 1e6, 1)} km² drains through here`,
@@ -350,9 +358,10 @@ function loop(now) {
     }
   }
   if (frame && frame !== shown) {
-    view.update(frame, settings.seaLevel, settings.temperature, settings.wind);
+    view.update(frame, frame.seaLevel, settings.temperature, settings.wind);
     shown = frame;
-    statusEl.textContent = `${formatYears(frame.time)} · peak ${fmt(Math.max(0, frame.peak - settings.seaLevel))} m${settings.speed ? '' : ' · paused'}`;
+    const seaShift = frame.seaLevel - settings.seaLevel;
+    statusEl.textContent = `${formatYears(frame.time)} · peak ${fmt(Math.max(0, frame.peak - frame.seaLevel))} m${settings.iceAges ? ` · sea ${seaShift < -0.5 ? '−' + fmt(-seaShift) : '0'} m` : ''}${settings.speed ? '' : ' · paused'}`;
     showProbe();
   }
   view.render();

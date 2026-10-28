@@ -1,5 +1,5 @@
 // Runs the landscape model off the main thread and turns it into ready-to-draw vertex data.
-import {makeSim, defaults} from './sim.js';
+import {makeSim, defaults, iceAgeSeaLevel} from './sim.js';
 
 const STEP_YEARS = 2000;
 const BUDGET_MS = 30; // longest stretch of stepping before checking for messages
@@ -7,6 +7,8 @@ const BUDGET_MS = 30; // longest stretch of stepping before checking for message
 /** @type {ReturnType<typeof makeSim>} */
 let sim;
 let params = {...defaults};
+let baseSeaLevel = defaults.seaLevel; // the reader's setting, before the ice ages move it
+let iceAges = false;
 let speed = 0; // years per real second
 let yearsDue = 0;
 let lastTick = performance.now();
@@ -46,6 +48,7 @@ function makeFrame() {
     rivers: new Uint8Array(((sim.N - 1) * RIVER_TEXELS + 1) ** 2 * 4),
     time: 0,
     peak: 0,
+    seaLevel: 0,
   };
 }
 
@@ -150,6 +153,7 @@ function fillFrame(f) {
   f.cloud.set(sim.cloud);
   f.time = sim.time;
   f.peak = peak;
+  f.seaLevel = params.seaLevel;
 }
 
 const RIVER_MIN_FLOW = 0.02 * 3.156e7; // m³/yr, about 20 liters a second
@@ -324,6 +328,7 @@ function tick() {
   );
   lastTick = now;
   while (yearsDue >= STEP_YEARS && performance.now() - now < BUDGET_MS) {
+    setSeaLevel();
     sim.step(STEP_YEARS, params);
     updateShown(SHOWN_EASE);
     yearsDue -= STEP_YEARS;
@@ -334,6 +339,10 @@ function tick() {
   // behind the heights. Routing again just to draw took 40% of the worker's time.
   send();
   setTimeout(tick, yearsDue >= STEP_YEARS ? 0 : 8);
+}
+
+function setSeaLevel() {
+  params.seaLevel = baseSeaLevel + (iceAges ? iceAgeSeaLevel(sim.time) : 0);
 }
 
 onmessage = ({data}) => {
@@ -359,7 +368,11 @@ onmessage = ({data}) => {
     yearsDue = 0;
     if (!data.restart) tick();
   } else if (data.type === 'params') {
-    params = {...params, ...data.params};
+    const {iceAges: cycles, ...rest} = data.params;
+    params = {...params, ...rest};
+    baseSeaLevel = rest.seaLevel;
+    iceAges = cycles;
+    setSeaLevel();
     speed = data.speed;
     sim.route(params);
     dirty = true;
