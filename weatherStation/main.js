@@ -116,7 +116,26 @@ function summarizeDays(rows, now) {
       (r) => r.time.getHours() >= 7 && r.time.getHours() < 20,
     );
     const code = Math.max(...daytime.map((r) => r.weather_code ?? 0));
+    // Three-hour blocks for the 10-day line: smooth enough that
+    // the week's trend shows through the daily rise and fall.
+    const blocks = [];
+    for (let h = 0; h < 24; h += 3) {
+      const block = day.filter(
+        (r) => r.time.getHours() >= h && r.time.getHours() < h + 3,
+      );
+      if (!block.length) continue;
+      const mean = (values) =>
+        values.reduce((a, v) => a + v, 0) / values.length;
+      blocks.push({
+        hour: h + 1.5,
+        felt: mean(block.map(felt)),
+        chance: Math.max(...block.map((r) => r.precipitation_probability ?? 0)),
+        snow: block.some((r) => SNOW_CODES.has(r.weather_code)),
+        radiation: mean(block.map((r) => r.shortwave_radiation ?? 0)),
+      });
+    }
     days.push({
+      blocks,
       name: date.toLocaleDateString(undefined, {weekday: 'short'}),
       date: `${date.getMonth() + 1}/${date.getDate()}`,
       longName: date.toLocaleDateString(undefined, {weekday: 'long'}),

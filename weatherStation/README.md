@@ -4,7 +4,7 @@ The display page for the living room tablet. Open `index.html?demo` for made-up 
 
 - `main.js`: loads the weather (comfort's `fetchWeatherBundle`) and indoor readings, renders everything.
 - `indoor.js`: indoor feels-like (SET, ASHRAE 55), clothing by season, dew point.
-- `charts.js`: the 24-hour line and the 10-day bars.
+- `charts.js`: the 24-hour and 10-day lines.
 - `advice.js`: the two action lines (alerts, windows, walk, outlook).
 
 Tests: `node --test weatherStation/test/*.test.js` (SET is checked against pythermalcomfort).
@@ -60,7 +60,7 @@ Why everything is where it is:
 - **Trend arrows** next to the outside number and CO2 say which way they're heading. Where the outside temperature is going is the 24-hour chart's job, so there's no separate line for it.
 - **Every big number is feels-like; raw temperatures always say "air".** The charts have no captions: their shape says what they are, and the 10 days carry day names and dates (10/29).
 - **10 days.** Days 6–10 are drawn fainter, since the forecast is less certain that far out. Rain chances under 30% are left off both charts.
-- **The 24-hour chart** labels its high and low with times, shades the sky by sunlight as one smooth wash, and shows rain or snow as bars (height = chance) with a time-range label. The 10 days use vertical low–high bars on one shared scale, so warm-ups and cold snaps show as the bars stepping up or down, readable before the numbers.
+- **The 24-hour chart** labels its high and low with times, shades the sky by sunlight as one smooth wash, and shows rain or snow as bars (height = chance) with a time-range label. The 10 days are one continuous line (3-hour averages) across ten day columns, with each day's high above and low below, marked on the line by dots, and rain or snow as bars by time of day. It replaced low–high bars (2026-10-29): the line shows when within a day a front arrives or rain starts and stops, which the bars couldn't.
 
 ### Each question
 

@@ -244,36 +244,128 @@ export function drawHourly(svg, hours, wet) {
 
 // Days beyond this are drawn fainter: the forecast is much less sure of them.
 const CONFIDENT_DAYS = 5;
-const TRACK_HEIGHT = 58; // rem, the span of the shared temperature scale
-
-// `days` is [{name, date, icon, hi, lo, chance}], today first. `icon` is
-// comfort's SVG markup for the day's weather.
+// The ten days as one continuous line, every three hours, so it shows when
+// within a day things change: a front arriving at noon, rain overnight. The
+// columns above keep each day's name, date and icon; its high and low sit in
+// rows above and below the line, each marked on it with a dot.
+//
+// `days` is [{name, date, icon, hi, lo, chance, blocks}], today first. `icon`
+// is comfort's SVG markup for the day's weather; `blocks` are three-hour
+// averages, [{hour, felt, chance, snow, radiation}].
 export function drawDaily(container, days) {
-  // One scale for all ten days, so a cold snap shows as the bars stepping down.
-  const min = Math.min(...days.map((d) => d.lo)) - 2;
-  const max = Math.max(...days.map((d) => d.hi)) + 2;
-  const at = (t) => (1 - (t - min) / (max - min)) * TRACK_HEIGHT;
-
-  container.replaceChildren(
-    ...days.map((d, k) => {
-      const el = document.createElement('div');
-      el.className = 'day';
-      el.classList.toggle('today', k === 0);
-      el.classList.toggle('far', k >= CONFIDENT_DAYS);
-      const top = at(d.hi);
-      const bottom = at(d.lo);
-      el.innerHTML = `
+  const cells = (render) =>
+    days
+      .map(
+        (d, k) =>
+          `<div class="day${k === 0 ? ' today' : ''}${k >= CONFIDENT_DAYS ? ' far' : ''}">${render(d, k)}</div>`,
+      )
+      .join('');
+  container.innerHTML = `
+    <div class="cells day-heads">${cells(
+      (d, k) => `
         <div class="name">${k === 0 ? 'Today' : d.name}</div>
         <div class="date">${d.date}</div>
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${d.icon}</svg>
-        <div class="chance">${d.chance >= SHOW_CHANCE ? `${Math.round(d.chance / 10) * 10}%` : ''}</div>
-        <div class="range" style="height: ${TRACK_HEIGHT + 30}rem">
-          <div class="hi" style="top: ${top}rem">${Math.round(d.hi)}°</div>
-          <div class="bar" style="top: ${top + 15}rem; height: ${Math.max(4, bottom - top)}rem;
-            background: linear-gradient(${temperatureColor(d.hi)}, ${temperatureColor(d.lo)})"></div>
-          <div class="lo" style="top: ${bottom + 15}rem">${Math.round(d.lo)}°</div>
-        </div>`;
-      return el;
-    }),
+        <div class="chance">${d.chance >= SHOW_CHANCE ? `${Math.round(d.chance / 10) * 10}%` : ''}</div>`,
+    )}</div>
+    <div class="cells highs">${cells((d) => `${Math.round(d.hi)}°`)}</div>
+    <svg class="week" role="img" aria-label="Feels-like temperature for the next ${days.length} days"></svg>
+    <div class="cells lows">${cells((d) => `${Math.round(d.lo)}°`)}</div>`;
+
+  const svg = container.querySelector('svg.week');
+  const box = svg.getBoundingClientRect();
+  const width = 360;
+  const height = (width * box.height) / box.width;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+  const dayWidth = width / days.length;
+  const points = days.flatMap((d, k) =>
+    d.blocks.map((b) => ({...b, x: (k + b.hour / 24) * dayWidth, day: k})),
   );
+  const felts = points.map((p) => p.felt);
+  const min = Math.min(...felts);
+  const max = Math.max(...felts);
+  const pad = 6;
+  const y = (t) => pad + (1 - (t - min) / (max - min)) * (height - 2 * pad);
+
+  // A softer sky wash than the 24-hour chart's: the line's own rise and fall
+  // already says day and night.
+  const defs = svgElement(svg, 'defs', {});
+  const wash = svgElement(defs, 'linearGradient', {id: 'week-wash'});
+  for (const p of points) {
+    svgElement(wash, 'stop', {
+      offset: p.x / width,
+      'stop-color': skyColor(p.radiation / 2),
+    });
+  }
+  svgElement(svg, 'rect', {x: 0, y: 0, width, height, fill: 'url(#week-wash)'});
+
+  // Midnights, faintly, so each stretch of line sits under its day.
+  for (let k = 1; k < days.length; k++) {
+    svgElement(svg, 'line', {
+      x1: k * dayWidth,
+      y1: 0,
+      x2: k * dayWidth,
+      y2: height,
+      stroke: '#1e2024',
+      'stroke-width': 1,
+    });
+  }
+
+  const barWidth = (dayWidth / 8) * 0.6;
+  for (const p of points) {
+    if (p.chance < SHOW_CHANCE) continue;
+    const h = (p.chance / 100) * height * 0.45;
+    svgElement(svg, 'rect', {
+      x: p.x - barWidth / 2,
+      y: height - h,
+      width: barWidth,
+      height: h,
+      rx: 1,
+      fill: p.snow ? '#c9d6ea' : '#3f78ba',
+      opacity: 0.75,
+    });
+  }
+
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    svgElement(svg, 'line', {
+      x1: a.x,
+      y1: y(a.felt),
+      x2: b.x,
+      y2: y(b.felt),
+      stroke: temperatureColor((a.felt + b.felt) / 2),
+      'stroke-width': 2.5,
+      'stroke-linecap': 'round',
+    });
+  }
+
+  // Each day's warmest and coolest point on the line, under its numbers.
+  days.forEach((d, k) => {
+    const own = points.filter((p) => p.day === k);
+    for (const p of [
+      own.reduce((a, b) => (b.felt > a.felt ? b : a)),
+      own.reduce((a, b) => (b.felt < a.felt ? b : a)),
+    ]) {
+      svgElement(svg, 'circle', {
+        cx: p.x,
+        cy: y(p.felt),
+        r: 2.5,
+        fill: temperatureColor(p.felt),
+        stroke: '#0d0e10',
+        'stroke-width': 1.5,
+      });
+    }
+  });
+
+  // Later days fade, like the columns above them.
+  svgElement(svg, 'rect', {
+    x: CONFIDENT_DAYS * dayWidth,
+    y: 0,
+    width: width - CONFIDENT_DAYS * dayWidth,
+    height,
+    fill: '#0d0e10',
+    opacity: 0.4,
+  });
 }
