@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:," />
+    <title>Weather Station</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css"
+    />
+    <style>
+      /* The layout was designed on a 624x390 sketch of the tablet. 1rem is one
+     sketch pixel, so the whole screen scales to whatever the tablet is while
+     keeping the sketch's proportions. */
+      html {
+        font-size: min(100vw / 624, 100vh / 390);
+      }
+      :root {
+        --bg: #0d0e10;
+        --panel: #191b1f;
+        --rule: #24262a;
+        --text: #eceae4;
+        --soft: #dad8d1;
+        --sub: #b9b7af;
+        --muted: #86847e;
+        --label: #c9c6bd;
+        --rain: #3f78ba;
+        --rain-text: #7fa9d8;
+        --good: #5dcaa5;
+        --warn: #efa845;
+        --bad: #e2694a;
+        --info: #6e9bd8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Barlow Semi Condensed', system-ui, sans-serif;
+        font-variant-numeric: tabular-nums lining-nums;
+        display: grid;
+        place-items: center;
+      }
+      #screen {
+        width: 624rem;
+        height: 390rem;
+        display: grid;
+        grid-template-columns: 62fr 38fr;
+      }
+      .column {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+      }
+      #outside {
+        padding: 12rem 12rem 6rem 16rem;
+      }
+      #house {
+        border-left: 1px solid var(--rule);
+        /* The inside panel's own 9rem padding brings its label level with OUTSIDE. */
+        padding: 3rem 14rem 8rem;
+      }
+      .tag {
+        font-size: 19rem;
+        font-weight: 500;
+        letter-spacing: 0.14em;
+        color: var(--label);
+        display: flex;
+        align-items: center;
+        gap: 6rem;
+      }
+      .hero {
+        font-size: 86rem;
+        line-height: 0.86;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        display: flex;
+        align-items: flex-start;
+      }
+      .trend {
+        font-size: 26rem;
+        color: var(--muted);
+        margin: 6rem 0 0 2rem;
+      }
+      .sub {
+        font-size: 14rem;
+        color: var(--sub);
+        line-height: 1.3;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .word {
+        color: var(--text);
+        font-weight: 500;
+      }
+      #now-outside {
+        display: flex;
+        align-items: flex-end;
+        gap: 12rem;
+        margin-top: 3rem;
+      }
+      #now-outside .details {
+        padding-bottom: 3rem;
+        min-width: 0;
+      }
+      #sky {
+        color: var(--soft);
+        font-size: 16rem;
+      }
+      #hourly {
+        margin-top: 10rem;
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+      #hourly text {
+        font-family: inherit;
+      }
+      #daily {
+        display: grid;
+        grid-template-columns: repeat(10, minmax(0, 1fr));
+        margin-top: 6rem;
+        flex: 1;
+        min-height: 0;
+      }
+      .day {
+        /* comfort's partly-cloudy icon fills its small cloud with this. */
+        --card: var(--bg);
+        text-align: center;
+        min-width: 0;
+        border-radius: 6rem;
+        padding-top: 1rem;
+      }
+      .day .name {
+        font-size: 13rem;
+        line-height: 1.25;
+        color: var(--sub);
+      }
+      .day .date {
+        font-size: 11rem;
+        line-height: 1.2;
+        color: var(--muted);
+      }
+      .day.today .name {
+        color: var(--text);
+        font-weight: 500;
+      }
+      .day .icon {
+        display: block;
+        width: 18rem;
+        height: 18rem;
+        margin: 0 auto;
+        fill: none;
+        stroke: var(--sub);
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .day .chance {
+        font-size: 11rem;
+        color: var(--rain-text);
+        height: 13rem;
+        line-height: 13rem;
+      }
+      .day .range {
+        position: relative;
+      }
+      .day .hi,
+      .day .lo {
+        position: absolute;
+        left: 0;
+        right: 0;
+        font-size: 13rem;
+        line-height: 15rem;
+      }
+      .day .lo {
+        color: var(--muted);
+      }
+      .day .bar {
+        position: absolute;
+        left: 50%;
+        width: 6rem;
+        margin-left: -3rem;
+        border-radius: 3rem;
+      }
+      /* Later days are a guess, and look like one. */
+      .day.far {
+        opacity: 0.6;
+      }
+      #clock {
+        margin-top: auto;
+        text-align: right;
+      }
+      #time {
+        font-size: 64rem;
+        line-height: 0.9;
+        font-weight: 500;
+      }
+      #inside {
+        background: var(--panel);
+        border-radius: 10rem;
+        padding: 9rem 12rem;
+      }
+      #inside .hero {
+        margin-top: 3rem;
+      }
+      #actions {
+        margin-top: 8rem;
+      }
+      .action {
+        display: flex;
+        gap: 9rem;
+        align-items: flex-start;
+        padding: 6rem 0;
+      }
+      .action + .action {
+        border-top: 1px solid var(--rule);
+      }
+      .action .dot {
+        width: 10rem;
+        height: 10rem;
+        border-radius: 50%;
+        flex: none;
+        margin-top: 5rem;
+      }
+      .action .title {
+        font-size: 17rem;
+        font-weight: 500;
+        line-height: 1.15;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .action .detail {
+        font-size: 13rem;
+      }
+      /* Data that has stopped updating fades rather than passing for current. */
+      .stale {
+        opacity: 0.4;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="screen">
+      <section id="outside" class="column">
+        <div class="tag">
+          <i class="ti ti-sun" aria-hidden="true"></i>OUTSIDE
+        </div>
+        <div id="now-outside">
+          <div class="hero" id="out-felt">–</div>
+          <div class="details">
+            <div class="sub" id="sky"></div>
+            <div class="sub" id="out-air"></div>
+          </div>
+        </div>
+        <svg
+          id="hourly"
+          viewBox="0 0 360 86"
+          role="img"
+          aria-label="Feels-like temperature for the next 24 hours"
+        ></svg>
+        <div id="daily"></div>
+      </section>
+
+      <section id="house" class="column">
+        <div id="inside">
+          <div class="tag">
+            <i class="ti ti-home" aria-hidden="true"></i>INSIDE
+          </div>
+          <div class="hero" id="in-felt">–</div>
+          <div class="sub" id="in-air" style="margin-top: 3rem">
+            Waiting for the Aranet4
+          </div>
+          <div class="sub" id="in-co2"></div>
+        </div>
+        <div id="actions"></div>
+        <div id="clock">
+          <div id="time">–</div>
+          <div class="sub" id="date"></div>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
