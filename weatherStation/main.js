@@ -61,6 +61,17 @@ window.onSensi = (state) => {
   render();
 };
 
+// The room's light level in lux, from the tablet's sensor. The app dims the
+// screen itself; the page just switches to a warmer, lower-contrast look once
+// the room is dark. Two thresholds, so a lamp at the edge doesn't flicker it.
+const NIGHT_BELOW_LUX = 8;
+const DAY_ABOVE_LUX = 20;
+window.onLight = (lux) => {
+  const body = document.body.classList;
+  if (lux < NIGHT_BELOW_LUX) body.add('night');
+  else if (lux > DAY_ABOVE_LUX) body.remove('night');
+};
+
 // --- Outside ----------------------------------------------------------------
 
 // Feels-like in the shade everywhere, so the hero, the 24 hours and the 10 days
@@ -377,6 +388,8 @@ function startDemo() {
 }
 
 if (params.has('demo')) startDemo();
+// ?lux=3 pretends the room is that bright, for working on the night look.
+if (params.has('lux')) window.onLight(Number(params.get('lux')));
 loadWeather();
 setInterval(loadWeather, WEATHER_REFRESH_MS);
 // Redraw on the minute, so the clock turns over when it should.

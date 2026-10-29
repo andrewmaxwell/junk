@@ -60,7 +60,7 @@ Why everything is where it is:
 - **Trend arrows** next to the outside number and CO2 say which way they're heading. Where the outside temperature is going is the 24-hour chart's job, so there's no separate line for it.
 - **Every big number is feels-like; raw temperatures always say "air".** The charts have no captions: their shape says what they are, and the 10 days carry day names and dates (10/29).
 - **10 days.** Days 6–10 are drawn fainter, since the forecast is less certain that far out. Rain chances under 30% are left off both charts.
-- **The 24-hour chart** labels its high and low with times, shades the sky by sunlight as one smooth wash, and shows rain or snow as bars (height = chance) with a time-range label. The 10 days are one continuous line (3-hour averages) across ten day columns, with each day's high above and low below, marked on the line by dots, and rain or snow as bars by time of day. It replaced low–high bars (2026-10-29): the line shows when within a day a front arrives or rain starts and stops, which the bars couldn't.
+- **The 24-hour chart** labels its high and low with times, shades the sky by sunlight as one smooth wash, and shows rain or snow as bars (height = chance) with a time-range label. The 10 days are one continuous line (3-hour averages) across ten day columns, with each day's high over its low below the line ("80/52°" side by side was too wide for a column), and rain or snow as bars by time of day. It replaced low–high bars (2026-10-29): the line shows when within a day a front arrives or rain starts and stops, which the bars couldn't.
 
 ### Each question
 
@@ -115,7 +115,7 @@ Indoor "feels like" (SET) is new, not in comfort.
 
 ### Night
 
-From bedtime to morning, or when the room goes dark (the tablet's light sensor, or sunset from the forecast): brightness way down via `Android.setBrightness`, warmer and dimmer colors, and maybe just the time and two temperatures.
+The Android app reads the tablet's light sensor and sets the screen brightness itself, or leaves it to Android when Adaptive brightness is on (see weather-station-android's README), then calls `window.onLight(lux)`. Below 8 lux the page switches to a night look: warmer, softer whites and quieter colors, with the layout unchanged. It switches back above 20 lux, so a lamp at the threshold doesn't flicker it. `?lux=3` pretends the room is dark, for working on it.
 
 ### Freshness
 

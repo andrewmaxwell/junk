@@ -133,8 +133,8 @@
       #hourly text {
         font-family: inherit;
       }
-      /* The ten days: a row of day headings, the highs, one line across all
-         ten days, then the lows. */
+      /* The ten days: a row of day headings, one line across all ten days,
+         then each day's high over its low. */
       #daily {
         display: flex;
         flex-direction: column;
@@ -146,12 +146,12 @@
         display: grid;
         grid-template-columns: repeat(10, minmax(0, 1fr));
       }
-      #daily .highs,
-      #daily .lows {
+      #daily .temps {
         font-size: 13rem;
-        line-height: 1.3;
+        line-height: 1.15;
+        margin-top: 3rem;
       }
-      #daily .lows {
+      #daily .temps .lo {
         color: var(--muted);
       }
       #daily svg.week {
@@ -252,6 +252,15 @@
       /* Data that has stopped updating fades rather than passing for current. */
       .stale {
         opacity: 0.4;
+      }
+      /* A dark room: the app has already turned the backlight right down, so
+         this is about glare and color, not brightness. Warmer, softer whites
+         and quieter colors, with the layout unchanged. */
+      body.night #screen {
+        filter: sepia(0.25) saturate(0.85) brightness(0.8);
+      }
+      body.night #inside {
+        background: #131416;
       }
     </style>
   </head>

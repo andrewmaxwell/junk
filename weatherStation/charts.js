@@ -171,14 +171,6 @@ export function drawHourly(svg, hours, wet) {
     [hi, 'high', true],
     [lo, 'low', false],
   ]) {
-    svgElement(svg, 'circle', {
-      cx: x(i),
-      cy: y(felts[i]),
-      r: 3.5,
-      fill: temperatureColor(felts[i]),
-      stroke: '#0d0e10',
-      'stroke-width': 2,
-    });
     const when =
       i === 0 ? 'now' : hourLabel(hours[i].time).replace(/([ap])$/, '$1m');
     // Keep labels near the edges from running off the chart.
@@ -246,8 +238,8 @@ export function drawHourly(svg, hours, wet) {
 const CONFIDENT_DAYS = 5;
 // The ten days as one continuous line, every three hours, so it shows when
 // within a day things change: a front arriving at noon, rain overnight. The
-// columns above keep each day's name, date and icon; its high and low sit in
-// rows above and below the line, each marked on it with a dot.
+// columns above keep each day's name, date and icon; its high and low sit
+// together below the line, the high over the low.
 //
 // `days` is [{name, date, icon, hi, lo, chance, blocks}], today first. `icon`
 // is comfort's SVG markup for the day's weather; `blocks` are three-hour
@@ -268,9 +260,12 @@ export function drawDaily(container, days) {
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${d.icon}</svg>
         <div class="chance">${d.chance >= SHOW_CHANCE ? `${Math.round(d.chance / 10) * 10}%` : ''}</div>`,
     )}</div>
-    <div class="cells highs">${cells((d) => `${Math.round(d.hi)}°`)}</div>
     <svg class="week" role="img" aria-label="Feels-like temperature for the next ${days.length} days"></svg>
-    <div class="cells lows">${cells((d) => `${Math.round(d.lo)}°`)}</div>`;
+    <div class="cells temps">${cells(
+      (d) => `
+        <div class="hi">${Math.round(d.hi)}°</div>
+        <div class="lo">${Math.round(d.lo)}°</div>`,
+    )}</div>`;
 
   const svg = container.querySelector('svg.week');
   const box = svg.getBoundingClientRect();
@@ -280,7 +275,7 @@ export function drawDaily(container, days) {
 
   const dayWidth = width / days.length;
   const points = days.flatMap((d, k) =>
-    d.blocks.map((b) => ({...b, x: (k + b.hour / 24) * dayWidth, day: k})),
+    d.blocks.map((b) => ({...b, x: (k + b.hour / 24) * dayWidth})),
   );
   const felts = points.map((p) => p.felt);
   const min = Math.min(...felts);
@@ -340,24 +335,6 @@ export function drawDaily(container, days) {
       'stroke-linecap': 'round',
     });
   }
-
-  // Each day's warmest and coolest point on the line, under its numbers.
-  days.forEach((d, k) => {
-    const own = points.filter((p) => p.day === k);
-    for (const p of [
-      own.reduce((a, b) => (b.felt > a.felt ? b : a)),
-      own.reduce((a, b) => (b.felt < a.felt ? b : a)),
-    ]) {
-      svgElement(svg, 'circle', {
-        cx: p.x,
-        cy: y(p.felt),
-        r: 2.5,
-        fill: temperatureColor(p.felt),
-        stroke: '#0d0e10',
-        'stroke-width': 1.5,
-      });
-    }
-  });
 
   // Later days fade, like the columns above them.
   svgElement(svg, 'rect', {
