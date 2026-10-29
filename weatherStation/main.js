@@ -19,6 +19,7 @@ import {
   hourRange,
 } from './charts.js';
 import {pickActions} from './advice.js';
+import {weekSentence} from './week.js';
 
 // Rounded to ~6 miles: plenty for weather, and junk is public.
 // Override with ?lat=..&lon=.. (the Android app's page URL can carry them).
@@ -27,11 +28,20 @@ const LAT = Number(params.get('lat') ?? 38.8);
 const LON = Number(params.get('lon') ?? -90.4);
 
 const WEATHER_REFRESH_MS = 10 * 60_000;
+// After a failed fetch, try again sooner, backing off to the usual 10 minutes.
+const RETRY_MS = [1, 2, 5].map((m) => m * 60_000);
 const OUTSIDE_STALE_MS = 30 * 60_000;
 const INSIDE_STALE_MS = 5 * 60_000;
 const FORECAST_DAYS = 10;
 
 const $ = (id) => document.getElementById(id);
+const clockTime = (ms) => {
+  const d = new Date(ms);
+  const time = `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}${d.getHours() < 12 ? 'am' : 'pm'}`;
+  return new Date().toDateString() === d.toDateString()
+    ? time
+    : `${d.toLocaleDateString(undefined, {weekday: 'short'})} ${time}`;
+};
 const round = (n) => Math.round(n);
 const toF = (c) => c * 1.8 + 32;
 
@@ -39,6 +49,7 @@ const toF = (c) => c * 1.8 + 32;
 
 let weather = null; // comfort's bundle, plus when it arrived
 let weatherAt = 0;
+let weatherError = null; // why the last fetch failed, while it keeps failing
 let aranet = null; // latest Aranet4 broadcast, plus when it arrived
 let aranetHistory = [];
 let sensi = null;
@@ -160,8 +171,7 @@ function summarizeDays(rows, now) {
   return days;
 }
 
-function renderOutside(now, days) {
-  const {current, upcoming} = weather;
+function renderOutside(now, days, {current, upcoming}) {
   const feltNow = felt(current);
   const hero = $('out-felt');
   hero.style.color = temperatureColor(feltNow);
@@ -193,12 +203,15 @@ function renderOutside(now, days) {
     snow: SNOW_CODES.has(row.weather_code),
   }));
   drawHourly($('hourly'), hours, wetSpell(hours));
+  $('week').textContent = weekSentence({
+    history: weather.rows.filter(
+      (r) => r.time <= now && now - r.time < 24 * 3600_000,
+    ),
+    upcoming,
+    days,
+    now,
+  });
   drawDaily($('daily'), days);
-
-  $('outside').classList.toggle(
-    'stale',
-    Date.now() - weatherAt > OUTSIDE_STALE_MS,
-  );
 }
 
 // --- Inside -----------------------------------------------------------------
@@ -272,10 +285,11 @@ function renderInside(inside) {
     co2 == null
       ? sensiWords()
       : `CO₂ <span style="color: ${color}">${co2}${co2Trend()}</span>${sensiWords()}`;
-  box.classList.toggle(
-    'stale',
-    Date.now() - aranet.receivedAt > INSIDE_STALE_MS,
-  );
+  const stale = Date.now() - aranet.receivedAt > INSIDE_STALE_MS;
+  box.classList.toggle('stale', stale);
+  $('in-age').textContent = stale
+    ? `as of ${clockTime(aranet.receivedAt)}`
+    : '';
 }
 
 // --- Clock and actions ------------------------------------------------------
@@ -293,7 +307,7 @@ function renderClock(now) {
     const {sunset, nextSunrise} = weather;
     const [icon, time] =
       sunset && now < sunset ? ['sunset-2', sunset] : ['sunrise', nextSunrise];
-    if (time)
+    if (time && time > now)
       sun = ` · <i class="ti ti-${icon}" aria-hidden="true"></i> ${time.getHours() % 12 || 12}:${String(time.getMinutes()).padStart(2, '0')}`;
   }
   $('date').innerHTML = date + sun;
@@ -313,18 +327,43 @@ function renderActions(context) {
     .join('');
 }
 
+// What "now" and "next" are outside. Normally Open-Meteo's current block, but
+// once the forecast is stale (offline, or loaded from the cache after a
+// reboot) that block is old news, and the forecast's own hour for now is the
+// better guess. Either way the heading says how old the forecast is.
+function outsideNow(now) {
+  const upcoming = weather.rows.filter(
+    (r) => r.time.getTime() + 3600_000 > now.getTime(),
+  );
+  const stale = Date.now() - weatherAt > OUTSIDE_STALE_MS;
+  const current = stale ? upcoming[0] : weather.current;
+  $('outside').classList.toggle('stale', stale);
+  $('out-age').textContent = stale
+    ? `forecast from ${clockTime(weatherAt)}${weatherError ? ' · offline' : ''}`
+    : '';
+  return current && upcoming.length > 24 ? {current, upcoming} : null;
+}
+
 function render() {
   const now = new Date();
   renderClock(now);
   const inside = insideConditions(now);
   renderInside(inside);
-  if (!weather) return;
+  if (!weather) {
+    if (weatherError)
+      $('sky').textContent = `No forecast yet: ${weatherError} · retrying`;
+    return;
+  }
+  const outside = outsideNow(now);
+  if (!outside) {
+    $('sky').textContent = 'The saved forecast has run out · retrying';
+    return;
+  }
   const days = summarizeDays(weather.rows, now);
-  renderOutside(now, days);
+  renderOutside(now, days, outside);
 
   renderActions({
-    current: weather.current,
-    upcoming: weather.upcoming,
+    ...outside,
     inside,
     sensi,
     now,
@@ -334,18 +373,67 @@ function render() {
 
 // --- Loading ----------------------------------------------------------------
 
+// The last good forecast, kept so a reboot without internet still has
+// something to show (faded, with its age).
+const CACHE_KEY = 'weatherStation.weather';
+
+function saveWeather() {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({weatherAt, weather}));
+  } catch {
+    // Storage full or blocked: the cache is a nicety.
+  }
+}
+
+function restoreWeather() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CACHE_KEY));
+    if (!saved) return;
+    const date = (t) => (t ? new Date(t) : null);
+    const {current, rows, sunset, nextSunrise} = saved.weather;
+    weather = {
+      current: {...current, time: date(current.time)},
+      rows: rows.map((r) => ({...r, time: date(r.time)})),
+      sunset: date(sunset),
+      nextSunrise: date(nextSunrise),
+    };
+    weatherAt = saved.weatherAt;
+  } catch (error) {
+    console.warn('Ignoring the saved forecast', error);
+  }
+}
+
+let retries = 0;
+let nextLoad = null;
+
 async function loadWeather() {
+  clearTimeout(nextLoad);
+  let wait = WEATHER_REFRESH_MS;
   try {
     // One past day so today's low counts the hours already gone.
-    weather = await fetchWeatherBundle(LAT, LON, {
-      historyDays: 1,
-      forecastDays: FORECAST_DAYS + 1,
-    });
+    const {current, rows, sunset, nextSunrise} = await fetchWeatherBundle(
+      LAT,
+      LON,
+      {historyDays: 1, forecastDays: FORECAST_DAYS + 1},
+    );
+    weather = {current, rows, sunset, nextSunrise};
     weatherAt = Date.now();
+    weatherError = null;
+    retries = 0;
+    saveWeather();
   } catch (error) {
-    // Keep showing the last forecast; it fades once it's stale.
+    // Keep showing the last forecast; it fades and says its age once stale.
     console.warn(error);
+    weatherError = !navigator.onLine
+      ? 'no internet'
+      : error instanceof TypeError
+        ? "can't reach Open-Meteo"
+        : error.name === 'TimeoutError'
+          ? 'Open-Meteo timed out'
+          : error.message;
+    wait = RETRY_MS[retries++] ?? WEATHER_REFRESH_MS;
   }
+  nextLoad = setTimeout(loadWeather, wait);
   render();
 }
 
@@ -390,8 +478,9 @@ function startDemo() {
 if (params.has('demo')) startDemo();
 // ?lux=3 pretends the room is that bright, for working on the night look.
 if (params.has('lux')) window.onLight(Number(params.get('lux')));
+restoreWeather();
 loadWeather();
-setInterval(loadWeather, WEATHER_REFRESH_MS);
+window.addEventListener('online', loadWeather);
 // Redraw on the minute, so the clock turns over when it should.
 setTimeout(
   () => {

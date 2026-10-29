@@ -2,9 +2,9 @@
 // The actions area: short things to do, each a one-line headline plus a reason.
 //
 // There's room for two, so everything that could be said competes for them:
-// safety first, then the house (windows, stale air), then the walk, then the
-// outlook for the days ahead. Each candidate carries a `rank` and the two
-// lowest win.
+// safety first, then the house (windows, stale air), then the walk. Each
+// candidate carries a `rank` and the two lowest win. What's coming later in
+// the week has its own line over the 10-day chart (week.js).
 // ---------------------------------------------------------------------------
 
 import {
@@ -23,7 +23,7 @@ const COLORS = {
   info: 'var(--info)',
 };
 
-const RANK = {alert: 0, house: 1, walk: 2, outlook: 3};
+const RANK = {alert: 0, house: 1, walk: 2};
 
 const at = (date) => hourLabel(date).replace(/([ap])$/, '$1m');
 
@@ -248,10 +248,19 @@ const SHORT_LEAD = 28;
 // comfort's words for its score bands, with "Tolerable" shortened so the
 // headline fits on one line.
 const walkWord = (score) => comfortVerdict(score).replace('Tolerable', 'Fair');
-function shortReason(row, result) {
-  const sentence = comfortReason(row, result.limiter, result.penalties, WALK)
+// comfort speaks about right now ("It is dark out"); a window later on gets
+// the same words moved to then.
+const LATER = [
+  [/^It is dark out/, 'After dark'],
+  [/ falling now/, ' falling'],
+  [/^Freezing rain is glazing everything/, 'Freezing rain'],
+];
+function shortReason(row, result, later = false) {
+  let sentence = comfortReason(row, result.limiter, result.penalties, WALK)
     .replace(` ${WALK.phrase}`, '')
     .replace(/\.$/, '');
+  if (later)
+    for (const [now, then] of LATER) sentence = sentence.replace(now, then);
   const [lead, clothes] = sentence.split('; ');
   const short = lead.length > SHORT_LEAD ? lead.split(',')[0] : lead;
   return clothes ? `${short}; ${clothes.replace(/^wear /, '')}` : short;
@@ -296,7 +305,9 @@ function walkAdvice({current, upcoming, now}) {
       ...walk,
       color: best.score >= GOOD_WALK ? COLORS.info : COLORS.warn,
       title: `${walkWord(best.score)} walk ${when}`,
-      detail: row ? shortReason(row, scoreComfort(row, {activity: WALK})) : '',
+      detail: row
+        ? shortReason(row, scoreComfort(row, {activity: WALK}), true)
+        : '',
     };
   }
   return {
@@ -307,47 +318,8 @@ function walkAdvice({current, upcoming, now}) {
   };
 }
 
-// --- Outlook ----------------------------------------------------------------
-
-const NOTICEABLE_CHANGE = 10; // °F felt, daily high against today's
-const OUTLOOK_DAYS = 3;
-
-const decade = (t) => {
-  const d = Math.floor(t / 10) * 10;
-  return d < 10 ? 'single digits' : `${d}s`;
-};
-
-function outlook({days}) {
-  const today = days[0];
-  for (const day of days.slice(1, OUTLOOK_DAYS + 1)) {
-    if (day.snow && day.chance >= 40) {
-      return {
-        rank: RANK.outlook,
-        color: COLORS.info,
-        title: `Snow ${day.longName}`,
-        detail: `${Math.round(day.chance)}% chance`,
-      };
-    }
-    const change = day.hi - today.hi;
-    if (Math.abs(change) >= NOTICEABLE_CHANGE) {
-      return {
-        rank: RANK.outlook,
-        color: COLORS.info,
-        title: `${change < 0 ? 'Colder' : 'Warmer'} ${day.longName}`,
-        detail: `highs in the ${decade(day.hi)}`,
-      };
-    }
-  }
-  return null;
-}
-
 export function pickActions(context) {
-  return [
-    ...alerts(context),
-    windowAdvice(context),
-    walkAdvice(context),
-    outlook(context),
-  ]
+  return [...alerts(context), windowAdvice(context), walkAdvice(context)]
     .filter(Boolean)
     .sort((a, b) => a.rank - b.rank)
     .slice(0, 2);

@@ -5,7 +5,8 @@ The display page for the living room tablet. Open `index.html?demo` for made-up 
 - `main.js`: loads the weather (comfort's `fetchWeatherBundle`) and indoor readings, renders everything.
 - `indoor.js`: indoor feels-like (SET, ASHRAE 55), clothing by season, dew point.
 - `charts.js`: the 24-hour and 10-day lines.
-- `advice.js`: the two action lines (alerts, windows, walk, outlook).
+- `advice.js`: the two action lines (alerts, windows, walk).
+- `week.js`: the line over the 10 days that says what's coming.
 
 Tests: `node --test weatherStation/test/*.test.js` (SET is checked against pythermalcomfort).
 
@@ -56,7 +57,7 @@ Why everything is where it is:
 - **Inside is treated differently, not just labelled differently.** It sits in a lit "room" panel with a house icon, while outside is open. Its number is white, while outside's is colored by temperature: indoor is nearly always comfortable, so color would only be noise there, and color stays the signal for weather.
 - **Actions sit right under the house**, because most are about it: what's true inside, then what to do about it. "Is there anything I should do?" has one place to look.
 - **The clock goes bottom right.** It belongs to neither place, and a corner is where a clock is easy to find without competing with the temperatures.
-- **Actions have room for exactly two one-line items**, so they're ranked: safety (NWS alerts, freezing rain, hazardous air) > windows/HVAC > walk > outlook ("Colder Saturday"). The outlook only appears when nothing more urgent needs the space. Headlines must fit on one line (checked in a browser at the tablet's shape).
+- **Actions have room for exactly two one-line items**, so they're ranked: safety (freezing rain, storms, damaging gusts, hazardous air, all read from the forecast) > windows/HVAC > walk. NWS alerts are left out on purpose: they already reach Andrew's phone. What's coming later in the week isn't an action: it has its own line over the 10 days (it used to be a fourth-ranked action, and almost never got a slot). Headlines must fit on one line (checked in a browser at the tablet's shape).
 - **Trend arrows** next to the outside number and CO2 say which way they're heading. Where the outside temperature is going is the 24-hour chart's job, so there's no separate line for it.
 - **Every big number is feels-like; raw temperatures always say "air".** The charts have no captions: their shape says what they are, and the 10 days carry day names and dates (10/29).
 - **10 days.** Days 6–10 are drawn fainter, since the forecast is less certain that far out. Rain chances under 30% are left off both charts.
@@ -84,13 +85,11 @@ Why everything is where it is:
 
 **Walk.** comfort's score and verdict for now. If now isn't good, `findBestWindow` for the rest of today, or tomorrow if today is done: "Best walk: tomorrow 10–11am".
 
-**Next few days.** Two lines of plain sentences on top of a chart:
+**Next few days.** One line of words over the 10-day chart (`week.js`), at most two things in the order they happen, like "Rain early Sun morning · Colder Mon, highs in the 60s":
 
-- **Sentences** are generated from events in the forecast, at most two, the most important first:
-  - rain or snow starting and stopping ("Rain 3am to noon tomorrow")
-  - a noticeable warm-up or cool-off: the daily high or low moving 10°F+ from today, or well away from normal using comfort's climatology ("Turning colder Friday, highs in the 40s")
-  - first freeze, heat, strong wind, NWS alerts
-- **Chart:** hourly feels-like for 5 days as a temperature-colored line, precipitation as bars (rain and snow styled differently), night shaded, day names along the bottom. Up close it shows the shape. From the couch the sentences carry it.
+- The next spell of rain, snow or storms in the first 5 days: hours at 40%+ (the 24-hour chart's bar), with gaps under 6 hours merged ("on and off" when under 70% of the span is wet). A lone 40–59% hour is ignored. It says when it starts and stops in forecast words: "this afternoon", "tonight", "Sun morning". The small hours are "late Sat night", not NWS's bare "Sat night", because on the chart those hours sit in Sunday's column. Already falling: "Rain till 9pm". Over two days: "Rain Sun–Wed". None: "Dry through Mon".
+- The biggest day-to-day jump in the felt high over the next week, if 10°+ ("Much" at 20°+), with the highs' decade. If the air (not felt) temperature first drops to 32° within two days of it, "freezing that night" replaces the highs, since the numbers below already show the highs. A freeze with no big swing gets its own clause. Only the first freeze counts: if it froze in the last day, it isn't news.
+- Not attempted: departures from normal (comfort's climatology), heat and wind events.
 
 ### What comes from comfort
 
@@ -119,7 +118,11 @@ The Android app reads the tablet's light sensor and sets the screen brightness i
 
 ### Freshness
 
-Each source (Open-Meteo, Aranet4, Sensi) has a last-updated time. When one goes stale, its numbers fade and show their age, rather than looking current when they aren't.
+When a source goes stale, its numbers fade and its heading says how old they are, in amber: "forecast from 11:27am · offline" after 30 minutes, "as of 4:28pm" for the Aranet4 after 5. (The Sensi isn't connected yet.)
+
+- The last good forecast is kept in localStorage and painted on load, so a reboot without internet still shows something (first paint ~0.3 s instead of waiting ~2 s for Open-Meteo).
+- Once the forecast is stale, "now" outside comes from the forecast's own hour for now, not Open-Meteo's old current block, and the charts start from the real now. If the saved forecast runs out (under 24 hours left), the page says so.
+- A failed fetch retries after 1, 2 and 5 minutes, then every 10, and straight away when the browser comes back online. With nothing saved, it says why: "No forecast yet: can't reach Open-Meteo · retrying".
 
 ### Touch, later
 
