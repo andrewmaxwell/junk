@@ -101,7 +101,7 @@ function whyNotOpen(row, band) {
   if (air < band.heat) return 'getting cold';
   if (air > band.cool) return 'getting hot';
   if ((row.dew_point_2m ?? 0) > MUGGY_DEW_POINT) return 'getting muggy';
-  if ((row.us_aqi ?? 0) > POOR_AQI) return 'air quality dropping';
+  if ((row.us_aqi ?? 0) > POOR_AQI) return 'air getting worse';
   return null;
 }
 
@@ -125,8 +125,10 @@ function openReason(inside, current, then) {
   if (out < inside.airF - 2 && inside.airF > IDEAL_F) parts.push('cooler');
   if (current.dew_point_2m < inside.dewF - 3 && inside.dewF > 55)
     parts.push('drier');
+  // With an ending to fit too, there's only room for the first of these.
+  const kept = then ? parts.slice(0, 1) : parts;
   const reasons = [
-    parts.length ? `${parts.join(' and ')} out` : 'free fresh air',
+    kept.length ? `${kept.join(' and ')} out` : 'free fresh air',
   ];
   if (inside.co2 >= STUFFY_CO2) reasons.push('stuffy in');
   if (then) reasons.push(`then ${then}`);

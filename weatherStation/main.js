@@ -32,6 +32,8 @@ const WEATHER_REFRESH_MS = 10 * 60_000;
 const RETRY_MS = [1, 2, 5].map((m) => m * 60_000);
 const OUTSIDE_STALE_MS = 30 * 60_000;
 const INSIDE_STALE_MS = 5 * 60_000;
+// The app repeats the thermostat's state every minute while it's connected.
+const SENSI_STALE_MS = 5 * 60_000;
 const FORECAST_DAYS = 10;
 
 const $ = (id) => document.getElementById(id);
@@ -351,6 +353,8 @@ function outsideNow(now) {
 
 function render() {
   const now = new Date();
+  // Advice shouldn't rest on an old setpoint, so a lost connection drops it.
+  if (sensi && Date.now() - sensi.receivedAt > SENSI_STALE_MS) sensi = null;
   renderClock(now);
   const inside = insideConditions(now);
   renderInside(inside);
@@ -446,6 +450,13 @@ async function loadWeather() {
 function startDemo() {
   const start = Date.now();
   const tick = () => {
+    window.onSensi({
+      tempF: 72,
+      heatSetpoint: 68,
+      coolSetpoint: 80,
+      mode: 'heat',
+      running: null,
+    });
     const minutes = (Date.now() - start) / 60_000;
     window.onAranet({
       co2: Math.round(1150 + 40 * Math.sin(minutes / 3)),
@@ -469,13 +480,6 @@ function startDemo() {
     });
   }
   window.onAranetHistory(history);
-  window.onSensi({
-    tempF: 72,
-    heatSetpoint: 68,
-    coolSetpoint: 80,
-    mode: 'heat',
-    running: null,
-  });
   tick();
   setInterval(tick, 60_000);
 }
