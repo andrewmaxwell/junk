@@ -87,7 +87,26 @@ function kindOf(rows) {
   return snowy === rows.length ? 'Snow' : 'Rain and snow';
 }
 
+// Each way of saying it, longest first; the page uses the longest that fits.
 function describeSpell(spell, now) {
+  const words = spellWords(spell, now);
+  const from = partOfDay(spell.start, now);
+  const to = partOfDay(spell.end, now);
+  const kind = kindOf(spell.rows);
+  return [
+    ...new Set([
+      words,
+      // "Rain late Mon night–Tue"
+      spell.start > now && from.day !== to.day
+        ? `${kind} ${from.words}–${to.day}`
+        : words,
+      // Just the calendar day it starts, as the 10-day columns have it.
+      spell.start > now ? `${kind} ${dayWord(spell.start, now)}` : words,
+    ]),
+  ];
+}
+
+function spellWords(spell, now) {
   const kind = kindOf(spell.rows);
   const hours = (spell.end - spell.start) / HOUR + 1;
   const patchy = spell.rows.length < 0.7 * hours ? ' on and off' : '';
@@ -135,13 +154,14 @@ function firstFreeze(history, upcoming, now) {
 }
 
 // `history` and `upcoming` are hourly rows (comfort's), `days` the 10-day
-// summary with each day's felt `hi`, today first.
+// summary with each day's felt `hi`, today first. Returns the clauses in time
+// order, each a list of ways to say it, longest first.
 export function weekSentence({history, upcoming, days, now}) {
   const clauses = [];
 
   const wetHorizon = startOfDay(now).getTime() + WET_DAYS * 24 * HOUR;
   const spell = wetSpells(upcoming).find((s) => s.start < wetHorizon);
-  if (spell) clauses.push({at: spell.start, text: describeSpell(spell, now)});
+  if (spell) clauses.push({at: spell.start, ways: describeSpell(spell, now)});
 
   let swing = null;
   for (let k = 1; k < Math.min(days.length, SWING_DAYS); k++) {
@@ -165,14 +185,15 @@ export function weekSentence({history, upcoming, days, now}) {
     const word =
       (Math.abs(swing.change) >= BIG_SWING ? 'Much ' : '') +
       (swing.change < 0 ? 'colder' : 'warmer');
-    let text = `${word[0].toUpperCase()}${word.slice(1)} ${day}`;
+    const short = `${word[0].toUpperCase()}${word.slice(1)} ${day}`;
+    let text = short;
     // A freeze is news the highs below the chart don't show; the highs are.
     if (freeze && Math.abs(freeze.time - date) < 2 * 24 * HOUR)
       text += `, freezing ${freezeWhen.day === day && freezeWhen.part?.endsWith('night') ? 'that night' : freezeWhen.words}`;
     else text += `, highs in the ${decade(days[swing.k].hi)}`;
-    clauses.push({at: date, text});
+    clauses.push({at: date, ways: [text, short]});
   } else if (freeze) {
-    clauses.push({at: freeze.time, text: `Freezing ${freezeWhen.words}`});
+    clauses.push({at: freeze.time, ways: [`Freezing ${freezeWhen.words}`]});
   }
 
   if (!spell) {
@@ -181,10 +202,28 @@ export function weekSentence({history, upcoming, days, now}) {
       now.getMonth(),
       now.getDate() + WET_DAYS - 1,
     );
-    clauses.push({at: now, text: `Dry through ${dayWord(last, now)}`});
+    clauses.push({at: now, ways: [`Dry through ${dayWord(last, now)}`]});
   }
-  return clauses
-    .sort((a, b) => a.at - b.at)
-    .map((c) => c.text)
-    .join(' · ');
+  return clauses.sort((a, b) => a.at - b.at).map((c) => c.ways);
+}
+
+// The longest version that `fits`: while it doesn't, the longest clause that
+// can be said more briefly is.
+export function fitWeek(clauses, fits) {
+  const pick = clauses.map(() => 0);
+  const text = () => clauses.map((ways, i) => ways[pick[i]]).join(' · ');
+  while (!fits(text())) {
+    let longest = -1;
+    clauses.forEach((ways, i) => {
+      if (
+        pick[i] < ways.length - 1 &&
+        (longest < 0 ||
+          ways[pick[i]].length > clauses[longest][pick[longest]].length)
+      )
+        longest = i;
+    });
+    if (longest < 0) break;
+    pick[longest]++;
+  }
+  return text();
 }

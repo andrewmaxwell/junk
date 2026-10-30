@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {weekSentence, partOfDay} from '../week.js';
+import {weekSentence as clauses, partOfDay, fitWeek} from '../week.js';
+
+// The full sentence, with room for all of it.
+const weekSentence = (options) => fitWeek(clauses(options), () => true);
 
 // Thursday Oct 29 2026, 4pm local.
 const now = new Date(2026, 9, 29, 16);
@@ -153,4 +156,24 @@ test('first freeze is news, a freeze in midwinter is not', () => {
     }),
     'Dry through Mon',
   );
+});
+
+test('a long line gives up detail, longest clause first', () => {
+  const upcoming = hours(wetBetween(at(4, 2), at(4, 16)));
+  const days = flatDays([75, 74, 50]);
+  const ways = clauses({history, upcoming, days, now});
+  assert.equal(
+    fitWeek(ways, () => true),
+    'Much colder Sat, highs in the 50s · Rain late Sun night into Mon afternoon',
+  );
+  const fitsIn = (n) => (text) => text.length <= n;
+  assert.equal(
+    fitWeek(ways, fitsIn(60)),
+    'Much colder Sat, highs in the 50s · Rain late Sun night–Mon',
+  );
+  assert.equal(
+    fitWeek(ways, fitsIn(45)),
+    'Much colder Sat · Rain late Sun night–Mon',
+  );
+  assert.equal(fitWeek(ways, fitsIn(10)), 'Much colder Sat · Rain Mon');
 });

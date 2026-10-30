@@ -19,7 +19,7 @@ import {
   hourRange,
 } from './charts.js';
 import {pickActions} from './advice.js';
-import {weekSentence} from './week.js';
+import {weekSentence, fitWeek} from './week.js';
 
 // Rounded to ~6 miles: plenty for weather, and junk is public.
 // Override with ?lat=..&lon=.. (the Android app's page URL can carry them).
@@ -203,13 +203,18 @@ function renderOutside(now, days, {current, upcoming}) {
     snow: SNOW_CODES.has(row.weather_code),
   }));
   drawHourly($('hourly'), hours, wetSpell(hours));
-  $('week').textContent = weekSentence({
+  const week = $('week');
+  const clauses = weekSentence({
     history: weather.rows.filter(
       (r) => r.time <= now && now - r.time < 24 * 3600_000,
     ),
     upcoming,
     days,
     now,
+  });
+  week.textContent = fitWeek(clauses, (text) => {
+    week.textContent = text;
+    return week.scrollWidth <= week.clientWidth;
   });
   drawDaily($('daily'), days);
 }

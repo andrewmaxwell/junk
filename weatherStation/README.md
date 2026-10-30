@@ -89,6 +89,7 @@ Why everything is where it is:
 
 - The next spell of rain, snow or storms in the first 5 days: hours at 40%+ (the 24-hour chart's bar), with gaps under 6 hours merged ("on and off" when under 70% of the span is wet). A lone 40–59% hour is ignored. It says when it starts and stops in forecast words: "this afternoon", "tonight", "Sun morning". The small hours are "late Sat night", not NWS's bare "Sat night", because on the chart those hours sit in Sunday's column. Already falling: "Rain till 9pm". Over two days: "Rain Sun–Wed". None: "Dry through Mon".
 - The biggest day-to-day jump in the felt high over the next week, if 10°+ ("Much" at 20°+), with the highs' decade. If the air (not felt) temperature first drops to 32° within two days of it, "freezing that night" replaces the highs, since the numbers below already show the highs. A freeze with no big swing gets its own clause. Only the first freeze counts: if it froze in the last day, it isn't news.
+- It never cuts off with an ellipsis: while the line is too wide, the longest clause that has a shorter form drops detail ("Much colder Sun, highs in the 50s" → "Much colder Sun"; "Rain late Mon night into Wed morning" → "Rain late Mon night–Wed" → "Rain Tue", the calendar day it starts). The page measures the real width, so this holds at any screen size.
 - Not attempted: departures from normal (comfort's climatology), heat and wind events.
 
 ### What comes from comfort
