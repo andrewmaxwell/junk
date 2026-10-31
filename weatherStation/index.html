@@ -32,7 +32,6 @@
         --sub: #b9b7af;
         --muted: #86847e;
         --label: #c9c6bd;
-        --rain: #3f78ba;
         --rain-text: #7fa9d8;
         --good: #5dcaa5;
         --warn: #efa845;
@@ -264,15 +263,6 @@
         letter-spacing: 0;
         color: var(--warn);
         margin-left: 4rem;
-      }
-      /* A dark room: the app has already turned the backlight right down, so
-         this is about glare and color, not brightness. Warmer, softer whites
-         and quieter colors, with the layout unchanged. */
-      body.night #screen {
-        filter: sepia(0.25) saturate(0.85) brightness(0.8);
-      }
-      body.night #inside {
-        background: #131416;
       }
     </style>
   </head>

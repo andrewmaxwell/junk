@@ -14,6 +14,7 @@ import {
   findBestWindow,
 } from '../comfort/js/comfort.js';
 import {hourLabel} from './charts.js';
+import {STORM_CODES, WET_CHANCE} from './constants.js';
 
 const COLORS = {
   good: 'var(--good)',
@@ -28,7 +29,6 @@ const at = (date) => hourLabel(date).replace(/([ap])$/, '$1m');
 
 // --- Alerts -----------------------------------------------------------------
 
-const STORM_CODES = new Set([95, 96, 99]);
 const ICE_CODES = new Set([56, 57, 66, 67]);
 const DAMAGING_GUST_MPH = 45;
 const UNHEALTHY_AQI = 151;
@@ -66,7 +66,6 @@ const MUGGY_DEW_POINT = 60;
 // and still be worth it for the fresh air.
 const FRESH_AIR_ALLOWANCE = 2;
 const POOR_AQI = 100;
-const RAIN_CHANCE = 40;
 const STUFFY_CO2 = 1000;
 const AIR_OUT_CO2 = 1200;
 const LOOKAHEAD_HOURS = 12;
@@ -78,7 +77,7 @@ const WORTHWHILE_MS = 2 * 3600_000;
 function whyNotOpen(row, band) {
   const air = row.temperature_2m;
   if (
-    (row.precipitation_probability ?? 0) >= RAIN_CHANCE ||
+    (row.precipitation_probability ?? 0) >= WET_CHANCE ||
     (row.precipitation ?? 0) > 0.2
   )
     return 'rain coming';

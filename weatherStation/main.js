@@ -15,6 +15,7 @@ import {
 } from './charts.js';
 import {pickActions} from './advice.js';
 import {weekSentence, fitWeek} from './week.js';
+import {SNOW_CODES, FREEZING, WET_CHANCE} from './constants.js';
 
 // Rounded to ~6 miles: plenty for weather, and junk is public.
 // Override with ?lat=..&lon=.. (the Android app's page URL can carry them).
@@ -32,9 +33,11 @@ const SENSI_STALE_MS = 5 * 60_000;
 const FORECAST_DAYS = 10;
 
 const $ = (id) => document.getElementById(id);
+const hourMinute = (d) =>
+  `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}`;
 const clockTime = (ms) => {
   const d = new Date(ms);
-  const time = `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}${d.getHours() < 12 ? 'am' : 'pm'}`;
+  const time = `${hourMinute(d)}${d.getHours() < 12 ? 'am' : 'pm'}`;
   return new Date().toDateString() === d.toDateString()
     ? time
     : `${d.toLocaleDateString(undefined, {weekday: 'short'})} ${time}`;
@@ -69,27 +72,17 @@ window.onSensi = (state) => {
   render();
 };
 
-// The room's light level in lux, from the tablet's sensor. The app dims the
-// screen itself; the page just switches to a warmer, lower-contrast look once
-// the room is dark. Two thresholds, so a lamp at the edge doesn't flicker it.
-const NIGHT_BELOW_LUX = 8;
-const DAY_ABOVE_LUX = 20;
-window.onLight = (lux) => {
-  const body = document.body.classList;
-  if (lux < NIGHT_BELOW_LUX) body.add('night');
-  else if (lux > DAY_ABOVE_LUX) body.remove('night');
-};
-
 // --- Outside ----------------------------------------------------------------
 
 // Feels-like in the shade, for the hero and the 24 hours. The 10 days are air
 // temperature, like any other forecast: UTCI can sit 20° under the air on a
-// breezy night, which reads as a freeze that isn't coming.
+// breezy night, which reads as a freeze that isn't coming. They come from NOAA's
+// National Blend, which beat Open-Meteo's default from two days out by about 2°
+// against the airport's readings; the default won for right now.
+const tenDayAir = (row) => row.blend_air ?? row.temperature_2m;
 const felt = (row) => feltTemperature(row, {shaded: true});
 
-const SNOW_CODES = new Set([71, 73, 75, 77, 85, 86]);
-const FREEZING = 32; // °F air
-const isFreezing = (row) => row.temperature_2m <= FREEZING;
+const isFreezing = (air) => air <= FREEZING;
 
 function windWords(mph) {
   if (mph >= 20) return 'windy';
@@ -98,14 +91,12 @@ function windWords(mph) {
   return null;
 }
 
-// "2–11am", or "10pm–3am" across the period change.
-
 // The first run of likely rain or snow in the window, for the chart's label.
 function wetSpell(hours) {
-  const start = hours.findIndex((h) => h.chance >= 40);
+  const start = hours.findIndex((h) => h.chance >= WET_CHANCE);
   if (start < 0) return null;
   let end = start;
-  while (end + 1 < hours.length && hours[end + 1].chance >= 40) end++;
+  while (end + 1 < hours.length && hours[end + 1].chance >= WET_CHANCE) end++;
   const kind = hours.slice(start, end + 1).some((h) => h.snow)
     ? 'snow'
     : 'rain';
@@ -131,7 +122,7 @@ function summarizeDays(rows, now) {
     const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + k);
     const day = byDay.get(dateKey(date));
     if (!day || day.length < 12) break;
-    const airs = day.map((r) => r.temperature_2m);
+    const airs = day.map(tenDayAir);
     // The day's weather is its worst daytime hour: a sunny day with an
     // afternoon storm is a storm day.
     const daytime = day.filter(
@@ -150,8 +141,8 @@ function summarizeDays(rows, now) {
         values.reduce((a, v) => a + v, 0) / values.length;
       blocks.push({
         hour: h + 1.5,
-        air: mean(block.map((r) => r.temperature_2m)),
-        freezing: block.some(isFreezing),
+        air: mean(block.map(tenDayAir)),
+        freezing: block.map(tenDayAir).some(isFreezing),
         chance: Math.max(...block.map((r) => r.precipitation_probability ?? 0)),
         snow: block.some((r) => SNOW_CODES.has(r.weather_code)),
         radiation: mean(block.map((r) => r.shortwave_radiation ?? 0)),
@@ -199,18 +190,19 @@ function renderOutside(now, days, {current, upcoming}) {
   const hours = upcoming.slice(0, 25).map((row, i) => ({
     time: i === 0 ? now : row.time,
     felt: i === 0 ? feltNow : felt(row),
-    freezing: isFreezing(i === 0 ? current : row),
+    freezing: isFreezing((i === 0 ? current : row).temperature_2m),
     chance: row.precipitation_probability ?? 0,
     radiation: row.shortwave_radiation,
     snow: SNOW_CODES.has(row.weather_code),
   }));
   drawHourly($('hourly'), hours, wetSpell(hours));
   const week = $('week');
+  const withTenDayAir = (r) => ({...r, temperature_2m: tenDayAir(r)});
   const clauses = weekSentence({
-    history: weather.rows.filter(
-      (r) => r.time <= now && now - r.time < 24 * 3600_000,
-    ),
-    upcoming,
+    history: weather.rows
+      .filter((r) => r.time <= now && now - r.time < 24 * 3600_000)
+      .map(withTenDayAir),
+    upcoming: upcoming.map(withTenDayAir),
     days,
     now,
   });
@@ -290,8 +282,7 @@ function renderInside(inside) {
 // --- Clock and actions ------------------------------------------------------
 
 function renderClock(now) {
-  $('time').textContent =
-    `${now.getHours() % 12 || 12}:${String(now.getMinutes()).padStart(2, '0')}`;
+  $('time').textContent = hourMinute(now);
   const date = now.toLocaleDateString(undefined, {
     weekday: 'short',
     month: 'short',
@@ -303,7 +294,7 @@ function renderClock(now) {
     const [icon, time] =
       sunset && now < sunset ? ['sunset-2', sunset] : ['sunrise', nextSunrise];
     if (time && time > now)
-      sun = ` · <i class="ti ti-${icon}" aria-hidden="true"></i> ${time.getHours() % 12 || 12}:${String(time.getMinutes()).padStart(2, '0')}`;
+      sun = ` · <i class="ti ti-${icon}" aria-hidden="true"></i> ${hourMinute(time)}`;
   }
   $('date').innerHTML = date + sun;
 }
@@ -397,6 +388,27 @@ function restoreWeather() {
   }
 }
 
+// The National Blend's hourly air temperature, by local time. Without it the 10
+// days fall back on the main forecast's.
+async function fetchBlendAir() {
+  try {
+    const res = await fetch(
+      'https://api.open-meteo.com/v1/forecast' +
+        `?latitude=${LAT}&longitude=${LON}&hourly=temperature_2m` +
+        '&models=ncep_nbm_conus&temperature_unit=fahrenheit&timezone=auto' +
+        `&past_days=1&forecast_days=${FORECAST_DAYS + 1}`,
+      {signal: AbortSignal.timeout(10_000)},
+    );
+    if (!res.ok)
+      throw new Error(`National Blend request failed (${res.status})`);
+    const {hourly} = await res.json();
+    return new Map(hourly.time.map((t, i) => [t, hourly.temperature_2m[i]]));
+  } catch (error) {
+    console.warn(error);
+    return new Map();
+  }
+}
+
 let retries = 0;
 let nextLoad = null;
 
@@ -405,11 +417,14 @@ async function loadWeather() {
   let wait = WEATHER_REFRESH_MS;
   try {
     // One past day so today's low counts the hours already gone.
-    const {current, rows, sunset, nextSunrise} = await fetchWeatherBundle(
-      LAT,
-      LON,
-      {historyDays: 1, forecastDays: FORECAST_DAYS + 1},
-    );
+    const [{current, rows, sunset, nextSunrise}, blendAir] = await Promise.all([
+      fetchWeatherBundle(LAT, LON, {
+        historyDays: 1,
+        forecastDays: FORECAST_DAYS + 1,
+      }),
+      fetchBlendAir(),
+    ]);
+    for (const row of rows) row.blend_air = blendAir.get(row.key) ?? null;
     weather = {current, rows, sunset, nextSunrise};
     weatherAt = Date.now();
     weatherError = null;
@@ -506,8 +521,6 @@ checkVersion();
 setInterval(checkVersion, VERSION_CHECK_MS);
 
 if (params.has('demo')) startDemo();
-// ?lux=3 pretends the room is that bright, for working on the night look.
-if (params.has('lux')) window.onLight(Number(params.get('lux')));
 restoreWeather();
 loadWeather();
 window.addEventListener('online', loadWeather);

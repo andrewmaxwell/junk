@@ -6,9 +6,8 @@
 // colder Thu, freezing that night"
 // ---------------------------------------------------------------------------
 
-const WET_CHANCE = 40; // same bar as the 24-hour chart's rain label
-const SNOW_CODES = new Set([71, 73, 75, 77, 85, 86]);
-const STORM_CODES = new Set([95, 96, 99]);
+import {SNOW_CODES, STORM_CODES, FREEZING, WET_CHANCE} from './constants.js';
+
 // Wet hours closer together than this are one spell, "on and off".
 const MERGE_GAP_HOURS = 6;
 // A lone wet hour is noise unless the forecast is fairly sure of it.
@@ -19,7 +18,6 @@ const WET_DAYS = 5;
 const SWING = 10;
 const BIG_SWING = 20;
 const SWING_DAYS = 7;
-const FREEZING = 32; // °F air: what kills plants and freezes hoses
 
 const HOUR = 3600_000;
 
@@ -153,8 +151,8 @@ function firstFreeze(history, upcoming, now) {
   );
 }
 
-// `history` and `upcoming` are hourly rows (comfort's), `days` the 10-day
-// summary with each day's air `hi`, today first. Returns the clauses in time
+// `history` and `upcoming` are hourly rows (comfort's, with the 10 days' air
+// temperature), `days` the 10-day summary with each day's air `hi`, today first. Returns the clauses in time
 // order, each a list of ways to say it, longest first.
 export function weekSentence({history, upcoming, days, now}) {
   const clauses = [];
