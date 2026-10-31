@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:," />
+    <title>Weather Station Features</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0d0e10;
+        --rule: #24262a;
+        --text: #eceae4;
+        --soft: #dad8d1;
+        --link: #7fa9d8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 32px 16px 48px;
+        background: var(--bg);
+        color: var(--soft);
+        font:
+          400 19px/1.45 'Barlow Semi Condensed',
+          system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 8px;
+        color: var(--text);
+        font-size: 40px;
+        font-weight: 500;
+        line-height: 1.1;
+      }
+      p {
+        margin: 0 0 20px;
+      }
+      a {
+        color: var(--link);
+      }
+      img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+      }
+      ul {
+        margin: 24px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      li {
+        padding: 10px 0;
+        border-top: 1px solid var(--rule);
+      }
+      strong {
+        color: var(--text);
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Weather Station Features</h1>
+      <p>
+        An always-on 10-inch tablet in my living room, readable from the couch.
+        <a href="./?demo">See the page live</a> (the indoor numbers are made up
+        in the demo, as they are in this screenshot).
+      </p>
+      <img
+        src="features.png"
+        width="1280"
+        height="800"
+        alt="The weather station showing 66° outside, 72° inside, the 24-hour and 10-day forecasts, and the time"
+      />
+      <ul>
+        <li>
+          <strong>Temperatures:</strong> outside is feels-like, using the
+          Universal Thermal Climate Index (UTCI). Inside is the actual
+          temperature, from the thermostat.
+        </li>
+        <li>
+          <strong>24-hour chart:</strong> feels-like line with the high and low,
+          rain or snow chance, and a background shaded by forecast sunlight.
+        </li>
+        <li>
+          <strong>10-day chart:</strong> one continuous air temperature line
+          showing when fronts arrive, with daily highs and lows.
+        </li>
+        <li>
+          <strong>Freezing:</strong> both lines turn icy white where the air is
+          at or below 32°.
+        </li>
+        <li>
+          <strong>The week in words:</strong> the next rain, snow or storms, big
+          temperature swings, and the first freeze.
+        </li>
+        <li>
+          <strong>Indoor air:</strong> CO₂ and dew point from an Aranet4, plus
+          furnace or AC status from a Sensi thermostat.
+        </li>
+        <li>
+          <strong>Advice:</strong> when to open or close the windows, air out
+          the room, or take a walk, plus warnings for storms, ice, high winds
+          and unhealthy air.
+        </li>
+        <li>
+          <strong>Always on:</strong> boots straight into the display, shows no
+          notifications, and fades any data that's out of date.
+        </li>
+      </ul>
+    </main>
+  </body>
+</html>

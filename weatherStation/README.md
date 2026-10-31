@@ -3,12 +3,13 @@ Weather Station - 2026 - Always-on living room display of the time, outdoor weat
 The display page for the living room tablet. Open `index.html?demo` for made-up indoor readings; without it, indoor numbers wait for the Android app ([weather-station-android](https://github.com/andrewmaxwell/weather-station-android)) to call `window.onAranet`. Location defaults to 38.8, -90.4 (rounded on purpose); override with `?lat=..&lon=..`.
 
 - `main.js`: loads the weather (comfort's `fetchWeatherBundle`) and indoor readings, renders everything.
-- `indoor.js`: indoor feels-like (SET, ASHRAE 55), clothing by season, dew point.
+- `indoor.js`: indoor dew point.
 - `charts.js`: the 24-hour and 10-day lines.
 - `advice.js`: the two action lines (alerts, windows, walk).
+- `features.html`: a feature list to share, with `features.png`.
 - `week.js`: the line over the 10 days that says what's coming.
 
-Tests: `node --test weatherStation/test/*.test.js` (SET is checked against pythermalcomfort).
+Tests: `node --test weatherStation/test/*.test.js`.
 
 The rest of this file is the planning notes.
 
@@ -57,9 +58,11 @@ Why everything is where it is:
 - **Inside is treated differently, not just labelled differently.** It sits in a lit "room" panel with a house icon, while outside is open. Its number is white, while outside's is colored by temperature: indoor is nearly always comfortable, so color would only be noise there, and color stays the signal for weather.
 - **Actions sit right under the house**, because most are about it: what's true inside, then what to do about it. "Is there anything I should do?" has one place to look.
 - **The clock goes bottom right.** It belongs to neither place, and a corner is where a clock is easy to find without competing with the temperatures.
-- **Actions have room for exactly two one-line items**, so they're ranked: safety (freezing rain, storms, damaging gusts, hazardous air, all read from the forecast) > windows/HVAC > walk. NWS alerts are left out on purpose: they already reach Andrew's phone. What's coming later in the week isn't an action: it has its own line over the 10 days (it used to be a fourth-ranked action, and almost never got a slot). Headlines must fit on one line (checked in a browser at the tablet's shape).
+- **Actions have room for exactly two items, one line each**, so they're ranked: safety (freezing rain, storms, damaging gusts, hazardous air, all read from the forecast) > windows/HVAC > walk. NWS alerts are left out on purpose: they already reach Andrew's phone. What's coming later in the week isn't an action: it has its own line over the 10 days (it used to be a fourth-ranked action, and almost never got a slot). Headlines fit on one line, except the longest window ones ("Open windows till 10pm"), which wrap onto two; there's room for one of those beside any other.
 - **Trend arrows** next to the outside number and CO2 say which way they're heading. Where the outside temperature is going is the 24-hour chart's job, so there's no separate line for it.
-- **Every big number is feels-like; raw temperatures always say "air".** The charts have no captions: their shape says what they are, and the 10 days carry day names and dates (10/29).
+- **Outside now is feels-like, everything else is the real temperature.** The outside hero and the 24-hour chart are feels-like, with the raw temperature marked "air". Inside and the 10 days are air temperature: inside so it matches the thermostat, and the 10 days because UTCI can sit 20° under the air on a breezy night, which read as a freeze that wasn't coming (2026-10-31). The charts have no captions: their shape says what they are, and the 10 days carry day names and dates (10/29).
+- **Freezing is a color, not a caption.** Both lines turn icy white where the air is at or below 32°.
+- **From the couch** (first impressions on the end table, 2026-10-31): the big numbers, the date (22rem) and the OUTSIDE/INSIDE labels read easily, and little else does. So the actions lost their gray reasons and their headlines are the date's size.
 - **10 days.** Days 6–10 are drawn fainter, since the forecast is less certain that far out. Rain chances under 30% are left off both charts.
 - **The 24-hour chart** labels its high and low with times, shades the sky by sunlight as one smooth wash, and shows rain or snow as bars (height = chance) with a time-range label. The 10 days are one continuous line (3-hour averages) across ten day columns, with each day's high over its low below the line ("80/52°" side by side was too wide for a column), and rain or snow as bars by time of day. It replaced low–high bars (2026-10-29): the line shows when within a day a front arrives or rain starts and stops, which the bars couldn't.
 
@@ -88,7 +91,7 @@ Why everything is where it is:
 **Next few days.** One line of words over the 10-day chart (`week.js`), at most two things in the order they happen, like "Rain early Sun morning · Colder Mon, highs in the 60s":
 
 - The next spell of rain, snow or storms in the first 5 days: hours at 40%+ (the 24-hour chart's bar), with gaps under 6 hours merged ("on and off" when under 70% of the span is wet). A lone 40–59% hour is ignored. It says when it starts and stops in forecast words: "this afternoon", "tonight", "Sun morning". The small hours are "late Sat night", not NWS's bare "Sat night", because on the chart those hours sit in Sunday's column. Already falling: "Rain till 9pm". Over two days: "Rain Sun–Wed". None: "Dry through Mon".
-- The biggest day-to-day jump in the felt high over the next week, if 10°+ ("Much" at 20°+), with the highs' decade. If the air (not felt) temperature first drops to 32° within two days of it, "freezing that night" replaces the highs, since the numbers below already show the highs. A freeze with no big swing gets its own clause. Only the first freeze counts: if it froze in the last day, it isn't news.
+- The biggest day-to-day jump in the high over the next week, if 10°+ ("Much" at 20°+), with the highs' decade. If the temperature first drops to 32° within two days of it, "freezing that night" replaces the highs, since the numbers below already show the highs. A freeze with no big swing gets its own clause. Only the first freeze counts: if it froze in the last day, it isn't news.
 - It never cuts off with an ellipsis: while the line is too wide, the longest clause that has a shorter form drops detail ("Much colder Sun, highs in the 50s" → "Much colder Sun"; "Rain late Mon night into Wed morning" → "Rain late Mon night–Wed" → "Rain Tue", the calendar day it starts). The page measures the real width, so this holds at any screen size.
 - Not attempted: departures from normal (comfort's climatology), heat and wind events.
 
@@ -96,10 +99,10 @@ Why everything is where it is:
 
 Imported straight from `../comfort/js/`, so there's one tested copy:
 
-- `thermal.js`: `feltTemperature` (UTCI) for the outside hero, the 24-hour line and the daily lows and highs, all shaded. `thermalStress` puts UTCI's own words ("moderate heat stress") under the outside number when it isn't neutral.
+- `thermal.js`: `feltTemperature` (UTCI) for the outside hero and the 24-hour line, both shaded. `thermalStress` puts UTCI's own words ("moderate heat stress") under the outside number when it isn't neutral.
 - `weather.js`: `fetchWeatherBundle` (Open-Meteo plus air quality, with the time zone handling already solved), `describeWeatherCode`, `weatherIcon`.
 - `comfort.js`:
-  - `comfortScore` / `comfortVerdict` and `findBestWindow` for the walk action, and `comfortReason` for its subtitle, which includes a clothing suggestion ("light jacket").
+  - `comfortScore` / `comfortVerdict` and `findBestWindow` for the walk action.
   - `describeHumidity` turns both dew points into words (Dry, Comfortable, Muggy, Oppressive), which read from the couch where "dew 52°" doesn't.
   - `describeAirQuality` and the hazard checks (storm, freezing rain, gale, hazardous air) feed the actions area and the window verdict.
   - `rainOutlook` for rain phrasing.
@@ -111,8 +114,6 @@ Later, maybe: the ensemble spread as a faint widening around later days' bars (h
 
 Skipped: the activity toggle, place search and geolocation. The location is fixed, but rounded to ~0.1° in the code, since junk is public and home coordinates shouldn't be.
 
-Indoor "feels like" (SET) is new, not in comfort.
-
 ### Night
 
 The Android app reads the tablet's light sensor and sets the screen brightness itself, or leaves it to Android when Adaptive brightness is on (see weather-station-android's README), then calls `window.onLight(lux)`. Below 8 lux the page switches to a night look: warmer, softer whites and quieter colors, with the layout unchanged. It switches back above 20 lux, so a lamp at the threshold doesn't flicker it. `?lux=3` pretends the room is dark, for working on it.
@@ -123,6 +124,7 @@ When a source goes stale, its numbers fade and its heading says how old they are
 
 - The last good forecast is kept in localStorage and painted on load, so a reboot without internet still shows something (first paint ~0.3 s instead of waiting ~2 s for Open-Meteo).
 - Once the forecast is stale, "now" outside comes from the forecast's own hour for now, not Open-Meteo's old current block, and the charts start from the real now. If the saved forecast runs out (under 24 hours left), the page says so.
+- Each deploy writes `version.txt`, naming the Git trees of `weatherStation/` and `comfort/js/`. The page checks it every minute and reloads when it changes, so a push reaches the tablet about a minute after it deploys, and pushes to other projects don't reload it. A push that stops the page's code from running can't be fixed this way: the app's 3am reload, or Reload page in the PIN menu, recovers it.
 - A failed fetch retries after 1, 2 and 5 minutes, then every 10, and straight away when the browser comes back online. With nothing saved, it says why: "No forecast yet: can't reach Open-Meteo · retrying".
 
 ### Touch, later
@@ -268,7 +270,7 @@ Rule of thumb for signs: about 1 inch of letter height per 10 ft for comfortable
 ## Decisions (2026-10-29)
 
 - Couch is ~10 ft away, so hero digits ~1" tall. Three of those just fit across a 10" screen in a semi-condensed face; the time is a step smaller than the temperatures.
-- **Both heroes are "feels like."** Raw temperatures go in the small print. Outside is comfort's UTCI. Inside needs an indoor model: SET (Standard Effective Temperature, from ASHRAE 55's comfort model) for someone sitting, in seasonal clothing, in still air. Indoors at 68–74°F humidity only moves it a degree or two; it matters much more once it's warm.
+- **The outside hero is "feels like"** (comfort's UTCI). Inside used SET (ASHRAE 55) until 2026-10-31, when it became the actual temperature: it was within a degree or two, humidity is controlled indoors, and the real number matches the thermostat.
 - Inside temperature comes from the Sensi: it's central, fixed and out of the sun. Humidity comes from the Aranet4 as a dew point, which is nearly the same everywhere in the house, so it combines cleanly with the Sensi's temperature. CO2 is Aranet4 only.
 - Furnace + central AC.
 - Walk verdict assumes walking.

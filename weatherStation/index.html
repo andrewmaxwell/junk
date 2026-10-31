@@ -233,30 +233,25 @@
       }
       .action {
         display: flex;
-        gap: 9rem;
-        align-items: flex-start;
-        padding: 6rem 0;
+        gap: 8rem;
+        align-items: center;
+        padding: 7rem 0;
       }
       .action + .action {
         border-top: 1px solid var(--rule);
       }
       .action .dot {
-        width: 10rem;
-        height: 10rem;
+        width: 12rem;
+        height: 12rem;
         border-radius: 50%;
         flex: none;
-        margin-top: 5rem;
       }
       .action .title {
-        font-size: 17rem;
+        font-size: 22rem;
         font-weight: 500;
-        line-height: 1.15;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .action .detail {
-        font-size: 13rem;
+        line-height: 1.1;
+        text-wrap: balance;
+        min-width: 0;
       }
       /* Data that has stopped updating fades rather than passing for current,
          and its heading says how old it is. */
@@ -311,7 +306,7 @@
             <i class="ti ti-home" aria-hidden="true"></i>INSIDE
             <span class="age" id="in-age"></span>
           </div>
-          <div class="hero" id="in-felt">–</div>
+          <div class="hero" id="in-temp">–</div>
           <div class="sub" id="in-air" style="margin-top: 3rem">
             Waiting for the Aranet4
           </div>

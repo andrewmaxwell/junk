@@ -1,8 +1,9 @@
-// The two forecast pictures: the next 24 hours as a line, the next 10 days as
-// low-to-high bars. Both plot feels-like, and both color it with the same
-// temperature scale as the big outside number.
+// The two forecast pictures: the next 24 hours as a feels-like line, the next
+// 10 days as an air temperature line. Both are colored with the same scale as
+// the big outside number, and turn icy white where the air is at or below
+// freezing.
 
-// Blue when cold, green when comfortable, amber and red when hot (°F felt).
+// Blue when cold, green when comfortable, amber and red when hot (°F).
 const TEMPERATURE_STOPS = [
   [25, [110, 140, 235]],
   [40, [90, 165, 225]],
@@ -44,6 +45,10 @@ export function hourRange(from, to) {
 
 const NS = 'http://www.w3.org/2000/svg';
 
+const ICE = '#f2f8ff';
+const lineColor = (a, b, temperature) =>
+  a.freezing || b.freezing ? ICE : temperatureColor(temperature);
+
 // Chances of rain or snow below this are left off both charts: a 20% that
 // usually doesn't happen is just noise on an always-on screen.
 const SHOW_CHANCE = 30;
@@ -71,7 +76,7 @@ const skyColor = (radiation) => {
   return `rgb(${DARK_SKY.map((c, j) => Math.round(c + (LIT_SKY[j] - c) * b))})`;
 };
 
-// `hours` is [{time, felt, chance, radiation, snow}], first entry = now.
+// `hours` is [{time, felt, freezing, chance, radiation, snow}], first entry = now.
 // `wet` is the run of likely rain or snow to label, or null.
 export function drawHourly(svg, hours, wet) {
   svg.replaceChildren();
@@ -141,7 +146,7 @@ export function drawHourly(svg, hours, wet) {
       y1: y(felts[i - 1]),
       x2: x(i),
       y2: y(felts[i]),
-      stroke: temperatureColor((felts[i] + felts[i - 1]) / 2),
+      stroke: lineColor(hours[i - 1], hours[i], (felts[i] + felts[i - 1]) / 2),
       'stroke-width': 3,
       'stroke-linecap': 'round',
     });
@@ -243,7 +248,7 @@ const CONFIDENT_DAYS = 5;
 //
 // `days` is [{name, date, icon, hi, lo, chance, blocks}], today first. `icon`
 // is comfort's SVG markup for the day's weather; `blocks` are three-hour
-// averages, [{hour, felt, chance, snow, radiation}].
+// averages, [{hour, air, freezing, chance, snow, radiation}].
 export function drawDaily(container, days) {
   const cells = (render) =>
     days
@@ -260,7 +265,7 @@ export function drawDaily(container, days) {
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${d.icon}</svg>
         <div class="chance">${d.chance >= SHOW_CHANCE ? `${Math.round(d.chance / 10) * 10}%` : ''}</div>`,
     )}</div>
-    <svg class="week" role="img" aria-label="Feels-like temperature for the next ${days.length} days"></svg>
+    <svg class="week" role="img" aria-label="Temperature for the next ${days.length} days"></svg>
     <div class="cells temps">${cells(
       (d) => `
         <div class="hi">${Math.round(d.hi)}°</div>
@@ -277,9 +282,9 @@ export function drawDaily(container, days) {
   const points = days.flatMap((d, k) =>
     d.blocks.map((b) => ({...b, x: (k + b.hour / 24) * dayWidth})),
   );
-  const felts = points.map((p) => p.felt);
-  const min = Math.min(...felts);
-  const max = Math.max(...felts);
+  const airs = points.map((p) => p.air);
+  const min = Math.min(...airs);
+  const max = Math.max(...airs);
   const pad = 6;
   const y = (t) => pad + (1 - (t - min) / (max - min)) * (height - 2 * pad);
 
@@ -327,10 +332,10 @@ export function drawDaily(container, days) {
     const b = points[i];
     svgElement(svg, 'line', {
       x1: a.x,
-      y1: y(a.felt),
+      y1: y(a.air),
       x2: b.x,
-      y2: y(b.felt),
-      stroke: temperatureColor((a.felt + b.felt) / 2),
+      y2: y(b.air),
+      stroke: lineColor(a, b, (a.air + b.air) / 2),
       'stroke-width': 2.5,
       'stroke-linecap': 'round',
     });

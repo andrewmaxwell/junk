@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// The actions area: short things to do, each a one-line headline plus a reason.
+// The actions area: short things to do, each one line, readable from the couch.
 //
 // There's room for two, so everything that could be said competes for them:
 // safety first, then the house (windows, stale air), then the walk. Each
@@ -10,11 +10,10 @@
 import {
   ACTIVITIES,
   scoreComfort,
-  comfortReason,
   comfortVerdict,
   findBestWindow,
 } from '../comfort/js/comfort.js';
-import {hourLabel, hourRange} from './charts.js';
+import {hourLabel} from './charts.js';
 
 const COLORS = {
   good: 'var(--good)',
@@ -41,28 +40,13 @@ function alerts({current, upcoming}) {
   const first = (test) => soon.find(test);
 
   const ice = first((row) => ICE_CODES.has(row.weather_code));
-  if (ice)
-    found.push({
-      title: `Freezing rain from ${at(ice.time)}`,
-      detail: 'roads and steps will be icy',
-    });
+  if (ice) found.push({title: `Freezing rain at ${at(ice.time)}`});
   const storm = first((row) => STORM_CODES.has(row.weather_code));
-  if (storm)
-    found.push({
-      title: `Storms from ${at(storm.time)}`,
-      detail: 'thunder and lightning likely',
-    });
+  if (storm) found.push({title: `Storms at ${at(storm.time)}`});
   const gale = first((row) => (row.wind_gusts_10m ?? 0) >= DAMAGING_GUST_MPH);
-  if (gale)
-    found.push({
-      title: `High winds from ${at(gale.time)}`,
-      detail: `gusts to ${Math.round(gale.wind_gusts_10m)} mph`,
-    });
+  if (gale) found.push({title: `High winds at ${at(gale.time)}`});
   if ((current.us_aqi ?? 0) >= UNHEALTHY_AQI)
-    found.push({
-      title: 'Unhealthy air outside',
-      detail: `AQI ${Math.round(current.us_aqi)} · keep windows shut`,
-    });
+    found.push({title: 'Unhealthy air outside'});
 
   return found.map((a) => ({...a, rank: RANK.alert, color: COLORS.bad}));
 }
@@ -116,26 +100,6 @@ function houseGains(inside, outsideAir) {
   );
 }
 
-// Up to two short reasons, most important first. `then` is why it ends.
-function openReason(inside, current, then) {
-  if (!inside) return then ? `free fresh air · then ${then}` : 'free fresh air';
-  const out = current.temperature_2m;
-  const parts = [];
-  if (out > inside.airF + 2 && inside.airF < IDEAL_F) parts.push('warmer');
-  if (out < inside.airF - 2 && inside.airF > IDEAL_F) parts.push('cooler');
-  if (current.dew_point_2m < inside.dewF - 3 && inside.dewF > 55)
-    parts.push('drier');
-  // With an ending to fit too, there's only room for the first of these.
-  const kept = then ? parts.slice(0, 1) : parts;
-  const reasons = [
-    kept.length ? `${kept.join(' and ')} out` : 'free fresh air',
-  ];
-  if (inside.co2 >= STUFFY_CO2) reasons.push('stuffy in');
-  if (then) reasons.push(`then ${then}`);
-  // Two fit on the line; the ending matters more than the second reason.
-  return (reasons.length > 2 ? [reasons[0], reasons[2]] : reasons).join(' · ');
-}
-
 const CLOSE_REMINDER_MS = 3 * 3600_000;
 const STORE_KEY = 'weatherStation.windowsOpenUntil';
 
@@ -183,7 +147,6 @@ function windowAdvice({current, upcoming, inside, sensi, now}) {
       ...house,
       color: COLORS.good,
       title: hvac ?? `Open windows${until}`,
-      detail: openReason(inside, current, end && whyNotOpen(end, band)),
     };
   }
 
@@ -199,7 +162,6 @@ function windowAdvice({current, upcoming, inside, sensi, now}) {
       ...house,
       color: COLORS.warn,
       title: 'Close the windows',
-      detail: notNow,
     };
   }
   if (openUntil && now.getTime() >= openUntil + CLOSE_REMINDER_MS) remember(0);
@@ -210,7 +172,6 @@ function windowAdvice({current, upcoming, inside, sensi, now}) {
       ...house,
       color: COLORS.warn,
       title: 'Air out the room',
-      detail: `CO₂ ${Math.round(inside.co2)} · 10 minutes will do`,
     };
   }
 
@@ -229,7 +190,6 @@ function windowAdvice({current, upcoming, inside, sensi, now}) {
         ...house,
         color: COLORS.info,
         title: `Open windows at ${at(later.time)}`,
-        detail: `${later.temperature_2m < inside.airF ? 'cooler' : 'warmer'} air coming`,
       };
     }
   }
@@ -242,32 +202,9 @@ const WALK = ACTIVITIES.walk;
 const GOOD_WALK = 70;
 const OK_WALK = 50;
 
-// comfort's sentence, cut to fit one line: its first clause, then what to wear.
-// "Hot enough to wear on you, so go early or late; wear a t-shirt."
-//   -> "Hot enough to wear on you; a t-shirt"
-const SHORT_LEAD = 28;
-
 // comfort's words for its score bands, with "Tolerable" shortened so the
 // headline fits on one line.
 const walkWord = (score) => comfortVerdict(score).replace('Tolerable', 'Fair');
-// comfort speaks about right now ("It is dark out"); a window later on gets
-// the same words moved to then.
-const LATER = [
-  [/^It is dark out/, 'After dark'],
-  [/ falling now/, ' falling'],
-  [/^Freezing rain is glazing everything/, 'Freezing rain'],
-];
-function shortReason(row, result, later = false) {
-  let sentence = comfortReason(row, result.limiter, result.penalties, WALK)
-    .replace(` ${WALK.phrase}`, '')
-    .replace(/\.$/, '');
-  if (later)
-    for (const [now, then] of LATER) sentence = sentence.replace(now, then);
-  const [lead, clothes] = sentence.split('; ');
-  const short = lead.length > SHORT_LEAD ? lead.split(',')[0] : lead;
-  return clothes ? `${short}; ${clothes.replace(/^wear /, '')}` : short;
-}
-
 function walkAdvice({current, upcoming, now}) {
   const hour = now.getHours();
   const result = scoreComfort(current, {activity: WALK});
@@ -279,7 +216,6 @@ function walkAdvice({current, upcoming, now}) {
       ...walk,
       color: COLORS.good,
       title: `${walkWord(result.score)} walk now`,
-      detail: shortReason(current, result),
     };
   }
 
@@ -297,26 +233,20 @@ function walkAdvice({current, upcoming, now}) {
       ? today
       : findBestWindow(upcoming, {now, activity: WALK});
   if (best && best.score >= OK_WALK) {
-    const row = upcoming.find((r) => r.time.getTime() === best.start.getTime());
-    // Tomorrow's window gives just its start time, so the line still fits.
-    const when =
+    const title =
       best.start.getDate() === now.getDate()
-        ? hourRange(best.start, best.end)
-        : `${hourLabel(best.start)}m tomorrow`;
+        ? `${walkWord(best.score)} walk at ${at(best.start)}`
+        : `Walk tomorrow ${at(best.start)}`;
     return {
       ...walk,
       color: best.score >= GOOD_WALK ? COLORS.info : COLORS.warn,
-      title: `${walkWord(best.score)} walk ${when}`,
-      detail: row
-        ? shortReason(row, scoreComfort(row, {activity: WALK}), true)
-        : '',
+      title,
     };
   }
   return {
     ...walk,
     color: COLORS.bad,
     title: 'No good walk today',
-    detail: shortReason(current, result),
   };
 }
 

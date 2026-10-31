@@ -15,11 +15,11 @@ const MERGE_GAP_HOURS = 6;
 const LONE_HOUR_CHANCE = 60;
 // Rain is only named this far out; past it the forecast is a guess.
 const WET_DAYS = 5;
-// A day's high (°F felt) this far from the day before is a change of weather.
+// A day's high (°F air) this far from the day before is a change of weather.
 const SWING = 10;
 const BIG_SWING = 20;
 const SWING_DAYS = 7;
-const FREEZING = 32; // °F air, not felt: what kills plants and freezes hoses
+const FREEZING = 32; // °F air: what kills plants and freezes hoses
 
 const HOUR = 3600_000;
 
@@ -154,7 +154,7 @@ function firstFreeze(history, upcoming, now) {
 }
 
 // `history` and `upcoming` are hourly rows (comfort's), `days` the 10-day
-// summary with each day's felt `hi`, today first. Returns the clauses in time
+// summary with each day's air `hi`, today first. Returns the clauses in time
 // order, each a list of ways to say it, longest first.
 export function weekSentence({history, upcoming, days, now}) {
   const clauses = [];

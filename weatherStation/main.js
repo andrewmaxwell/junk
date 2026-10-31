@@ -5,12 +5,7 @@ import {
 } from '../comfort/js/weather.js';
 import {feltTemperature, thermalStress} from '../comfort/js/thermal.js';
 import {describeHumidity} from '../comfort/js/comfort.js';
-import {
-  standardEffectiveTemperature,
-  clothingFor,
-  dewPointF,
-  relativeHumidity,
-} from './indoor.js';
+import {dewPointF} from './indoor.js';
 import {
   drawHourly,
   drawDaily,
@@ -87,11 +82,14 @@ window.onLight = (lux) => {
 
 // --- Outside ----------------------------------------------------------------
 
-// Feels-like in the shade everywhere, so the hero, the 24 hours and the 10 days
-// are one consistent number.
+// Feels-like in the shade, for the hero and the 24 hours. The 10 days are air
+// temperature, like any other forecast: UTCI can sit 20° under the air on a
+// breezy night, which reads as a freeze that isn't coming.
 const felt = (row) => feltTemperature(row, {shaded: true});
 
 const SNOW_CODES = new Set([71, 73, 75, 77, 85, 86]);
+const FREEZING = 32; // °F air
+const isFreezing = (row) => row.temperature_2m <= FREEZING;
 
 function windWords(mph) {
   if (mph >= 20) return 'windy';
@@ -133,7 +131,7 @@ function summarizeDays(rows, now) {
     const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + k);
     const day = byDay.get(dateKey(date));
     if (!day || day.length < 12) break;
-    const felts = day.map(felt);
+    const airs = day.map((r) => r.temperature_2m);
     // The day's weather is its worst daytime hour: a sunny day with an
     // afternoon storm is a storm day.
     const daytime = day.filter(
@@ -152,7 +150,8 @@ function summarizeDays(rows, now) {
         values.reduce((a, v) => a + v, 0) / values.length;
       blocks.push({
         hour: h + 1.5,
-        felt: mean(block.map(felt)),
+        air: mean(block.map((r) => r.temperature_2m)),
+        freezing: block.some(isFreezing),
         chance: Math.max(...block.map((r) => r.precipitation_probability ?? 0)),
         snow: block.some((r) => SNOW_CODES.has(r.weather_code)),
         radiation: mean(block.map((r) => r.shortwave_radiation ?? 0)),
@@ -163,8 +162,8 @@ function summarizeDays(rows, now) {
       name: date.toLocaleDateString(undefined, {weekday: 'short'}),
       date: `${date.getMonth() + 1}/${date.getDate()}`,
       longName: date.toLocaleDateString(undefined, {weekday: 'long'}),
-      hi: Math.max(...felts),
-      lo: Math.min(...felts),
+      hi: Math.max(...airs),
+      lo: Math.min(...airs),
       chance: Math.max(...day.map((r) => r.precipitation_probability ?? 0)),
       snow: day.some((r) => SNOW_CODES.has(r.weather_code)),
       icon: weatherIcon(code, 1),
@@ -200,6 +199,7 @@ function renderOutside(now, days, {current, upcoming}) {
   const hours = upcoming.slice(0, 25).map((row, i) => ({
     time: i === 0 ? now : row.time,
     felt: i === 0 ? feltNow : felt(row),
+    freezing: isFreezing(i === 0 ? current : row),
     chance: row.precipitation_probability ?? 0,
     radiation: row.shortwave_radiation,
     snow: SNOW_CODES.has(row.weather_code),
@@ -229,23 +229,11 @@ const CO2_BAD = 1500;
 // The house: temperature from the thermostat when there is one (central, out of
 // the sun), moisture from the Aranet4 as a dew point, which is close to the
 // same everywhere in the house.
-function insideConditions(now) {
+function insideConditions() {
   if (!aranet || !Number.isFinite(aranet.tempC)) return null;
   const aranetF = toF(aranet.tempC);
   const dewF = dewPointF(aranetF, aranet.rh);
-  const airF = sensi?.tempF ?? aranetF;
-
-  // Clothing follows this morning's outdoor temperature (ASHRAE 55).
-  const sixAm = weather?.rows.find(
-    (r) => dateKey(r.time) === dateKey(now) && r.time.getHours() === 6,
-  );
-  const clo = clothingFor(sixAm?.temperature_2m ?? 50);
-  const feltF = standardEffectiveTemperature({
-    airF,
-    rh: relativeHumidity(airF, dewF),
-    clo,
-  });
-  return {airF, dewF, feltF, co2: aranet.co2};
+  return {airF: sensi?.tempF ?? aranetF, dewF, co2: aranet.co2};
 }
 
 function co2Trend() {
@@ -277,14 +265,14 @@ function sensiWords() {
 function renderInside(inside) {
   const box = $('inside');
   if (!inside) {
-    $('in-felt').textContent = '–';
+    $('in-temp').textContent = '–';
     $('in-air').textContent = 'Waiting for the Aranet4';
     $('in-co2').textContent = '';
     return;
   }
-  $('in-felt').textContent = `${round(inside.feltF)}°`;
+  $('in-temp').textContent = `${round(inside.airF)}°`;
   $('in-air').innerHTML =
-    `<span class="word">${describeHumidity(inside.dewF)}</span> · dew ${round(inside.dewF)}° · air ${round(inside.airF)}°`;
+    `<span class="word">${describeHumidity(inside.dewF)}</span> · dew ${round(inside.dewF)}°`;
   const co2 = inside.co2;
   const color =
     co2 >= CO2_BAD ? 'var(--bad)' : co2 >= CO2_WARN ? 'var(--warn)' : 'inherit';
@@ -325,10 +313,7 @@ function renderActions(context) {
     .map(
       (a) => `<div class="action">
         <span class="dot" style="background: ${a.color}"></span>
-        <div style="min-width: 0">
-          <div class="title">${a.title}</div>
-          <div class="sub muted detail">${a.detail}</div>
-        </div>
+        <div class="title">${a.title}</div>
       </div>`,
     )
     .join('');
@@ -356,7 +341,7 @@ function render() {
   // Advice shouldn't rest on an old setpoint, so a lost connection drops it.
   if (sensi && Date.now() - sensi.receivedAt > SENSI_STALE_MS) sensi = null;
   renderClock(now);
-  const inside = insideConditions(now);
+  const inside = insideConditions();
   renderInside(inside);
   if (!weather) {
     if (weatherError)
@@ -483,6 +468,42 @@ function startDemo() {
   tick();
   setInterval(tick, 60_000);
 }
+
+// --- Updates ----------------------------------------------------------------
+
+// Each deploy writes version.txt (see .github/workflows/pages.yml). When it
+// changes, a plain reload could still run scripts from the browser's cache for
+// up to 10 minutes and then never look again, so refresh those first.
+const VERSION_CHECK_MS = 60_000;
+let version = null;
+
+async function checkVersion() {
+  try {
+    const res = await fetch('./version.txt', {cache: 'no-store'});
+    if (!res.ok) return;
+    const latest = await res.text();
+    if (version !== null && latest !== version) {
+      const scripts = performance
+        .getEntriesByType('resource')
+        .map((entry) => entry.name)
+        .filter(
+          (url) =>
+            url.startsWith(location.origin) &&
+            new URL(url).pathname.endsWith('.js'),
+        );
+      await Promise.allSettled(
+        scripts.map((url) => fetch(url, {cache: 'reload'})),
+      );
+      location.reload();
+    }
+    version = latest;
+  } catch {
+    // Offline: the next check tries again.
+  }
+}
+
+checkVersion();
+setInterval(checkVersion, VERSION_CHECK_MS);
 
 if (params.has('demo')) startDemo();
 // ?lux=3 pretends the room is that bright, for working on the night look.

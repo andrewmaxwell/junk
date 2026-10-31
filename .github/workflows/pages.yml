@@ -90,6 +90,10 @@ jobs:
           # Optional: disable Jekyll processing (safer for files/folders starting with _)
           touch _site/.nojekyll
 
+          # The weather station's tablet reloads when this changes, so it only
+          # names what that page is built from: other projects' pushes leave it.
+          git rev-parse HEAD:weatherStation HEAD:comfort/js > _site/weatherStation/version.txt
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
