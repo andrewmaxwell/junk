@@ -1,0 +1,8 @@
+{
+  "name": "livestream",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "atem-connection": "^3.10.3"
+  }
+}
