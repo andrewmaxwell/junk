@@ -4,8 +4,7 @@ Extracts and views the level geometry of **SSX 3 (GameCube, USA, GXBE69)** from 
 user's own disc image. Pure Python 3.14 (stdlib only: `compression.zstd`, `gzip`,
 `zlib`) in `scripts/`, plus a three.js viewer page at the top of this folder, published
 on GitHub Pages at https://andrewmaxwell.github.io/junk/ssx3/ (the Pages workflow deploys
-the whole repo). It isn't on the junk homepage yet; when it is, add an entry to
-`home/data.json` with `filePath: "ssx3"` (thumbnail `image.png` is ready). Everything was
+the whole repo) and listed on the junk homepage. Everything was
 reverse engineered in this repo;
 GlitcherOG's PS2 research (github.com/GlitcherOG/SSX-Library, `SSX3PS2/`) was a
 useful starting point, but the GameCube files differ in the details below.
