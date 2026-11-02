@@ -22,8 +22,21 @@ const MIN_FRAMES = 30; // fewer changed frames than this is a jump or two, not m
 // before recording (ms), and act runs on the page after loading.
 const setup = {
   lambdagator: {warmup: 300, act: (page) => page.click('#watch')},
-  bz: {warmup: 8000},
-  island: {warmup: 4000}, // let the rivers form and the camera start drifting // let the broken fronts curl up into spirals
+  bz: {warmup: 8000}, // let the broken fronts curl up into spirals
+  // let the rivers form and the camera start drifting; at the default 10 kyr/s, the orbit alone
+  // was too still for a clip
+  island: {
+    warmup: 4000,
+    act: async (page) => {
+      const speed = page
+        .locator('text=Speed (kyr/s)')
+        .locator('..')
+        .locator('input')
+        .first();
+      await speed.fill('50');
+      await speed.press('Enter');
+    },
+  },
   // unstretch and stretch again every 2 seconds, so the 4-second clip loops cleanly
   cartogram: {
     warmup: 0,
