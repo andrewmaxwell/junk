@@ -1,6 +1,6 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {makeRenderer} from './makeRenderer.js';
-import {defaults, biome} from './sim.js';
+import {defaults} from './sim.js';
 
 const lowPower = matchMedia('(pointer: coarse)').matches;
 const N = lowPower ? 256 : 384;
@@ -8,12 +8,16 @@ const ISLAND_SIZE = 12800; // m across the whole grid
 const cellSize = ISLAND_SIZE / (N - 1);
 const BRUSH_RADIUS = 700; // m
 const BRUSH_RATE = 400; // m/s at the middle of the brush
+// thousand years per second: slow enough to watch a valley deepen or a lake fill (at 100 a
+// volcano rose and wore away in under half a minute)
+const SPEED = 10;
+// the hour the sun is low enough for long shadows, warm light and shafts through the clouds
+const GOLDEN_HOUR = 17.3;
 
 const canvas = /** @type {HTMLCanvasElement} */ (
   document.getElementById('app')
 );
 const statusEl = document.getElementById('status');
-const infoEl = document.getElementById('info');
 const hintEl = document.getElementById('hint');
 
 /** @param {string} message */
@@ -31,8 +35,8 @@ const settings = {
   upliftRate: +(url.get('uplift') ?? defaults.upliftRate),
   seaLevel: +(url.get('sea') ?? defaults.seaLevel),
   iceAges: url.get('ice') === '1',
-  speed: 100, // thousand years per second
-  hour: +(url.get('hour') ?? 16.5),
+  speed: SPEED, // thousand years per second
+  hour: +(url.get('hour') ?? GOLDEN_HOUR),
   clouds: url.get('clouds') !== '0',
   seed: +(url.get('seed') ?? 0) || newSeed(),
 };
@@ -52,7 +56,7 @@ function saveUrl() {
   if (settings.seaLevel !== defaults.seaLevel)
     q.set('sea', String(settings.seaLevel));
   if (settings.iceAges) q.set('ice', '1');
-  if (settings.hour !== 16.5) q.set('hour', String(settings.hour));
+  if (settings.hour !== GOLDEN_HOUR) q.set('hour', String(settings.hour));
   if (!settings.clouds) q.set('clouds', '0');
   history.replaceState(null, '', '?' + q);
 }
@@ -84,6 +88,7 @@ function sendParams() {
     },
     speed: settings.speed * 1000,
   });
+  view.setSpeed(settings.speed * 1000);
   saveUrl();
 }
 
@@ -92,10 +97,7 @@ function newIsland(seed) {
   worker.postMessage({type: 'init', N, cellSize, seed, restart: started});
   started = true;
   sendParams();
-  probe = null;
   view.reframe();
-  infoEl.hidden = true;
-  view.showPath([], new Float32Array(0));
 }
 let started = false;
 
@@ -115,11 +117,8 @@ const transfers = (f) =>
     f.normal,
     f.ground,
     f.waterY,
-    f.area,
-    f.rain,
     f.cloud,
-    f.flow,
-    f.receiver,
+    f.heat,
     f.rivers,
   ].map((a) => a.buffer);
 
@@ -127,9 +126,8 @@ const transfers = (f) =>
 // Each changes the world and keeps the island, so you can watch it adjust.
 const presets = {
   'Hotspot island': {},
-  'Sinking: atoll': {upliftRate: -0.4, speed: 30},
-  // a cycle takes a second and a half at full speed, which is a blur
-  'Ice-age cycles': {iceAges: true, speed: 20},
+  'Sinking: atoll': {upliftRate: -1, speed: 30},
+  'Ice-age cycles': {iceAges: true},
   'Ice age': {seaLevel: -120, temperature: 18},
   Desert: {rain: 0.3, temperature: 28},
   'Arctic island': {temperature: -2, rain: 1},
@@ -141,7 +139,7 @@ const presetSettings = (name) => ({
   upliftRate: defaults.upliftRate,
   seaLevel: defaults.seaLevel,
   iceAges: false,
-  speed: 100,
+  speed: SPEED,
   ...presets[name],
 });
 settings.preset =
@@ -189,7 +187,7 @@ gui
   .onChange(changeClimate);
 gui.add(settings, 'iceAges').name('Ice-age cycles').onChange(changeClimate);
 gui
-  .add(settings, 'hour', 6, 18, 0.1)
+  .add(settings, 'hour', 0, 24, 0.1)
   .name('Time of day (h)')
   .onChange(() => {
     view.setHour(settings.hour);
@@ -203,7 +201,7 @@ gui
     saveUrl();
   });
 const speedController = gui
-  .add(settings, 'speed', 0, 500, 10)
+  .add(settings, 'speed', 0, 200, 1)
   .name('Speed (kyr/s)')
   .onChange(sendParams);
 gui.add({island: () => newIsland(newSeed())}, 'island').name('New island');
@@ -221,7 +219,7 @@ addEventListener('keydown', (e) => {
   e.preventDefault();
   [settings.speed, lastSpeed] = settings.speed
     ? [0, settings.speed]
-    : [lastSpeed || 100, 0];
+    : [lastSpeed || SPEED, 0];
   speedController.updateDisplay();
   sendParams();
 });
@@ -233,12 +231,10 @@ function setTool() {
   canvas.style.cursor = sculpting ? 'crosshair' : '';
 }
 
-// ---------- sculpting and probing ----------
+// ---------- sculpting ----------
 /** @type {Map<number, {x: number, y: number}>} */
 const pointers = new Map();
 let painting = null;
-let tapStart = null;
-let probe = null; // grid cell the reader tapped
 
 canvas.addEventListener('pointerdown', (e) => {
   pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
@@ -247,7 +243,6 @@ canvas.addEventListener('pointerdown', (e) => {
   const single = pointers.size === 1 && e.button === 0;
   painting =
     single && settings.tool !== 'Look' ? {x: e.clientX, y: e.clientY} : null;
-  tapStart = single ? {x: e.clientX, y: e.clientY, t: performance.now()} : null;
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!pointers.has(e.pointerId)) return;
@@ -257,20 +252,6 @@ canvas.addEventListener('pointermove', (e) => {
 const release = (e) => {
   pointers.delete(e.pointerId);
   painting = null;
-  if (
-    tapStart &&
-    e.type === 'pointerup' &&
-    Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y) < 8 &&
-    performance.now() - tapStart.t < 400
-  ) {
-    const hit = view.pick(e.clientX, e.clientY);
-    probe = hit ? Math.round(hit.z) * N + Math.round(hit.x) : null;
-    if (probe === null) {
-      infoEl.hidden = true;
-      view.showPath([], new Float32Array(0));
-    } else if (frame) showProbe();
-  }
-  tapStart = null;
 };
 canvas.addEventListener('pointerup', release);
 canvas.addEventListener('pointercancel', release);
@@ -281,64 +262,9 @@ const fmt = (v, digits = 0) =>
     minimumFractionDigits: digits,
   });
 
-const capitalize = (text) => text[0].toUpperCase() + text.slice(1);
-
 function formatYears(years) {
   if (years < 1e6) return `${fmt(Math.round(years / 1000) * 1000)} years`;
   return `${fmt(years / 1e6, 2)} million years`;
-}
-
-/** Follow a raindrop from the probed cell to the sea, and describe the spot. */
-function showProbe() {
-  if (probe === null) return;
-  const cells = [probe];
-  let length = 0;
-  for (let i = probe; frame.receiver[i] !== i && cells.length < N * 4; ) {
-    const r = frame.receiver[i];
-    length +=
-      Math.hypot((r % N) - (i % N), Math.floor(r / N) - Math.floor(i / N)) *
-      cellSize;
-    cells.push(r);
-    i = r;
-  }
-  const surface = frame.height.map((h, i) =>
-    Math.max(h, frame.waterY[i], frame.seaLevel),
-  );
-  view.showPath(cells, surface);
-
-  const h = frame.height[probe];
-  const lake = frame.waterY[probe] - h; // the water surface tucks under dry land
-  const area = frame.area[probe];
-  const flow = frame.flow[probe] / 3.156e7; // m³/s
-  const coral = frame.normal[probe * 4 + 3];
-  const sea = frame.seaLevel;
-  const lines =
-    h < sea
-      ? [
-          `${fmt(sea - h)} m under the sea`,
-          coral > 0.02
-            ? `coral reef, building up ${fmt(coral * defaults.reefGrowth * 1000, 1)} mm a year`
-            : settings.temperature <= 17
-              ? 'too cold for coral'
-              : sea - h > 50
-                ? 'too deep and dark for coral'
-                : 'no coral: too muddy, or too far from the open sea',
-        ]
-      : [
-          `${fmt(h)} m above sea level${lake > 1 ? `, under ${fmt(lake)} m of lake` : ''}`,
-          `${capitalize(biome(frame.rain[probe], settings.temperature - 0.0065 * (h - sea)))}, ${fmt(frame.rain[probe], 1)} m of rain a year`,
-          area < 1e6
-            ? `${fmt(area / 1e4, 1)} hectares drain through here`
-            : `${fmt(area / 1e6, 1)} km² drains through here`,
-          flow < 1e-5
-            ? 'almost no water flows past'
-            : flow < 0.1
-              ? `about ${fmt(flow * 1000, flow < 0.01 ? 2 : 0)} liters/s of water flows past`
-              : `about ${fmt(flow, flow < 10 ? 1 : 0)} m³/s of water flows past`,
-          `${fmt(length / 1000, 1)} km to the sea`,
-        ];
-  infoEl.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
-  infoEl.hidden = false;
 }
 
 // ---------- loop ----------
@@ -365,14 +291,35 @@ function loop(now) {
     const speed = Math.abs(frame.rise);
     const rate = speed >= 0.95 ? speed.toFixed(1) : speed.toPrecision(1);
     statusEl.textContent = `${formatYears(frame.time)} · peak ${fmt(Math.max(0, frame.peak - frame.seaLevel))} m · ${frame.rise > 0 ? 'volcano growing' : 'sinking'} ${rate} mm/yr${settings.iceAges ? ` · sea ${seaShift < -0.5 ? '−' + fmt(-seaShift) : '0'} m` : ''}${settings.speed ? '' : ' · paused'}`;
-    showProbe();
   }
   view.render();
-  requestAnimationFrame(loop);
+  // paused, it still runs until the first island is drawn, so there's something to look at
+  if (paused && shown) looping = false;
+  else requestAnimationFrame(loop);
 }
+
+// Stop simulating and drawing while the page is hidden or another window has focus: left open
+// behind other work it took a CPU core and much of the GPU.
+let paused = false;
+let looping = true;
+function checkPaused() {
+  const pause = document.hidden || !document.hasFocus();
+  if (pause === paused) return;
+  paused = pause;
+  worker.postMessage({type: 'pause', paused});
+  if (!paused && !looping) {
+    looping = true;
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+}
+addEventListener('blur', checkPaused);
+addEventListener('focus', checkPaused);
+document.addEventListener('visibilitychange', checkPaused);
 
 setTool();
 view.setHour(settings.hour);
 view.setClouds(settings.clouds);
 newIsland(settings.seed);
 requestAnimationFrame(loop);
+checkPaused();

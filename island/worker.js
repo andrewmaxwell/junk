@@ -1,5 +1,11 @@
 // Runs the landscape model off the main thread and turns it into ready-to-draw vertex data.
-import {makeSim, defaults, iceAgeSeaLevel} from './sim.js';
+import {
+  makeSim,
+  defaults,
+  iceAgeSeaLevel,
+  LAVA_FRESH_YEARS,
+  LAVA_HEAT_YEARS,
+} from './sim.js';
 
 const STEP_YEARS = 2000;
 const BUDGET_MS = 30; // longest stretch of stepping before checking for messages
@@ -12,6 +18,7 @@ let iceAges = false;
 let speed = 0; // years per real second
 let yearsDue = 0;
 let lastTick = performance.now();
+let paused = false; // while the page is hidden or another window has focus
 let dirty = true;
 // Some things change from one step (2,000 years) to the next in ways that flickered at full
 // speed: river mud arrives in pulses and cuts reef growth, and ponds on coastal flats come and
@@ -31,6 +38,8 @@ let visited;
 let hasRiverDonor;
 /** @type {any[]} */
 const freeFrames = [];
+/** @type {number[]} where flows started since the last frame: grid x, z, height (m), m³ */
+let vents = [];
 
 function makeFrame() {
   const num = sim.N * sim.N;
@@ -40,15 +49,15 @@ function makeFrame() {
     fields: new Float32Array(num * 4),
     normal: new Float32Array(num * 4),
     // per point, for drawing the rock: dikes (0..1), sediment depth (m), the lava layers'
-    // offset (m, as sim.layerOffset), and years since the lava at the surface erupted (up
-    // to 50,000)
+    // offset (m, as sim.layerOffset), and how fresh the lava at the surface is (see
+    // smoothLava)
     ground: new Float32Array(num * 4),
     waterY: new Float32Array(num),
-    area: new Float32Array(num),
-    rain: new Float32Array(num),
     cloud: new Float32Array(num), // condensed water in the air, for drawing clouds
-    flow: new Float32Array(num),
-    receiver: new Int32Array(num),
+    // how hot the lava is, for its glow: e^(−years / LAVA_HEAT_YEARS), not blurred, since the
+    // glow has to show flows one point wide
+    heat: new Float32Array(num),
+    vents: [],
     rivers: new Uint8Array(((sim.N - 1) * RIVER_TEXELS + 1) ** 2 * 4),
     time: 0,
     peak: 0,
@@ -107,18 +116,8 @@ function updateOcclusion() {
 
 /** Fill a frame from the current state. Assumes route() has run since the last change. */
 function fillFrame(f) {
-  const {
-    N,
-    cellSize,
-    height,
-    area,
-    rain,
-    discharge,
-    soil,
-    dikes,
-    layerOffset,
-    age,
-  } = sim;
+  const {N, cellSize, height, rain, discharge, soil, dikes, layerOffset, age} =
+    sim;
   let peak = -Infinity;
   updateOcclusion();
   for (let z = 0; z < N; z++) {
@@ -126,9 +125,6 @@ function fillFrame(f) {
       const i = z * N + x;
       const h = height[i];
       f.height[i] = h;
-      f.area[i] = area[i];
-      f.rain[i] = rain[i];
-      f.flow[i] = discharge[i];
       if (h > peak) peak = h;
       f.fields[i * 4] = h;
       f.fields[i * 4 + 1] = rain[i];
@@ -149,29 +145,36 @@ function fillFrame(f) {
       f.ground[i * 4] = dikes[i];
       f.ground[i * 4 + 1] = soil[i];
       f.ground[i * 4 + 2] = layerOffset[i];
-      // capped, so a flow's edge blends over a cell instead of stepping from old to new
-      f.ground[i * 4 + 3] = Math.min(5e4, age[i] + sim.time);
+      lavaFresh[i] = Math.exp(-(age[i] + sim.time) / LAVA_FRESH_YEARS);
+      f.heat[i] = Math.exp(-(age[i] + sim.time) / LAVA_HEAT_YEARS);
 
-      // Lakes are flat sheets at their spill height, reaching one point past the shore so the
-      // ground cuts a clean shoreline through them. Everywhere else the sheet tucks well under
-      // the ground.
+      // Lakes are flat sheets at their spill height, reaching two points past the shore over
+      // ground that rises above them, so the ground cuts the shoreline through the flat sheet.
+      // (Reaching one point, the sheet sloped down between the shore and the next point, and
+      // the ground cut it along the mesh's triangles, in steps a grid point wide.) Everywhere
+      // else the sheet tucks well under the ground.
       let level = lakeShown[i] > 0.5 ? lakeLevel[i] : -Infinity;
       if (level === -Infinity) {
-        for (let dz = -1; dz <= 1; dz++) {
-          for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -2; dz <= 2; dz++) {
+          for (let dx = -2; dx <= 2; dx++) {
             const nx2 = x + dx;
             const nz2 = z + dz;
             if (nx2 < 0 || nz2 < 0 || nx2 >= N || nz2 >= N) continue;
             const j = nz2 * N + nx2;
-            if (lakeShown[j] > 0.5) level = Math.max(level, lakeLevel[j]);
+            if (lakeShown[j] <= 0.5) continue;
+            const far = Math.abs(dx) === 2 || Math.abs(dz) === 2;
+            if (far && h < lakeLevel[j]) continue; // not out over lower ground
+            level = Math.max(level, lakeLevel[j]);
           }
         }
       }
       f.waterY[i] = level > -Infinity ? level : h - 40; // below the GPU's finer relief too
     }
   }
-  f.receiver.set(sim.receiver);
+  smoothLava(f.ground);
   f.cloud.set(sim.cloud);
+  f.vents = vents;
+  vents = [];
   f.time = sim.time;
   f.peak = peak;
   f.seaLevel = params.seaLevel;
@@ -180,7 +183,37 @@ function fillFrame(f) {
     (params.upliftRate < 0 ? -params.upliftRate : params.sinkRate);
 }
 
-const RIVER_MIN_FLOW = 0.02 * 3.156e7; // m³/yr, about 20 liters a second
+// Lava flows run one grid point wide, and drawn from each point's age a flow running diagonally
+// across the grid was a row of beads. So the shader gets how fresh the lava is, e^(−years /
+// LAVA_FRESH_YEARS), blurred over the points around it, and turns it back into years: a flow
+// becomes a smooth tongue a couple of points wide whose edges look a little older.
+/** @type {Float32Array} */
+let lavaFresh;
+/** @type {Float32Array} */
+let lavaBlur;
+
+/** Blur lavaFresh by [1 2 1] each way into ground's fourth channel. */
+function smoothLava(ground) {
+  const N = sim.N;
+  for (let z = 0; z < N; z++) {
+    for (let x = 0; x < N; x++) {
+      const i = z * N + x;
+      const l = lavaFresh[x > 0 ? i - 1 : i];
+      const r = lavaFresh[x < N - 1 ? i + 1 : i];
+      lavaBlur[i] = (l + 2 * lavaFresh[i] + r) / 4;
+    }
+  }
+  for (let z = 0; z < N; z++) {
+    for (let x = 0; x < N; x++) {
+      const i = z * N + x;
+      const u = lavaBlur[z > 0 ? i - N : i];
+      const d = lavaBlur[z < N - 1 ? i + N : i];
+      ground[i * 4 + 3] = (u + 2 * lavaBlur[i] + d) / 4;
+    }
+  }
+}
+
+const RIVER_MIN_FLOW = 0.008 * 3.156e7; // m³/yr, about 8 liters a second
 const RIVER_TEXELS = 4; // river texture texels per grid cell, each way
 const RIVER_REACH = 63; // m: how far from a river the texture keeps track of it
 
@@ -198,7 +231,8 @@ let riverDrop;
  * draw banks, gravel bars and green strips along them; plus how much of it is lake. Each river
  * is traced from its head down to where it joins a bigger one or reaches still water, and the
  * grid's zigzags are rounded off with Chaikin's corner cutting.
- * Channels: distance (m, /63), half width (m, /31.5), lake (0..1), unused.
+ * Channels: distance (m, /63), half width (m, /31.5), lake (0..1), and how much steeper the
+ * river drops here than around it (m per m, for waterfalls).
  */
 function drawRivers(out) {
   const {N, cellSize, height, wet, discharge, receiver} = sim;
@@ -280,6 +314,20 @@ function drawRivers(out) {
       i = receiver[i];
     }
     if (points.length < 2) continue;
+    // A waterfall is a step: a drop much steeper than the stream's own slope above and below
+    // it. Measured on the drop alone, every small stream on a young volcano's steep flanks
+    // fell white from top to bottom.
+    const drops = points.map((pt) => pt[3]);
+    points.forEach((pt, k) => {
+      let sum = 0;
+      let count = 0;
+      for (let j = Math.max(0, k - 4); j <= k + 4 && j < drops.length; j++) {
+        if (j === k) continue;
+        sum += drops[j];
+        count++;
+      }
+      pt[3] = drops[k] - (count ? sum / count : 0);
+    });
     for (let pass = 0; pass < 3; pass++) {
       const next = [points[0]];
       for (let k = 0; k < points.length - 1; k++) {
@@ -312,7 +360,7 @@ function drawRivers(out) {
       out[k * 4] = (riverDistance[k] / RIVER_REACH) * 255;
       out[k * 4 + 1] = (riverHalfWidth[k] / 31.5) * 255;
       out[k * 4 + 2] = lakeness * 255;
-      // drop per meter, up to 1
+      // m per m the drop here is steeper than the river around it, up to 1
       out[k * 4 + 3] = Math.min(1, Math.max(0, riverDrop[k])) * 255;
     }
   }
@@ -337,11 +385,8 @@ function send() {
     f.normal.buffer,
     f.ground.buffer,
     f.waterY.buffer,
-    f.area.buffer,
-    f.rain.buffer,
     f.cloud.buffer,
-    f.flow.buffer,
-    f.receiver.buffer,
+    f.heat.buffer,
   ]);
 }
 
@@ -366,6 +411,16 @@ function tick() {
   while (yearsDue >= STEP_YEARS && performance.now() - now < BUDGET_MS) {
     setSeaLevel();
     sim.step(STEP_YEARS, params);
+    for (let k = 0; k < sim.ventsThisStep.length; k += 2) {
+      const i = sim.ventsThisStep[k];
+      vents.push(
+        i % sim.N,
+        Math.floor(i / sim.N),
+        sim.height[i],
+        sim.ventsThisStep[k + 1],
+      );
+    }
+    if (vents.length > 400) vents.splice(0, vents.length - 400);
     updateShown(SHOWN_EASE);
     yearsDue -= STEP_YEARS;
     dirty = true;
@@ -374,7 +429,7 @@ function tick() {
   // Each step routes the water before it erodes, so the frame shows that routing, one step
   // behind the heights. Routing again just to draw took 40% of the worker's time.
   send();
-  setTimeout(tick, yearsDue >= STEP_YEARS ? 0 : 8);
+  if (!paused) setTimeout(tick, yearsDue >= STEP_YEARS ? 0 : 8);
 }
 
 function setSeaLevel() {
@@ -391,6 +446,8 @@ onmessage = ({data}) => {
     hasRiverDonor = new Uint8Array(data.N * data.N);
     riversDrawnAt = -Infinity;
     occlusion = new Float32Array(data.N * data.N);
+    lavaFresh = new Float32Array(data.N * data.N);
+    lavaBlur = new Float32Array(data.N * data.N);
     for (let k = 0; k < AO_BANDS; k++) updateOcclusion();
     const texels = ((data.N - 1) * RIVER_TEXELS + 1) ** 2;
     riverDistance = new Float32Array(texels);
@@ -403,7 +460,7 @@ onmessage = ({data}) => {
     updateShown(1);
     dirty = true;
     yearsDue = 0;
-    if (!data.restart) tick();
+    if (!data.restart && !paused) tick();
   } else if (data.type === 'params') {
     const {iceAges: cycles, ...rest} = data.params;
     params = {...params, ...rest};
@@ -418,6 +475,13 @@ onmessage = ({data}) => {
     sim.route(params);
     updateShown(1); // a dam the reader just built fills at once
     dirty = true;
+  } else if (data.type === 'pause') {
+    if (data.paused === paused) return;
+    paused = data.paused;
+    if (!paused && sim) {
+      lastTick = performance.now(); // pick up where it left off, not catch up
+      tick();
+    }
   } else if (data.type === 'frame') {
     if (data.frame.height.length === sim.N * sim.N) freeFrames.push(data.frame);
   }

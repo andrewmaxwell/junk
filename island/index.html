@@ -14,7 +14,7 @@
     <meta property="og:title" content="Island" />
     <meta
       property="og:description"
-      content="Millions of years in seconds: an island rises, rivers carve its valleys, and you can raise mountains and follow a raindrop to the sea."
+      content="Millions of years in seconds: an island rises, rivers carve its valleys, and you can raise mountains or watch the eruptions at night."
     />
     <meta
       property="og:image"
@@ -58,10 +58,6 @@
         max-width: calc(100% - 230px);
         font-variant-numeric: tabular-nums;
       }
-      #info {
-        bottom: calc(10px + env(safe-area-inset-bottom));
-        border-left: 3px solid #ffd23f;
-      }
       #hint {
         bottom: calc(10px + env(safe-area-inset-bottom));
         transition: opacity 1s;
@@ -104,10 +100,8 @@
     <canvas id="app"></canvas>
     <div id="status" class="panel">Raising an island…</div>
     <div id="hint" class="panel">
-      Tap the land to follow a raindrop to the sea. Pick Raise to build
-      mountains.
+      Drag to look around. Pick Raise to build mountains.
     </div>
-    <div id="info" class="panel" hidden></div>
     <div id="error" hidden></div>
     <script type="module" src="main.js"></script>
   </body>

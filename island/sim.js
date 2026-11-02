@@ -25,16 +25,20 @@ export const defaults = {
   rain: 2.5, // m/yr of rain, averaged over the land
   temperature: 24, // °C at sea level
   wind: 60, // degrees the wind blows from: 0 north (away from the camera), 90 east
-  upliftRate: 3, // mm/yr a volcano grows at its summit while it sits right over the hotspot
-  eruptions: 0.5, // how much of that growth comes as lava flows; the rest swells it from inside
+  upliftRate: 5, // mm/yr a volcano grows at its summit while it sits right over the hotspot
+  eruptions: 0.3, // how much of that growth comes as lava flows right over the hotspot; the rest
+  // swells it from inside
   plateSpeed: 2, // mm/yr (km per million years) the plate carries the islands off the hotspot
   sinkRate: 0.03, // mm/yr the plate sinks as it cools, drifting away from the hotspot
   flexure: 1, // how much of the volcanoes' new rock the plate bends down under (0..1)
   seaLevel: 0, // m
-  K: 1.2e-4, // erodibility of bare ground, for discharge in m³/yr
+  K: 6e-5, // erodibility of bare ground, for discharge in m³/yr
   m: 0.5, // discharge exponent (slope exponent n is 1)
   D: 0.03, // m²/yr soil creep on land
   marineD: 0.4, // m²/yr sediment spreading under water, which builds a shelf
+  // m above sea level a river mouth builds its delta (filling only to a meter under the sea,
+  // deltas never surfaced and the coast never moved out)
+  deltaTop: 0.5,
   G: 1, // how readily rivers drop what they carry (Yuan et al. 2019's G)
   layering: 1, // how much harder lava flows are than the ash beds between them (0 for none)
   waveErosion: 0.01, // m/yr a basalt sea cliff retreats in the full force of the waves
@@ -126,6 +130,18 @@ const FLOW_THICKNESS = 10;
 const LAVA_SLOPE = 0.15;
 /** the gentlest slope lava runs down in the sea (about 27°) */
 const LAVA_FRONT = 0.5;
+// As a volcano's eruptions wane, the emptying magma chamber under its summit lets the roof fall
+// in, leaving a caldera, and later vents open along the rift zones outside it. Its walls are all
+// that drain into it, so it holds a lake far longer than a hollow on a river does. (Collapsing
+// once eruptions had stopped was too late: valleys had already cut into the summit and the
+// caldera drained out through them. Vents inside it filled it with lava within 100,000 years.)
+/** grid halves across the caldera's floor, from its center */
+const CALDERA_RADIUS = 0.07;
+/** m the caldera's floor drops */
+const CALDERA_DEPTH = 160;
+/** a volcano collapses once its activity falls to this after it's grown past CALDERA_GROWN */
+const CALDERA_ACTIVITY = 0.5;
+const CALDERA_GROWN = 0.8;
 /** lava flows erupting from each volcano in a step, at full activity */
 const FLOWS_PER_STEP = 10;
 
@@ -136,6 +152,11 @@ const RAIN_EVERY = 5;
 const SEDIMENT_SOFTNESS = 2;
 /** m of sediment that counts as covering the rock */
 const COVERED = 0.5;
+/** years: drawn lava freshness is e^(−years / this) (worker.js smoothLava, shaders.js) */
+export const LAVA_FRESH_YEARS = 1e4;
+// years for new lava's glow to fade by 1/e, as drawn (the real thing cools in years, but each
+// step is 2,000)
+export const LAVA_HEAT_YEARS = 2000;
 /** m: one lava flow plus the bed of ash and rubble on top of it */
 export const LAYER_THICKNESS = 40;
 /** years for weathering to clog young lava's cracks so rain runs off instead of soaking in */
@@ -296,7 +317,12 @@ export function makeSim({N, cellSize, seed}) {
 
   const island = makeIsland(N, seed, height, age, dikes);
   const half = (N - 1) / 2;
+  // grid cells from a volcano's center that vents stay out of once it has a caldera (the
+  // starting island's youngest volcano has one already)
+  const calderaReach = (vol) => (vol.caldera ? 1.6 : 0) * CALDERA_RADIUS * half;
   const volcanoes = island.volcanoes.map(withFootprint);
+  /** @type {number[]} where this step's lava flows started and how big they were: point, m³ */
+  const ventsThisStep = [];
   // the hotspot starts under the youngest volcano, heading on along the chain, in grid cells
   let hotspotX = volcanoes[volcanoes.length - 1].cx;
   let hotspotZ = volcanoes[volcanoes.length - 1].cz;
@@ -627,11 +653,13 @@ export function makeSim({N, cellSize, seed}) {
    */
   function step(dt, p) {
     const {seaLevel} = p;
+    ventsThisStep.length = 0;
     moveHotspot(dt, p);
     // Volcanoes grow while they're near the hotspot, partly swelling from inside as magma
     // fills dikes and chambers, and partly in lava flows. The plate sinks as it cools, evenly
     // across the grid. A negative upliftRate skips the volcanoes and just sinks that fast.
-    measureGrowth();
+    measureGrowth(p);
+    for (const vol of volcanoes) collapse(vol);
     const grow = Math.max(0, p.upliftRate) / 1000;
     const sink = (p.upliftRate < 0 ? -p.upliftRate : p.sinkRate) / 1000;
     // The plate also bends down under the weight of the new rock, most around the hotspot,
@@ -643,15 +671,14 @@ export function makeSim({N, cellSize, seed}) {
     const bend =
       (Math.max(0, unbent) / (bendTotal * cellArea)) * (dt / FLEX_TIME);
     unbent -= bend * bendTotal * cellArea;
-    const inflate = grow * (1 - p.eruptions);
     for (let i = 0; i < num; i++) {
       height[i] +=
-        uplift[i] * inflate * dt - sinking[i] * sink * dt - bendShare[i] * bend;
-      unbent += p.flexure * uplift[i] * inflate * dt * cellArea;
+        uplift[i] * grow * dt - sinking[i] * sink * dt - bendShare[i] * bend;
+      unbent += p.flexure * uplift[i] * grow * dt * cellArea;
     }
     if (grow > 0 && p.eruptions > 0) {
       for (const vol of volcanoes)
-        unbent += p.flexure * erupt(vol, grow * p.eruptions * dt, p.seaLevel);
+        unbent += p.flexure * erupt(vol, grow * dt, p);
     }
 
     // The climate follows the broad shape of the land, which barely moves in one step, and the
@@ -697,15 +724,16 @@ export function makeSim({N, cellSize, seed}) {
 
     // Carry it downstream. Rivers drop what the solve above says, never more than reaches
     // them. In still water it all settles: lakes fill up to their surface from where rivers
-    // enter, then pass the rest on toward their outlet. At the sea it fills to a meter below sea
-    // level and slides on down the steepest slope, so deltas build out from river mouths.
+    // enter, then pass the rest on toward their outlet. At the sea it fills to just above sea
+    // level, as floods spread it over a delta's top, and slides on down the steepest slope, so
+    // deltas build out from river mouths and the river runs on across them.
     sediment.fill(0); // m³ arriving at each point from upstream
     mud.fill(0);
     for (let k = num - 1; k >= 0; k--) {
       const i = stack[k];
       let q = sediment[i];
       if (wet[i] === 2) {
-        if (q > 0) settleInSea(i, q, seaLevel - 1, dt);
+        if (q > 0) settleInSea(i, q, seaLevel + p.deltaTop, dt);
         continue;
       }
       if (wet[i]) {
@@ -777,6 +805,23 @@ export function makeSim({N, cellSize, seed}) {
     return p.upliftRate * Math.max(...volcanoes.map(activity));
   }
 
+  /** Drop the summit into a caldera once the volcano has grown and is waning. */
+  function collapse(vol) {
+    const a = activity(vol);
+    if (a > CALDERA_GROWN) vol.grown = true;
+    if (!vol.grown || vol.caldera || a > CALDERA_ACTIVITY) return;
+    vol.caldera = true;
+    const r = CALDERA_RADIUS * half;
+    const reach = Math.ceil(r * 1.4);
+    for (let z = Math.round(vol.cz) - reach; z <= vol.cz + reach; z++) {
+      for (let x = Math.round(vol.cx) - reach; x <= vol.cx + reach; x++) {
+        if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1) continue;
+        const d = Math.hypot(x - vol.cx, z - vol.cz) / r;
+        height[z * N + x] -= CALDERA_DEPTH * (1 - smooth(0.75, 1.3, d));
+      }
+    }
+  }
+
   /** 0..1, how close a volcano is to the hotspot, which is how fast it grows. */
   function activity(vol) {
     const dx = hotspotX - vol.cx;
@@ -814,11 +859,30 @@ export function makeSim({N, cellSize, seed}) {
     return {...vol, x0, z0, size, lift, dike, vents, onGrid: 0};
   }
 
-  /** Fill `uplift` from every volcano's footprint and how near the hotspot it is. */
-  function measureGrowth() {
+  /**
+   * 0..1, how much of a volcano's growth comes as lava flows. Eruptions wane faster than the
+   * volcano swells as the hotspot moves off, as in a real volcano's quiet post-shield stage, so
+   * rivers get time to cut valleys before the next volcano's flows reach them. (With a fixed
+   * share, fresh lava covered 6% of the land every 2,000 years, mostly in the valleys, and
+   * kept the whole island smooth and soaking up the rain.)
+   * @param {typeof defaults} p
+   */
+  function eruptiveShare(vol, p) {
+    const a = activity(vol);
+    const share = p.eruptions * a * a;
+    return a * share < 0.005 ? 0 : share; // too little to bother with a flow
+  }
+
+  /**
+   * Fill `uplift` with how fast each point swells from inside, from every volcano's footprint
+   * and how near the hotspot it is.
+   * @param {typeof defaults} p
+   */
+  function measureGrowth(p) {
     uplift.fill(0);
     for (const vol of volcanoes) {
       const a = activity(vol);
+      const swells = a * (1 - eruptiveShare(vol, p));
       vol.onGrid = 0;
       if (a < 1e-3) continue;
       const {x0, z0, size, lift} = vol;
@@ -830,7 +894,7 @@ export function makeSim({N, cellSize, seed}) {
           if (x < 0 || x >= N) continue;
           const i = z * N + x;
           const here = lift[bz * size + bx] * edgeFade[i];
-          uplift[i] += a * here;
+          uplift[i] += swells * here;
           vol.onGrid += here;
         }
       }
@@ -843,23 +907,30 @@ export function makeSim({N, cellSize, seed}) {
    * past them, until its lava runs out. Fresh lava buries any sediment and starts weathering
    * from scratch.
    * @param {number} perArea m the volcano's summit would grow if it were right over the hotspot
-   * @param {number} seaLevel
+   * @param {typeof defaults} p
    * @returns {number} m³ of lava erupted
    */
-  function erupt(vol, perArea, seaLevel) {
-    const a = activity(vol);
-    if (a < 0.02) return 0;
+  function erupt(vol, perArea, p) {
+    const a = activity(vol) * eruptiveShare(vol, p);
+    if (!a) return 0;
     const {x0, z0, size} = vol;
-    // as much lava as the volcano's footprint would grow by
+    // as much lava as that share of the volcano's footprint would grow by
     const flows = Math.max(1, Math.round(FLOWS_PER_STEP * a));
     const volume = (a * perArea * vol.onGrid * cellArea) / flows;
     let erupted = 0;
+    const away = calderaReach(vol);
     for (let f = 0; f < flows; f++) {
-      const k = pickVent(vol.vents);
-      const x = x0 + (k % size);
-      const z = z0 + Math.floor(k / size);
+      let x;
+      let z;
+      for (let tries = 0; tries < 30; tries++) {
+        const k = pickVent(vol.vents);
+        x = x0 + (k % size);
+        z = z0 + Math.floor(k / size);
+        if (Math.hypot(x - vol.cx, z - vol.cz) >= away) break;
+      }
       if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1) continue;
-      runLava(z * N + x, volume, seaLevel);
+      runLava(z * N + x, volume, p.seaLevel);
+      ventsThisStep.push(z * N + x, volume);
       erupted += volume;
     }
     return erupted;
@@ -1349,6 +1420,7 @@ export function makeSim({N, cellSize, seed}) {
     receiver,
     coral,
     cloud,
+    ventsThisStep,
     route,
     step,
     brush,

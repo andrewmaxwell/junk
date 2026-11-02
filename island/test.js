@@ -272,11 +272,11 @@ check(badLakes === 0, 'lakes spill downhill');
     const top = s.height.reduce((a, b) => Math.max(a, b), -Infinity);
     return {top, lagoon: s.height[peak]};
   };
-  const atoll = sink(0.5, 300);
-  const bare = sink(0.5, 300, 0);
+  const atoll = sink(1, 300);
+  const bare = sink(1, 300, 0);
   check(
     atoll.top > -2 && atoll.top <= 3 && atoll.lagoon < -10 && bare.top < -20,
-    `sinking 0.5 mm/yr for 600,000 years makes an atoll: its highest point is ${atoll.top.toFixed(1)} m (storm-built islets), with ${(-atoll.lagoon).toFixed(0)} m of lagoon over the old peak; without reefs the top is ${(-bare.top).toFixed(0)} m down`,
+    `sinking 1 mm/yr for 600,000 years makes an atoll: its highest point is ${atoll.top.toFixed(1)} m (storm-built islets), with ${(-atoll.lagoon).toFixed(0)} m of lagoon over the old peak; without reefs the top is ${(-bare.top).toFixed(0)} m down`,
   );
   const guyot = sink(defaults.reefGrowth * 1000 * 1.5, 50);
   check(
@@ -286,12 +286,15 @@ check(badLakes === 0, 'lakes spill downhill');
 }
 
 // Run toward steady state with steady uplift and no lava flows, drifting plate, sinking,
-// bending, reefs, soil creep, waves, landslides or layered rock (reefs building up coastal
-// flats kept river mouths moving), where the stream power law with deposition gives an exact
+// bending, reefs, deltas, soil creep, waves, landslides or layered rock (reefs and deltas
+// building up coastal flats kept river mouths moving), where the stream power law with deposition gives an exact
 // answer (Yuan et al. 2019): everything uplifted upstream passes through, so rivers drop G Qs / A = G Ū (Ū the mean uplift upstream), and cutting
-// balances both: S = (U + G Ū) / (K Q^m) at every river point.
+// balances both: S = (U + G Ū) / (K Q^m) at every river point. It uses faster erosion and
+// slower uplift than the defaults, which only reach steady state in about twice the time.
 const params = {
   ...defaults,
+  K: 1.2e-4,
+  upliftRate: 3,
   D: 0,
   marineD: 0,
   waveErosion: 0,
@@ -302,6 +305,7 @@ const params = {
   sinkRate: 0,
   flexure: 0,
   reefGrowth: 0,
+  deltaTop: -1,
 };
 for (let t = 0; t < 2000; t++) sim.step(5000, params);
 sim.route(params);
