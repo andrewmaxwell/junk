@@ -1,4 +1,4 @@
-Island - 2026 - A hotspot keeps building a volcanic island: lava flows raise new volcanoes, rivers carve them, and the old ones sink into lagoons as coral rings them with reefs.
+Volcanic Island Simulator - 2026 - A hotspot keeps building a volcanic island: lava flows raise new volcanoes, rivers carve them, and the old ones sink into lagoons as coral rings them with reefs.
 
 The island begins as a chain of two or three basalt shield volcanoes, like the islands a hotspot builds as the plate slides over it: the oldest already worn, the youngest still growing, stretched along its rift zones and topped by a caldera. The volcanoes grow, rivers cut down into them and drop part of what they carry, and soil creeps downhill, following the landscape evolution equation
 
