@@ -172,16 +172,21 @@ export function makeRenderer(canvas, {N, cellSize, lowPower}) {
     texture.needsUpdate = true;
     return texture;
   };
-  const cloudTexture = new THREE.DataTexture(
-    new Float32Array(N * N),
-    N,
-    N,
-    THREE.RedFormat,
-    THREE.FloatType,
-  );
-  cloudTexture.magFilter = cloudTexture.minFilter = THREE.LinearFilter;
-  const heatTexture = cloudTexture.clone();
-  heatTexture.image = {data: new Float32Array(N * N), width: N, height: N};
+  // (Not one cloned from the other: a clone shares its image, so the clouds read the lava's
+  // heat and puffed up over each step's new flows for a frame.)
+  const floatTexture = () => {
+    const texture = new THREE.DataTexture(
+      new Float32Array(N * N),
+      N,
+      N,
+      THREE.RedFormat,
+      THREE.FloatType,
+    );
+    texture.magFilter = texture.minFilter = THREE.LinearFilter;
+    return texture;
+  };
+  const cloudTexture = floatTexture();
+  const heatTexture = floatTexture();
   const uniforms = {
     fieldsTex: {value: dataTexture()},
     normalTex: {value: dataTexture()},
