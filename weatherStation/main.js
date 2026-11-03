@@ -80,7 +80,15 @@ window.onSensi = (state) => {
 // National Blend, which beat Open-Meteo's default from two days out by about 2°
 // against the airport's readings; the default won for right now.
 const tenDayAir = (row) => row.blend_air ?? row.temperature_2m;
-const felt = (row) => feltTemperature(row, {shaded: true});
+// UTCI wants wind 10 m up over open ground, but among houses and trees the wind
+// at head height is about half that. Unscaled, a 17 mph morning at 68° read 53°
+// when it felt mild.
+const YARD_WIND = 0.5;
+const felt = (row) =>
+  feltTemperature(
+    {...row, wind_speed_10m: (row.wind_speed_10m ?? 0) * YARD_WIND},
+    {shaded: true},
+  );
 
 const isFreezing = (air) => air <= FREEZING;
 

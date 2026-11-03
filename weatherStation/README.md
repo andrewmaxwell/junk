@@ -34,7 +34,7 @@ It answers five questions at a glance: what time is it, how does it feel outside
 
 ## Temperatures
 
-- **Outside now and the 24 hours:** feels-like (UTCI in the shade), with the raw temperature marked "air".
+- **Outside now and the 24 hours:** feels-like (UTCI in the shade), with the raw temperature marked "air". The wind going in is halved, because the forecast's 10 m open-ground wind is about twice what reaches you in the yard, and unscaled a breezy 68° morning read 53°.
 - **Inside:** the actual temperature, from the thermostat so it's central and out of the sun, or from the Aranet4 without it. A feels-like model stayed within a degree or two and didn't match the thermostat.
 - **Dew point:** from the Aranet4, since moisture is close to the same across the house.
 - **The 10 days:** air temperature, because UTCI can sit 20° under the air on a breezy night, which read as a freeze that wasn't coming.
