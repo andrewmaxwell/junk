@@ -1,0 +1,31 @@
+#4.0# 38 "Cello" 0 %0011111100111101 1
+/config "Cello" 40 MG
+/delay OFF   0.3
+/preamp +0.0 OFF ON 24  59
+/gate ON GATE -60.5 60.0 1  502  983 0
+/gate/filter OFF 3.0 990.9
+/dyn ON COMP PEAK LOG -21.0 3.0 2 1.00 13 2.00  116 POST 0 100 OFF
+/dyn/filter OFF 3.0 990.9
+/eq ON
+/eq/1 PEQ 164.4 -3.00 2.0
+/eq/2 PEQ 417.9 -3.50 2.2
+/eq/3 PEQ 1k55 -4.00 2.0
+/eq/4 HShv 5k38 +9.50 2.0
+/mix OFF   -oo ON +0 OFF   -oo
+/mix/01 ON   -oo +0 EQ-> 0
+/mix/02 ON   -oo
+/mix/03 ON   -oo +0 EQ-> 0
+/mix/04 ON   -oo
+/mix/05 ON   0.0 +0 POST 0
+/mix/06 OFF   -oo
+/mix/07 OFF   -oo +0 POST 0
+/mix/08 ON -25.0
+/mix/09 ON   -oo +0 EQ-> 0
+/mix/10 OFF   -oo
+/mix/11 OFF   -oo +0 POST 0
+/mix/12 OFF   -oo
+/mix/13 OFF   -oo +0 POST 0
+/mix/14 ON -18.0
+/mix/15 OFF   -oo +0 POST 0
+/mix/16 OFF   -oo
+/headamp/025 +40.0 ON

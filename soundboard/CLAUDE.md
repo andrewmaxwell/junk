@@ -3,7 +3,7 @@
 Scene files and channel presets for the church's Behringer X32. This is not a web project: there's no index.html, and the homepage ignores it.
 
 - `master.scn` is the scene to start each week from. When it changes, push it to the board and save it as that week's scene (see below).
-- `presets/*.chn` are channel presets exported from the board's library.
+- `presets/NNN-Name.chn` are the channel presets in the board's library, one per slot (`NNN` is the slot, 001–100). `getpresets.mjs` writes them.
 - `81626.scn` is an old copy of a weekly scene.
 - `current.scn` is what `getscene.mjs` writes. It's a temporary copy of the board, so don't commit it.
 
@@ -13,16 +13,20 @@ The X32 is at **10.0.0.100** on the LAN (X32-03-4A-B5, firmware 4.00). It speaks
 
 - `node getscene.mjs [ref.scn] [out.scn]` saves the board's live state to a file. It asks for every line that `ref.scn` contains, using `/node ,s <path>`, and the board answers in the same text format as a `.scn` file. The defaults are `master.scn` → `current.scn`. Only reads.
 - `node pushscene.mjs [file.scn]` sets the board to match a scene. It sends each line as `/ ,s "<scene line>"`, and the board echoes back every line it accepts, which the script checks. **This changes the live mix immediately**, so get the user's explicit go-ahead first; auto mode blocks it otherwise. Only push when nobody is relying on the sound. Before pushing, pull the board and diff it against master, so you don't overwrite changes the user made on the board.
-- After a push, read the board back with `getscene.mjs` into a scratch file and diff it against master. The main LR fader always reads −9.9 for −10.0: faders move in fixed steps, so expect small rounding like that.
+- After a push, read the board back with `getscene.mjs` into a scratch file and diff it against master. Faders move in fixed steps, so expect small rounding like −9.9 for −10.0. Once the main LR fader stayed at −oo after a push even though the board echoed the line; `/main/st/mix/fader ,f 0.5` set it to −10.0.
+- `node getpresets.mjs` replaces every file in `presets/` with the board's library. Only ch 26 and input jack 26 change while it runs, and it blanks both again from master afterwards.
+- `node putpresets.mjs <files...>` saves those preset files into their slots on the board, then loads each back and checks it. Same ch 26 caveat.
 
 Other commands that have been tested (replies end with an int, where 1 = success):
 - Save the live state as a scene: `/save ,siss "scene" <slot> "<name>" ""`
 - Load a scene, which also makes it the current scene: `/load ,si "scene" <slot>`
 - Current scene number: `/node ,s -show/prepos/current`
 - Scene slot names: `/node ,s -show/showfile/scene/NNN`
-- Channel preset library names: `/node ,s -libs/ch/NNN`. You can read only names and flags, not a preset's settings.
+- Channel preset library entries: `/node ,s -libs/ch/NNN` gives `<n> "Name" 0 %flags 1`. There's no way to read a preset's settings directly, so load it onto a channel and read that.
+- Load a preset onto a channel: `/load ,siii "libchan" <slot-1> <channel-1> <scope>`. With scope 0 nothing loads; 255 loads everything.
+- Save a channel as a preset: `/save ,sisi "libchan" <slot-1> "<name>" <channel-1>`. It always writes flags `%0011111100110000`, so set them afterwards with `/-libs/ch/NNN/flags ,i <int>`.
 
-Weekly scenes are named by date (e.g. `2026_10_09` in slot 11). Empty slots show `""`.
+Weekly scenes are named by date with underscores (e.g. `2026_10_09` in slot 11, `2026_11_01` in slot 12). Empty slots show `""`.
 
 ## Reading .scn lines (easy to get wrong)
 
@@ -48,13 +52,15 @@ Weekly scenes are named by date (e.g. `2026_10_09` in slot 11). Empty slots show
 - Bus names: 1 MON L, 2 MON R (separate wedge mixes, not a stereo pair), 3 PIANO AVIOM, 4 DRUMS AVIOM, 5 Aux Mix, 8 Sub Woofers, 9 Vocal Aviom, 13–15 Vocal/Music/Drum FX.
 - **Some jacks are dead, so some inputs have been moved:** Cello comes in on input 31 and Bass on 32 (so ch 31/32 are labelled "DO NOT USE"), and Piano High is on input 14. Inputs 11 and 13 are unused.
 - LP-Guitar is now one mono channel on ch 17, and ch 18 is blank. Djembe is on ch 23.
-- The Aviom personal monitors (P16 outputs, AN-16i on several XLR outs) are going to be replaced with Behringer P16s soon, so don't spend effort on Aviom routing.
+- The Aviom personal monitors (P16 outputs, AN-16i on several XLR outs) will be replaced with Behringer P16s, but on 2026-11-02 the user was told to wait a few more weeks: keep the Aviom system working until the user says otherwise. P16 output changes made on the board belong in master.
+- Cello's EQ stays as it is in master; the user wasn't sure about later changes to it on the board. Piano High has its low cut on at 101 Hz; Piano Low has none.
 - USB card routing block 3 is set to `UIN17-24`, which looks odd, but nobody knows whether it matters. Leave it alone.
 - Unused channels and buses should be fully blank: copy them from an untouched one such as ch 26 or bus 10.
 
 ## Presets
 
-- A file named `NN-Name.chn` corresponds to the board's library entry whose first field matches the number on the file's first line (`#4.0# <n> "Name" ...`). That number is usually NN+1; for example, `38-Djembe` is board slot 39.
-- The board and the files don't fully match: board slot 29 is a second "Peter", and slot 47 "Piano high" has no file.
-- A preset's `%...` flags set which sections it loads.
-- Saving a preset to the board over OSC hasn't been tried. The plan was: set up unused ch 26 with the preset's settings, save it into the slot, load it back onto ch 26 to check, then blank ch 26 again. Test on an empty slot first.
+- The low 6 bits of a preset's flags are its sections: 1 input gain and low cut, 2 config (name, icon, color), 4 gate, 8 compressor, 16 EQ, 32 sends. Most presets have `%0011111100110100`. The OSC load ignores them, but the board's own Library screen may use them, so keep them when rewriting a preset.
+- The gain always loads with a preset, onto the channel's input jack. Files say `/headamp/025` because they're read through ch 26.
+- Board slot 29 is a second "Peter". "empty" presets fill unused slots.
+- When master changes a channel, update the matching preset's gain, low cut, gate, compressor, EQ and Aux Mix send to match (names, faders and monitor sends stay per person). Every preset sends 0.0 to the Aux Mix.
+- Unknown how a preset's `/mix` ON/OFF (mute) affects anything; Mark Bass was saved muted like the rest of master.

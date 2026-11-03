@@ -1,4 +1,4 @@
-#4.0# "2026_10_09" "" %000000000 1                                                                                                
+#4.0# "2026_11_01" "" %000000000 1                                                                                                
 /config/chlink OFF OFF OFF OFF OFF OFF OFF OFF OFF ON ON OFF OFF OFF OFF OFF
 /config/auxlink ON ON ON ON
 /config/fxlink ON ON ON ON
@@ -421,7 +421,7 @@
 /ch/12/automix OFF -12.0
 /ch/13/config "Piano High" 27 WH 14
 /ch/13/delay OFF   0.3
-/ch/13/preamp +0.0 OFF OFF 24 140
+/ch/13/preamp +0.0 OFF ON 24 101
 /ch/13/gate ON GATE -60.5 40.0 33  100  804 0
 /ch/13/gate/filter OFF 3.0 3k55
 /ch/13/dyn ON COMP RMS LIN -23.0 4.0 1 3.00 6 0.40  124 POST 0 100 OFF
@@ -684,10 +684,10 @@
 /ch/21/dyn/filter OFF 3.0 990.9
 /ch/21/insert OFF POST OFF
 /ch/21/eq ON
-/ch/21/eq/1 PEQ 124.7 -3.25 2.0
-/ch/21/eq/2 PEQ 514.1 -2.00 2.0
-/ch/21/eq/3 PEQ 1k97 +0.00 2.0
-/ch/21/eq/4 PEQ 11k11 -1.25 2.0
+/ch/21/eq/1 PEQ 124.7 +0.00 2.0
+/ch/21/eq/2 PEQ 632.5 +0.25 2.0
+/ch/21/eq/3 PEQ 2k69 +0.25 2.0
+/ch/21/eq/4 PEQ 11k50 +0.00 2.0
 /ch/21/mix OFF  -7.0 ON +0 OFF   -oo
 /ch/21/mix/01 ON -15.5 +0 EQ-> 0
 /ch/21/mix/02 ON  -5.0
@@ -716,10 +716,10 @@
 /ch/22/dyn/filter OFF 3.0 990.9
 /ch/22/insert OFF POST OFF
 /ch/22/eq ON
-/ch/22/eq/1 PEQ 124.7 -3.25 2.0
-/ch/22/eq/2 PEQ 514.1 -2.00 2.0
-/ch/22/eq/3 PEQ 1k97 +0.00 2.0
-/ch/22/eq/4 PEQ 11k11 -1.25 2.0
+/ch/22/eq/1 PEQ 124.7 +0.00 2.0
+/ch/22/eq/2 PEQ 632.5 +0.25 2.0
+/ch/22/eq/3 PEQ 2k69 +0.25 2.0
+/ch/22/eq/4 PEQ 11k50 +0.00 2.0
 /ch/22/mix OFF  -7.0 ON +0 OFF   -oo
 /ch/22/mix/01 ON -15.5 +0 EQ-> 0
 /ch/22/mix/02 ON  -5.0
@@ -1953,7 +1953,7 @@
 /outputs/p16/04/iQ OFF none Linear 0
 /outputs/p16/05 42 <-EQ OFF
 /outputs/p16/05/iQ OFF none Linear 0
-/outputs/p16/06 43 <-EQ OFF
+/outputs/p16/06 36 EQ-> OFF
 /outputs/p16/06/iQ OFF none Linear 0
 /outputs/p16/07 46 <-EQ OFF
 /outputs/p16/07/iQ OFF none Linear 0
@@ -1971,16 +1971,16 @@
 /outputs/p16/13/iQ OFF none Linear 0
 /outputs/p16/14 31 <-EQ OFF
 /outputs/p16/14/iQ OFF none Linear 0
-/outputs/p16/15 64 <-EQ OFF
+/outputs/p16/15 32 IN/LC OFF
 /outputs/p16/15/iQ OFF none Linear 0
-/outputs/p16/16 65 <-EQ OFF
+/outputs/p16/16 33 IN/LC OFF
 /outputs/p16/16/iQ OFF none Linear 0
 /outputs/aes/01 1 POST OFF
 /outputs/aes/02 2 POST OFF
 /outputs/rec/01 8 EQ->
 /outputs/rec/02 8 EQ->
 /headamp/000 +29.5 ON
-/headamp/001 +24.0 OFF
+/headamp/001 +33.0 OFF
 /headamp/002 +24.0 OFF
 /headamp/003 +24.0 OFF
 /headamp/004 +24.0 OFF
