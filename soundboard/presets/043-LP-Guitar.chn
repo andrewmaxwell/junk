@@ -1,5 +1,5 @@
 #4.0# 43 "LP-Guitar" 0 %0011111100100000 1
-/config "LP-Guitar " 20 YE
+/config "LP-Guitar" 20 YE
 /delay OFF   0.3
 /preamp +0.0 OFF ON 24  70
 /gate OFF GATE -80.0 60.0 1  502  983 0

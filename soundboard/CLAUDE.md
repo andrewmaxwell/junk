@@ -17,6 +17,9 @@ The X32 is at **10.0.0.100** on the LAN (X32-03-4A-B5, firmware 4.00). It speaks
 - `node getpresets.mjs` replaces every file in `presets/` with the board's library. Only ch 26 and input jack 26 change while it runs, and it blanks both again from master afterwards.
 - `node putpresets.mjs <files...>` saves those preset files into their slots on the board, then loads each back and checks it. Same ch 26 caveat.
 
+- `node osc.mjs <address> [,types] [args...]` sends one message and prints the replies, for the commands below. For example: `node osc.mjs /load ,si scene 12`.
+- `/soundboard-sync` (`.claude/skills/soundboard-sync/`) walks through the whole periodic sync.
+
 Other commands that have been tested (replies end with an int, where 1 = success):
 - Save the live state as a scene: `/save ,siss "scene" <slot> "<name>" ""`
 - Load a scene, which also makes it the current scene: `/load ,si "scene" <slot>`
@@ -25,6 +28,7 @@ Other commands that have been tested (replies end with an int, where 1 = success
 - Channel preset library entries: `/node ,s -libs/ch/NNN` gives `<n> "Name" 0 %flags 1`. There's no way to read a preset's settings directly, so load it onto a channel and read that.
 - Load a preset onto a channel: `/load ,siii "libchan" <slot-1> <channel-1> <scope>`. With scope 0 nothing loads; 255 loads everything.
 - Save a channel as a preset: `/save ,sisi "libchan" <slot-1> "<name>" <channel-1>`. It always writes flags `%0011111100110000`, so set them afterwards with `/-libs/ch/NNN/flags ,i <int>`.
+- Delete a preset: `/delete ,si "libchan" <slot-1>`. The slot then reads `""`.
 
 Weekly scenes are named by date with underscores (e.g. `2026_10_09` in slot 11, `2026_11_01` in slot 12). Empty slots show `""`.
 
@@ -66,6 +70,7 @@ Weekly scenes are named by date with underscores (e.g. `2026_10_09` in slot 11, 
 
 - In the `/load` scope argument, the low 6 bits pick sections: 1 input gain and low cut, 2 config (name, icon, color), 4 gate (probably; untested), 8 compressor, 16 EQ, 32 sends. Whether a preset's stored flags use the same bits is unknown: Sydney's are `%…010100`, yet loading her preset on the board sets the channel name. Most presets have `%0011111100110100`. Keep each preset's flags when rewriting it.
 - The gain always loads with a preset, onto the channel's input jack. Files say `/headamp/025` because they're read through ch 26.
-- Board slot 29 is a second "Peter". "empty" presets fill unused slots.
+- "empty" presets fill most unused slots; slot 29 is truly empty (a duplicate Peter was deleted).
+- Ch 7 "Dave" is Dave Powell (preset 013).
 - When master changes a channel, update the matching preset's gain, low cut, gate, compressor, EQ and Aux Mix send to match (names, faders and monitor sends stay per person). Every preset sends 0.0 to the Aux Mix.
 - Unknown how a preset's `/mix` ON/OFF (mute) affects anything; Mark Bass was saved muted like the rest of master.

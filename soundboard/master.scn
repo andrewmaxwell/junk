@@ -1757,14 +1757,14 @@
 /bus/16/grp %00000000 %000000
 /mtx/01/config "" 1 OFF
 /mtx/01/preamp OFF
-/mtx/01/dyn ON COMP RMS LOG -40.0 10 3 0.00 10 10.0  151 PRE 100 OFF
+/mtx/01/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 100 OFF
 /mtx/01/dyn/filter OFF 3.0 990.9
-/mtx/01/insert OFF POST OFF
-/mtx/01/eq ON
-/mtx/01/eq/1 LShv 76.9 +2.75 2.0
-/mtx/01/eq/2 PEQ 232.3 +3.00 1.1
+/mtx/01/insert OFF PRE OFF
+/mtx/01/eq OFF
+/mtx/01/eq/1 LShv 79.6 +0.00 2.0
+/mtx/01/eq/2 PEQ 158.9 +0.00 2.0
 /mtx/01/eq/3 PEQ 496.6 +0.00 2.0
-/mtx/01/eq/4 PEQ 8k14 +2.50 0.9
+/mtx/01/eq/4 PEQ 1k97 +0.00 2.0
 /mtx/01/eq/5 PEQ 5k02 +0.00 2.0
 /mtx/01/eq/6 HShv 10k02 +0.00 2.0
 /mtx/01/mix OFF   -oo
@@ -1809,10 +1809,10 @@
 /mtx/04/mix OFF   -oo
 /mtx/05/config "" 1 OFF
 /mtx/05/preamp OFF
-/mtx/05/dyn ON COMP RMS LOG -29.5 100 1 0.00 10 10.0  151 PRE 100 OFF
+/mtx/05/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 100 OFF
 /mtx/05/dyn/filter OFF 3.0 990.9
-/mtx/05/insert OFF POST OFF
-/mtx/05/eq ON
+/mtx/05/insert OFF PRE OFF
+/mtx/05/eq OFF
 /mtx/05/eq/1 LShv 79.6 +0.00 2.0
 /mtx/05/eq/2 PEQ 158.9 +0.00 2.0
 /mtx/05/eq/3 PEQ 496.6 +0.00 2.0
@@ -1822,10 +1822,10 @@
 /mtx/05/mix OFF   -oo
 /mtx/06/config "" 1 OFF
 /mtx/06/preamp OFF
-/mtx/06/dyn ON COMP RMS LOG -29.5 100 1 0.00 10 10.0  151 PRE 100 OFF
+/mtx/06/dyn OFF COMP RMS LOG 0.0 3.0 1 0.00 10 10.0  151 POST 100 OFF
 /mtx/06/dyn/filter OFF 3.0 990.9
-/mtx/06/insert OFF POST OFF
-/mtx/06/eq ON
+/mtx/06/insert OFF PRE OFF
+/mtx/06/eq OFF
 /mtx/06/eq/1 LShv 79.6 +0.00 2.0
 /mtx/06/eq/2 PEQ 158.9 +0.00 2.0
 /mtx/06/eq/3 PEQ 496.6 +0.00 2.0
