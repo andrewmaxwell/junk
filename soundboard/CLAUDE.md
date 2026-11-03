@@ -59,7 +59,7 @@ Weekly scenes are named by date with underscores (e.g. `2026_10_09` in slot 11, 
 
 ## Presets
 
-- The low 6 bits of a preset's flags are its sections: 1 input gain and low cut, 2 config (name, icon, color), 4 gate, 8 compressor, 16 EQ, 32 sends. Most presets have `%0011111100110100`. The OSC load ignores them, but the board's own Library screen may use them, so keep them when rewriting a preset.
+- In the `/load` scope argument, the low 6 bits pick sections: 1 input gain and low cut, 2 config (name, icon, color), 4 gate (probably; untested), 8 compressor, 16 EQ, 32 sends. Whether a preset's stored flags use the same bits is unknown: Sydney's are `%…010100`, yet loading her preset on the board sets the channel name. Most presets have `%0011111100110100`. Keep each preset's flags when rewriting it.
 - The gain always loads with a preset, onto the channel's input jack. Files say `/headamp/025` because they're read through ch 26.
 - Board slot 29 is a second "Peter". "empty" presets fill unused slots.
 - When master changes a channel, update the matching preset's gain, low cut, gate, compressor, EQ and Aux Mix send to match (names, faders and monitor sends stay per person). Every preset sends 0.0 to the Aux Mix.
