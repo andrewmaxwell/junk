@@ -19,7 +19,7 @@
 /mix/05 ON   0.0 +0 POST 0
 /mix/06 OFF   -oo
 /mix/07 OFF   -oo +0 POST 0
-/mix/08 ON  -5.5
+/mix/08 OFF   -oo
 /mix/09 ON   -oo +0 EQ-> 0
 /mix/10 OFF   -oo
 /mix/11 OFF   -oo +0 POST 0

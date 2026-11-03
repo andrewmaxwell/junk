@@ -53,7 +53,12 @@ Weekly scenes are named by date with underscores (e.g. `2026_10_09` in slot 11, 
 - **Some jacks are dead, so some inputs have been moved:** Cello comes in on input 31 and Bass on 32 (so ch 31/32 are labelled "DO NOT USE"), and Piano High is on input 14. Inputs 11 and 13 are unused.
 - LP-Guitar is now one mono channel on ch 17, and ch 18 is blank. Djembe is on ch 23.
 - The Aviom personal monitors (P16 outputs, AN-16i on several XLR outs) will be replaced with Behringer P16s, but on 2026-11-02 the user was told to wait a few more weeks: keep the Aviom system working until the user says otherwise. P16 output changes made on the board belong in master.
-- Cello's EQ stays as it is in master; the user wasn't sure about later changes to it on the board. Piano High has its low cut on at 101 Hz; Piano Low has none.
+- Cello's EQ stays as it is in master; the user wasn't sure about later changes to it on the board. Its high shelf was +9.5 dB until 2026-11-02, when it was lowered to +3 to see how it sounds. Piano High has its low cut on at 101 Hz; Piano Low has none. Violin's low cut is 149 Hz, below its open G (196 Hz).
+- **Gates on Piano Low/High and Cello are deliberate:** those are condenser mics, and the gates silence room noise between pieces. Their thresholds are about −60 with ~1 s release, so they close only near silence.
+- **The drums are electronic (Roland TD-27KV2):** ch 15 is the kit's drum output and ch 16 its cymbal output, both line level, so they need no low cut or bleed handling.
+- **The subwoofer amp's crossover is in the London DSP**, so bus 8 needs no high cut on the board. Only low sources send to it; Piano High and Cymbals don't.
+- The speech mics' (ch 1/2) deep, wide EQ cuts came from the October 2026 ring-out. Leave them unless the user says voices sound thin.
+- Unused FX 4–8, matrices and bus 16 have leftover settings but feed nothing. Clearing them wouldn't change the sound, so it isn't worth doing unless they get in the way.
 - USB card routing block 3 is set to `UIN17-24`, which looks odd, but nobody knows whether it matters. Leave it alone.
 - Unused channels and buses should be fully blank: copy them from an untouched one such as ch 26 or bus 10.
 

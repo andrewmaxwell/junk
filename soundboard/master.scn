@@ -325,7 +325,7 @@
 /ch/09/automix OFF -12.0
 /ch/10/config "Violin" 39 MG 10
 /ch/10/delay OFF   0.3
-/ch/10/preamp +0.0 OFF ON 24 213
+/ch/10/preamp +0.0 OFF ON 24 149
 /ch/10/gate OFF GATE -80.0 60.0 1  502  983 0
 /ch/10/gate/filter OFF 3.0 990.9
 /ch/10/dyn ON COMP PEAK LOG -33.0 3.0 1 0.00 10 10.0  151 POST 0 100 OFF
@@ -367,7 +367,7 @@
 /ch/11/eq/1 PEQ 164.4 -3.00 2.0
 /ch/11/eq/2 PEQ 417.9 -3.50 2.2
 /ch/11/eq/3 PEQ 1k55 -4.00 2.0
-/ch/11/eq/4 HShv 5k38 +9.50 2.0
+/ch/11/eq/4 HShv 5k38 +3.00 2.0
 /ch/11/mix OFF   -oo ON +0 OFF   -oo
 /ch/11/mix/01 ON   -oo +0 EQ-> 0
 /ch/11/mix/02 ON   -oo
@@ -440,7 +440,7 @@
 /ch/13/mix/05 ON   0.0 +0 POST 0
 /ch/13/mix/06 OFF   -oo
 /ch/13/mix/07 OFF   -oo +0 POST 0
-/ch/13/mix/08 ON  -5.5
+/ch/13/mix/08 OFF   -oo
 /ch/13/mix/09 ON   -oo +0 EQ-> 0
 /ch/13/mix/10 OFF   -oo
 /ch/13/mix/11 OFF   -oo +0 POST 0
@@ -536,7 +536,7 @@
 /ch/16/mix/05 ON   0.0 +100 POST 0
 /ch/16/mix/06 OFF   -oo
 /ch/16/mix/07 OFF   -oo +100 POST 0
-/ch/16/mix/08 ON -28.0
+/ch/16/mix/08 OFF   -oo
 /ch/16/mix/09 ON   -oo +100 EQ-> 0
 /ch/16/mix/10 OFF   -oo
 /ch/16/mix/11 OFF   -oo +100 POST 0
