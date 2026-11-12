@@ -4,6 +4,8 @@ Each pixel is one 3 km cell, colored by the share of waking hours (6 AM – 10 P
 
 Click anywhere, search a town or pick an example to see that place's year: a bar per month showing the share of Good hours and what spoiled the rest (heat, cold, rain, storms…), with the other activity drawn as a line. Tap a month in the chart to show it on the map. Pinch or ⌘/Ctrl-scroll to zoom down to individual 3 km cells. The URL keeps the activity, view, month, place and zoom, so a link shows what you saw.
 
+The same year as a path-traced 3D field of columns: [Comfort Spikes](spikes/).
+
 ## Data
 
 - Weather: NOAA's HRRR model on AWS (3 km, hourly), Oct 20, 2025 – Oct 19, 2026. Each hour's one-hour forecast supplies temperature, dew point, wind, gusts, cloud, radiation, ground temperature, precipitation and its type, and lightning. Only those fields are fetched, about 17 MB an hour, by byte range.
