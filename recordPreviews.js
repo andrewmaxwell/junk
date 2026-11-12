@@ -23,6 +23,12 @@ const MIN_FRAMES = 30; // fewer changed frames than this is a jump or two, not m
 const setup = {
   lambdagator: {warmup: 300, act: (page) => page.click('#watch')},
   bz: {warmup: 8000}, // let the broken fronts curl up into spirals
+  // let the opening world come alive and the camera glide in to it
+  'particle-life': {
+    warmup: 6000,
+    act: (page) =>
+      page.evaluate(() => document.querySelector('#hint').remove()),
+  },
   // let the rivers form and the camera start drifting; at the default 10 kyr/s, the orbit alone
   // was too still for a clip
   island: {
