@@ -82,3 +82,11 @@ These are the things the monitor can't see:
 - `analyze.mjs` blames the router for the morning incident, because the whole window includes the Mac's bad Wi-Fi. The timeline above is the better account: the cache kept filling after the Mac recovered.
 - Worth finding out: what happens at church from about 10:07 to 10:20, when the Mac's Wi-Fi was bad.
 - The ATEM is on Ethernet, and Andrew doesn't think there's any wireless link between it and the router (not yet traced end to end). So the Mac's Wi-Fi trouble shouldn't have reached the ATEM directly. What they share is the router and whatever switches are in the path, so check whether the router was overloaded from 10:07 to 10:20.
+
+## 2026-11-08
+
+- No problems reported. The monitor started late, at 10:39, after the stream was already up, so it missed how the stream started and the 10:07-10:20 window.
+- From 10:39:36 to 11:56:13, when the stream ended, the cache never went above 3 and there were no state blips or ATEM link drops. The stream averaged 10.5 Mbps, ranging from 9.3 to 14.3. Settings were still 12 and 20 Mbps.
+- The Mac stayed on 5 GHz the whole time, with a weakest signal of -52 dBm.
+- Ping loss over 4676 pings: router 0.02%, ATEM 0.04%, Cloudflare 0.02%, YouTube 0.45%, Google DNS 0.36%. The first responding Spectrum hop lost 3.1% while later hops lost far less, so it's probably just giving pings low priority.
+- Both Sundays, pings to Google's servers were lost far more often than pings to Cloudflare over the same Spectrum connection. On 11-01, from 10:22:30, YouTube lost about 1.0% and Cloudflare about 0.06%. Google may simply give pings low priority, so this isn't proof, but it fits the theory that the trouble is on the route to YouTube rather than in the building.
