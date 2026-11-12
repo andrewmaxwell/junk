@@ -1,59 +1,107 @@
 # Grind size camera stand
 
-A printed tower that holds the R6 II + RF 100mm F2.8L Macro pointing straight
-down at a 77mm UV filter covered in coffee grounds, lit from below. Built by
-`build_stand.py` (run `.venv/bin/python grindSize/stand/build_stand.py` from the
-repo root); every dimension is a named constant at the top of that file.
+A printed stand that fits over the hood of the R6 II + RF 100mm F2.8L Macro and
+holds a 77mm UV filter covered in coffee grounds at the lens's minimum focus
+distance (1.42x, 4.22 µm per pixel). The open bottom points at an evenly lit
+white surface, which is the backlight. No hardware: every part is printed.
 
-![section](preview.png)
+**To print, open `grind_stand.3mf` in Bambu Studio.** It's a ready project for
+the A1 with black PETG and the settings below. Plate 2 is a part that hasn't
+changed since an earlier print; skip it if you already have one.
+
+| Plate | Parts | Time | PETG |
+|---|---|---|---|
+| 1 | sleeve + barrel + lock ring | 2 h 47 min | 66 g |
+| 2 | filter carrier (unchanged) | 19 min | 8 g |
+
+Times and weights are from Bambu Studio 02.09.01.70's own slicer, which slices
+both plates with no warnings and no supports. That CLI slice applies the
+project's settings however the file lists them, so it doesn't prove the app
+keeps them: the app rebuilds each preset from the stock one and keeps only the
+keys named in `different_settings_to_system`, which `export_3mf.py` writes and
+checks. If the app ever shows 0.20 mm layers and grid infill, that list is
+missing.
 
 ## How it works
 
-- The camera stands lens-down. The hood's flat front edge (90 mm) rests on a
-  ledge, and a 25 mm collar keeps it centered and upright.
+![section](preview.png)
+
+- The **sleeve** goes over the hood. The hood's front edge seats on a ledge,
+  which keeps everything square to the lens, and 12 slotted fingers with a
+  small lip grip the hood.
+- Below the ledge, the sleeve is a tube with a coarse thread (3 mm per turn).
+  The **barrel** screws onto it with an ordinary right-hand thread: seen from
+  below, clockwise raises the glass toward the lens. It moves 4 mm either way
+  from the middle, 2.7 turns in all, and each turn moves the glass 3 mm, so a
+  twelfth of a turn is 0.25 mm.
+- The **lock ring** runs down the tube against the top of the barrel. Snugging
+  it stops the barrel turning, and it always pushes the thread's play to the
+  same side, so the glass stays square.
 - The filter sits front side up in the **carrier**, its male thread down through
   the hole and its shoulder on the ledge, so the filter's rim walls in the
-  grounds. The carrier slides in through the front slot and rests on three M3
-  screw tips.
-- The three screws level the glass and set focus. Leave the lens at minimum
-  focus (1.4x) with the SA control ring at 0, and never touch the focus ring.
-  The scale then stays the same from session to session. Once set, the screws
-  stay put.
-- The **diffuser** slides into the lower slot, 35 mm under the glass, far
-  enough down that its print texture blurs away completely. Light comes in
-  through the three windows at the bottom: aim the strobe at a white card under
-  the tower, or set the tower over a softbox.
+  grounds. The carrier slides in through the barrel's slot a few mm high, then
+  drops onto the ring at the bottom of the barrel.
+- Leave the lens at minimum focus with the SA control ring at 0, with the AF/MF
+  switch on MF, and focus only with the barrel. The scale then stays the same
+  from session to session.
+- Keep light from reaching the carrier slot. Light coming in through the slot
+  lights the grounds from above and turns their black silhouettes gray.
 
-## Parts
+The focal plane is somewhere between 34 and 40 mm below the hood's front edge.
+The first stand put the glass at 33 mm, which was too close, and the second
+could only come up to 40.5 mm, which was too far. This one centers on 38 mm and
+covers 34-42.
 
-| File | Filament | Notes |
-|---|---|---|
-| `hood_fit_test.stl` | any | Print first (17 mm tall). The hood should drop in with a little play and sit flat on the ledge. Adjust `CLEAR` or `HOOD_OD` if not. |
-| `tower.stl` | black PETG | Print upright as exported. No supports needed: the ledges and screw bosses have 45° undersides. The tops of the two front slots and the windows are long bridges and may sag a little, which doesn't matter because nothing locates against them. |
-| `carrier.stl` | black PETG | Print flat. Its underside rests on the screws. |
-| `diffuser.stl` | white PETG | Optional. 1.2 mm thick. Paper or opal acrylic cut to the same shape works too. |
+## After printing
 
-Hardware: 3 × M3 heat-set inserts (4.1 mm hole, up to 5.8 mm long), 3 × M3×16
-screws, and optionally 3 × M3 nylock nuts to lock the screws once set.
+- **Snap out the 18 thin ribs in the barrel's slot** with pliers and clean up
+  the stubs with a knife. They're there because the wall above the slot is a
+  half circle held only at its ends, which can't print as a bridge.
 
 ## Setup
 
-1. Press the inserts into the tops of the three bosses. Thread the screws up
-   through them from below so about 3 mm of tip shows.
-2. Pull the diffuser out. That opens the holes in the diffuser ledge, so a hex
-   key reaches the screws from below. Set the tower on two books so your hand
-   fits underneath.
-3. Put a stage micrometer or a sprinkle of grounds on the filter, slide the
-   carrier in, and stand the camera on top. In magnified live view, turn the
-   screws together until the center is sharp, then individually until all four
-   corners are sharp. One full turn moves the glass 0.5 mm; depth of field is
-   only about 0.15 mm.
-4. Optionally run a nylock nut up each screw against the boss to lock it. Put the
-   diffuser back.
-5. Photograph the stage micrometer to get the µm-per-pixel scale.
+1. Run the lock ring up the sleeve's tube to the collar, then screw the barrel
+   on about halfway.
+2. Sprinkle a small pinch of grounds on the filter and tap it so they spread
+   out into one layer with gaps between particles. Grounds piled on each other
+   can't be measured.
+3. Slide the carrier in and push the sleeve onto the hood until the hood seats
+   on the ledge.
+4. In magnified live view, turn the barrel until the grounds are sharp, then
+   run the lock ring down against the barrel.
+5. Photograph a stage micrometer or a coin to check the µm-per-pixel scale, and
+   take one frame of the empty glass to correct for uneven backlight.
+
+Use f/8. At 1.4x, f/2.8 leaves only about 0.04 mm in focus.
+
+## Print settings
+
+On top of Bambu's 0.20mm Standard @BBL A1 process and Generic PETG profile.
+Each one is explained in `export_3mf.py`:
+
+- Textured PEI plate, bed 70 °C (Overture PETG's range), retraction 1.0 mm
+- Precise outer wall, elephant foot compensation 0.15 mm, Arachne walls, so the
+  hood collar, filter pocket and threads come out at their modeled size
+- 0.24 mm layers, 2 walls, 3 top and bottom layers, 10% gyroid infill. The
+  stand only carries a filter, so it's built light: every wall is 2-3 mm thick
+- Thick bridges, no supports, no brim (every part has a wide flat base)
+
+## Rebuilding
+
+Every dimension is a named constant at the top of `build_stand.py`. From the
+repo root, run:
+
+```
+.venv/bin/python grindSize/stand/build_stand.py
+```
+
+It writes `grind_stand.3mf` and `preview.png`, and stops if any part has an
+unsupported overhang steeper than 50 degrees (other than the slot's intended
+bridge) or isn't watertight. The venv needs `manifold3d`,
+`trimesh`, `shapely`, `lxml` and `matplotlib`.
 
 ## Guesses to check
 
 `FILTER_THREAD_H` (3 mm) and `GLASS_ABOVE_SHOULDER` (1.5 mm) are guesses about
-the Kenko filter. The screws cover about ±3 mm, so being a little off is fine.
-`HOOD_TO_FOCUS` (30 mm) is the measured distance.
+the Kenko filter. `HOOD_TO_FOCUS` (38 mm) is bracketed by the first two
+stands. The barrel's ±4 mm of travel covers all three being a little off.
