@@ -1,0 +1,48 @@
+{
+  "start": "2025-11-01",
+  "end": "2026-10-31",
+  "width": 3600,
+  "height": 1582,
+  "projection": {
+    "name": "Equal Earth",
+    "xMax": 2.7066299836960743,
+    "yMax": 1.317362759157413,
+    "cell": 0.0015036833242755968,
+    "south": -58
+  },
+  "periods": [
+    "all",
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "12"
+  ],
+  "reasons": [
+    "cold",
+    "hot",
+    "rain",
+    "humid",
+    "air"
+  ],
+  "test": {
+    "lowF": 62,
+    "highF": 80,
+    "dewF": 63,
+    "rainMm": 1.0,
+    "pm10": 154,
+    "pm25": 35.4,
+    "airComplete": true
+  },
+  "encoding": {
+    "noData": 255,
+    "noReason": 254
+  }
+}
