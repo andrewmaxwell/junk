@@ -11,6 +11,13 @@ Pick a month to watch the seasons move. Each closed hour is blamed on one thing,
 
 What stands out: the East African highlands (Nairobi 71%) are far ahead of anywhere else, then the high plateaus and mild coasts (Mexico City, Kunming, the Andes, southern Africa, eastern Australia). The Sahara is mild all autumn but loses its summer to heat and its spring to dust, ending the year at about 18%, just below Kansas City and Dallas. Delhi falls from 23% on weather alone to 1% once smoke and pollution count, and Singapore is too hot or muggy every hour of the year.
 
+Why Nairobi beats San Francisco: every hour counts, night included, and 62°F is the floor. Nairobi, at 1,700 m on the equator, has days around 77°F that stay above 62°F until about midnight, so only the hours around dawn are lost (61–79% open in every month). San Francisco's nights fall below 62°F almost every day of the year (downtown's low reached 62°F on 5 of 273 days in NOAA's 2024 record), and on 103 of those days it never got that warm at all, so 73% of its hours are too cold.
+
+## Checks
+
+- The page's labels match the build cache read directly at each city's own ERA5-Land cell (Nairobi 70% on weather alone, San Francisco 27%), and Open-Meteo's independent ERA5-Land series for the same year and places agrees within 1–3 points (Nairobi 73%, SF 27%, London 24%, Lisbon 36%, Mexico City 41%, Sydney 43%, Kunming 40%, Dubai 25%).
+- Against NOAA ISD station observations for 2024 (temperature and dew point only, the hours each station reported), ERA5-Land is close and, if anything, low for Nairobi: Wilson 81% observed vs 73% ERA5-Land, JKIA 68% vs 70%, SFO 24% vs 24%, Oakland 32% vs 29%, Heathrow 21% vs 17%, Sydney Observatory Hill 35% vs 37%. Mean temperature bias was within ±0.7°C at all of them.
+
 ## Data
 
 - Weather: ECMWF's ERA5-Land reanalysis from the Copernicus Climate Data Store: hourly, 0.1° (about 9 km), land only. 2 m temperature, 2 m dew point and precipitation, which is accumulated since 00 UTC and differenced to hourly.
