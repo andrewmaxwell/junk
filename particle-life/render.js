@@ -18,6 +18,8 @@ struct View {
   zoom: f32,
   // how many steps of motion each streak shows
   streaks: f32,
+  // the wrapping world's size, in the same units as center
+  world: vec2f,
   colors: array<vec4f, 16>,
 }
 
@@ -44,10 +46,12 @@ fn dotVertex(@builtin(vertex_index) v: u32, @builtin(instance_index) i: u32) -> 
 
   // where it is relative to the camera, the short way around the world
   var d = particle.xy - view.center;
-  d -= view.size * round(d / view.size);
+  d -= view.world * round(d / view.world);
   let screen = d * view.zoom + view.size * 0.5;
 
-  let r = view.dotSize * view.zoom * 0.5;
+  // dots grow slower than the zoom, so close up they stay distinct particles
+  // instead of blurring into each other
+  let r = view.dotSize * sqrt(view.zoom) * 0.5;
   let vel = particle.zw * view.zoom;
   let speed = length(vel);
   let halfLen = speed * view.streaks * 0.5;
@@ -61,8 +65,9 @@ fn dotVertex(@builtin(vertex_index) v: u32, @builtin(instance_index) i: u32) -> 
   var out: Dot;
   out.position = vec4f(p / view.size * vec2f(2, -2) + vec2f(-1, 1), 0, 1);
   out.local = local;
-  // a longer streak spreads the same light over more pixels
-  out.color = view.colors[colors[i]].rgb * view.brightness * r / (r + halfLen);
+  // a longer streak spreads the same light over more pixels, and zoomed in,
+  // dots get brighter to make up for the space between them
+  out.color = view.colors[colors[i]].rgb * view.brightness * sqrt(view.zoom) * r / (r + halfLen);
   out.shape = vec2f(r, halfLen);
   return out;
 }
@@ -168,6 +173,9 @@ export const makeRenderer = (device, context, format) => {
       v.fade,
       v.zoom,
       v.streaks,
+      0,
+      v.world,
+      v.world,
     ]);
     v.colors.forEach((rgb, i) => data.set(rgb, 12 + i * 4));
     device.queue.writeBuffer(viewBuffer, 0, data);

@@ -55,6 +55,8 @@ struct Params {
 @group(0) @binding(8) var<storage, read_write> cellSlot: array<vec2u>;
 // xy = summed offsets of the particles near followCenter, z = how many
 @group(0) @binding(9) var<storage, read_write> tracked: vec4f;
+// see measure
+@group(0) @binding(10) var<storage, read_write> stats: array<f32, 8>;
 
 fn cellOf(p: vec2f) -> vec2u {
   let grid = vec2u(params.cols, params.rows);
@@ -239,6 +241,61 @@ fn track(@builtin(local_invocation_id) lid: vec3u) {
     tracked = vec4f(trackSums[0], 0.0);
   }
 }
+
+var<workgroup> statSums: array<vec3f, 256>;
+var<workgroup> bestCells: array<vec2f, 256>;
+
+// One workgroup sums up how alive the world looks, cell by cell, from the
+// last step (particles are still in the cells' runs, though they've just
+// moved): the particles' speeds, how fast each cell's particles are moving
+// together (a creature swimming, rather than particles jiggling in place),
+// and the sum of each cell's count squared (how clumped they are). It also
+// finds the cell moving together the fastest.
+@compute @workgroup_size(256)
+fn measure(@builtin(local_invocation_id) lid: vec3u) {
+  var sum = vec3f(0.0);
+  var best = vec2f(-1.0, 0.0);
+  for (var c = lid.x; c < params.numCells; c += 256u) {
+    let start = cellStart[c];
+    let end = cellStart[c + 1u];
+    var together = vec2f(0.0);
+    for (var n = start; n < end; n++) {
+      let v = particles[n].zw;
+      together += v;
+      sum.x += length(v);
+    }
+    let moving = length(together);
+    let count = f32(end - start);
+    sum.y += moving;
+    sum.z += count * count;
+    if (moving > best.x) {
+      best = vec2f(moving, f32(c));
+    }
+  }
+  statSums[lid.x] = sum;
+  bestCells[lid.x] = best;
+  workgroupBarrier();
+  for (var s = 128u; s > 0u; s >>= 1u) {
+    if (lid.x < s) {
+      statSums[lid.x] += statSums[lid.x + s];
+      if (bestCells[lid.x + s].x > bestCells[lid.x].x) {
+        bestCells[lid.x] = bestCells[lid.x + s];
+      }
+    }
+    workgroupBarrier();
+  }
+  if (lid.x == 0u) {
+    let b = u32(bestCells[0].y);
+    stats = array<f32, 8>(
+      statSums[0].x,
+      statSums[0].y,
+      statSums[0].z,
+      f32(b % params.cols),
+      f32(b / params.cols),
+      0.0, 0.0, 0.0,
+    );
+  }
+}
 `;
 
 const entryPoints = [
@@ -248,6 +305,7 @@ const entryPoints = [
   'scatter',
   'interact',
   'track',
+  'measure',
 ];
 
 export const makeSim = (device) => {
@@ -284,8 +342,17 @@ export const makeSim = (device) => {
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
   let tracking = false; // a copy into trackedRead is on its way
+  const stats = device.createBuffer({
+    size: 32,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  });
+  const statsRead = device.createBuffer({
+    size: 32,
+    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+  });
 
   let numParticles = 0;
+  let worldSize = [1, 1];
   let cols = 0;
   let rows = 0;
   let particles, colors, sorted, sortedColors, cellSlot, cellCount, cellStart;
@@ -300,6 +367,7 @@ export const makeSim = (device) => {
     scatter: [0, 2, 3, 4, 5, 7, 8],
     interact: [0, 1, 2, 3, 4, 5, 7],
     track: [0, 2, 9],
+    measure: [0, 2, 7, 10],
   };
   const makeBindGroups = () => {
     const buffers = [
@@ -313,6 +381,7 @@ export const makeSim = (device) => {
       cellStart,
       cellSlot,
       tracked,
+      stats,
     ];
     bindGroups = Object.fromEntries(
       entryPoints.map((name) => [
@@ -346,6 +415,7 @@ export const makeSim = (device) => {
 
   /** Cells are at least `radius` wide, and there are at least 3 each way. */
   const setGrid = (width, height, radius) => {
+    worldSize = [width, height];
     const nextCols = Math.max(3, Math.floor(width / radius));
     const nextRows = Math.max(3, Math.floor(height / radius));
     if (nextCols === cols && nextRows === rows) return;
@@ -371,7 +441,8 @@ export const makeSim = (device) => {
   /**
    * p: the settings, plus `tool` (0-4, see Params), `pointer` and
    * `pointerVel` in world pixels, and `follow` ({x, y, radius}) to also find
-   * the middle of the particles there.
+   * the middle of the particles there, and `measure` to also measure how alive
+   * it is after the last step (see readStats).
    */
   const step = (encoder, steps, p) => {
     const data = new ArrayBuffer(96);
@@ -401,11 +472,42 @@ export const makeSim = (device) => {
     }
     const track = p.follow && !tracking;
     if (track) run('track', 1);
+    const measure = p.measure && steps > 0;
+    if (measure) run('measure', 1);
     pass.end();
     if (track) {
       encoder.copyBufferToBuffer(tracked, 0, trackedRead, 0, 16);
       tracking = true;
     }
+    if (measure) encoder.copyBufferToBuffer(stats, 0, statsRead, 0, 32);
+  };
+
+  /**
+   * Call after submitting a step with `measure`. Resolves to how alive the
+   * world is: `speed`, the particles' average speed, `together`, the part
+   * of that which is whole cells moving together (0 to 1), `clumping`, how
+   * many more neighbors each particle has than if they were spread evenly
+   * at random (1), and `liveliest`, the middle of the cell moving together
+   * the fastest, in world units.
+   */
+  const readStats = async () => {
+    await statsRead.mapAsync(GPUMapMode.READ);
+    const [speed, together, squares, col, row] = new Float32Array(
+      statsRead.getMappedRange(),
+    );
+    statsRead.unmap();
+    const perCell = numParticles / (cols * rows);
+    return {
+      speed: speed / numParticles,
+      together: speed ? together / speed : 0,
+      // for counts scattered at random, the average of count^2 / count is
+      // perCell + 1
+      clumping: squares / numParticles / (perCell + 1),
+      liveliest: [
+        ((col + 0.5) / cols) * worldSize[0],
+        ((row + 0.5) / rows) * worldSize[1],
+      ],
+    };
   };
 
   /**
@@ -428,6 +530,7 @@ export const makeSim = (device) => {
     setRules,
     step,
     readTracked,
+    readStats,
     get particles() {
       return particles;
     },
