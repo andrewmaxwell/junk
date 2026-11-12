@@ -325,7 +325,22 @@ def project_settings(n_plates, tower=None):
         cfg["wipe_tower_x"] = [f"{tower[0]:.3f}"] * n_plates
         cfg["wipe_tower_y"] = [f"{tower[1]:.3f}"] * n_plates
     cfg["version"] = BAMBU_APP_VERSION
+    cfg["different_settings_to_system"] = settings_diff(n)
     return json.dumps(cfg, indent=4)
+
+
+def settings_diff(n):
+    """The keys that differ from the system presets named in print_settings_id
+    and filament_settings_id: [process, one per filament, printer], each a
+    sorted ";"-joined list. When the Bambu Studio *app* opens a project it
+    rebuilds each preset from its system parent and keeps only the keys listed
+    here; without it the app shows stock 0.20mm Standard and stock Generic PETG
+    (no ironing, grid infill, 80 C bed). `BambuStudio --slice` applies the
+    overrides regardless, so a CLI slice does not prove this works."""
+    stock = json.load(open(TEMPLATE))
+    print_keys = sorted(k for k, v in PROCESS.items() if k != "curr_bed_type" and stock.get(k) != v)
+    filament_keys = ";".join(sorted(FILAMENT))
+    return [";".join(print_keys)] + [filament_keys] * n + [""]
 
 
 def layout(P, meshes, order):
@@ -550,6 +565,13 @@ def verify(path=OUT):
     check(len(cfg["flush_volumes_matrix"]) == n * n,
            "flush_volumes_matrix is n^2", f"{len(cfg['flush_volumes_matrix'])} entries")
     check(all(t == "PETG" for t in cfg["filament_type"]), "all four filaments are PETG")
+    flush = [float(v) for v in cfg["flush_volumes_matrix"]]
+    check(any(flush), "flush_volumes_matrix is non-zero",
+          f"{min(v for v in flush if v)}..{max(flush):.0f} mm^3 off the diagonal")
+    diff = cfg.get("different_settings_to_system", [])
+    check(len(diff) == n + 2 and diff[0] and all(diff[1:-1]),
+          "different_settings_to_system lists the overrides (or the app drops them)",
+          f"process: {diff[0] if diff else None}")
 
     # part id == component objectid is what makes Bambu apply the right extruder
     comps = re.findall(r'<component objectid="(\d+)"', model)

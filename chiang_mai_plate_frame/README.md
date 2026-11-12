@@ -16,7 +16,12 @@ interlocked on one plate (`plate_preview.png`) and every color already assigned
 to an AMS slot. All six meshes are watertight; the colors form an exact
 partition. It has also been put through the BambuStudio CLI slicer, which slices
 it clean — no warnings, and the weights, times and color-change counts below are
-that slicer's own numbers.
+that slicer's own numbers. The CLI applies the project's settings no matter
+what, though, so a clean CLI slice doesn't prove the *app* keeps them. The app
+rebuilds each preset from the stock one and keeps only the keys named in
+`different_settings_to_system`; `export_3mf.py` writes that list and `verify()`
+checks it. If the app ever shows grid infill, no ironing and an 80 °C bed, the
+list is missing.
 
 It is v3. v1 (two plates, no ironing) is what the first pair of halves was
 printed with; v2 (v1 + ironing) was never printed. Both are in git history. Never
