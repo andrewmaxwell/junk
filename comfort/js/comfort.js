@@ -68,7 +68,10 @@ const exposureRelief = (minutes) =>
 // the move the comfort band just made.
 const WIND_FREE = 7; // top of Beaufort 2; the most wind a perfect day has
 const WIND_TOTAL = 40; // sustained mph that costs the entire score
-const GUST_WEIGHT = 0.7; // a gust is worse than its speed suggests, but is brief
+// Gusts usually run 1.5-2x the sustained wind, so at half weight they only take
+// over on a day gustier than that. At 0.7, 37 mph gusts on a 19 mph day counted
+// as 26 mph sustained and cost 34 points of a walk that felt fine.
+const GUST_WEIGHT = 0.5;
 
 const RAIN_TRACE = 0.2; // mm/hr; mist you would not turn back for
 const RAIN_HALF_PENALTY = 2.5; // mm/hr above trace at which rain costs ~63 points

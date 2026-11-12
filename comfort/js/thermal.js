@@ -413,6 +413,12 @@ export function utci({airC, windMs, tmrtC, vapourKPa}) {
 // One cache per sun exposure, since the two answers differ for the same row.
 const caches = {open: new WeakMap(), shaded: new WeakMap()};
 
+// UTCI wants wind 10 m up over open ground, which is what Open-Meteo reports,
+// but among houses and trees the wind at head height is about half that.
+// Unscaled, a 19 mph, 72° morning read 69° and "wear light layers" to someone
+// who had just walked it comfortably in a t-shirt.
+const STREET_WIND = 0.5;
+
 // The one temperature the comfort model reasons about, in °F. Null when the row
 // has no air temperature, which is the only field with no sane substitute.
 export function feltTemperature(conditions, {shaded = false} = {}) {
@@ -429,7 +435,7 @@ export function feltTemperature(conditions, {shaded = false} = {}) {
   const felt = toF(
     utci({
       airC,
-      windMs: (conditions.wind_speed_10m ?? 0) * MPH_TO_MS,
+      windMs: (conditions.wind_speed_10m ?? 0) * STREET_WIND * MPH_TO_MS,
       tmrtC: meanRadiantTemperature(conditions, {shaded}),
       vapourKPa: vapourPressure(dewC) / 10,
     }),
