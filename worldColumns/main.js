@@ -82,7 +82,7 @@ const MAPS = {
     power: 2,
     night: true,
     ranges: {low: [0, 100, 1], high: [100, 6000, 10]},
-    settings: {low: 10, high: 1500, gamma: 2, height: 2.5},
+    settings: {low: 3, high: 1500, gamma: 2, height: 2.5},
   },
   windows: {
     button: 'Open windows',

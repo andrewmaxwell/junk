@@ -38,7 +38,7 @@ import sys
 import numpy as np
 from PIL import Image
 
-from export import A1, A2, A3, A4, DATA_DIR, M, SOUTH, equal_earth, forward
+from export import A1, A2, A3, A4, DATA_DIR, M, SOUTH, equal_earth, forward, inverse
 from fetch import CHUNK_DIR, MISSING, NI, NJ
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -197,15 +197,28 @@ def mean_of(grid, image, lat, lon, valid):
     return bins.shaped(np.where(bins.count > 0, bins.sum / np.maximum(bins.count, 1), np.nan))
 
 
-def lights(grid):
-    """Mean radiance, nW/(cm² sr), from lights.py's tiles, times 10."""
+def lights(grid, people, land):
+    """Mean radiance, nW/(cm² sr), from lights.py's tiles, times 10, less the
+    sky's own glow: at 55-72°N even land where nobody lives reads about 0.4
+    (the aurora, which the annual composite doesn't wholly remove), so each
+    1° band of latitude loses what 90% of its uninhabited land stays under."""
     n = grid.width * grid.height
     sums, counts = np.zeros(n), np.zeros(n)
     for path in glob.glob(os.path.join(HERE, 'cache', 'vnp46', '*.npz')):
         z = np.load(path)
         np.add.at(sums, z['cells'], z['sums'])
         np.add.at(counts, z['cells'], z['counts'])
-    return (np.where(counts > 0, sums / np.maximum(counts, 1), 0) * 10).reshape(grid.height, grid.width)
+    radiance = np.where(counts > 0, sums / np.maximum(counts, 1), 0).reshape(grid.height, grid.width)
+    xs = -grid.x_max + (np.arange(grid.width) + 0.5) * grid.cell
+    ys = grid.y_max - (np.arange(grid.height) + 0.5) * grid.cell
+    _, lat = inverse(*np.meshgrid(xs, ys))
+    band = np.floor(lat).astype(int)
+    empty = land & (people == 0)
+    sky = np.zeros_like(radiance)
+    for b in np.unique(band[empty]):
+        m = band == b
+        sky[m] = np.percentile(radiance[m & empty], 90)
+    return np.maximum(radiance - sky, 0) * 10
 
 
 def travel(grid):
@@ -265,10 +278,16 @@ def main():
     grid = Grid(FINE)
     print('elevation and the land mask')
     heights, land = elevation(grid)
+    cache = {}
+
+    def people():
+        if 'people' not in cache:
+            cache['people'] = population(grid)
+        return cache['people']
     fine = {
         'elevation': (lambda: heights, 'm', 'highest point, to 10 m', 10),
-        'population': (lambda: population(grid), 'people/km²', '', 1),
-        'lights': (lambda: lights(grid), 'nW/(cm² sr)×10', 'VNP46A4 2023 radiance times 10', 1),
+        'population': (lambda: people(), 'people/km²', '', 1),
+        'lights': (lambda: lights(grid, people(), land), 'nW/(cm² sr)×10', 'VNP46A4 2023 radiance times 10', 1),
         'travel': (lambda: travel(grid), 'minutes', 'to 5 minutes', 5),
     }
     for name in wanted:
