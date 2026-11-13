@@ -15,6 +15,13 @@
   html, body { margin: 0; height: 100%; background: #edebe9; overflow: hidden; }
   canvas { display: block; }
   .overlay { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .maps { position: fixed; display: flex; flex-wrap: wrap; max-width: calc(100vw - 32px); align-items: center; gap: 0.5em; font: 300 12px Jost, sans-serif; color: #2b2723; }
+  .maps button { font: inherit; color: inherit; background: rgba(237, 235, 233, 0.7); border: 1px solid rgba(43, 39, 35, 0.35); border-radius: 999px; padding: 0.3em 1em; cursor: pointer; }
+  .maps button:hover { border-color: #2b2723; }
+  .maps button.active { background: #2b2723; border-color: #2b2723; color: #edebe9; }
+  .maps button.reset { margin-left: 1em; border-style: dashed; }
+  .maps .hint { margin-left: 1.2em; opacity: 0.55; }
+  .maps [hidden] { display: none; }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

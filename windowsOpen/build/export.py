@@ -66,6 +66,24 @@ def inverse(x, y):
 air_months = {}
 
 
+def equal_earth(land):
+    """The Equal Earth grid, and for each of its cells the ERA5-Land cell under
+    its centre: (row, col, on_land, height, (x_max, y_max, cell))."""
+    x_max, _ = forward(180, 0)
+    _, y_max = forward(0, 90)
+    _, y_min = forward(0, SOUTH)
+    cell = 2 * x_max / WIDTH
+    height = int(np.ceil((y_max - y_min) / cell))
+    xs = -x_max + (np.arange(WIDTH) + 0.5) * cell
+    ys = y_max - (np.arange(height) + 0.5) * cell
+    gx, gy = np.meshgrid(xs, ys)
+    lon, lat = inverse(gx, gy)
+    inside = np.abs(lon) <= 180
+    col = np.round(np.mod(lon, 360) / 0.1).astype(int) % NI
+    row = np.clip(np.round((90 - lat) / 0.1).astype(int), 0, NJ - 1)
+    return row, col, inside & land[row, col], height, (x_max, y_max, cell)
+
+
 def bad_air(stamp):
     """The CAMS bad-air bits for an hour, flat, or None if not downloaded."""
     month = f'{stamp[:4]}-{stamp[4:6]}'
@@ -119,21 +137,7 @@ def main():
     print(f'{len(files)} chunks, {first} to {last}, months {sorted(months)}; '
           f'air for {air_hours} hours, missing for {missing_air}')
 
-    # The Equal Earth grid, and for each of its cells the ERA5-Land cell under
-    # its centre.
-    x_max, _ = forward(180, 0)
-    _, y_max = forward(0, 90)
-    _, y_min = forward(0, SOUTH)
-    cell = 2 * x_max / WIDTH
-    height = int(np.ceil((y_max - y_min) / cell))
-    xs = -x_max + (np.arange(WIDTH) + 0.5) * cell
-    ys = y_max - (np.arange(height) + 0.5) * cell
-    gx, gy = np.meshgrid(xs, ys)
-    lon, lat = inverse(gx, gy)
-    inside = np.abs(lon) <= 180
-    col = np.round(np.mod(lon, 360) / 0.1).astype(int) % NI
-    row = np.clip(np.round((90 - lat) / 0.1).astype(int), 0, NJ - 1)
-    on_land = inside & land[row, col]
+    row, col, on_land, height, (x_max, y_max, cell) = equal_earth(land)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     periods = {'all': [sum(m[0] for m in months.values()), sum(m[1] for m in months.values())]}

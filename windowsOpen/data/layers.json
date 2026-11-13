@@ -1,0 +1,16 @@
+{
+  "encoding": {
+    "noData": 65535,
+    "bytes": "R high, G low"
+  },
+  "layers": {
+    "elevation": {
+      "unit": "m",
+      "max": 6348
+    },
+    "population": {
+      "unit": "people/km\u00b2",
+      "max": 61835
+    }
+  }
+}

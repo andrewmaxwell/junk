@@ -1,34 +1,140 @@
-// The world as a field of columns, each as tall as the share of the year's
-// hours you could have left the windows open there. The data is ERA5-Land
-// (about 9 km, hourly) reduced by build/fetch.py and resampled onto an Equal
-// Earth grid by build/export.py: red is the percent of open hours, 255 is sea.
+// The world as a field of columns. The main map makes each as tall as the
+// share of the year's hours you could have left the windows open there
+// (ERA5-Land, about 9 km, hourly, reduced by build/fetch.py and resampled onto
+// an Equal Earth grid by build/export.py). The other maps, from
+// build/layers.py, use the same grid for elevation and population.
 // The picture is path traced with the Comfort spike map's tracer and sharpens
 // as samples add up. Titles, labels and the legend are drawn on a 2D canvas
 // over it, so "save PNG" can stack the two into one image.
+//
+// Rendering pauses while the window isn't focused, since it keeps the GPU
+// busy; ?noPause turns that off. ?map=elevation or ?map=population opens
+// another map.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {createPathTracer} from '../comfort/map/spikes/pathtracer.js';
 
-const meta = await fetch('data/meta.json').then((r) => r.json());
+const [meta, layers] = await Promise.all(
+  ['data/meta.json', 'data/layers.json'].map((url) =>
+    fetch(url).then((r) => r.json()),
+  ),
+);
 const {width: nx, height: ny, projection} = meta;
-const NO_DATA = meta.encoding.noData;
+const NO_VALUE = 65535; // sea, once a map is decoded
 const WORLD = 100; // map width in scene units
 const CELL = WORLD / nx;
+const KM_PER_UNIT = (2 * projection.xMax * 6371) / WORLD;
 
 const INK = '#2b2723';
 const HALO = '#edebe9'; // the lit ground as rendered
 const FONT = 'Jost';
 
+const query = new URLSearchParams(location.search);
+const NO_PAUSE = query.has('noPause');
+
+const MONTHS =
+  'January February March April May June July August September October November December'.split(
+    ' ',
+  );
+const monthName = (period) => MONTHS[Number(period) - 1];
+function formatDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${MONTHS[m - 1].slice(0, 3)} ${d}, ${y}`;
+}
+const round2 = new Intl.NumberFormat('en-US', {maximumSignificantDigits: 2});
+const compact = new Intl.NumberFormat('en-US', {
+  maximumSignificantDigits: 2,
+  notation: 'compact',
+});
+
+// Each map: where its numbers come from, how they become columns, and the
+// words around it. settings are the column shape, kept per map.
+const MAPS = {
+  windows: {
+    button: 'Open windows',
+    title: 'Windows open',
+    kicker: (period) =>
+      period === 'all'
+        ? 'A YEAR OF OPEN-WINDOW WEATHER AROUND THE WORLD'
+        : `OPEN-WINDOW WEATHER IN ${monthName(period).toUpperCase()} AROUND THE WORLD`,
+    subtitle(period) {
+      const {lowF, nightLowF, highF, dewF, rainMm, windMph} = meta.test;
+      const when =
+        period === 'all'
+          ? `${formatDate(meta.start)} – ${formatDate(meta.end)}`
+          : monthName(period);
+      return `Share of all hours ${lowF}–${highF}°F (${nightLowF}°F at night), dew point under ${dewF}°F, under ${rainMm} mm of rain, wind under ${windMph} mph and no dust or smoke  ·  ${when}`;
+    },
+    legend: 'HEIGHT · HOURS WITH THE WINDOWS OPEN',
+    unit: '% open',
+    format: (v) => `${Math.round(v)}%`,
+    max: 100,
+    source: [
+      'Weather: ERA5-Land reanalysis, 0.1°, hourly. Dust and smoke: CAMS PM10 and PM2.5 over AQI 100.',
+      'All 24 hours of the day, in Equal Earth projection.',
+    ],
+    ramp: ['#f3e2c4', '#f0b56a', '#e8763a', '#cf3f22', '#9a1b14'],
+    ranges: {low: [0, 90, 1], high: [10, 100, 1]},
+    settings: {low: 0, high: 100, gamma: 1.6, height: 4},
+  },
+  elevation: {
+    button: 'Elevation',
+    title: 'Elevation',
+    kicker: () => 'THE LAND, STRETCHED UPWARD',
+    subtitle() {
+      const {low, high, gamma, height} = params;
+      const times = (height * KM_PER_UNIT) / ((high - low) / 1000);
+      const scale =
+        gamma === 1 && low === 0
+          ? `exaggerated about ${round2.format(times)} times`
+          : 'exaggerated';
+      return `Height of the ground above sea level, averaged over about 10 km and ${scale}`;
+    },
+    legend: 'HEIGHT · ELEVATION',
+    unit: 'm',
+    format: (m) =>
+      `${(Math.round((m * 3.28084) / 10) * 10).toLocaleString('en-US')} ft`,
+    max: layers.layers.elevation.max,
+    source: [
+      'Elevation: ERA5-Land orography (ECMWF), 0.1°, the terrain its weather is computed over.',
+      'In Equal Earth projection.',
+    ],
+    ramp: ['#8fb07a', '#d6cf9a', '#c09062', '#8c6b58', '#f7f4ef'],
+    ranges: {low: [0, 3000, 50], high: [500, 6500, 50]},
+    settings: {low: 0, high: 5000, gamma: 1, height: 1.2},
+  },
+  population: {
+    button: 'Population',
+    title: 'Where people live',
+    kicker: () => 'PEOPLE PER SQUARE MILE IN 2025',
+    subtitle: () =>
+      'Everyone on Earth, from a 1 km grid averaged over about 10 km',
+    legend: 'HEIGHT · PEOPLE PER SQUARE MILE',
+    unit: 'people/km²',
+    format: (perKm) => compact.format(perKm * 2.58999), // per square mile
+    max: layers.layers.population.max,
+    source: [
+      'Population: GHS-POP R2023A (EU Joint Research Centre), 2025 estimate, 30″ grid.',
+      'In Equal Earth projection.',
+    ],
+    ramp: ['#e9e2ec', '#c3b0d8', '#8f73c2', '#5a3a9c', '#2a1260'],
+    ranges: {low: [0, 1000, 10], high: [100, 60000, 100]},
+    settings: {low: 0, high: 8000, gamma: 0.7, height: 3},
+  },
+};
+for (const map of Object.values(MAPS)) {
+  map.rampColors = map.ramp.map((hex) => new THREE.Color(hex));
+}
+
+const startMap = MAPS[query.get('map')] ? query.get('map') : 'windows';
 const params = {
+  map: startMap,
   period: 'all',
   labels: true,
   block: 3, // grid cells per column, each way
   fit: false, // stretch floor and top to this period's 5th and 99.5th percentiles
-  low: 0, // percent of hours open that gets the shortest column
-  high: 100, // percent that gets the tallest
-  gamma: 1.6, // >1 keeps the merely-okay places low
-  height: 4,
+  ...MAPS[startMap].settings, // low, high, gamma (>1 keeps the merely-okay low), height
   sunElevation: 13,
   sunAzimuth: 294, // degrees clockwise from north the light comes from
   sunRadius: 5.72, // degrees; the real sun is 0.27, bigger gives softer shadows
@@ -39,11 +145,7 @@ const params = {
   maxSamples: 2048,
   pixelRatio: Math.min(devicePixelRatio, 2),
 };
-
-const MONTHS =
-  'January February March April May June July August September October November December'.split(
-    ' ',
-  );
+const current = () => MAPS[params.map];
 
 // Where the labels point: mild highlands and coasts, and the hot, cold and
 // muggy places that make the contrast. Names on the left sit out over the
@@ -98,23 +200,51 @@ const controls = new OrbitControls(camera, renderer.domElement);
 // nudge restarts the render.
 controls.maxPolarAngle = Math.PI * 0.47;
 controls.addEventListener('change', () => tracer.reset());
+controls.addEventListener('start', () => setMoved(true));
 
 // A low, three-quarter view from the south, framed to the window.
-function frame() {
+function home() {
   const aspect = innerWidth / innerHeight;
   const half = THREE.MathUtils.degToRad(camera.fov / 2);
   const fitWidth = (WORLD * 0.53) / (Math.tan(half) * aspect);
   const fitHeight = (ny * CELL * 0.62) / Math.tan(half);
   const distance = Math.max(fitWidth, fitHeight);
   const tilt = THREE.MathUtils.degToRad(42); // from straight down
-  controls.target.set(0, 0, -4);
-  camera.position.set(
-    controls.target.x,
+  const target = new THREE.Vector3(0, 0, -4);
+  const position = new THREE.Vector3(
+    target.x,
     Math.cos(tilt) * distance,
-    controls.target.z + Math.sin(tilt) * distance,
+    target.z + Math.sin(tilt) * distance,
   );
+  return {target, position};
+}
+
+// Camera moves: instant, or a short eased glide that the render loop runs.
+let flight = null;
+function moveTo({target, position}, seconds = 0) {
+  flight = {
+    from: {target: controls.target.clone(), position: camera.position.clone()},
+    to: {target, position},
+    start: performance.now(),
+    ms: seconds * 1000,
+  };
+  fly();
+}
+function fly() {
+  if (!flight) return;
+  const k = flight.ms
+    ? Math.min((performance.now() - flight.start) / flight.ms, 1)
+    : 1;
+  const e = k < 0.5 ? 4 * k ** 3 : 1 - (-2 * k + 2) ** 3 / 2; // ease in-out
+  controls.target.lerpVectors(flight.from.target, flight.to.target, e);
+  camera.position.lerpVectors(flight.from.position, flight.to.position, e);
   controls.update();
   tracer.reset();
+  if (k === 1) flight = null;
+}
+function resetView(seconds = 0) {
+  moveTo(home(), seconds);
+  setMoved(false);
 }
 
 const color = (hex) => new THREE.Color(hex); // hex is sRGB; this is linear
@@ -140,21 +270,24 @@ function setLighting() {
   tracer.reset();
 }
 
-// Pale gold through orange to deep red, by how high the column reaches.
-const RAMP = ['#f3e2c4', '#f0b56a', '#e8763a', '#cf3f22', '#9a1b14'];
-const RAMP_COLORS = RAMP.map(color);
+// The map's ramp, from the shortest column's color to the tallest's.
 function ramp(t, out) {
-  const x = Math.min(Math.max(t, 0), 1) * (RAMP.length - 1);
-  const i = Math.min(Math.floor(x), RAMP.length - 2);
-  return out.copy(RAMP_COLORS[i]).lerp(RAMP_COLORS[i + 1], x - i);
+  const colors = current().rampColors;
+  const x = Math.min(Math.max(t, 0), 1) * (colors.length - 1);
+  const i = Math.min(Math.floor(x), colors.length - 2);
+  return out.copy(colors[i]).lerp(colors[i + 1], x - i);
 }
 
 // --- data ------------------------------------------------------------------
 
-const shares = new Map();
-async function loadShare(key) {
-  if (!shares.has(key)) {
-    const blob = await fetch(`data/${key}.png`).then((r) => r.blob());
+// The open-window maps keep their value in R (255 off land); the others are
+// 16-bit, high byte in R and low in G (65535 off land). Either way a map
+// decodes to one number per cell, NO_VALUE off land.
+const decoded = new Map();
+async function loadValues(map, period) {
+  const file = map === 'windows' ? period : map;
+  if (!decoded.has(file)) {
+    const blob = await fetch(`data/${file}.png`).then((r) => r.blob());
     const bitmap = await createImageBitmap(blob, {
       premultiplyAlpha: 'none',
       colorSpaceConversion: 'none',
@@ -164,15 +297,20 @@ async function loadShare(key) {
     });
     c.drawImage(bitmap, 0, 0);
     const rgba = c.getImageData(0, 0, nx, ny).data;
-    const share = new Uint8Array(nx * ny);
-    for (let i = 0; i < share.length; i++) share[i] = rgba[i * 4];
-    shares.set(key, share);
+    const values = new Uint16Array(nx * ny);
+    const noData = meta.encoding.noData;
+    for (let i = 0; i < values.length; i++) {
+      const [r, g] = [rgba[i * 4], rgba[i * 4 + 1]];
+      if (map === 'windows') values[i] = r === noData ? NO_VALUE : r;
+      else values[i] = (r << 8) | g;
+    }
+    decoded.set(file, values);
   }
-  return shares.get(key);
+  return decoded.get(file);
 }
 
-// Each block's average share, or NaN where it's mostly sea.
-function blocks(share, size) {
+// Each block's average, or NaN where it's mostly sea.
+function blocks(values, size) {
   const [w, h] = [Math.floor(nx / size), Math.floor(ny / size)];
   const out = new Float32Array(w * h).fill(NaN);
   for (let by = 0; by < h; by++) {
@@ -181,8 +319,8 @@ function blocks(share, size) {
       let n = 0;
       for (let y = by * size; y < (by + 1) * size; y++) {
         for (let x = bx * size; x < (bx + 1) * size; x++) {
-          const v = share[y * nx + x];
-          if (v !== NO_DATA) [sum, n] = [sum + v, n + 1];
+          const v = values[y * nx + x];
+          if (v !== NO_VALUE) [sum, n] = [sum + v, n + 1];
         }
       }
       if (n * 2 >= size * size) out[by * w + bx] = sum / n;
@@ -196,9 +334,13 @@ const shapeOf = (v) =>
 const heightOf = (t) => 0.03 + params.height * t ** params.gamma;
 
 let labels = [];
+let grid = null; // the columns as built, for finding what a click hits
+let building = 0;
 async function build() {
-  const share = await loadShare(params.period);
-  const {w, h, values} = blocks(share, params.block);
+  const ticket = ++building;
+  const cells = await loadValues(params.map, params.period);
+  if (ticket !== building) return; // a newer build started meanwhile
+  const {w, h, values} = blocks(cells, params.block);
   if (params.fit) {
     const land = values.filter((v) => !isNaN(v)).sort((a, b) => a - b);
     params.low = Math.round(land[Math.floor(land.length * 0.05)]);
@@ -218,6 +360,7 @@ async function build() {
     data.set([tint.r, tint.g, tint.b, heightOf(t) / size], i * 4);
   }
   tracer.setColumns(data, w, h, size, origin);
+  grid = {w, h, size, origin, data};
 
   // Each label points at the middle of its place's column top and quotes the
   // cell's own value, not the block average. A coastal city whose own cell is
@@ -228,8 +371,8 @@ async function build() {
     let best = Infinity;
     for (let dy = -3; dy <= 3; dy++) {
       for (let dx = -3; dx <= 3; dx++) {
-        const v = share[(cy + dy) * nx + cx + dx];
-        if (v !== NO_DATA && dx * dx + dy * dy < best) {
+        const v = cells[(cy + dy) * nx + cx + dx];
+        if (v !== NO_VALUE && dx * dx + dy * dy < best) {
           best = dx * dx + dy * dy;
           [gx, gy] = [cx + dx, cy + dy];
         }
@@ -245,27 +388,65 @@ async function build() {
       top,
       origin.z + (by + 0.5) * size,
     );
-    return {name, value: share[gy * nx + gx], tip};
+    return {name, value: cells[gy * nx + gx], tip};
   });
 }
 
+// Where a ray from the camera through a point on screen first meets a
+// column (or the ground), marching down from the tallest column's height.
+const raycaster = new THREE.Raycaster();
+function pick(clientX, clientY) {
+  const ndc = new THREE.Vector2(
+    (clientX / innerWidth) * 2 - 1,
+    -(clientY / innerHeight) * 2 + 1,
+  );
+  raycaster.setFromCamera(ndc, camera);
+  const {origin: o, direction: d} = raycaster.ray;
+  if (d.y >= 0) return null;
+  const top = heightOf(1);
+  const t0 = Math.max(0, (o.y - top) / -d.y);
+  const t1 = o.y / -d.y;
+  const p = new THREE.Vector3();
+  for (let t = t0; t <= t1; t += grid.size * 0.25) {
+    p.copy(d).multiplyScalar(t).add(o);
+    const bx = Math.floor((p.x - grid.origin.x) / grid.size);
+    const by = Math.floor((p.z - grid.origin.z) / grid.size);
+    if (bx < 0 || by < 0 || bx >= grid.w || by >= grid.h) continue;
+    if (p.y <= grid.data[(by * grid.w + bx) * 4 + 3] * grid.size) return p;
+  }
+  return p.copy(d).multiplyScalar(t1).add(o); // the ground, out at sea
+}
+
+// Double-click: glide there and halve the distance to it, keeping the angle.
+renderer.domElement.addEventListener('dblclick', (e) => {
+  const hit = grid && pick(e.clientX, e.clientY);
+  if (!hit) return;
+  const offset = camera.position.clone().sub(controls.target);
+  const distance = Math.max(offset.length() * 0.5, 3);
+  const position = hit.clone().add(offset.setLength(distance));
+  moveTo({target: hit, position}, 0.7);
+  setMoved(true);
+});
+
 // --- overlay ---------------------------------------------------------------
 
-function formatDate(iso) {
-  const [y, m, d] = iso.split('-').map(Number);
-  return `${MONTHS[m - 1].slice(0, 3)} ${d}, ${y}`;
-}
-function subtitle() {
-  const {lowF, nightLowF, highF, dewF, rainMm, windMph} = meta.test;
-  const when =
-    params.period === 'all'
-      ? `${formatDate(meta.start)} – ${formatDate(meta.end)}`
-      : MONTHS[Number(params.period) - 1];
-  return `Share of all hours ${lowF}–${highF}°F (${nightLowF}°F at night), dew point under ${dewF}°F, under ${rainMm} mm of rain, wind under ${windMph} mph and no dust or smoke  ·  ${when}`;
+// Splits text into lines no wider than maxWidth in the context's font.
+function wrap(c, text, maxWidth) {
+  const lines = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && c.measureText(next).width > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else line = next;
+  }
+  return [...lines, line];
 }
 
 const projected = new THREE.Vector3();
 function drawOverlay(c, w, h) {
+  const map = current();
   const u = Math.min(w, h * 1.6) / 1000; // one unit of type scale
   c.clearRect(0, 0, w, h);
   c.fillStyle = INK;
@@ -274,19 +455,25 @@ function drawOverlay(c, w, h) {
   // Title block, top left.
   const pad = 44 * u;
   c.font = `200 ${50 * u}px ${FONT}`;
-  c.fillText('Windows open', pad, pad + 40 * u);
+  c.fillText(map.title, pad, pad + 40 * u);
   c.font = `400 ${10.5 * u}px ${FONT}`;
   c.letterSpacing = `${2.6 * u}px`;
-  const kicker =
-    params.period === 'all'
-      ? 'A YEAR OF OPEN-WINDOW WEATHER'
-      : `OPEN-WINDOW WEATHER IN ${MONTHS[Number(params.period) - 1].toUpperCase()}`;
-  c.fillText(`${kicker} AROUND THE WORLD`, pad + 3 * u, pad + 64 * u);
+  c.fillText(map.kicker(params.period), pad + 3 * u, pad + 64 * u);
   c.letterSpacing = '0px';
   c.font = `300 ${12.5 * u}px ${FONT}`;
   c.globalAlpha = 0.75;
-  c.fillText(subtitle(), pad + 3 * u, pad + 83 * u);
+  const lines = wrap(c, map.subtitle(params.period), 560 * u);
+  lines.forEach((line, i) =>
+    c.fillText(line, pad + 3 * u, pad + (83 + 17 * i) * u),
+  );
   c.globalAlpha = 1;
+  if (c === ctx) {
+    // The map buttons sit under the subtitle, in CSS pixels.
+    const css = innerWidth / w;
+    nav.style.left = `${(pad + 3 * u) * css}px`;
+    nav.style.top = `${(pad + (83 + 17 * (lines.length - 1) + 16) * u) * css}px`;
+    nav.style.fontSize = `${Math.max(11, 12 * u * css)}px`;
+  }
 
   // Legend, bottom left: the ramp with the floor and top it stands for.
   const lx = pad + 3 * u;
@@ -294,38 +481,36 @@ function drawOverlay(c, w, h) {
   const lw = 200 * u;
   const lh = 5 * u;
   const gradient = c.createLinearGradient(lx, 0, lx + lw, 0);
-  RAMP.forEach((col, i) => gradient.addColorStop(i / (RAMP.length - 1), col));
+  map.ramp.forEach((col, i) =>
+    gradient.addColorStop(i / (map.ramp.length - 1), col),
+  );
   c.fillStyle = gradient;
   c.fillRect(lx, ly, lw, lh);
   c.fillStyle = INK;
   c.font = `300 ${11 * u}px ${FONT}`;
   c.fillText(
-    `${params.low}%${params.low > 0 ? ' or less' : ''}`,
+    `${map.format(params.low)}${params.low > 0 ? ' or less' : ''}`,
     lx,
     ly + lh + 15 * u,
   );
   c.textAlign = 'right';
-  c.fillText(`${params.high}%`, lx + lw, ly + lh + 15 * u);
+  c.fillText(
+    `${map.format(params.high)}${params.high < map.max ? ' or more' : ''}`,
+    lx + lw,
+    ly + lh + 15 * u,
+  );
   c.textAlign = 'left';
   c.font = `400 ${10 * u}px ${FONT}`;
   c.letterSpacing = `${2 * u}px`;
-  c.fillText('HEIGHT · HOURS WITH THE WINDOWS OPEN', lx, ly - 9 * u);
+  c.fillText(map.legend, lx, ly - 9 * u);
   c.letterSpacing = '0px';
 
   // Source, bottom right.
   c.textAlign = 'right';
   c.globalAlpha = 0.6;
   c.font = `300 ${10.5 * u}px ${FONT}`;
-  c.fillText(
-    'Weather: ERA5-Land reanalysis, 0.1°, hourly. Dust and smoke: CAMS PM10 and PM2.5 over AQI 100.',
-    w - pad,
-    h - pad - 14 * u,
-  );
-  c.fillText(
-    'All 24 hours of the day, in Equal Earth projection.',
-    w - pad,
-    h - pad,
-  );
+  c.fillText(map.source[0], w - pad, h - pad - 14 * u);
+  c.fillText(map.source[1], w - pad, h - pad);
   c.globalAlpha = 1;
   c.textAlign = 'left';
 
@@ -333,7 +518,7 @@ function drawOverlay(c, w, h) {
   // City labels: a dot on the column's top and a fine leader to the name.
   for (const {name, value, tip} of labels) {
     projected.copy(tip).project(camera);
-    if (projected.z > 1) continue;
+    if (projected.z > 1 || Math.abs(projected.x) > 1.2) continue;
     const x = (projected.x * 0.5 + 0.5) * w;
     const y = (-projected.y * 0.5 + 0.5) * h;
     // Leaders on the left run straight out over the water; the rest rise.
@@ -349,7 +534,7 @@ function drawOverlay(c, w, h) {
     c.beginPath();
     c.arc(x, y, 2.2 * u, 0, Math.PI * 2);
     c.fill();
-    const text = `${name}  ${value === NO_DATA ? '–' : value + '%'}`;
+    const text = `${name}  ${value === NO_VALUE ? '–' : map.format(value)}`;
     c.font = `300 ${12 * u}px ${FONT}`;
     c.lineWidth = 4 * u;
     c.strokeStyle = HALO;
@@ -362,27 +547,93 @@ function drawOverlay(c, w, h) {
   }
 }
 
+// --- map buttons -----------------------------------------------------------
+
+// One button per map under the subtitle, then a reset button that shows once
+// the camera has moved (and a hint until it has). Keys 1-3 switch maps too,
+// and Escape resets the view.
+const nav = document.createElement('nav');
+nav.className = 'maps';
+const buttons = Object.entries(MAPS).map(([key, map]) => {
+  const b = document.createElement('button');
+  b.textContent = map.button;
+  b.onclick = () => (switchMap(key), b.blur());
+  nav.append(b);
+  return [key, b];
+});
+const resetButton = document.createElement('button');
+resetButton.className = 'reset';
+resetButton.textContent = 'Reset view';
+resetButton.onclick = () => resetView(0.7);
+const hint = document.createElement('span');
+hint.className = 'hint';
+hint.textContent = 'Double-click to zoom in';
+nav.append(resetButton, hint);
+document.body.append(nav);
+
+function setMoved(moved) {
+  resetButton.hidden = !moved;
+  hint.hidden = moved;
+}
+
+function showActive() {
+  for (const [key, b] of buttons)
+    b.classList.toggle('active', key === params.map);
+}
+
+function switchMap(key) {
+  if (key === params.map) return;
+  const {low, high, gamma, height} = params;
+  Object.assign(current().settings, {low, high, gamma, height});
+  params.map = key;
+  Object.assign(params, current().settings);
+  const url = new URL(location.href);
+  if (key === 'windows') url.searchParams.delete('map');
+  else url.searchParams.set('map', key);
+  history.replaceState(null, '', url);
+  showActive();
+  fitControllers();
+  build();
+}
+
+addEventListener('keydown', (e) => {
+  if (e.target.closest?.('.lil-gui')) return;
+  const keys = Object.keys(MAPS);
+  if (e.key >= '1' && e.key <= String(keys.length)) switchMap(keys[e.key - 1]);
+  if (e.key === 'Escape') resetView(0.7);
+});
+
 // --- controls --------------------------------------------------------------
 
 const gui = new GUI({title: 'Settings'});
 const rebuild = () => build();
 const manual = () => ((params.fit = false), rebuild());
-gui.add(params, 'period', meta.periods).onChange(rebuild);
+const periodController = gui
+  .add(params, 'period', meta.periods)
+  .onChange(rebuild);
 gui.add(params, 'labels');
 gui.add(tracer, 'samples').listen().disable();
 const shape = gui.addFolder('Columns').close();
 shape.add(params, 'block', 1, 12, 1).name('cells per column').onChange(rebuild);
-shape.add(params, 'fit').name('fit to period').onChange(rebuild);
-shape
-  .add(params, 'low', 0, 90, 1)
-  .name('floor (% open)')
+shape.add(params, 'fit').name('fit to data').onChange(rebuild);
+const lowController = shape.add(params, 'low', 0, 1, 1).onFinishChange(manual);
+const highController = shape
+  .add(params, 'high', 0, 1, 1)
   .onFinishChange(manual);
-shape
-  .add(params, 'high', 10, 100, 1)
-  .name('top (% open)')
-  .onFinishChange(manual);
-shape.add(params, 'gamma', 0.5, 5, 0.1).onFinishChange(rebuild);
-shape.add(params, 'height', 0.5, 20, 0.25).onFinishChange(rebuild);
+shape.add(params, 'gamma', 0.2, 5, 0.1).listen().onFinishChange(rebuild);
+shape.add(params, 'height', 0.25, 20, 0.25).listen().onFinishChange(rebuild);
+// The floor and top sliders in the current map's units.
+function fitControllers() {
+  const {ranges, unit} = current();
+  for (const [c, key, name] of [
+    [lowController, 'low', 'floor'],
+    [highController, 'high', 'top'],
+  ]) {
+    const [min, max, step] = ranges[key];
+    c.min(min).max(max).step(step).name(`${name} (${unit})`).updateDisplay();
+  }
+  periodController.show(params.map === 'windows');
+}
 const light = gui.addFolder('Light').close();
 light
   .add(params, 'sunElevation', 3, 60, 1)
@@ -406,7 +657,7 @@ quality
   .add(params, 'pixelRatio', 0.25, 3, 0.25)
   .name('pixel ratio')
   .onChange(() => (renderer.setPixelRatio(params.pixelRatio), resize()));
-gui.add({reset: frame}, 'reset').name('reset view');
+gui.add({reset: () => resetView(0.7)}, 'reset').name('reset view');
 gui.add({save}, 'save').name('save PNG');
 gui.close();
 
@@ -420,7 +671,9 @@ function save() {
   drawOverlay(c, out.width, out.height);
   const a = document.createElement('a');
   a.href = out.toDataURL('image/png');
-  a.download = `windows-open-${params.period}.png`;
+  const name =
+    params.map === 'windows' ? `windows-open-${params.period}` : params.map;
+  a.download = `${name}.png`;
   a.click();
 }
 
@@ -432,18 +685,24 @@ function resize() {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 }
-addEventListener('resize', () => (resize(), frame()));
+addEventListener('resize', () => (resize(), resetView()));
 
 await Promise.all(
   ['200', '300', '400'].map((weight) =>
     document.fonts.load(`${weight} 20px ${FONT}`),
   ),
 );
+showActive();
+fitControllers();
 resize();
-frame();
+resetView();
 setLighting();
 await build();
 renderer.setAnimationLoop(() => {
+  // Idle while another window has focus, so a background tab or window
+  // doesn't keep the GPU busy.
+  if (!NO_PAUSE && !document.hasFocus()) return;
+  fly();
   controls.update();
   if (tracer.samples < params.maxSamples) tracer.step(camera);
   tracer.show(params.exposure);
