@@ -1,4 +1,4 @@
-// node --test voxels/turmite.test.js  (checks the fast turmite against a slow, independent one)
+// node --test turmite3D/turmite.test.js  (checks the fast turmite against a slow, independent one)
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Turmite, parseRule} from './turmite.js';

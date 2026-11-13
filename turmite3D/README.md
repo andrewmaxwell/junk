@@ -1,4 +1,4 @@
-3D Turmites - 2023 - Langton's ant on a cubic grid: type a rule of turns and pitches, and watch up to 48 ants build cages, stars, coral and highways out of voxels.
+3D Turmites - 2026 - Langton's ant on a cubic grid: type a rule of turns and pitches, and watch up to 48 ants build cages, stars, coral and highways out of voxels.
 
 # 3D Turmites
 
@@ -37,4 +37,4 @@ Drag **Time** to scrub back and forth through the sculpture's history. The simul
 - `turmite.js`: the ants and an unbounded grid of 32³ chunks holding each cell's state and the step it was last visited. One ant runs about 20M steps/s in Node.
 - `mesher.js`: builds one mesh per chunk, with only the faces that touch empty cells. Each vertex carries its cell's state, age and ambient occlusion, about 0.7 ms per chunk.
 - `main.js`: three.js scene, the shader that turns state and age into color, camera framing, time scrubbing, lil-gui controls and URL state.
-- `node --test voxels/turmite.test.js` checks the ants, states and ages cell for cell against a slow, independent version that turns with rotation matrices, for every formation. It also checks that 48 ants keep the cube's symmetry, that `RL` reaches Langton's highway (period 104, moving 2 cells diagonally) and that the mesher emits exactly one outward-facing quad per exposed face.
+- `node --test turmite3D/turmite.test.js` checks the ants, states and ages cell for cell against a slow, independent version that turns with rotation matrices, for every formation. It also checks that 48 ants keep the cube's symmetry, that `RL` reaches Langton's highway (period 104, moving 2 cells diagonally) and that the mesher emits exactly one outward-facing quad per exposed face.
