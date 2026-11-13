@@ -1,18 +1,26 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
-import {Turmite, parseRule, CHUNK} from './turmite.js';
+import {Turmite, parseRule, CHUNK, FORMATIONS, MAX_STATES} from './turmite.js';
 import {meshChunk} from './mesher.js';
 
+// rule, or rule*ants
 const PRESETS = {
+  'Cage (LRRL ×48)': 'LRRL*48',
+  'Star (UND ×48)': 'UND*48',
+  'Flower (LNBLN ×24)': 'LNBLN*24',
+  'Jacks (LLBRB ×48)': 'LLBRB*48',
+  'Mandala (UDNN ×8)': 'UDNN*8',
   'Coral (LRULL)': 'LRULL',
   'Chaos, then a highway (LRUD)': 'LRUD',
   'Necklace (ULLB)': 'ULLB',
-  'Caterpillar (UNLNL)': 'UNLNL',
-  'Spire (LUDD)': 'LUDD',
   "Langton's ant, flat (RL)": 'RL',
 };
-const DEFAULT_RULE = 'LRULL';
+const DEFAULT = 'LRRL*48';
 const SPEEDS = {
   '10 steps/s': 10,
   '100 steps/s': 100,
@@ -21,10 +29,18 @@ const SPEEDS = {
   '100k steps/s': 1e5,
   '1M steps/s': 1e6,
 };
+const ANTS = {
+  1: 1,
+  '2 · mirror': 2,
+  '4 · two mirrors': 4,
+  '8 · three mirrors': 8,
+  '24 · rotations': 24,
+  '48 · full cube': 48,
+};
 
 const phone = matchMedia('(pointer: coarse)').matches;
-const MAX_QUADS = phone ? 1.5e6 : 5e6; // what the GPU has to draw
-const MAX_CHUNKS = phone ? 3000 : 8000; // 32 KB each
+const MAX_QUADS = phone ? 1e6 : 3e6; // what the GPU has to draw, twice a frame (once for shadows)
+const MAX_CHUNKS = phone ? 600 : 2000; // 160 KB each
 const EDGE = 32000; // chunk keys run out at ±32768
 
 const $ = (id) => document.getElementById(id);
@@ -35,8 +51,7 @@ const fmt = (n) =>
     : n.toLocaleString('en-US');
 
 // One colour per state (state 0 is empty), evenly spaced in OKLCH hue.
-const makePalette = (states) => {
-  const palette = [[0, 0, 0]];
+const setPalette = (states, colors) => {
   for (let s = 1; s < states; s++) {
     const t = states > 2 ? (s - 1) / (states - 2) : 0;
     const h = ((25 + 260 * t) * Math.PI) / 180;
@@ -46,14 +61,13 @@ const makePalette = (states) => {
     const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
     const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
     const q = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
-    const rgb = [
+    colors[s].setRGB(
       4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * q,
       -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * q,
       -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * q,
-    ]; // linear sRGB, which is what vertex colours are
-    palette.push(rgb.map((v) => Math.round(255 * Math.min(1, Math.max(0, v)))));
+      THREE.LinearSRGBColorSpace,
+    );
   }
-  return palette;
 };
 
 // ---- three.js setup
@@ -61,13 +75,14 @@ const makePalette = (states) => {
 const canvas = $('c');
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({canvas, antialias: true});
+  renderer = new THREE.WebGLRenderer({canvas});
 } catch (e) {
   say(`This needs WebGL, which isn't available here (${e.message}).`);
   throw e;
 }
-renderer.setPixelRatio(Math.min(devicePixelRatio, phone ? 1.5 : 2));
-renderer.toneMapping = THREE.NeutralToneMapping;
+const pixelRatio = Math.min(devicePixelRatio, phone ? 1.5 : 2);
+renderer.setPixelRatio(pixelRatio);
+renderer.shadowMap.enabled = true;
 
 const BACKGROUND = new THREE.Color('#14161c');
 const scene = new THREE.Scene();
@@ -76,35 +91,92 @@ scene.fog = new THREE.Fog(BACKGROUND, 10, 100);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
 camera.position.set(14, 10, 18);
-scene.add(camera);
-scene.add(new THREE.HemisphereLight('#dfe8ff', '#3a302c', 0.9));
-const sun = new THREE.DirectionalLight('#fff4e6', 2.6);
-sun.position.set(-1, 2, 1); // up and to the left of the viewer, wherever they orbit
-camera.add(sun);
+scene.add(new THREE.HemisphereLight('#e6ecff', '#57525e', 0.95));
+// The sun stays up and to the left of the viewer, like a turntable under a studio light.
+const sun = new THREE.DirectionalLight('#fff4e6', 2.3);
+const SHADOW_SIZE = phone ? 1024 : 2048;
+sun.castShadow = true;
+sun.shadow.mapSize.set(SHADOW_SIZE, SHADOW_SIZE);
+sun.shadow.bias = -0.0002;
+sun.shadow.intensity = 0.85;
+scene.add(sun, sun.target);
 
-const material = new THREE.MeshLambertMaterial({vertexColors: true});
+// Colour comes from what the mesher put on each vertex: state, age and openness.
+const AGE_RAMP = [
+  '#34388f',
+  '#7a3fa6',
+  '#c9488c',
+  '#f0765a',
+  '#f8b84a',
+  '#fff0b5',
+]; // old to new
+const uniforms = {
+  uNow: {value: 1},
+  uByAge: {value: 1},
+  uStates: {value: 2},
+  uPalette: {value: Array.from({length: MAX_STATES}, () => new THREE.Color())},
+  uRamp: {value: AGE_RAMP.map((c) => new THREE.Color(c))},
+};
+const material = new THREE.MeshLambertMaterial();
+material.onBeforeCompile = (shader) => {
+  Object.assign(shader.uniforms, uniforms);
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      '#include <common>',
+      `#include <common>
+      attribute vec3 voxel; // state, step last visited, openness
+      uniform float uNow, uByAge, uStates;
+      uniform vec3 uPalette[${MAX_STATES}];
+      uniform vec3 uRamp[${AGE_RAMP.length}];
+      varying vec3 vTint;`,
+    )
+    .replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      // squared, so that the newest colours are kept for the cells the ants have only just left
+      float t = pow(clamp(voxel.y / uNow, 0.0, 1.0), 2.0) * ${AGE_RAMP.length - 1}.0;
+      int k = int(min(t, ${AGE_RAMP.length - 2}.0));
+      vec3 byAge = mix(uRamp[k], uRamp[k + 1], t - float(k));
+      // later states a little darker, so the pattern of states still shows
+      byAge *= mix(1.0, 0.7, (voxel.x - 1.0) / max(1.0, uStates - 2.0));
+      vTint = mix(uPalette[int(voxel.x + 0.5)], byAge, uByAge) * voxel.z;`,
+    );
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vTint;')
+    .replace('#include <color_fragment>', 'diffuseColor.rgb *= vTint;');
+};
 
-const ant = new THREE.Mesh(
-  new THREE.ConeGeometry(0.4, 1, 12).rotateX(Math.PI / 2), // points along +z
-  // drawn through the sculpture, so you can always see where it is
-  new THREE.MeshBasicMaterial({
-    color: '#fff3c4',
-    fog: false,
-    depthTest: false,
-    transparent: true,
-    opacity: 0.9,
+// The ants are drawn after the sculpture and through it, so you can always see where they are,
+// and brighter than white, so the bloom pass makes them glow.
+const antGeometry = new THREE.ConeGeometry(0.4, 1, 12).rotateX(Math.PI / 2); // points along +z
+const antMaterial = new THREE.MeshBasicMaterial({
+  color: new THREE.Color('#fff3c4').multiplyScalar(2.5),
+  depthTest: false,
+  fog: false,
+});
+let antMeshes = [];
+
+const composer = new EffectComposer(
+  renderer,
+  new THREE.WebGLRenderTarget(1, 1, {
+    type: THREE.HalfFloatType,
+    samples: phone ? 2 : 4,
   }),
 );
-ant.renderOrder = 1;
-scene.add(ant);
+composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.12, 0.2, 1.5));
+composer.addPass(new OutputPass());
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.enablePan = false;
+controls.autoRotate = true;
 controls.autoRotateSpeed = 0.8;
 
 const resize = () => {
   renderer.setSize(innerWidth, innerHeight, false);
+  composer.setPixelRatio(pixelRatio);
+  composer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 };
@@ -114,47 +186,47 @@ resize();
 // ---- the simulation and its meshes
 
 const params = {
-  rule: DEFAULT_RULE,
-  preset: DEFAULT_RULE,
+  rule: DEFAULT,
+  preset: DEFAULT,
+  ants: 1,
+  colorByAge: 1,
   speed: 1e4,
-  autoRotate: true,
+  time: 0,
   follow: false,
 };
-let turmite, palette, queue, quads, running, budget;
+let turmite, running, budget;
+let quads = 0;
+let seek = null; // the step the time slider wants to be at
+let horizon = 0; // the furthest step this rule has been run to
 
-const meshes = new Map(); // chunk -> Mesh
+const meshes = new Map(); // chunk key -> Mesh
+const queue = new Set(); // keys of chunks to mesh again
 
-const clear = () => {
-  for (const mesh of meshes.values()) {
-    scene.remove(mesh);
-    mesh.geometry.dispose();
-  }
-  meshes.clear();
-};
-
-const remesh = (chunk) => {
-  const m = meshChunk(turmite, chunk, palette);
-  let mesh = meshes.get(chunk);
+const remesh = (key) => {
+  const chunk = turmite.chunks.get(key);
+  const m = chunk && meshChunk(turmite, chunk);
+  let mesh = meshes.get(key);
   if (mesh) {
     quads -= mesh.userData.quads;
     mesh.geometry.dispose();
   }
-  if (!m.quads) {
+  if (!m?.quads) {
     if (mesh) scene.remove(mesh);
-    meshes.delete(chunk);
+    meshes.delete(key);
     return;
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(m.position, 3));
   geometry.setAttribute('normal', new THREE.BufferAttribute(m.normal, 3, true));
-  geometry.setAttribute('color', new THREE.BufferAttribute(m.color, 3, true));
+  geometry.setAttribute('voxel', new THREE.BufferAttribute(m.voxel, 3));
   geometry.setIndex(new THREE.BufferAttribute(m.index, 1));
   geometry.computeBoundingSphere();
   if (mesh) mesh.geometry = geometry;
   else {
     mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = mesh.receiveShadow = true;
     mesh.position.set(chunk.cx, chunk.cy, chunk.cz).multiplyScalar(CHUNK);
-    meshes.set(chunk, mesh);
+    meshes.set(key, mesh);
     scene.add(mesh);
   }
   mesh.userData.quads = m.quads;
@@ -163,18 +235,22 @@ const remesh = (chunk) => {
 
 // Why it has to stop, if it does.
 const limit = () => {
-  const {x, y, z} = turmite;
-  if (Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) > EDGE)
-    return 'the ant reached the edge of the world';
+  if (
+    turmite.ants.some(
+      ({x, y, z}) => Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) > EDGE,
+    )
+  )
+    return 'an ant reached the edge of the world';
   if (quads > MAX_QUADS)
     return `it hit this device's ${fmt(MAX_QUADS)}-face drawing budget`;
   if (turmite.chunks.size > MAX_CHUNKS) return 'it hit the memory budget';
 };
 
+// Runs up to this many steps in about this many milliseconds. Returns how many are left.
 const advance = (steps, ms) => {
   const t0 = performance.now();
   while (steps > 0 && performance.now() - t0 < ms) {
-    const n = Math.min(steps, 20000);
+    const n = Math.min(steps, Math.ceil(20000 / turmite.ants.length));
     turmite.run(n);
     steps -= n;
     const why = limit();
@@ -187,38 +263,56 @@ const advance = (steps, ms) => {
   return steps;
 };
 
-const start = (rule, steps = 0) => {
-  clear();
-  turmite = new Turmite(rule);
-  palette = makePalette(rule.length);
-  queue = new Set();
-  quads = 0;
+// Back to step 0. The old meshes stay up until the new ones replace them.
+const rewind = () => {
+  turmite = new Turmite(params.rule, params.ants);
+  for (const key of meshes.keys()) queue.add(key);
   budget = 0;
+};
+
+const presetOf = (rule, ants) => (ants > 1 ? `${rule}*${ants}` : rule);
+
+const start = (rule, ants) => {
   params.rule = rule;
-  params.preset = rule;
+  params.ants = ants;
+  params.preset = presetOf(rule, ants);
+  rewind();
+  seek = null;
+  horizon = 0;
+  setPalette(rule.length, uniforms.uPalette.value);
+  uniforms.uStates.value = rule.length;
+  scene.remove(...antMeshes);
+  antMeshes = turmite.ants.map(() => new THREE.Mesh(antGeometry, antMaterial));
+  for (const mesh of antMeshes) mesh.renderOrder = 1;
+  scene.add(...antMeshes);
   gui?.controllersRecursive().forEach((c) => c.updateDisplay());
   say('');
-  if (steps) advance(steps, 3000);
-  history.replaceState(null, '', `#rule=${rule}`);
+  history.replaceState(null, '', link());
 };
+
+const link = (steps) =>
+  `#rule=${params.rule}${params.ants > 1 ? `&ants=${params.ants}` : ''}${steps ? `&steps=${steps}` : ''}`;
 
 // ---- camera framing: keep the whole sculpture in view as it grows, unless the user takes over
 
 const box = new THREE.Box3();
 const center = new THREE.Vector3();
 const offset = new THREE.Vector3();
+const point = new THREE.Vector3();
+const axes = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 let zoom = 1;
 let touching = false;
 let resumeRotate;
 
 const framing = () => {
-  const {min, max, x, y, z} = turmite;
+  const {min, max, ants} = turmite;
   if (params.follow) {
-    center.set(x + 0.5, y + 0.5, z + 0.5);
+    center.set(ants[0].x + 0.5, ants[0].y + 0.5, ants[0].z + 0.5);
     return {radius: 30, distance: 70};
   }
-  box.min.set(Math.min(min[0], x), Math.min(min[1], y), Math.min(min[2], z));
-  box.max.set(Math.max(max[0], x), Math.max(max[1], y), Math.max(max[2], z));
+  box.makeEmpty();
+  if (turmite.filled) box.set(point.fromArray(min), offset.fromArray(max));
+  for (const {x, y, z} of ants) box.expandByPoint(point.set(x, y, z));
   box.max.addScalar(1);
   box.getCenter(center);
   const radius = Math.max(4, box.min.distanceTo(box.max) / 2);
@@ -230,23 +324,21 @@ const framing = () => {
   axes[2].set(0, 0, 1).applyQuaternion(camera.quaternion); // towards the camera
   let distance = 8;
   for (let i = 0; i < 8; i++) {
-    corner.set(
+    point.set(
       i & 1 ? box.max.x : box.min.x,
       i & 2 ? box.max.y : box.min.y,
       i & 4 ? box.max.z : box.min.z,
     );
-    corner.sub(center);
-    const toward = corner.dot(axes[2]);
+    point.sub(center);
+    const toward = point.dot(axes[2]);
     distance = Math.max(
       distance,
-      Math.abs(corner.dot(axes[0])) / tanH + toward,
-      Math.abs(corner.dot(axes[1])) / tanV + toward,
+      Math.abs(point.dot(axes[0])) / tanH + toward,
+      Math.abs(point.dot(axes[1])) / tanV + toward,
     );
   }
   return {radius, distance};
 };
-const axes = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
-const corner = new THREE.Vector3();
 
 controls.addEventListener('start', () => {
   touching = true;
@@ -260,10 +352,7 @@ controls.addEventListener('end', () => {
     0.15,
     5,
   );
-  resumeRotate = setTimeout(
-    () => (controls.autoRotate = params.autoRotate),
-    4000,
-  );
+  resumeRotate = setTimeout(() => (controls.autoRotate = true), 4000);
 });
 
 const updateCamera = (dt) => {
@@ -276,51 +365,74 @@ const updateCamera = (dt) => {
     offset.setLength(d + (distance * zoom - d) * k);
     camera.position.copy(controls.target).add(offset);
   }
+  controls.update();
   const d = camera.position.distanceTo(controls.target);
   camera.near = Math.max(0.05, (d - radius) * 0.5, d * 0.002);
   camera.far = d + radius * 3;
   camera.updateProjectionMatrix();
   scene.fog.near = d;
   scene.fog.far = d + radius * 2.5;
-  ant.scale.setScalar(Math.max(1, d / 60));
-  controls.update();
-};
 
-const heading = new THREE.Vector3();
-const updateAnt = () => {
-  const {x, y, z, hx, hy, hz} = turmite;
-  ant.position.set(x + 0.5, y + 0.5, z + 0.5);
-  ant.lookAt(heading.set(hx, hy, hz).add(ant.position));
+  // light and shadow for the part of the sculpture in view
+  const view = Math.min(radius, d);
+  point.set(-0.55, 0.7, 0.45).normalize().applyQuaternion(camera.quaternion);
+  sun.target.position.copy(controls.target);
+  sun.position.copy(controls.target).addScaledVector(point, view * 3);
+  const shadow = sun.shadow.camera;
+  shadow.left = shadow.bottom = -view;
+  shadow.right = shadow.top = view;
+  shadow.near = view;
+  shadow.far = view * 5;
+  shadow.updateProjectionMatrix();
+  sun.shadow.normalBias = ((2 * view) / SHADOW_SIZE) * 1.5;
+
+  const heading = point;
+  turmite.ants.forEach(({x, y, z, hx, hy, hz}, i) => {
+    const mesh = antMeshes[i];
+    mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
+    mesh.lookAt(heading.set(hx, hy, hz).add(mesh.position));
+    mesh.scale.setScalar(Math.max(1, d / (antMeshes.length > 1 ? 120 : 60)));
+  });
 };
 
 const updateStats = () => {
-  const {steps, filled, min, max} = turmite;
+  const {steps, filled, min, max, ants} = turmite;
   const size = filled ? max.map((v, i) => v - min[i] + 1).join('×') : '–';
   $('stats').textContent =
-    `${params.rule} · step ${fmt(steps)} · ${fmt(filled)} voxels · ${size} · ${fmt(quads)} faces`;
+    `${params.rule}${ants.length > 1 ? ` · ${ants.length} ants` : ''} · step ${fmt(steps)} · ${fmt(filled)} voxels · ${size}`;
 };
 
+let timeSlider;
 let last = performance.now();
 const frame = (now) => {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  if (running) {
+  if (seek !== null) {
+    if (seek < turmite.steps) rewind();
+    if (advance(seek - turmite.steps, 12) === 0) seek = null;
+  } else if (running) {
     budget += params.speed * dt;
     const n = Math.floor(budget);
     budget -= n;
-    if (advance(n, 8) > 0) budget = 0; // can't keep up: run as fast as we can
+    if (advance(n, 6) > 0) budget = 0; // can't keep up: run as fast as we can
   }
-  for (const chunk of turmite.takeDirty()) queue.add(chunk);
+  if (seek === null && (params.time !== turmite.steps || !horizon)) {
+    horizon = Math.max(horizon, turmite.steps, 1);
+    params.time = turmite.steps;
+    timeSlider.max(horizon).updateDisplay();
+  }
+
+  for (const chunk of turmite.takeDirty()) queue.add(chunk.key);
   const t0 = performance.now();
-  for (const chunk of queue) {
-    if (performance.now() - t0 > 6) break; // the rest next frame
-    queue.delete(chunk);
-    remesh(chunk);
+  for (const key of queue) {
+    if (performance.now() - t0 > 5) break; // the rest next frame
+    queue.delete(key);
+    remesh(key);
   }
-  updateAnt();
+  uniforms.uNow.value = Math.max(1, turmite.steps);
   updateCamera(dt);
   updateStats();
-  renderer.render(scene, camera);
+  composer.render();
   requestAnimationFrame(frame);
 };
 
@@ -347,7 +459,7 @@ const setRunning = (on) => {
   if (on) say('');
 };
 
-const setRule = (text) => {
+const setRule = (text, ants = params.ants) => {
   const rule = parseRule(text);
   if (!rule) {
     say(`“${text}” isn't a rule: use 2–12 of the letters L R U D N B.`);
@@ -355,7 +467,7 @@ const setRule = (text) => {
     gui.controllersRecursive().forEach((c) => c.updateDisplay());
     return;
   }
-  start(rule);
+  start(rule, ants);
   setRunning(true);
 };
 
@@ -364,11 +476,10 @@ const actions = {
   toggle: () => setRunning(!running),
   step: () => {
     setRunning(false);
-    turmite.run(1);
+    if (seek === null) advance(1, 8);
   },
-  restart: () => setRule(turmite.rule),
   share: async () => {
-    const url = `${location.origin}${location.pathname}#rule=${turmite.rule}&steps=${turmite.steps}`;
+    const url = location.origin + location.pathname + link(turmite.steps);
     history.replaceState(null, '', url);
     try {
       await navigator.clipboard.writeText(url);
@@ -387,16 +498,26 @@ gui
 gui
   .add(params, 'preset', PRESETS)
   .name('Preset')
-  .onChange((v) => setRule(v));
+  .onChange((v) => setRule(v.split('*')[0], +v.split('*')[1] || 1));
 gui.add(actions, 'random').name('🎲 Random rule');
+gui
+  .add(params, 'ants', ANTS)
+  .name('Ants')
+  .onChange((v) => setRule(turmite.rule, v));
+gui
+  .add(params, 'colorByAge', {Age: 1, State: 0})
+  .name('Color by')
+  .onChange((v) => (uniforms.uByAge.value = v));
 gui.add(params, 'speed', SPEEDS).name('Speed');
 playButton = gui.add(actions, 'toggle');
-gui.add(actions, 'step').name('Step once');
-gui.add(actions, 'restart').name('↺ Restart');
-gui
-  .add(params, 'autoRotate')
-  .name('Auto-rotate')
-  .onChange((v) => (controls.autoRotate = v));
+timeSlider = gui
+  .add(params, 'time', 0, 1, 1)
+  .name('Time')
+  .onChange((v) => {
+    seek = v;
+    setRunning(false);
+    say('');
+  });
 gui.add(params, 'follow').name('Follow the ant');
 gui.add(actions, 'share').name('🔗 Copy link');
 if (phone) gui.close();
@@ -413,20 +534,21 @@ addEventListener('keydown', (e) => {
 
 const openLink = () => {
   const hash = new URLSearchParams(location.hash.slice(1));
-  const linked = parseRule(hash.get('rule') || '');
-  const linkedSteps = Math.max(0, Math.floor(+hash.get('steps') || 0));
-  start(linked || DEFAULT_RULE, linked ? linkedSteps : 0);
-  if (!linked || !linkedSteps) return setRunning(true);
-  const message = $('message').textContent; // set if it hit a limit
-  setRunning(false);
-  say(
-    message ||
-      (turmite.steps < linkedSteps
-        ? `Got to step ${fmt(turmite.steps)} of ${fmt(linkedSteps)} before giving up. Press play to go on.`
-        : `Opened at step ${fmt(turmite.steps)}. Press play to go on.`),
-  );
+  const rule = parseRule(hash.get('rule') || '');
+  const ants = Object.hasOwn(FORMATIONS, hash.get('ants'))
+    ? +hash.get('ants')
+    : 1;
+  const steps = Math.max(0, Math.floor(+hash.get('steps') || 0));
+  if (!rule) {
+    const [r, a] = DEFAULT.split('*');
+    start(r, +a || 1);
+  } else start(rule, ants);
+  setRunning(!(rule && steps));
+  if (rule && steps) {
+    seek = horizon = steps;
+    say(`Opened at step ${fmt(steps)}. Press play to go on.`);
+  }
 };
 openLink();
 addEventListener('hashchange', openLink);
-controls.autoRotate = params.autoRotate;
 requestAnimationFrame(frame);

@@ -16,67 +16,144 @@ const rot = (v, a, sign) => {
   const d = dot(a, v);
   return v.map((_, i) => sign * c[i] + a[i] * d);
 };
-const reference = (rule, steps) => {
-  const grid = new Map();
-  let p = [0, 0, 0];
-  let h = [1, 0, 0];
-  let u = [0, 1, 0];
-  for (let i = 0; i < steps; i++) {
-    const k = p.join();
-    const s = grid.get(k) || 0;
-    const r = cross(h, u);
-    switch (rule[s]) {
-      case 'L':
-        h = rot(h, u, 1);
-        break;
-      case 'R':
-        h = rot(h, u, -1);
-        break;
-      case 'U':
-        [h, u] = [rot(h, r, 1), rot(u, r, 1)];
-        break;
-      case 'D':
-        [h, u] = [rot(h, r, -1), rot(u, r, -1)];
-        break;
-      case 'B':
-        h = rot(rot(h, u, 1), u, 1);
-        break;
-    }
-    grid.set(k, (s + 1) % rule.length);
-    p = p.map((v, j) => v + h[j]);
+// Ants as [heading, up, hand, position], built by closing the first ant under generators rather than by
+// listing matrices as turmite.js does.
+const formation = (count) => {
+  const flipped = (axis) => (vec) => vec.map((v, i) => (i === axis ? -v : v));
+  const flip =
+    (axis) =>
+    ([h, u, hand, p]) =>
+      [h, u, p].map(flipped(axis)).toSpliced(2, 0, -hand);
+  const turn =
+    (axis) =>
+    ([h, u, hand, p]) => [
+      rot(h, axis, 1),
+      rot(u, axis, 1),
+      hand,
+      rot(p, axis, 1),
+    ];
+  const generators = {
+    1: [],
+    2: [flip(0)],
+    4: [flip(0), flip(1)],
+    8: [flip(0), flip(1), flip(2)],
+    24: [turn([1, 0, 0]), turn([0, 1, 0])],
+    48: [turn([1, 0, 0]), turn([0, 1, 0]), flip(0)],
+  }[count];
+  const seen = new Map();
+  const todo = [[[1, 0, 0], [0, 1, 0], 1, count > 1 ? [3, 1, 2] : [0, 0, 0]]];
+  while (todo.length) {
+    const ant = todo
+      .pop()
+      .map((v) => (Array.isArray(v) ? v.map((c) => c + 0) : v));
+    const key = JSON.stringify(ant);
+    if (seen.has(key)) continue;
+    seen.set(key, ant);
+    for (const g of generators) todo.push(g(ant));
   }
-  return {grid, p, h, u};
+  return [...seen.values()];
 };
 
-for (const rule of ['RL', 'LRUD', 'RUDNLB', 'UUDLR', 'LLRRUD']) {
-  test(`${rule} matches the reference cell for cell`, () => {
-    const steps = 30000;
-    const ref = reference(rule, steps);
-    const t = new Turmite(rule);
+const reference = (rule, steps, count = 1) => {
+  const grid = new Map();
+  const age = new Map();
+  const ants = formation(count).map(([h, u, hand, p]) => ({p, h, u, hand}));
+  for (let i = 1; i <= steps; i++) {
+    const read = ants.map((ant) => grid.get(ant.p.join()) || 0);
+    ants.forEach((ant, j) => {
+      const k = ant.p.join();
+      let {h, u} = ant;
+      const r = cross(h, u).map((v) => v * ant.hand); // the ant's own right
+      const yaw = ant.hand; // a mirror image turns the other way about its up
+      switch (rule[read[j]]) {
+        case 'L':
+          h = rot(h, u, yaw);
+          break;
+        case 'R':
+          h = rot(h, u, -yaw);
+          break;
+        case 'U':
+          [h, u] = [rot(h, r, ant.hand), rot(u, r, ant.hand)];
+          break;
+        case 'D':
+          [h, u] = [rot(h, r, -ant.hand), rot(u, r, -ant.hand)];
+          break;
+        case 'B':
+          h = h.map((v) => -v);
+          break;
+      }
+      grid.set(k, ((grid.get(k) || 0) + 1) % rule.length);
+      age.set(k, i);
+      Object.assign(ant, {h, u, p: ant.p.map((v, c) => v + h[c])});
+    });
+  }
+  return {grid, age, ants};
+};
+
+const antKey = (p, h, u) => [...p, ...h, ...u].map((v) => v + 0).join();
+const ageAt = (t, x, y, z) => {
+  const chunk = t.chunkAt(x >> 5, y >> 5, z >> 5);
+  return chunk ? chunk.age[((y & 31) << 10) | ((z & 31) << 5) | (x & 31)] : 0;
+};
+
+for (const [rule, count] of [
+  ['RL', 1],
+  ['LRUD', 1],
+  ['RUDNLB', 1],
+  ['UUDLR', 1],
+  ['LLRRUD', 1],
+  ['LRULL', 2],
+  ['LNURD', 4],
+  ['RUDNLB', 8],
+  ['LRUD', 24],
+  ['UUDLR', 48],
+]) {
+  test(`${rule} with ${count} ant(s) matches the reference cell for cell`, () => {
+    const steps = count > 8 ? 4000 : 30000;
+    const ref = reference(rule, steps, count);
+    const t = new Turmite(rule, count);
     t.run(steps / 2);
     t.run(steps / 2);
-    assert.deepEqual([t.x, t.y, t.z], ref.p);
+    assert.equal(t.ants.length, count);
     assert.deepEqual(
-      [t.hx, t.hy, t.hz].map((v) => v + 0),
-      ref.h.map((v) => v + 0),
-    );
-    assert.deepEqual(
-      [t.ux, t.uy, t.uz].map((v) => v + 0),
-      ref.u.map((v) => v + 0),
+      t.ants
+        .map((a) =>
+          antKey([a.x, a.y, a.z], [a.hx, a.hy, a.hz], [a.ux, a.uy, a.uz]),
+        )
+        .sort(),
+      ref.ants.map((a) => antKey(a.p, a.h, a.u)).sort(),
     );
     let filled = 0;
     for (const [k, s] of ref.grid) {
-      assert.equal(t.get(...k.split(',').map(Number)), s, k);
-      if (s) filled++;
-    }
-    assert.equal(t.filled, filled);
-    for (const [k, s] of ref.grid) {
-      if (!s) continue;
       const c = k.split(',').map(Number);
+      assert.equal(t.get(...c), s, k);
+      assert.equal(ageAt(t, ...c), ref.age.get(k), `age at ${k}`);
+      if (!s) continue;
+      filled++;
       c.forEach((v, i) => assert.ok(v >= t.min[i] && v <= t.max[i]));
     }
+    assert.equal(t.filled, filled);
   });
 }
+
+test('48 ants keep the full symmetry of the cube', () => {
+  const t = new Turmite('LRULL', 48);
+  t.run(3000);
+  assert.ok(t.filled > 1000);
+  for (const chunk of t.chunks.values())
+    chunk.data.forEach((s, i) => {
+      if (!s) return;
+      const [x, y, z] = [
+        chunk.cx * 32 + (i & 31),
+        chunk.cy * 32 + (i >> 10),
+        chunk.cz * 32 + ((i >> 5) & 31),
+      ];
+      // a quarter turn about each axis and a mirror generate every symmetry
+      assert.equal(t.get(x, -z, y), s);
+      assert.equal(t.get(z, y, -x), s);
+      assert.equal(t.get(-x, y, z), s);
+    });
+});
 
 test('RL is 2D Langton’s ant: flat, and on its highway after ~10k steps', () => {
   const t = new Turmite('RL');
@@ -84,9 +161,10 @@ test('RL is 2D Langton’s ant: flat, and on its highway after ~10k steps', () =
   assert.equal(t.min[1], 0);
   assert.equal(t.max[1], 0);
   // the highway repeats every 104 steps, moving the ant 2 cells along each axis
-  const a = [t.x, t.z];
+  const ant = t.ants[0];
+  const a = [ant.x, ant.z];
   t.run(104);
-  assert.deepEqual([Math.abs(t.x - a[0]), Math.abs(t.z - a[1])], [2, 2]);
+  assert.deepEqual([Math.abs(ant.x - a[0]), Math.abs(ant.z - a[1])], [2, 2]);
 });
 
 test('parseRule', () => {
@@ -99,11 +177,10 @@ test('mesher: one quad per exposed face, wound to face outwards, lit when open',
   const {meshChunk} = await import('./mesher.js');
   const t = new Turmite('LRULL');
   t.run(200000);
-  const palette = Array.from({length: 5}, () => [200, 200, 200]);
   let quads = 0;
   let expected = 0;
   for (const chunk of t.chunks.values()) {
-    const m = meshChunk(t, chunk, palette);
+    const m = meshChunk(t, chunk);
     quads += m.quads;
     const o = [chunk.cx, chunk.cy, chunk.cz].map((c) => c * 32);
     for (let i = 0; i < m.index.length; i += 3) {
@@ -139,8 +216,11 @@ test('mesher: one quad per exposed face, wound to face outwards, lit when open',
   assert.equal(quads, expected);
 
   const lone = new Turmite('LR');
-  lone.chunkAt(0, 0, 0, true).data[0] = 1;
-  const m = meshChunk(lone, lone.chunkAt(0, 0, 0), [0, [200, 100, 50]]);
+  const chunk = lone.chunkAt(0, 0, 0, true);
+  chunk.data[0] = 1;
+  chunk.age[0] = 7;
+  const m = meshChunk(lone, chunk);
   assert.equal(m.quads, 6);
-  assert.ok(m.color.every((v, i) => v === [200, 100, 50][i % 3]));
+  // state 1, last visited at step 7, every corner fully open
+  assert.ok(m.voxel.every((v, i) => v === [1, 7, 1][i % 3]));
 });
