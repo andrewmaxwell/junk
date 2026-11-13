@@ -14,9 +14,9 @@
     "population": {
       "width": 7200,
       "height": 3164,
-      "unit": "people/km\u00b2",
-      "note": "",
-      "max": 65534
+      "unit": "people per \u00bd km\u00b2",
+      "note": "people/km\u00b2 halved",
+      "max": 54179
     },
     "lights": {
       "width": 7200,

@@ -4,10 +4,12 @@ The world's land in columns on an Equal Earth map, each as tall as one number fo
 
 - **Night lights** (the default): how much light each place sent up on cloud-free nights in 2023, measured by satellite, with height on a log scale (a city centre can be 1,000 times a village). Zoomed out, each column is the root mean square of the cells it covers, so a lone city isn't averaged away by its dark neighbours. The page goes dark, and the columns glow by their own brightness and light the pale land around them, under a faint moon whose broad glint shows on the dark, glossy sea.
 - **Open windows**: the share of all hours, day and night, from Nov 1, 2025 to Oct 31, 2026, when the windows could have been open. Pick a month in Settings to watch the seasons move.
-- **Elevation**: the highest ground in each column, exaggerated about 70 times.
-- **Population**: people per square mile in 2025.
+- **Elevation**: the highest ground in each column, exaggerated about 85 times.
+- **Population**: people per square mile in 2025. Zoomed out, each column is the root mean square of its cells, as for night lights, so cities aren't averaged away.
 - **Travel time** to the nearest city of 50,000 people.
 - **Rain** over the same year as the open-window map.
+
+Each map's tallest column is its highest value, so nothing is cut off flat; the curve from floor to top (gamma in Settings › Columns) keeps ordinary values from being dwarfed by the extremes.
 
 Drag to turn, scroll to zoom toward the pointer, WASD or the arrow keys to slide across, and double-click to glide in; Reset view or Escape goes back. Away from the home view only the legend stays on screen. Point at any column to see its value and the nearest city of 100,000 people (from [GeoNames](https://www.geonames.org/), CC BY 4.0, via `build/cities.py`). Once the camera settles, the URL keeps the view (`view=`), so a link reopens exactly what you see. `?glide` circles low over Europe at night with nothing else on screen, which is what the homepage's hover clip records. `?map=windows`, `elevation`, `population`, `travel` or `rain` opens another map, and `?noPause` keeps rendering while the window isn't focused (it pauses otherwise, to spare the GPU). The project was called Windows Open until it grew more maps; old links redirect.
 
@@ -31,7 +33,7 @@ Why Nairobi beats San Francisco: every hour counts, night included. Nairobi, at 
 
 The renderer is the Comfort spike map's [path tracer](../comfort/map/spikes/pathtracer.js): every column fills its grid cell, so a ray walks the grid cell by cell and hits the boxes exactly. Each sample is a jittered camera ray and up to three diffuse bounces, with the sun (or moon) sampled directly from a disk of a few degrees, so shadows have soft edges.
 
-- **Detail where you look.** The page always gives the tracer the same number of columns (650,000 by default) and spends them on what's in view: 33 km columns for the whole world, down to 5.5 km zoomed in, rebuilt once the camera settles.
+- **Detail where you look.** Columns are sized to look about one pixel across wherever they stand (but never finer than the data's own 5.5 km cells), so near ones are finer than far ones: the view gets a detail grid near the camera inside a coarser grid for everything else, rebuilt once the camera settles and kept if the columns there are already as fine. A grid only goes coarser than that when it would need more than 6 million columns, as when the whole map is in view. **column size** in Settings › Quality makes columns wider, for a faster picture.
 - **Moving.** While the camera moves it traces a quick preview (30% of the pixels, one bounce), which caps glow found by chance bounces so a few samples don't sparkle). Full-quality samples are drawn a band of rows at a time, sized to about 20 ms of GPU work, so a Retina-sized frame (about half a second whole) never holds up the camera.
 - **Denoising**, after SVGF (as in [anotherRaytracer](../anotherRaytracer/)): when the view changes, the last image is moved to where its surfaces are now and counts as up to 8 samples, and five edge-avoiding wavelet passes average each pixel with neighbours on the same face, plane and color whose brightness differs by no more than the noise explains. Against a 4,096-sample render it halves the error at 1 sample (19.8 to 10.1, on a 0–255 scale) and cuts it by a fifth at 4. Each pixel fades back to its own samples as their noise drops (fully under 8% relative error, fully denoised over 25%), since past that the filter would only blur detail where several columns share a pixel; on the elevation map that's never worse than the raw samples from 16 on. **denoise** in Settings › Quality turns it off.
 - **Glowing columns are lights** the tracer aims at, like the sun: at every surface it picks one, the brighter and nearer the likelier, by walking down a pyramid of their summed power, and weighs those rays against bounce rays that happen to hit one (multiple importance sampling). Against bounce rays alone it gives the same brightness with about half the noise.
@@ -50,7 +52,7 @@ These were run under the original test, 62°F around the clock and no wind limit
 
 - Weather: ECMWF's ERA5-Land reanalysis from the Copernicus Climate Data Store: hourly, 0.1° (about 9 km), land only. 2 m temperature, 2 m dew point, 10 m wind and precipitation, which is accumulated since 00 UTC and differenced to hourly.
 - Dust and smoke: CAMS global atmospheric composition forecasts from the Atmosphere Data Store, 0.4°, hourly from each day's 00 UTC run. Each land cell takes its nearest CAMS cell.
-- The map is resampled from latitude and longitude onto an Equal Earth grid 3600 cells wide (about 11 km), so columns have square footprints and equal areas. Antarctica is left off. At the home view each column averages 3×3 cells.
+- The map is resampled from latitude and longitude onto an Equal Earth grid 3600 cells wide (about 11 km), so columns have square footprints and equal areas. Antarctica is left off.
 - One year's weather, not a climate average.
 - The other maps don't depend on the weather, so all but rain are binned straight from their sources onto a grid twice as fine (7200 cells, about 5.5 km). Their coastline comes from ETOPO, with ERA5-Land deciding big lakes (water) and inland land below sea level (land).
 - Elevation: [ETOPO 2022](https://www.ncei.noaa.gov/products/etopo-global-relief-model) from NOAA, 60″, the highest point in each cell, so ranges keep their peaks.

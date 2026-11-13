@@ -7,8 +7,9 @@
 // picture sharpens as samples add up. The caption, labels and legend are
 // drawn on a 2D canvas over it; "save PNG" saves the map alone.
 //
-// The tracer gets a fixed budget of columns: the whole map at the home view,
-// and only what's in view, in finer columns, after zooming in.
+// Columns are sized to look a few pixels wide where they stand: a finer grid
+// near the camera inside a coarser one for the rest of the view. How many
+// pixels follows how fast this device draws (see the level of detail below).
 //
 // Rendering pauses while the window isn't focused, since it keeps the GPU
 // busy; ?noPause turns that off. ?map=<name> opens another map.
@@ -52,7 +53,9 @@ const compact = new Intl.NumberFormat('en-US', {
 });
 
 // Each map: where its numbers come from, how they become columns, and the
-// words around it. settings are the column shape, kept per map.
+// words around it. settings are the column shape, kept per map. ranges are
+// the floor slider's [min, max, step] and the top's [min, step]; the top's max
+// (and default) is the map's highest value.
 const hours = (minutes) =>
   minutes < 60
     ? `${Math.round(minutes)} min`
@@ -80,8 +83,8 @@ const MAPS = {
     // cell makes every block with a lit village tall.
     power: 2,
     night: true,
-    ranges: {low: [0, 100, 1], high: [100, 6000, 10]},
-    settings: {low: 3, high: 1500, gamma: 2, height: 2.5},
+    ranges: {low: [0, 100, 1], high: [100, 10]},
+    settings: {low: 3, gamma: 1.5, height: 1.8},
   },
   windows: {
     button: 'Open windows',
@@ -106,8 +109,8 @@ const MAPS = {
       'All 24 hours of the day, in Equal Earth projection.',
     ],
     ramp: ['#f3e2c4', '#f0b56a', '#e8763a', '#cf3f22', '#9a1b14'],
-    ranges: {low: [0, 90, 1], high: [10, 100, 1]},
-    settings: {low: 0, high: 100, gamma: 1.6, height: 4},
+    ranges: {low: [0, 90, 1], high: [10, 1]},
+    settings: {low: 0, gamma: 1.6, height: 2},
   },
   elevation: {
     button: 'Elevation',
@@ -131,24 +134,25 @@ const MAPS = {
       'In Equal Earth projection.',
     ],
     ramp: ['#8fb07a', '#d6cf9a', '#c09062', '#8c6b58', '#f7f4ef'],
-    ranges: {low: [0, 3000, 50], high: [500, 8500, 50]},
-    settings: {low: 0, high: 8000, gamma: 1, height: 1.6},
+    ranges: {low: [0, 3000, 50], high: [500, 50]},
+    settings: {low: 0, gamma: 1, height: 2},
   },
   population: {
     button: 'Population',
     kicker: () => 'PEOPLE PER SQUARE MILE IN 2025',
     subtitle: () => 'Everyone on Earth, counted on a 1 km grid',
     legend: 'HEIGHT · PEOPLE PER SQUARE MILE',
-    unit: 'people/km²',
-    format: (perKm) => compact.format(perKm * 2.58999), // per square mile
+    unit: 'people per ½ km²', // halved to fit 16 bits; the densest is 108,000/km²
+    format: (v) => compact.format(v * 2 * 2.58999), // per square mile
     readout: ' people per sq mi', // after the value, on hover
     source: [
       'Population: GHS-POP R2023A (EU Joint Research Centre), 2025 estimate, 30″ grid.',
       'In Equal Earth projection.',
     ],
     ramp: ['#e9e2ec', '#c3b0d8', '#8f73c2', '#5a3a9c', '#2a1260'],
-    ranges: {low: [0, 1000, 10], high: [100, 60000, 100]},
-    settings: {low: 0, high: 8000, gamma: 0.7, height: 3},
+    ranges: {low: [0, 500, 5], high: [50, 50]},
+    power: 2, // zoomed out, root mean square, as for night lights
+    settings: {low: 0, gamma: 0.65, height: 2.5},
   },
   travel: {
     button: 'Travel time',
@@ -165,8 +169,8 @@ const MAPS = {
     ],
     ramp: ['#e6efe9', '#9cc7b4', '#4f9a8a', '#22646b', '#123a4a'],
     labels: false, // every city is 0 minutes from itself
-    ranges: {low: [0, 600, 5], high: [60, 10000, 30]},
-    settings: {low: 0, high: 2880, gamma: 0.7, height: 3},
+    ranges: {low: [0, 600, 5], high: [60, 30]},
+    settings: {low: 0, gamma: 0.45, height: 3},
   },
   rain: {
     button: 'Rain',
@@ -183,12 +187,17 @@ const MAPS = {
       'In Equal Earth projection.',
     ],
     ramp: ['#e8eef4', '#a9c6e0', '#5b93c7', '#2a5f9e', '#0f2f63'],
-    ranges: {low: [0, 1000, 10], high: [500, 10000, 50]},
-    settings: {low: 0, high: 4000, gamma: 0.9, height: 3},
+    ranges: {low: [0, 1000, 10], high: [500, 50]},
+    settings: {low: 0, gamma: 0.5, height: 3.5},
   },
 };
+// Each map's top is its highest value, so no column is cut off flat; the top
+// slider can't go past it.
 for (const [key, map] of Object.entries(MAPS)) {
   map.max = key === 'windows' ? 100 : layers.layers[key].max;
+  map.settings.high = map.max;
+  const [min, step] = map.ranges.high;
+  map.ranges.high = [min, map.max, step];
 }
 for (const map of Object.values(MAPS)) {
   map.rampColors = map.ramp.map((hex) => new THREE.Color(hex));
@@ -200,7 +209,6 @@ const params = {
   map: startMap,
   period: 'all',
   labels: true,
-  columns: 650, // thousands of columns the tracer gets
   fit: false, // stretch floor and top to this period's 5th and 99.5th percentiles
   ...MAPS[startMap].settings, // low, high, gamma (>1 keeps the merely-okay low), height
   sunElevation: 13,
@@ -592,52 +600,170 @@ function viewRegion() {
   ];
 }
 
+// --- level of detail -------------------------------------------------------
+
+// Columns aim to look `pixels` device pixels across where they stand (but
+// never finer than the data), so those near the camera are finer than those
+// far off. A view gets two grids: a detail grid out to the distance halfway
+// (in ratio) between the nearest and farthest ground in view, and a main grid
+// for everything, each sized for the near end of its range. `pixels` is set
+// by hand (column size in Settings › Quality); the grids only get coarser
+// than it asks when a grid would need more than MAX_CELLS.
+const lod = {pixels: 1};
+const MAX_CELLS = 6e6; // per grid, for the textures' memory
+
+// What the camera sees, for planning: the ground reached by rays through a
+// grid of points on the screen, clamped to the map (with the map's far
+// corners when the view reaches its edge or the horizon), with distances.
+function viewNow() {
+  camera.updateMatrixWorld();
+  const half = [WORLD / 2, (ny * CELL) / 2];
+  const points = [];
+  let horizon = false;
+  const N = 12;
+  for (let j = 0; j <= N; j++) {
+    for (let i = 0; i <= N; i++) {
+      raycaster.setFromCamera(
+        new THREE.Vector2((i / N) * 2 - 1, (j / N) * 2 - 1),
+        camera,
+      );
+      const {origin: o, direction: d} = raycaster.ray;
+      if (d.y > -1e-4) {
+        horizon = true;
+        continue;
+      }
+      const t = o.y / -d.y;
+      const x = o.x + d.x * t;
+      const z = o.z + d.z * t;
+      if (Math.abs(x) > half[0] || Math.abs(z) > half[1]) horizon = true;
+      points.push(
+        new THREE.Vector3(
+          THREE.MathUtils.clamp(x, -half[0], half[0]),
+          0,
+          THREE.MathUtils.clamp(z, -half[1], half[1]),
+        ),
+      );
+    }
+  }
+  if (horizon) {
+    for (const sx of [-1, 1])
+      for (const sz of [-1, 1])
+        points.push(new THREE.Vector3(sx * half[0], 0, sz * half[1]));
+  }
+  const dist = points.map((p) => p.distanceTo(camera.position));
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  return {
+    points,
+    dist,
+    region: viewRegion(),
+    pixelAngle:
+      (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / size.y,
+  };
+}
+
+// The grids a view wants for columns `pixels` wide, in the map's cells: the
+// main grid's block size and window, and the detail grid's (or none).
+function plan(map, view, pixels) {
+  const {width: W, height: H, cell} = map;
+  const left = -WORLD / 2;
+  const top = (-H * cell) / 2;
+  const {points, dist} = view;
+  const near = Math.max(Math.min(...dist), 1e-3);
+  const far = Math.max(...dist, near);
+  const split = Math.sqrt(near * far);
+  const blockAt = (d) => (pixels * d * view.pixelAngle) / cell;
+
+  // The main grid: everything in view.
+  const [x0, z0, x1, z1] = view.region;
+  const fine = Math.max(1, Math.round(blockAt(near)));
+  let block = fine * Math.max(1, Math.round(blockAt(split) / fine));
+  const span = (lo, hi, size, n) => [
+    Math.max(0, Math.floor(lo / size)),
+    Math.min(Math.floor(n / (size / cell)), Math.ceil(hi / size)),
+  ];
+  let gx, gy;
+  for (;;) {
+    const size = block * cell;
+    gx = span(x0 - left, x1 - left, size, W);
+    gy = span(z0 - top, z1 - top, size, H);
+    if ((gx[1] - gx[0]) * (gy[1] - gy[0]) <= MAX_CELLS) break;
+    block += fine;
+  }
+  const main = {block, x: gx[0], y: gy[0], w: gx[1] - gx[0], h: gy[1] - gy[0]};
+
+  // The detail grid: the ground nearer than the split, with a margin for
+  // columns leaning in, in whole main-grid cells.
+  let detail = null;
+  const close = points.filter((p, i) => dist[i] <= split);
+  if (block > fine && close.length) {
+    const xs = close.map((p) => p.x);
+    const zs = close.map((p) => p.z);
+    const margin = (Math.max(...xs) - Math.min(...xs)) * 0.15 + heightOf(1) * 2;
+    const size = block * cell;
+    const [dx0, dx1] = span(
+      Math.min(...xs) - margin - left,
+      Math.max(...xs) + margin - left,
+      size,
+      W,
+    );
+    const [dy0, dy1] = span(
+      Math.min(...zs) - margin - top,
+      Math.max(...zs) + margin - top,
+      size,
+      H,
+    );
+    const x = Math.max(dx0, main.x);
+    const y = Math.max(dy0, main.y);
+    const w = Math.min(dx1, main.x + main.w) - x;
+    const h = Math.min(dy1, main.y + main.h) - y;
+    // The finest block that divides the main one and fits.
+    for (let b = fine; b < block && w > 0 && h > 0; b++) {
+      if (block % b) continue;
+      const scale = block / b;
+      if (w * h * scale * scale > MAX_CELLS) continue;
+      detail = {block: b, scale, x, y, w, h};
+      break;
+    }
+  }
+  return {main, detail};
+}
+
+// Whether grids built for plan `have` serve plan `want` as well or better:
+// they cover its windows in columns at least as fine.
+function serves(have, want) {
+  const covers = (a, b) =>
+    a.x * a.block <= b.x * b.block &&
+    a.y * a.block <= b.y * b.block &&
+    (a.x + a.w) * a.block >= (b.x + b.w) * b.block &&
+    (a.y + a.h) * a.block >= (b.y + b.h) * b.block;
+  if (have.main.block > want.main.block || !covers(have.main, want.main))
+    return false;
+  if (!want.detail) return true;
+  const fineHave = have.detail ?? have.main;
+  return (
+    fineHave.block <= want.detail.block &&
+    (covers(fineHave, want.detail) ||
+      (have.main.block <= want.detail.block && covers(have.main, want.detail)))
+  );
+}
+
 let labels = [];
 let grid = null; // the columns as built, for clicks and for knowing what's covered
 let building = 0;
-// Builds the columns for the view. With force false (after a camera move)
-// it keeps what's there if that already covers the view at the right detail.
-async function build(force = true) {
-  const ticket = ++building;
-  const map = await loadMap(params.map, params.period);
-  if (ticket !== building) return; // a newer build started meanwhile
-  const {width: W, height: H, cell} = map;
-  const [x0, z0, x1, z1] = viewRegion();
-  const inView = ((x1 - x0) / cell) * ((z1 - z0) / cell);
-  const block = Math.max(
-    1,
-    Math.ceil(Math.sqrt(inView / (params.columns * 1000))),
-  );
-  const size = block * cell;
-  const left = -WORLD / 2;
-  const top = (-H * cell) / 2;
-  const gx0 = Math.max(0, Math.floor((x0 - left) / size) * block);
-  const gy0 = Math.max(0, Math.floor((z0 - top) / size) * block);
-  const w = Math.floor(
-    (Math.min(W, Math.ceil((x1 - left) / cell)) - gx0) / block,
-  );
-  const h = Math.floor(
-    (Math.min(H, Math.ceil((z1 - top) / cell)) - gy0) / block,
-  );
-  if (
-    !force &&
-    grid?.block === block &&
-    grid.gx0 <= gx0 &&
-    grid.gy0 <= gy0 &&
-    grid.gx0 + grid.w * block >= gx0 + w * block &&
-    grid.gy0 + grid.h * block >= gy0 + h * block
-  )
-    return;
-  const values = blocks(map, gx0, gy0, w, h, block, current().power);
-  if (params.fit) {
-    const land = values.filter((v) => !isNaN(v)).sort((a, b) => a - b);
-    params.low = Math.round(land[Math.floor(land.length * 0.05)]);
-    params.high = Math.round(land[Math.floor(land.length * 0.995)]);
-    gui.controllersRecursive().forEach((c) => c.updateDisplay());
-  }
 
-  // The window, north up, so row 0 is its far edge.
-  const origin = new THREE.Vector3(left + gx0 * cell, 0, top + gy0 * cell);
+// Each column's color and height (in its own cells) for a window of the map,
+// as the tracer takes them.
+function columnData(map, {block, x, y, w, h}) {
+  const size = block * map.cell;
+  const values = blocks(
+    map,
+    x * block,
+    y * block,
+    w,
+    h,
+    block,
+    current().power,
+  );
   const data = new Float32Array(w * h * 4);
   const tint = new THREE.Color();
   for (let i = 0; i < w * h; i++) {
@@ -646,11 +772,75 @@ async function build(force = true) {
     ramp(t ** (params.gamma * 0.6), tint);
     data.set([tint.r, tint.g, tint.b, heightOf(t) / size], i * 4);
   }
+  return {data, values};
+}
+
+// Builds the columns for the view. `why` is 'scene' (a new map, column shape
+// or column size: always rebuild) or 'view' (the camera settled: keep the
+// columns there if they cover the view at least as finely).
+async function build(why = 'scene') {
+  const ticket = ++building;
+  const map = await loadMap(params.map, params.period);
+  if (ticket !== building) return; // a newer build started meanwhile
+  const view = viewNow();
+  const want = plan(map, view, lod.pixels);
+  if (why === 'view' && grid?.source === map && serves(grid, want)) return;
+  const {width: W, height: H, cell} = map;
+  const {main, detail} = want;
+  const size = main.block * cell;
+  const left = -WORLD / 2;
+  const top = (-H * cell) / 2;
+  const {data, values} = columnData(map, main);
+  if (params.fit) {
+    const land = values.filter((v) => !isNaN(v)).sort((a, b) => a - b);
+    params.low = Math.round(land[Math.floor(land.length * 0.05)]);
+    params.high = Math.round(land[Math.floor(land.length * 0.995)]);
+    gui.controllersRecursive().forEach((c) => c.updateDisplay());
+  }
+  let fine = null;
+  if (detail) {
+    // The main grid's cells under the detail grid stand empty.
+    for (let y = detail.y; y < detail.y + detail.h; y++)
+      for (let x = detail.x; x < detail.x + detail.w; x++)
+        data[((y - main.y) * main.w + x - main.x) * 4 + 3] = 0;
+    const {data: fineData} = columnData(map, {
+      block: detail.block,
+      x: detail.x * detail.scale,
+      y: detail.y * detail.scale,
+      w: detail.w * detail.scale,
+      h: detail.h * detail.scale,
+    });
+    fine = {
+      data: fineData,
+      width: detail.w * detail.scale,
+      height: detail.h * detail.scale,
+      x: detail.x - main.x,
+      y: detail.y - main.y,
+      scale: detail.scale,
+      size: detail.block * cell,
+    };
+  }
+
+  // The window, north up, so row 0 is its far edge.
+  const origin = new THREE.Vector3(
+    left + main.x * size,
+    0,
+    top + main.y * size,
+  );
   // A new map or column shape shouldn't borrow the last picture's colors;
   // finer columns for a new view can.
-  if (force) tracer.forgetHistory();
-  tracer.setColumns(data, w, h, size, origin);
-  grid = {w, h, size, origin, data, block, gx0, gy0, source: map};
+  if (why === 'scene') tracer.forgetHistory();
+  tracer.setColumns(data, main.w, main.h, size, origin, fine);
+  grid = {
+    main,
+    detail,
+    view,
+    size,
+    origin,
+    data,
+    fine,
+    source: map,
+  };
 
   // Each label points at the middle of its place's column top and quotes the
   // cell's own value, not the block average. A coastal city whose own cell is
@@ -670,16 +860,43 @@ async function build(force = true) {
         }
       }
     }
-    const bx = Math.floor((gx - gx0) / block);
-    const by = Math.floor((gy - gy0) / block);
-    if (bx < 0 || by < 0 || bx >= w || by >= h) return [];
-    const tip = new THREE.Vector3(
-      origin.x + (bx + 0.5) * size,
-      data[(by * w + bx) * 4 + 3] * size,
-      origin.z + (by + 0.5) * size,
-    );
+    const [x, z] = [left + (gx + 0.5) * cell, top + (gy + 0.5) * cell];
+    const column = columnAt(x, z);
+    if (!column) return [];
+    const tip = new THREE.Vector3(column.x, column.height, column.z);
     return [{name, value: map.values[gy * W + gx], tip}];
   });
+}
+
+// The column standing at a point of the ground (x, z), from whichever grid
+// has it: the middle of its top, or null outside the grids.
+function columnAt(x, z) {
+  const {origin, size, main, data, fine} = grid;
+  let bx = Math.floor((x - origin.x) / size);
+  let by = Math.floor((z - origin.z) / size);
+  if (bx < 0 || by < 0 || bx >= main.w || by >= main.h) return null;
+  if (
+    fine &&
+    bx >= fine.x &&
+    by >= fine.y &&
+    bx < fine.x + fine.width / fine.scale &&
+    by < fine.y + fine.height / fine.scale
+  ) {
+    const fx = Math.floor((x - origin.x - fine.x * size) / fine.size);
+    const fy = Math.floor((z - origin.z - fine.y * size) / fine.size);
+    return {
+      x: origin.x + fine.x * size + (fx + 0.5) * fine.size,
+      z: origin.z + fine.y * size + (fy + 0.5) * fine.size,
+      height: fine.data[(fy * fine.width + fx) * 4 + 3] * fine.size,
+      size: fine.size,
+    };
+  }
+  return {
+    x: origin.x + (bx + 0.5) * size,
+    z: origin.z + (by + 0.5) * size,
+    height: data[(by * main.w + bx) * 4 + 3] * size,
+    size,
+  };
 }
 
 // After the camera settles, rebuild if the view needs other columns, and
@@ -687,7 +904,10 @@ async function build(force = true) {
 let refineTimer = 0;
 function refine() {
   clearTimeout(refineTimer);
-  refineTimer = setTimeout(() => (build(false), saveView()), 150);
+  refineTimer = setTimeout(() => {
+    build('view');
+    saveView();
+  }, 150);
 }
 const round = (v) => +v.toFixed(3);
 function saveView() {
@@ -726,12 +946,11 @@ function pick(clientX, clientY) {
   const t0 = Math.max(0, (o.y - top) / -d.y);
   const t1 = o.y / -d.y;
   const p = new THREE.Vector3();
-  for (let t = t0; t <= t1; t += grid.size * 0.25) {
+  const step = (grid.fine?.size ?? grid.size) * 0.25;
+  for (let t = t0; t <= t1; t += step) {
     p.copy(d).multiplyScalar(t).add(o);
-    const bx = Math.floor((p.x - grid.origin.x) / grid.size);
-    const by = Math.floor((p.z - grid.origin.z) / grid.size);
-    if (bx < 0 || by < 0 || bx >= grid.w || by >= grid.h) continue;
-    if (p.y <= grid.data[(by * grid.w + bx) * 4 + 3] * grid.size) return p;
+    const column = columnAt(p.x, p.z);
+    if (column && p.y <= column.height) return p;
   }
   return p.copy(d).multiplyScalar(t1).add(o); // the ground, out at sea
 }
@@ -1071,10 +1290,6 @@ const periodController = gui
 gui.add(params, 'labels');
 gui.add(tracer, 'samples').listen().disable();
 const shape = gui.addFolder('Columns').close();
-shape
-  .add(params, 'columns', 100, 3000, 50)
-  .name('columns (thousands)')
-  .onFinishChange(rebuild);
 shape.add(params, 'fit').name('fit to data').onChange(rebuild);
 const lowController = shape.add(params, 'low', 0, 1, 1).onFinishChange(manual);
 const highController = shape
@@ -1113,6 +1328,10 @@ light.add(params, 'bounces', 0, 6, 1).onChange(setLighting);
 light.add(params, 'exposure', 0.2, 3, 0.05);
 const quality = gui.addFolder('Quality').close();
 quality.add(params, 'maxSamples', 16, 16384, 1).name('max samples');
+quality
+  .add(lod, 'pixels', 1, 16, 0.5)
+  .name('column size (px)')
+  .onFinishChange(() => build());
 quality
   .add(params, 'denoise')
   .onChange((on) => ((tracer.denoise = on), tracer.reset()));

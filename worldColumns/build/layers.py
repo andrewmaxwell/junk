@@ -10,7 +10,7 @@ since they don't depend on ERA5-Land's 9 km weather:
               metres, floored at 0. The highest point, not the average, so
               mountain ranges keep their peaks.
   population  GHS-POP R2023A (EU Joint Research Centre), 2025 estimate, 30″:
-              people in each cell over its area, people per km².
+              people in each cell over its area, people per km² halved (to fit 16 bits).
   lights      Black Marble VNP46A4 (NASA), 2023, 15″: mean calibrated
               radiance at night, nW/(cm² sr), stored times 10; from the tiles
               lights.py downloads and reduces.
@@ -286,7 +286,8 @@ def main():
         return cache['people']
     fine = {
         'elevation': (lambda: heights, 'm', 'highest point, to 10 m', 10),
-        'population': (lambda: people(), 'people/km²', '', 1),
+        # Halved, since the densest cells (108,000 people/km²) don't fit 16 bits.
+        'population': (lambda: people() / 2, 'people per ½ km²', 'people/km² halved', 1),
         'lights': (lambda: lights(grid, people(), land), 'nW/(cm² sr)×10', 'VNP46A4 2023 radiance times 10', 1),
         'travel': (lambda: travel(grid), 'minutes', 'to 5 minutes', 5),
     }

@@ -35,6 +35,14 @@ uniform ivec2 uGrid;
 uniform vec3 uOrigin; // world position of the grid's (0, 0) corner
 uniform float uCell; // world size of one cell
 uniform float uMaxH; // tallest column, in cells
+// An optional finer grid (uDetailGrid.x 0 for none), uDetailScale cells to
+// each of the main grid's, over the main grid's cells from uDetailOffset;
+// the main grid's own cells there are empty. Heights in its own cells.
+uniform sampler2D uDetail;
+uniform ivec2 uDetailGrid;
+uniform vec2 uDetailOffset;
+uniform float uDetailScale;
+uniform float uDetailMaxH;
 uniform mat4 uCamWorld;
 uniform mat4 uProjInv;
 uniform vec3 uCamPos;
@@ -53,6 +61,8 @@ uniform vec3 uGlowAlbedo;
 // summed up a mip chain, for picking a column to aim at; see pickGlow.
 uniform sampler2D uPower;
 uniform int uPowerLevels;
+uniform sampler2D uDetailPower; // the same for the detail grid
+uniform int uDetailPowerLevels;
 // Over 0, the ground is water: it mirrors this share of light head on (more
 // at grazing angles, by Schlick's Fresnel), blurred by uWaterRough (a GGX
 // roughness for the sun's glint), and scatters the rest by its albedo.
@@ -123,26 +133,40 @@ vec2 sobol2(uint index, uint s) {
   return vec2(float(x >> 8u), float(y >> 8u)) / 16777216.0;
 }
 
-vec4 column(ivec2 c) { return texelFetch(uColumns, c, 0); }
+// A cell is (x, y, level): level 0 is the main grid, 1 the detail grid.
+// Ground is x = -1.
+vec4 column(ivec3 c) {
+  return c.z == 0 ? texelFetch(uColumns, c.xy, 0) : texelFetch(uDetail, c.xy, 0);
+}
+// A cell's width and its column's height, in main grid cells.
+float cellSize(ivec3 c) { return c.z == 0 ? 1.0 : 1.0 / uDetailScale; }
+float heightOf(ivec3 c) { return column(c).a * cellSize(c); }
+// The cell's corner at the ground, in the main grid's space.
+vec3 cellCorner(ivec3 c) {
+  return c.z == 0
+    ? vec3(float(c.x), 0.0, float(c.y))
+    : vec3(uDetailOffset.x, 0.0, uDetailOffset.y) + vec3(float(c.x), 0.0, float(c.y)) / uDetailScale;
+}
+// From the main grid's space to the detail grid's.
+vec3 toDetail(vec3 p) {
+  return (p - vec3(uDetailOffset.x, 0.0, uDetailOffset.y)) * uDetailScale;
+}
 
-// In grid space (x and z in cells, y in cell widths). Returns the distance to
-// the first hit (INF for none), its normal, and the cell hit (-1 for ground).
-float trace(vec3 o, vec3 d, out vec3 n, out ivec2 hitCell) {
-  hitCell = ivec2(-1);
-  n = vec3(0.0, 1.0, 0.0);
-  float tGround = d.y < 0.0 ? -o.y / d.y : INF;
-
+// One grid of columns in its own space (x and z in cells, y in cell
+// widths): the distance to the first column hit before tLimit (INF for
+// none), its normal and its cell.
+float traceGrid(sampler2D cols, ivec2 grid, float maxH, vec3 o, vec3 d, float tLimit, out vec3 n, out ivec2 hitCell) {
   vec3 inv = 1.0 / d;
   vec3 t0 = -o * inv;
-  vec3 t1 = (vec3(float(uGrid.x), uMaxH, float(uGrid.y)) - o) * inv;
+  vec3 t1 = (vec3(float(grid.x), maxH, float(grid.y)) - o) * inv;
   vec3 tn = min(t0, t1);
   vec3 tf = max(t0, t1);
   float tEnter = max(max(tn.x, tn.z), max(tn.y, 0.0));
-  float tExit = min(min(tf.x, tf.y), tf.z);
-  if (tEnter >= tExit) return tGround;
+  float tExit = min(min(min(tf.x, tf.y), tf.z), tLimit);
+  if (tEnter >= tExit) return INF;
 
   vec3 p = o + d * tEnter;
-  ivec2 cell = clamp(ivec2(floor(p.xz)), ivec2(0), uGrid - 1);
+  ivec2 cell = clamp(ivec2(floor(p.xz)), ivec2(0), grid - 1);
   ivec2 stp = ivec2(d.x > 0.0 ? 1 : -1, d.z > 0.0 ? 1 : -1);
   vec2 tDelta = abs(inv.xz);
   vec2 tMax = vec2(
@@ -154,7 +178,7 @@ float trace(vec3 o, vec3 d, out vec3 n, out ivec2 hitCell) {
 
   for (int i = 0; i < 8192; i++) {
     float tNext = min(min(tMax.x, tMax.y), tExit);
-    float h = column(cell).a;
+    float h = texelFetch(cols, cell, 0).a;
     if (h > 0.0) {
       if (o.y + d.y * tCur <= h) {
         n = lastN;
@@ -162,13 +186,13 @@ float trace(vec3 o, vec3 d, out vec3 n, out ivec2 hitCell) {
         return tCur;
       }
       if (o.y + d.y * tNext <= h) {
+        n = vec3(0.0, 1.0, 0.0);
         hitCell = cell;
         return (h - o.y) / d.y;
       }
     }
-    if (tGround <= tNext) return tGround;
     if (tNext >= tExit) break;
-    if (d.y > 0.0 && o.y + d.y * tNext > uMaxH) break;
+    if (d.y > 0.0 && o.y + d.y * tNext > maxH) break;
     if (tMax.x < tMax.y) {
       cell.x += stp.x;
       tCur = tMax.x;
@@ -180,21 +204,49 @@ float trace(vec3 o, vec3 d, out vec3 n, out ivec2 hitCell) {
       tMax.y += tDelta.y;
       lastN = vec3(0.0, 0.0, -float(stp.y));
     }
-    if (any(lessThan(cell, ivec2(0))) || any(greaterThanEqual(cell, uGrid))) break;
+    if (any(lessThan(cell, ivec2(0))) || any(greaterThanEqual(cell, grid))) break;
   }
-  return tGround;
+  return INF;
+}
+
+// In the main grid's space. Returns the distance to the first hit (INF for
+// none), its normal, and the cell hit. The detail grid, when there is one,
+// stands where the main grid's own cells are empty, so the nearer hit of the
+// two (or the ground) is the scene's.
+float trace(vec3 o, vec3 d, out vec3 n, out ivec3 hitCell) {
+  hitCell = ivec3(-1, -1, 0);
+  n = vec3(0.0, 1.0, 0.0);
+  float best = d.y < 0.0 ? -o.y / d.y : INF;
+  vec3 gn;
+  ivec2 gc;
+  if (uDetailGrid.x > 0) {
+    // Scaling the ray's direction too keeps its distances the same.
+    float t = traceGrid(uDetail, uDetailGrid, uDetailMaxH, toDetail(o), d * uDetailScale, best, gn, gc);
+    if (t < best) {
+      best = t;
+      n = gn;
+      hitCell = ivec3(gc, 1);
+    }
+  }
+  float t = traceGrid(uColumns, uGrid, uMaxH, o, d, best, gn, gc);
+  if (t < best) {
+    best = t;
+    n = gn;
+    hitCell = ivec3(gc, 0);
+  }
+  return best;
 }
 
 vec3 sky(vec3 d) {
   return mix(uSkyHorizon, uSkyZenith, sqrt(clamp(d.y, 0.0, 1.0)));
 }
 
-vec3 albedoAt(ivec2 c, vec3 p, vec3 n) {
+vec3 albedoAt(ivec3 c, vec3 p, vec3 n) {
   if (c.x < 0) return uGround;
-  vec4 col = column(c);
-  if (n.y > 0.5) return col.rgb;
-  float f = clamp(p.y / col.a, 0.0, 1.0);
-  return mix(uBase, col.rgb, f * f);
+  vec3 top = column(c).rgb;
+  if (n.y > 0.5) return top;
+  float f = clamp(p.y / heightOf(c), 0.0, 1.0);
+  return mix(uBase, top, f * f);
 }
 
 void basis(vec3 n, out vec3 t, out vec3 b) {
@@ -227,27 +279,36 @@ vec3 sampleCosine(vec3 n, vec2 u) {
 // among four children by power over distance squared, so bright columns
 // nearby are picked most and every glowing one can be.
 
-// How much a node of the pyramid (at level, covering 2^level cells a side)
-// is worth aiming at from x.
-float glowWeight(vec3 x, ivec2 node, int level) {
-  ivec2 size = textureSize(uPower, level);
+// How much a node of a pyramid (at level, covering 2^level cells a side)
+// is worth aiming at from x, in that grid's space.
+float glowWeight(sampler2D pw, vec3 x, ivec2 node, int level) {
+  ivec2 size = textureSize(pw, level);
   if (node.x >= size.x || node.y >= size.y) return 0.0;
-  float power = texelFetch(uPower, node, level).r;
+  float power = texelFetch(pw, node, level).r;
   if (power <= 0.0) return 0.0;
   float s = float(1 << level);
   vec2 d = x.xz - (vec2(node) + 0.5) * s;
   return power / max(dot(d, d) + x.y * x.y, 0.5 * s * s);
 }
 
-// A glowing cell picked for x, and the chance of picking it (0 if none).
-ivec2 pickGlow(vec3 x, out float prob) {
+// The weight of a whole pyramid from x: its root's four children.
+float glowTotal(sampler2D pw, int levels, vec3 x) {
+  if (levels < 2) return glowWeight(pw, x, ivec2(0), 0);
+  float total = 0.0;
+  for (int k = 0; k < 4; k++) total += glowWeight(pw, x, ivec2(k & 1, k >> 1), levels - 2);
+  return total;
+}
+
+// A glowing cell of one grid picked for x, and the chance of picking it (0
+// if none).
+ivec2 pickIn(sampler2D pw, int levels, vec3 x, out float prob) {
   ivec2 node = ivec2(0);
   prob = 1.0;
-  for (int level = uPowerLevels - 1; level > 0; level--) {
+  for (int level = levels - 1; level > 0; level--) {
     float w[4];
     float total = 0.0;
     for (int k = 0; k < 4; k++) {
-      w[k] = glowWeight(x, node * 2 + ivec2(k & 1, k >> 1), level - 1);
+      w[k] = glowWeight(pw, x, node * 2 + ivec2(k & 1, k >> 1), level - 1);
       total += w[k];
     }
     if (total <= 0.0) {
@@ -271,15 +332,15 @@ ivec2 pickGlow(vec3 x, out float prob) {
   return node;
 }
 
-// The chance pickGlow(x) picks cell c.
-float glowProb(vec3 x, ivec2 c) {
+// The chance pickIn(x) picks cell c of its grid.
+float probIn(sampler2D pw, int levels, vec3 x, ivec2 c) {
   float prob = 1.0;
-  for (int level = uPowerLevels - 1; level > 0; level--) {
+  for (int level = levels - 1; level > 0; level--) {
     ivec2 node = c >> level;
     float w[4];
     float total = 0.0;
     for (int k = 0; k < 4; k++) {
-      w[k] = glowWeight(x, node * 2 + ivec2(k & 1, k >> 1), level - 1);
+      w[k] = glowWeight(pw, x, node * 2 + ivec2(k & 1, k >> 1), level - 1);
       total += w[k];
     }
     ivec2 child = (c >> (level - 1)) - node * 2;
@@ -290,37 +351,74 @@ float glowProb(vec3 x, ivec2 c) {
   return prob;
 }
 
+// The chance of aiming from x at the detail grid rather than the main one.
+float detailShare(vec3 x) {
+  if (uDetailGrid.x == 0) return 0.0;
+  float main = glowTotal(uPower, uPowerLevels, x);
+  float detail = glowTotal(uDetailPower, uDetailPowerLevels, toDetail(x));
+  return main + detail > 0.0 ? detail / (main + detail) : 0.0;
+}
+
+// A glowing cell picked for x, from either grid, and the chance of picking
+// it (0 if none).
+ivec3 pickGlow(vec3 x, out float prob) {
+  float share = detailShare(x);
+  if (rand() < share) {
+    ivec2 c = pickIn(uDetailPower, uDetailPowerLevels, toDetail(x), prob);
+    prob *= share;
+    return ivec3(c, 1);
+  }
+  ivec2 c = pickIn(uPower, uPowerLevels, x, prob);
+  prob *= 1.0 - share;
+  return ivec3(c, 0);
+}
+
+// The chance pickGlow(x) picks cell c.
+float glowProb(vec3 x, ivec3 c) {
+  float share = detailShare(x);
+  return c.z == 1
+    ? share * probIn(uDetailPower, uDetailPowerLevels, toDetail(x), c.xy)
+    : (1.0 - share) * probIn(uPower, uPowerLevels, x, c.xy);
+}
+
+// A column's surface area (top and four sides), in main grid cells.
+float glowArea(ivec3 c) {
+  float s = cellSize(c);
+  return s * s + 4.0 * s * heightOf(c);
+}
+
 // The chance, per unit solid angle, of aiming from x at a point on column c
 // with normal nl, a distance d away along l. Points are picked evenly over
 // the column's surface (top and four sides).
-float glowPdf(vec3 x, ivec2 c, vec3 nl, vec3 l, float d) {
+float glowPdf(vec3 x, ivec3 c, vec3 nl, vec3 l, float d) {
   float cosL = -dot(nl, l);
   if (cosL <= 0.0) return 0.0;
-  return glowProb(x, c) / (1.0 + 4.0 * column(c).a) * d * d / cosL;
+  return glowProb(x, c) / glowArea(c) * d * d / cosL;
 }
 
 // Light reaching x (normal n) from a glowing column picked for it, as it
 // leaves a surface of the given albedo, weighed against bounce rays.
 vec3 glowLight(vec3 x, vec3 n, vec3 albedo) {
   float prob;
-  ivec2 c = pickGlow(x, prob);
+  ivec3 c = pickGlow(x, prob);
   if (prob <= 0.0) return vec3(0.0);
-  float h = column(c).a;
-  float area = 1.0 + 4.0 * h;
+  float s = cellSize(c);
+  float h = heightOf(c);
+  float area = glowArea(c);
   float a = rand() * area;
-  vec3 cell = vec3(float(c.x), 0.0, float(c.y));
+  vec3 cell = cellCorner(c);
   vec3 p;
   vec3 nl;
-  if (a < 1.0) {
-    p = cell + vec3(rand(), h, rand());
+  if (a < s * s) {
+    p = cell + vec3(rand() * s, h, rand() * s);
     nl = vec3(0.0, 1.0, 0.0);
   } else {
-    int side = min(int((a - 1.0) / h), 3);
+    int side = min(int((a - s * s) / (s * h)), 3);
     float y = rand() * h;
-    float f = rand();
-    if (side == 0) { p = cell + vec3(1.0, y, f); nl = vec3(1.0, 0.0, 0.0); }
+    float f = rand() * s;
+    if (side == 0) { p = cell + vec3(s, y, f); nl = vec3(1.0, 0.0, 0.0); }
     else if (side == 1) { p = cell + vec3(0.0, y, f); nl = vec3(-1.0, 0.0, 0.0); }
-    else if (side == 2) { p = cell + vec3(f, y, 1.0); nl = vec3(0.0, 0.0, 1.0); }
+    else if (side == 2) { p = cell + vec3(f, y, s); nl = vec3(0.0, 0.0, 1.0); }
     else { p = cell + vec3(f, y, 0.0); nl = vec3(0.0, 0.0, -1.0); }
   }
   vec3 toP = p - x;
@@ -332,7 +430,7 @@ vec3 glowLight(vec3 x, vec3 n, vec3 albedo) {
   if (abs(l.x) < 1e-7) l.x = 1e-7;
   if (abs(l.z) < 1e-7) l.z = 1e-7;
   vec3 sn;
-  ivec2 sc;
+  ivec3 sc;
   float t = trace(x, l, sn, sc);
   if (sc != c || abs(t - d) > 1e-3 * max(1.0, d)) return vec3(0.0);
   float pdfLight = prob / area * d * d / cosL;
@@ -368,7 +466,7 @@ void main() {
   if (uGuide) {
     vec3 gd = rayThrough(gl_FragCoord.xy);
     vec3 gn;
-    ivec2 gc;
+    ivec3 gc;
     float gt = trace(o0, gd, gn, gc);
     fragColor = gt >= INF
       ? vec4(-1.0, 5.0, 0.0, 0.0)
@@ -388,7 +486,7 @@ void main() {
   bool mirrored = false; // the last bounce was off water
   for (int bounce = 0; bounce <= uBounces; bounce++) {
     vec3 n;
-    ivec2 c;
+    ivec3 c;
     float t = trace(o, d, n, c);
     if (t >= INF) {
       radiance += throughput * sky(d);
@@ -427,7 +525,7 @@ void main() {
     float cosL = dot(n, l);
     if (cosL > 0.0) {
       vec3 sn;
-      ivec2 sc;
+      ivec3 sc;
       if (trace(o, l, sn, sc) >= INF || sc.x < 0) {
         radiance += throughput * diffuse * uSun * cosL;
         // Water's glint of the sun (or moon): a GGX microfacet reflection,
@@ -828,6 +926,13 @@ export function createPathTracer(renderer) {
       uOrigin: {value: new THREE.Vector3()},
       uCell: {value: 1},
       uMaxH: {value: 1},
+      uDetail: {value: null},
+      uDetailGrid: {value: new THREE.Vector2(0, 0)},
+      uDetailOffset: {value: new THREE.Vector2()},
+      uDetailScale: {value: 1},
+      uDetailMaxH: {value: 1},
+      uDetailPower: {value: null},
+      uDetailPowerLevels: {value: 1},
       uCamWorld: {value: new THREE.Matrix4()},
       uProjInv: {value: new THREE.Matrix4()},
       uCamPos: {value: new THREE.Vector3()},
@@ -1054,12 +1159,12 @@ export function createPathTracer(renderer) {
     p.samples++;
   };
 
-  let columns;
-  let power;
+  // The textures in use: the grids and their glow pyramids, main and detail.
+  const textures = [];
   // The glow's power pyramid (see pickGlow): each cell's glow brightness
   // (its color squared) times roughly its glowing area, padded to powers of
   // two and summed 2x2 up to one cell.
-  function setPower(data, width, height) {
+  function powerPyramid(data, width, height) {
     const pow2 = (v) => 2 ** Math.ceil(Math.log2(Math.max(v, 1)));
     let [w, h] = [pow2(width), pow2(height)];
     let level = new Float32Array(w * h);
@@ -1090,8 +1195,7 @@ export function createPathTracer(renderer) {
       }
       mipmaps.push({data: level, width: w, height: h});
     }
-    power?.dispose();
-    power = new THREE.DataTexture(
+    const power = new THREE.DataTexture(
       mipmaps[0].data,
       mipmaps[0].width,
       mipmaps[0].height,
@@ -1103,9 +1207,24 @@ export function createPathTracer(renderer) {
     power.minFilter = THREE.NearestMipmapNearestFilter;
     power.magFilter = THREE.NearestFilter;
     power.needsUpdate = true;
-    u.uPower.value = power;
-    u.uPowerLevels.value = mipmaps.length;
+    return [power, mipmaps.length];
   }
+  function columnTexture(data, width, height) {
+    const t = new THREE.DataTexture(
+      data,
+      width,
+      height,
+      THREE.RGBAFormat,
+      THREE.FloatType,
+    );
+    t.needsUpdate = true;
+    return t;
+  }
+  const tallest = (data) => {
+    let maxH = 0;
+    for (let i = 3; i < data.length; i += 4) maxH = Math.max(maxH, data[i]);
+    return maxH + 1e-3;
+  };
   let screen = [1, 1];
   let row = 0; // first row of the next band of the sample being drawn
   let rows = 64; // rows per band, adjusted to keep each band near budgetMs
@@ -1199,24 +1318,43 @@ export function createPathTracer(renderer) {
       tracer.reset();
     },
     // `data` holds RGBA floats per cell: linear albedo and height in cells.
-    setColumns(data, width, height, cell, origin) {
-      columns?.dispose();
-      columns = new THREE.DataTexture(
-        data,
-        width,
-        height,
-        THREE.RGBAFormat,
-        THREE.FloatType,
-      );
-      columns.needsUpdate = true;
-      u.uColumns.value = columns;
+    // `detail`, optional, is a finer grid over part of this one, where this
+    // one's own cells should be empty: {data, width, height, x, y, scale},
+    // scale of its cells to each of this grid's, from this grid's cell (x, y).
+    setColumns(data, width, height, cell, origin, detail = null) {
+      for (const t of textures.splice(0)) t.dispose();
+      const main = columnTexture(data, width, height);
+      const [power, levels] = powerPyramid(data, width, height);
+      textures.push(main, power);
+      u.uColumns.value = main;
       u.uGrid.value.set(width, height);
       u.uCell.value = cell;
       u.uOrigin.value.copy(origin);
-      let maxH = 0;
-      for (let i = 3; i < data.length; i += 4) maxH = Math.max(maxH, data[i]);
-      u.uMaxH.value = maxH + 1e-3;
-      setPower(data, width, height);
+      u.uMaxH.value = tallest(data);
+      u.uPower.value = power;
+      u.uPowerLevels.value = levels;
+      if (detail) {
+        const fine = columnTexture(detail.data, detail.width, detail.height);
+        const [finePower, fineLevels] = powerPyramid(
+          detail.data,
+          detail.width,
+          detail.height,
+        );
+        textures.push(fine, finePower);
+        u.uDetail.value = fine;
+        u.uDetailGrid.value.set(detail.width, detail.height);
+        u.uDetailOffset.value.set(detail.x, detail.y);
+        u.uDetailScale.value = detail.scale;
+        u.uDetailMaxH.value = tallest(detail.data);
+        u.uDetailPower.value = finePower;
+        u.uDetailPowerLevels.value = fineLevels;
+      } else {
+        // Samplers still need something bound.
+        u.uDetail.value = main;
+        u.uDetailGrid.value.set(0, 0);
+        u.uDetailPower.value = power;
+        u.uDetailPowerLevels.value = levels;
+      }
       tracer.reset();
     },
     // Advances the full-resolution render: one whole sample per pixel, or one
