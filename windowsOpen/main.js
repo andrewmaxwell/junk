@@ -267,19 +267,14 @@ controls.addEventListener('end', () => refine());
 
 // While the camera moves, trace a quick preview (a fraction of the pixels,
 // one bounce) so dragging and zooming keep up; full quality resumes once it
-// has been still for a moment.
-const PREVIEW_SCALE = 0.3;
+// has been still for a moment, drawn a band of rows at a time so the GPU is
+// never more than a few milliseconds from the next frame.
+tracer.budgetMs = 20;
+tracer.previewScale = 0.3;
 let lastMove = -Infinity;
-let previewing = false;
 function moving() {
   lastMove = performance.now();
   tracer.reset();
-}
-function setPreview(on) {
-  if (on === previewing) return;
-  previewing = on;
-  tracer.uniforms.uBounces.value = on ? 1 : params.bounces;
-  tracer.setScale(on ? PREVIEW_SCALE : 1);
 }
 
 // WASD or the arrow keys slide the view across the map, faster when it's
@@ -389,7 +384,7 @@ function setLighting() {
   u.uSkyHorizon.value.set(horizon.r, horizon.g, horizon.b);
   u.uGround.value = color('#f3ebdf');
   u.uBase.value = color('#f0e3cd');
-  u.uBounces.value = previewing ? 1 : params.bounces;
+  u.uBounces.value = params.bounces;
   tracer.reset();
 }
 
@@ -931,8 +926,8 @@ renderer.setAnimationLoop(() => {
   lastFrame = now;
   fly();
   controls.update();
-  setPreview(now - lastMove < 250);
-  if (tracer.samples < params.maxSamples) tracer.step(camera);
+  if (now - lastMove < 200) tracer.preview(camera);
+  else if (tracer.samples < params.maxSamples) tracer.step(camera);
   tracer.show(params.exposure);
   drawOverlay(ctx, overlay.width, overlay.height);
 });

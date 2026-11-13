@@ -249,8 +249,23 @@ export function createPathTracer(renderer) {
     magFilter: THREE.NearestFilter,
     depthBuffer: false,
   };
-  let read = new THREE.WebGLRenderTarget(1, 1, targetOptions);
-  let write = new THREE.WebGLRenderTarget(1, 1, targetOptions);
+  // An accumulation buffer pair (read is the latest complete sum, write the
+  // one being drawn), one at full resolution and one small for previews.
+  const pair = () => ({
+    read: new THREE.WebGLRenderTarget(1, 1, targetOptions),
+    write: new THREE.WebGLRenderTarget(1, 1, targetOptions),
+    width: 1,
+    height: 1,
+    samples: 0,
+  });
+  const main = pair();
+  const small = pair();
+  const setSize = (p, width, height) => {
+    [p.width, p.height] = [Math.max(1, width), Math.max(1, height)];
+    p.read.setSize(p.width, p.height);
+    p.write.setSize(p.width, p.height);
+    p.samples = 0;
+  };
 
   const linear = (hex) => new THREE.Color(hex);
   const trace = new THREE.RawShaderMaterial({
@@ -292,27 +307,56 @@ export function createPathTracer(renderer) {
   const u = trace.uniforms;
 
   let columns;
-  let full = [1, 1];
-  let scale = 1;
+  let screen = [1, 1];
+  let row = 0; // first row of the next band of the sample being drawn
+  let rows = 64; // rows per band, adjusted to keep each band near budgetMs
+  let lastStep = 0;
+
+  // Draws rows [y0, y0 + count) of the next sample into p.write.
+  function draw(p, view, y0, count, frame, bounces) {
+    u.uCamWorld.value.copy(view.matrixWorld);
+    u.uProjInv.value.copy(view.projectionMatrixInverse);
+    u.uCamPos.value.setFromMatrixPosition(view.matrixWorld);
+    u.uFrame.value = frame;
+    u.uPrev.value = p.read.texture;
+    u.uRes.value.set(p.width, p.height);
+    const saved = u.uBounces.value;
+    u.uBounces.value = bounces;
+    p.write.scissor.set(0, y0, p.width, count);
+    p.write.scissorTest = count < p.height;
+    quad.material = trace;
+    renderer.setRenderTarget(p.write);
+    renderer.render(scene, camera);
+    u.uBounces.value = saved;
+  }
+  const swap = (p) => {
+    [p.read, p.write] = [p.write, p.read];
+    p.samples++;
+  };
+
   const tracer = {
-    samples: 0,
+    samples: 0, // complete full-resolution samples per pixel
     uniforms: u,
+    // Milliseconds of GPU work to aim for per step. 0 draws each whole sample
+    // in one go; a budget splits it into bands of rows over several steps, so
+    // a big screen never holds up the next frame (and camera input) for long.
+    budgetMs: 0,
+    previewScale: 0.3, // preview resolution, as a fraction of the screen's
+    previewBounces: 1,
     reset() {
       tracer.samples = 0;
+      main.samples = 0;
+      small.samples = 0;
+      row = 0;
     },
     resize(width, height) {
-      full = [width, height];
-      tracer.setScale(scale);
-    },
-    // Traces at a fraction of the screen's resolution (and shows it scaled
-    // up), for a fast preview while the view is moving. 1 is full resolution.
-    setScale(s) {
-      scale = s;
-      const [w, h] = full.map((v) => Math.max(1, Math.round(v * s)));
-      read.setSize(w, h);
-      write.setSize(w, h);
-      u.uRes.value.set(w, h);
-      display.uniforms.uScale.value.set(w / full[0], h / full[1]);
+      screen = [width, height];
+      setSize(main, width, height);
+      setSize(
+        small,
+        Math.round(width * tracer.previewScale),
+        Math.round(height * tracer.previewScale),
+      );
       tracer.reset();
     },
     // `data` holds RGBA floats per cell: linear albedo and height in cells.
@@ -335,22 +379,52 @@ export function createPathTracer(renderer) {
       u.uMaxH.value = maxH + 1e-3;
       tracer.reset();
     },
-    // One more sample per pixel.
+    // Advances the full-resolution render: one whole sample per pixel, or one
+    // band of one when there's a budget.
     step(view) {
-      u.uCamWorld.value.copy(view.matrixWorld);
-      u.uProjInv.value.copy(view.projectionMatrixInverse);
-      u.uCamPos.value.setFromMatrixPosition(view.matrixWorld);
-      u.uFrame.value = tracer.samples;
-      u.uPrev.value = read.texture;
-      quad.material = trace;
-      renderer.setRenderTarget(write);
-      renderer.render(scene, camera);
-      [read, write] = [write, read];
-      tracer.samples++;
+      if (!tracer.budgetMs) {
+        draw(main, view, 0, main.height, main.samples, u.uBounces.value);
+        swap(main);
+        tracer.samples = main.samples;
+        return;
+      }
+      // Nothing on screen for this view yet: a quick preview first.
+      if (main.samples === 0 && small.samples === 0) tracer.preview(view);
+      // Steps come once a frame, so the time since the last one shows how far
+      // behind the GPU is; resize the bands toward the budget.
+      const now = performance.now();
+      const dt = now - lastStep;
+      lastStep = now;
+      if (dt < 200) {
+        if (dt > tracer.budgetMs * 1.3)
+          rows = Math.max(8, Math.floor(rows * 0.7));
+        else if (dt < tracer.budgetMs)
+          rows = Math.min(main.height, Math.ceil(rows * 1.15));
+      }
+      const count = Math.min(rows, main.height - row);
+      draw(main, view, row, count, main.samples, u.uBounces.value);
+      row += count;
+      if (row >= main.height) {
+        row = 0;
+        swap(main);
+        tracer.samples = main.samples;
+      }
     },
+    // One quick low-resolution sample, for while the view is moving.
+    preview(view) {
+      draw(small, view, 0, small.height, small.samples, tracer.previewBounces);
+      swap(small);
+    },
+    // Shows the full render, or the preview until the full one has a whole
+    // sample.
     show(exposure) {
-      display.uniforms.uAccum.value = read.texture;
+      const p = main.samples === 0 && small.samples > 0 ? small : main;
+      display.uniforms.uAccum.value = p.read.texture;
       display.uniforms.uExposure.value = exposure;
+      display.uniforms.uScale.value.set(
+        p.width / screen[0],
+        p.height / screen[1],
+      );
       quad.material = display;
       renderer.setRenderTarget(null);
       renderer.render(scene, camera);
