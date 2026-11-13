@@ -5,12 +5,39 @@
   },
   "layers": {
     "elevation": {
+      "width": 7200,
+      "height": 3164,
       "unit": "m",
-      "max": 6348
+      "note": "highest point, to 10 m",
+      "max": 8160
     },
     "population": {
+      "width": 7200,
+      "height": 3164,
       "unit": "people/km\u00b2",
-      "max": 61835
+      "note": "",
+      "max": 65534
+    },
+    "lights": {
+      "width": 7200,
+      "height": 3164,
+      "unit": "brightness\u00d710",
+      "note": "0-255 times 10",
+      "max": 2550
+    },
+    "travel": {
+      "width": 7200,
+      "height": 3164,
+      "unit": "minutes",
+      "note": "to 5 minutes",
+      "max": 25285
+    },
+    "rain": {
+      "width": 3600,
+      "height": 1582,
+      "unit": "mm",
+      "note": "",
+      "max": 24839
     }
   }
 }

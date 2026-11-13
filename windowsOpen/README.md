@@ -8,7 +8,7 @@ A path-traced map of the world's land in columns, each as tall as the share of a
 - the wind averaged under 10 m/s (22 mph) for the hour, and
 - there was no dust or smoke: CAMS PM10 under 154 µg/m³ and PM2.5 under 35.4 µg/m³, the US EPA's AQI 100 lines, applied hour by hour.
 
-Pick a month to watch the seasons move. The buttons under the title (or keys 1–3) switch to two other maps on the same grid: **Elevation**, the ground exaggerated about 80 times, and **Population**, people per square mile in 2025. Double-click anywhere to glide in there; Reset view or Escape goes back. Rendering pauses while the window isn't focused, to spare the GPU; add `?noPause` to the URL to keep it going (for screenshots), and `?map=elevation` or `?map=population` to open another map.
+Pick a month to watch the seasons move. The buttons under the title (or keys 1–6) switch to five other maps on the same projection: **Elevation** (the highest ground in each column, exaggerated about 70 times), **Population** (people per square mile in 2025), **Night lights**, **Travel time** to the nearest city of 50,000 people, and **Rain** over the same year as the open-window map. Double-click anywhere to glide in; the columns sharpen once the camera settles, because the page always gives the path tracer the same number of columns (650,000 by default) and spends them on what's in view. Reset view or Escape goes back. Rendering pauses while the window isn't focused, to spare the GPU; add `?noPause` to the URL to keep it going (for screenshots), and `?map=elevation`, `population`, `lights`, `travel` or `rain` to open another map.
 
  Each closed hour is blamed on one thing, in the order cold, hot, rain, wind, muggy, air; the data keeps the main reason per cell, though the page doesn't show it yet.
 
@@ -27,23 +27,27 @@ These were run under the original test, 62°F around the clock and no wind limit
 
 - Weather: ECMWF's ERA5-Land reanalysis from the Copernicus Climate Data Store: hourly, 0.1° (about 9 km), land only. 2 m temperature, 2 m dew point, 10 m wind and precipitation, which is accumulated since 00 UTC and differenced to hourly.
 - Dust and smoke: CAMS global atmospheric composition forecasts from the Atmosphere Data Store, 0.4°, hourly from each day's 00 UTC run. Each land cell takes its nearest CAMS cell.
-- The map is resampled from latitude and longitude onto an Equal Earth grid 3600 cells wide (about 11 km), so columns have square footprints and equal areas. Antarctica is left off. The page draws 3×3 cells per column by default.
+- The map is resampled from latitude and longitude onto an Equal Earth grid 3600 cells wide (about 11 km), so columns have square footprints and equal areas. Antarctica is left off. At the home view each column averages 3×3 cells.
 - One year's weather, not a climate average.
-- Elevation: ERA5-Land's own orography (its geopotential over g), so it's the terrain the weather was computed over, smoothed to 0.1° (Everest reads about 6,000 m).
-- Population: GHS-POP R2023A from the EU Joint Research Centre, the 2025 estimate on a 30″ (about 1 km) grid, summed into each 0.1° cell and divided by its area.
+- The other maps don't depend on the weather, so all but rain are binned straight from their sources onto a grid twice as fine (7200 cells, about 5.5 km). Their coastline comes from ETOPO, with ERA5-Land deciding big lakes (water) and inland land below sea level (land).
+- Elevation: [ETOPO 2022](https://www.ncei.noaa.gov/products/etopo-global-relief-model) from NOAA, 60″, the highest point in each cell, so ranges keep their peaks.
+- Population: [GHS-POP R2023A](https://ghsl.jrc.ec.europa.eu/download.php?ds=pop) from the EU Joint Research Centre, the 2025 estimate on a 30″ (about 1 km) grid, people in each cell over its area.
+- Night lights: NASA's [Black Marble 2016](https://visibleearth.nasa.gov/images/144897/earth-at-night-black-marble-2016-grayscale-maps) grayscale picture, 3 km. It's an image, not calibrated radiance, so city centres saturate; the page has no city labels for it.
+- Travel time: layer 11 of [Nelson 2019](https://figshare.com/articles/dataset/Travel_time_to_cities_and_ports_in_the_year_2015/7638134), 30″: minutes to the nearest city of at least 50,000 people in 2015, on the friction surface of Weiss et al. 2018 (Nature).
+- Rain: ERA5-Land monthly means for Nov 2025 to Oct 2026, 0.1°, on the open-window map's own grid.
 
 ## Building
 
-Python in `build/.venv` (`cdsapi eccodes numpy pillow tifffile imagecodecs`), with a Copernicus key in `~/.cdsapirc` and the ERA5-Land and CAMS licences accepted.
+Python in `build/.venv` (`cdsapi eccodes numpy pillow tifffile imagecodecs h5py`), with a Copernicus key in `~/.cdsapirc` and the ERA5-Land and CAMS licences accepted.
 
 ```
 cd windowsOpen/build
 .venv/bin/python fetch.py --start 2025-11-01 --end 2026-10-31   # weather, about 6 hours
 .venv/bin/python air.py --start 2025-11-01 --end 2026-10-31     # dust and smoke, about 3-5 hours, can run alongside
 .venv/bin/python export.py                                      # about 30 s
-.venv/bin/python layers.py                                      # elevation and population, about 1 min
+.venv/bin/python layers.py                                      # the other maps, about 7 min
 ```
 
-`fetch.py` downloads ERA5-Land in 48 chunks of about eight days (about 5.6 GB of GRIB each), three at a time, reduces each to hour counts per cell plus a packed per-hour bit of whether the weather allowed open windows, and deletes the GRIB. `air.py` does the same for CAMS a month at a time, keeping a bit per hour per CAMS cell where the air was bad. Both skip what's already done, so an interrupted run resumes. `export.py` combines them, so changing the air limits needs only an export, not new downloads, and writes `data/`: one PNG per period (red is the percent of open hours, green the main reason the rest were closed, 255 off land) and `meta.json`. `layers.py` writes `elevation.png` and `population.png` the same way but as 16-bit values (high byte in red, low in green, 65535 off land; metres and people per km²) with `layers.json`. It downloads the elevation itself; the population GeoTIFF has to be unzipped into `build/cache/sources/` first (see its docstring).
+`fetch.py` downloads ERA5-Land in 48 chunks of about eight days (about 5.6 GB of GRIB each), three at a time, reduces each to hour counts per cell plus a packed per-hour bit of whether the weather allowed open windows, and deletes the GRIB. `air.py` does the same for CAMS a month at a time, keeping a bit per hour per CAMS cell where the air was bad. Both skip what's already done, so an interrupted run resumes. `export.py` combines them, so changing the air limits needs only an export, not new downloads, and writes `data/`: one PNG per period (red is the percent of open hours, green the main reason the rest were closed, 255 off land) and `meta.json`. `layers.py` writes one PNG per other map as 16-bit values (high byte in red, low in green, 65535 off land), with `layers.json` giving each one's grid and units. Its sources go in `build/cache/sources/` first: the files linked above (the population zip unzipped), plus the ERA5-Land monthly precipitation, which is a small Climate Data Store request. `layers.py name ...` rebuilds just those maps.
 
 The renderer is the Comfort Spikes [path tracer](../comfort/map/spikes/pathtracer.js).

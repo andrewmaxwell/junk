@@ -2,14 +2,16 @@
 // share of the year's hours you could have left the windows open there
 // (ERA5-Land, about 9 km, hourly, reduced by build/fetch.py and resampled onto
 // an Equal Earth grid by build/export.py). The other maps, from
-// build/layers.py, use the same grid for elevation and population.
+// build/layers.py, are on the same projection, most of them twice as fine.
 // The picture is path traced with the Comfort spike map's tracer and sharpens
 // as samples add up. Titles, labels and the legend are drawn on a 2D canvas
 // over it, so "save PNG" can stack the two into one image.
 //
+// The tracer gets a fixed budget of columns: the whole map at the home view,
+// and only what's in view, in finer columns, after zooming in.
+//
 // Rendering pauses while the window isn't focused, since it keeps the GPU
-// busy; ?noPause turns that off. ?map=elevation or ?map=population opens
-// another map.
+// busy; ?noPause turns that off. ?map=<name> opens another map.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
@@ -50,6 +52,12 @@ const compact = new Intl.NumberFormat('en-US', {
 
 // Each map: where its numbers come from, how they become columns, and the
 // words around it. settings are the column shape, kept per map.
+const hours = (minutes) =>
+  minutes < 60
+    ? `${Math.round(minutes)} min`
+    : minutes < 48 * 60
+      ? `${round2.format(minutes / 60)} h`
+      : `${round2.format(minutes / 1440)} days`;
 const MAPS = {
   windows: {
     button: 'Open windows',
@@ -69,7 +77,6 @@ const MAPS = {
     legend: 'HEIGHT · HOURS WITH THE WINDOWS OPEN',
     unit: '% open',
     format: (v) => `${Math.round(v)}%`,
-    max: 100,
     source: [
       'Weather: ERA5-Land reanalysis, 0.1°, hourly. Dust and smoke: CAMS PM10 and PM2.5 over AQI 100.',
       'All 24 hours of the day, in Equal Earth projection.',
@@ -89,31 +96,28 @@ const MAPS = {
         gamma === 1 && low === 0
           ? `exaggerated about ${round2.format(times)} times`
           : 'exaggerated';
-      return `Height of the ground above sea level, averaged over about 10 km and ${scale}`;
+      return `The highest ground in each column, above sea level and ${scale}`;
     },
     legend: 'HEIGHT · ELEVATION',
     unit: 'm',
     format: (m) =>
       `${(Math.round((m * 3.28084) / 10) * 10).toLocaleString('en-US')} ft`,
-    max: layers.layers.elevation.max,
     source: [
-      'Elevation: ERA5-Land orography (ECMWF), 0.1°, the terrain its weather is computed over.',
+      'Elevation: ETOPO 2022 (NOAA), 60″ grid, highest point per 5 km cell.',
       'In Equal Earth projection.',
     ],
     ramp: ['#8fb07a', '#d6cf9a', '#c09062', '#8c6b58', '#f7f4ef'],
-    ranges: {low: [0, 3000, 50], high: [500, 6500, 50]},
-    settings: {low: 0, high: 5000, gamma: 1, height: 1.2},
+    ranges: {low: [0, 3000, 50], high: [500, 8500, 50]},
+    settings: {low: 0, high: 8000, gamma: 1, height: 1.6},
   },
   population: {
     button: 'Population',
     title: 'Where people live',
     kicker: () => 'PEOPLE PER SQUARE MILE IN 2025',
-    subtitle: () =>
-      'Everyone on Earth, from a 1 km grid averaged over about 10 km',
+    subtitle: () => 'Everyone on Earth, counted on a 1 km grid',
     legend: 'HEIGHT · PEOPLE PER SQUARE MILE',
     unit: 'people/km²',
     format: (perKm) => compact.format(perKm * 2.58999), // per square mile
-    max: layers.layers.population.max,
     source: [
       'Population: GHS-POP R2023A (EU Joint Research Centre), 2025 estimate, 30″ grid.',
       'In Equal Earth projection.',
@@ -122,7 +126,64 @@ const MAPS = {
     ranges: {low: [0, 1000, 10], high: [100, 60000, 100]},
     settings: {low: 0, high: 8000, gamma: 0.7, height: 3},
   },
+  lights: {
+    button: 'Night lights',
+    title: 'Lights at night',
+    kicker: () => 'THE EARTH FROM SPACE AFTER DARK, 2016',
+    subtitle: () =>
+      'How bright each place looked on cloud-free nights through the year; the brightest city centres max out the scale',
+    legend: 'HEIGHT · BRIGHTNESS AT NIGHT',
+    unit: 'brightness',
+    format: (v) => `${Math.round(v / 25.5)}%`, // of the brightest
+    source: [
+      'Night lights: Black Marble 2016 (NASA), VIIRS day-night band, 3 km grid.',
+      'In Equal Earth projection.',
+    ],
+    ramp: ['#2d3250', '#4b4a6b', '#a07e3c', '#e8b84a', '#fff1b8'],
+    labels: false, // every city maxes out the scale
+    ranges: {low: [0, 1000, 10], high: [100, 2550, 10]},
+    settings: {low: 0, high: 2550, gamma: 1, height: 2.5},
+  },
+  travel: {
+    button: 'Travel time',
+    title: 'Far from everywhere',
+    kicker: () => 'TRAVEL TIME TO THE NEAREST CITY, 2015',
+    subtitle: () =>
+      'The fastest way by road, rail, river or on foot to a city of at least 50,000 people',
+    legend: 'HEIGHT · TIME TO THE NEAREST CITY',
+    unit: 'min',
+    format: hours,
+    source: [
+      'Travel time: Nelson 2019 on the Weiss et al. 2018 friction surface, 30″ grid.',
+      'In Equal Earth projection.',
+    ],
+    ramp: ['#e6efe9', '#9cc7b4', '#4f9a8a', '#22646b', '#123a4a'],
+    labels: false, // every city is 0 minutes from itself
+    ranges: {low: [0, 600, 5], high: [60, 10000, 30]},
+    settings: {low: 0, high: 2880, gamma: 0.7, height: 3},
+  },
+  rain: {
+    button: 'Rain',
+    title: 'Rain',
+    kicker: () =>
+      `RAIN AND SNOW, ${formatDate(meta.start)} – ${formatDate(meta.end)}`.toUpperCase(),
+    subtitle: () =>
+      "Everything that fell in the open-window map's year, snow counted as its water",
+    legend: 'HEIGHT · INCHES OF RAIN AND SNOW',
+    unit: 'mm',
+    format: (mm) => `${round2.format(mm / 25.4)} in`,
+    source: [
+      'Rain: ERA5-Land monthly means (ECMWF), 0.1°, Nov 2025 to Oct 2026.',
+      'In Equal Earth projection.',
+    ],
+    ramp: ['#e8eef4', '#a9c6e0', '#5b93c7', '#2a5f9e', '#0f2f63'],
+    ranges: {low: [0, 1000, 10], high: [500, 10000, 50]},
+    settings: {low: 0, high: 4000, gamma: 0.9, height: 3},
+  },
 };
+for (const [key, map] of Object.entries(MAPS)) {
+  map.max = key === 'windows' ? 100 : layers.layers[key].max;
+}
 for (const map of Object.values(MAPS)) {
   map.rampColors = map.ramp.map((hex) => new THREE.Color(hex));
 }
@@ -132,7 +193,7 @@ const params = {
   map: startMap,
   period: 'all',
   labels: true,
-  block: 3, // grid cells per column, each way
+  columns: 650, // thousands of columns the tracer gets
   fit: false, // stretch floor and top to this period's 5th and 99.5th percentiles
   ...MAPS[startMap].settings, // low, high, gamma (>1 keeps the merely-okay low), height
   sunElevation: 13,
@@ -201,6 +262,7 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.maxPolarAngle = Math.PI * 0.47;
 controls.addEventListener('change', () => tracer.reset());
 controls.addEventListener('start', () => setMoved(true));
+controls.addEventListener('end', () => refine());
 
 // A low, three-quarter view from the south, framed to the window.
 function home() {
@@ -240,7 +302,10 @@ function fly() {
   camera.position.lerpVectors(flight.from.position, flight.to.position, e);
   controls.update();
   tracer.reset();
-  if (k === 1) flight = null;
+  if (k === 1) {
+    flight = null;
+    refine();
+  }
 }
 function resetView(seconds = 0) {
   moveTo(home(), seconds);
@@ -282,65 +347,128 @@ function ramp(t, out) {
 
 // The open-window maps keep their value in R (255 off land); the others are
 // 16-bit, high byte in R and low in G (65535 off land). Either way a map
-// decodes to one number per cell, NO_VALUE off land.
+// decodes to one number per cell, NO_VALUE off land, on its own grid.
 const decoded = new Map();
-async function loadValues(map, period) {
+async function loadMap(map, period) {
   const file = map === 'windows' ? period : map;
   if (!decoded.has(file)) {
+    const {width, height} = map === 'windows' ? meta : layers.layers[map];
     const blob = await fetch(`data/${file}.png`).then((r) => r.blob());
     const bitmap = await createImageBitmap(blob, {
       premultiplyAlpha: 'none',
       colorSpaceConversion: 'none',
     });
-    const c = new OffscreenCanvas(nx, ny).getContext('2d', {
+    const c = new OffscreenCanvas(width, height).getContext('2d', {
       willReadFrequently: true,
     });
     c.drawImage(bitmap, 0, 0);
-    const rgba = c.getImageData(0, 0, nx, ny).data;
-    const values = new Uint16Array(nx * ny);
+    const rgba = c.getImageData(0, 0, width, height).data;
+    const values = new Uint16Array(width * height);
     const noData = meta.encoding.noData;
     for (let i = 0; i < values.length; i++) {
       const [r, g] = [rgba[i * 4], rgba[i * 4 + 1]];
       if (map === 'windows') values[i] = r === noData ? NO_VALUE : r;
       else values[i] = (r << 8) | g;
     }
-    decoded.set(file, values);
+    decoded.set(file, {values, width, height, cell: WORLD / width});
   }
   return decoded.get(file);
 }
 
-// Each block's average, or NaN where it's mostly sea.
-function blocks(values, size) {
-  const [w, h] = [Math.floor(nx / size), Math.floor(ny / size)];
+// Each block's average over a window of the map, or NaN where it's mostly sea.
+function blocks({values, width}, gx0, gy0, w, h, size) {
   const out = new Float32Array(w * h).fill(NaN);
   for (let by = 0; by < h; by++) {
     for (let bx = 0; bx < w; bx++) {
       let sum = 0;
       let n = 0;
-      for (let y = by * size; y < (by + 1) * size; y++) {
-        for (let x = bx * size; x < (bx + 1) * size; x++) {
-          const v = values[y * nx + x];
+      const [x0, y0] = [gx0 + bx * size, gy0 + by * size];
+      for (let y = y0; y < y0 + size; y++) {
+        for (let x = x0; x < x0 + size; x++) {
+          const v = values[y * width + x];
           if (v !== NO_VALUE) [sum, n] = [sum + v, n + 1];
         }
       }
       if (n * 2 >= size * size) out[by * w + bx] = sum / n;
     }
   }
-  return {w, h, values: out};
+  return out;
 }
 
 const shapeOf = (v) =>
   Math.min(Math.max((v - params.low) / (params.high - params.low), 0), 1);
 const heightOf = (t) => 0.03 + params.height * t ** params.gamma;
 
+// The part of the map the camera sees, in scene units [x0, z0, x1, z1], with
+// a margin for columns leaning in from outside it; the whole map whenever the
+// view reaches the horizon.
+const raycaster = new THREE.Raycaster();
+function viewRegion() {
+  const half = [WORLD / 2, (ny * CELL) / 2];
+  const whole = [-half[0], -half[1], half[0], half[1]];
+  const xs = [];
+  const zs = [];
+  for (const [sx, sy] of [
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+    [1, 1],
+    [0, 1],
+  ]) {
+    raycaster.setFromCamera(new THREE.Vector2(sx, sy), camera);
+    const {origin: o, direction: d} = raycaster.ray;
+    if (d.y > -0.05) return whole;
+    const t = o.y / -d.y;
+    xs.push(o.x + d.x * t);
+    zs.push(o.z + d.z * t);
+  }
+  const span = Math.max(...xs) - Math.min(...xs);
+  const margin = span * 0.15 + heightOf(1) * 2;
+  return [
+    Math.max(Math.min(...xs) - margin, whole[0]),
+    Math.max(Math.min(...zs) - margin, whole[1]),
+    Math.min(Math.max(...xs) + margin, whole[2]),
+    Math.min(Math.max(...zs) + margin, whole[3]),
+  ];
+}
+
 let labels = [];
-let grid = null; // the columns as built, for finding what a click hits
+let grid = null; // the columns as built, for clicks and for knowing what's covered
 let building = 0;
-async function build() {
+// Builds the columns for the view. With force false (after a camera move)
+// it keeps what's there if that already covers the view at the right detail.
+async function build(force = true) {
   const ticket = ++building;
-  const cells = await loadValues(params.map, params.period);
+  const map = await loadMap(params.map, params.period);
   if (ticket !== building) return; // a newer build started meanwhile
-  const {w, h, values} = blocks(cells, params.block);
+  const {width: W, height: H, cell} = map;
+  const [x0, z0, x1, z1] = viewRegion();
+  const inView = ((x1 - x0) / cell) * ((z1 - z0) / cell);
+  const block = Math.max(
+    1,
+    Math.ceil(Math.sqrt(inView / (params.columns * 1000))),
+  );
+  const size = block * cell;
+  const left = -WORLD / 2;
+  const top = (-H * cell) / 2;
+  const gx0 = Math.max(0, Math.floor((x0 - left) / size) * block);
+  const gy0 = Math.max(0, Math.floor((z0 - top) / size) * block);
+  const w = Math.floor(
+    (Math.min(W, Math.ceil((x1 - left) / cell)) - gx0) / block,
+  );
+  const h = Math.floor(
+    (Math.min(H, Math.ceil((z1 - top) / cell)) - gy0) / block,
+  );
+  if (
+    !force &&
+    grid?.block === block &&
+    grid.gx0 <= gx0 &&
+    grid.gy0 <= gy0 &&
+    grid.gx0 + grid.w * block >= gx0 + w * block &&
+    grid.gy0 + grid.h * block >= gy0 + h * block
+  )
+    return;
+  const values = blocks(map, gx0, gy0, w, h, block);
   if (params.fit) {
     const land = values.filter((v) => !isNaN(v)).sort((a, b) => a - b);
     params.low = Math.round(land[Math.floor(land.length * 0.05)]);
@@ -348,9 +476,8 @@ async function build() {
     gui.controllersRecursive().forEach((c) => c.updateDisplay());
   }
 
-  // The grid, north up, so row 0 is the far edge of the map.
-  const size = params.block * CELL;
-  const origin = new THREE.Vector3((-w * size) / 2, 0, (-h * size) / 2);
+  // The window, north up, so row 0 is its far edge.
+  const origin = new THREE.Vector3(left + gx0 * cell, 0, top + gy0 * cell);
   const data = new Float32Array(w * h * 4);
   const tint = new THREE.Color();
   for (let i = 0; i < w * h; i++) {
@@ -360,41 +487,47 @@ async function build() {
     data.set([tint.r, tint.g, tint.b, heightOf(t) / size], i * 4);
   }
   tracer.setColumns(data, w, h, size, origin);
-  grid = {w, h, size, origin, data};
+  grid = {w, h, size, origin, data, block, gx0, gy0};
 
   // Each label points at the middle of its place's column top and quotes the
   // cell's own value, not the block average. A coastal city whose own cell is
-  // sea borrows the nearest land cell.
-  labels = Object.entries(PLACES).map(([name, [lat, lon]]) => {
-    const [cx, cy] = toGrid(lat, lon).map(Math.floor);
+  // sea borrows the nearest land cell. Places outside the window get none.
+  const scale = W / nx; // this map's cells per open-window cell
+  labels = Object.entries(PLACES).flatMap(([name, [lat, lon]]) => {
+    const [cx, cy] = toGrid(lat, lon).map((v) => Math.floor(v * scale));
     let [gx, gy] = [cx, cy];
     let best = Infinity;
-    for (let dy = -3; dy <= 3; dy++) {
-      for (let dx = -3; dx <= 3; dx++) {
-        const v = cells[(cy + dy) * nx + cx + dx];
+    const reach = 3 * scale;
+    for (let dy = -reach; dy <= reach; dy++) {
+      for (let dx = -reach; dx <= reach; dx++) {
+        const v = map.values[(cy + dy) * W + cx + dx];
         if (v !== NO_VALUE && dx * dx + dy * dy < best) {
           best = dx * dx + dy * dy;
           [gx, gy] = [cx + dx, cy + dy];
         }
       }
     }
-    const [bx, by] = [
-      Math.floor(gx / params.block),
-      Math.floor(gy / params.block),
-    ];
-    const top = data[(by * w + bx) * 4 + 3] * size;
+    const bx = Math.floor((gx - gx0) / block);
+    const by = Math.floor((gy - gy0) / block);
+    if (bx < 0 || by < 0 || bx >= w || by >= h) return [];
     const tip = new THREE.Vector3(
       origin.x + (bx + 0.5) * size,
-      top,
+      data[(by * w + bx) * 4 + 3] * size,
       origin.z + (by + 0.5) * size,
     );
-    return {name, value: cells[gy * nx + gx], tip};
+    return [{name, value: map.values[gy * W + gx], tip}];
   });
+}
+
+// After the camera settles, rebuild if the view needs other columns.
+let refineTimer = 0;
+function refine() {
+  clearTimeout(refineTimer);
+  refineTimer = setTimeout(() => build(false), 150);
 }
 
 // Where a ray from the camera through a point on screen first meets a
 // column (or the ground), marching down from the tallest column's height.
-const raycaster = new THREE.Raycaster();
 function pick(clientX, clientY) {
   const ndc = new THREE.Vector2(
     (clientX / innerWidth) * 2 - 1,
@@ -444,6 +577,19 @@ function wrap(c, text, maxWidth) {
   return [...lines, line];
 }
 
+// Text with a soft outline in the ground's color, so it stays readable over
+// columns when zoomed in.
+function halo(c, u, text, x, y) {
+  c.save();
+  c.lineWidth = 5 * u;
+  c.strokeStyle = HALO;
+  c.lineJoin = 'round';
+  c.globalAlpha *= 0.85;
+  c.strokeText(text, x, y);
+  c.restore();
+  c.fillText(text, x, y);
+}
+
 const projected = new THREE.Vector3();
 function drawOverlay(c, w, h) {
   const map = current();
@@ -455,16 +601,16 @@ function drawOverlay(c, w, h) {
   // Title block, top left.
   const pad = 44 * u;
   c.font = `200 ${50 * u}px ${FONT}`;
-  c.fillText(map.title, pad, pad + 40 * u);
+  halo(c, u, map.title, pad, pad + 40 * u);
   c.font = `400 ${10.5 * u}px ${FONT}`;
   c.letterSpacing = `${2.6 * u}px`;
-  c.fillText(map.kicker(params.period), pad + 3 * u, pad + 64 * u);
+  halo(c, u, map.kicker(params.period), pad + 3 * u, pad + 64 * u);
   c.letterSpacing = '0px';
   c.font = `300 ${12.5 * u}px ${FONT}`;
   c.globalAlpha = 0.75;
   const lines = wrap(c, map.subtitle(params.period), 560 * u);
   lines.forEach((line, i) =>
-    c.fillText(line, pad + 3 * u, pad + (83 + 17 * i) * u),
+    halo(c, u, line, pad + 3 * u, pad + (83 + 17 * i) * u),
   );
   c.globalAlpha = 1;
   if (c === ctx) {
@@ -488,13 +634,17 @@ function drawOverlay(c, w, h) {
   c.fillRect(lx, ly, lw, lh);
   c.fillStyle = INK;
   c.font = `300 ${11 * u}px ${FONT}`;
-  c.fillText(
+  halo(
+    c,
+    u,
     `${map.format(params.low)}${params.low > 0 ? ' or less' : ''}`,
     lx,
     ly + lh + 15 * u,
   );
   c.textAlign = 'right';
-  c.fillText(
+  halo(
+    c,
+    u,
     `${map.format(params.high)}${params.high < map.max ? ' or more' : ''}`,
     lx + lw,
     ly + lh + 15 * u,
@@ -502,19 +652,19 @@ function drawOverlay(c, w, h) {
   c.textAlign = 'left';
   c.font = `400 ${10 * u}px ${FONT}`;
   c.letterSpacing = `${2 * u}px`;
-  c.fillText(map.legend, lx, ly - 9 * u);
+  halo(c, u, map.legend, lx, ly - 9 * u);
   c.letterSpacing = '0px';
 
   // Source, bottom right.
   c.textAlign = 'right';
   c.globalAlpha = 0.6;
   c.font = `300 ${10.5 * u}px ${FONT}`;
-  c.fillText(map.source[0], w - pad, h - pad - 14 * u);
-  c.fillText(map.source[1], w - pad, h - pad);
+  halo(c, u, map.source[0], w - pad, h - pad - 14 * u);
+  halo(c, u, map.source[1], w - pad, h - pad);
   c.globalAlpha = 1;
   c.textAlign = 'left';
 
-  if (!params.labels) return;
+  if (!params.labels || map.labels === false) return;
   // City labels: a dot on the column's top and a fine leader to the name.
   for (const {name, value, tip} of labels) {
     projected.copy(tip).project(camera);
@@ -614,7 +764,10 @@ const periodController = gui
 gui.add(params, 'labels');
 gui.add(tracer, 'samples').listen().disable();
 const shape = gui.addFolder('Columns').close();
-shape.add(params, 'block', 1, 12, 1).name('cells per column').onChange(rebuild);
+shape
+  .add(params, 'columns', 100, 3000, 50)
+  .name('columns (thousands)')
+  .onFinishChange(rebuild);
 shape.add(params, 'fit').name('fit to data').onChange(rebuild);
 const lowController = shape.add(params, 'low', 0, 1, 1).onFinishChange(manual);
 const highController = shape
