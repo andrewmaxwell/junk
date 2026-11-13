@@ -49,6 +49,10 @@ uniform vec3 uBase; // column sides fade up from this at the ground
 // bright colors glow far more than dim ones), and is uGlowAlbedo itself.
 uniform float uGlow;
 uniform vec3 uGlowAlbedo;
+// Each cell's glowing power (its glow's brightness times its surface area),
+// summed up a mip chain, for picking a column to aim at; see pickGlow.
+uniform sampler2D uPower;
+uniform int uPowerLevels;
 uniform int uFrame; // this sample's number since the last restart
 uniform uint uSeed; // changes at every restart
 uniform int uBounces;
@@ -206,6 +210,129 @@ vec3 sampleCosine(vec3 n, vec2 u) {
   return normalize(t * r * cos(phi) + b * r * sin(phi) + n * sqrt(max(0.0, 1.0 - r * r)));
 }
 
+// --- glowing columns as lights ---
+// Light from glowing columns is found two ways, weighed against each other
+// by multiple importance sampling (the power heuristic): aiming at one
+// (pickGlow) at every surface, and bounce rays that happen to hit one. A
+// column is picked by walking down the power pyramid, at each level choosing
+// among four children by power over distance squared, so bright columns
+// nearby are picked most and every glowing one can be.
+
+// How much a node of the pyramid (at level, covering 2^level cells a side)
+// is worth aiming at from x.
+float glowWeight(vec3 x, ivec2 node, int level) {
+  ivec2 size = textureSize(uPower, level);
+  if (node.x >= size.x || node.y >= size.y) return 0.0;
+  float power = texelFetch(uPower, node, level).r;
+  if (power <= 0.0) return 0.0;
+  float s = float(1 << level);
+  vec2 d = x.xz - (vec2(node) + 0.5) * s;
+  return power / max(dot(d, d) + x.y * x.y, 0.5 * s * s);
+}
+
+// A glowing cell picked for x, and the chance of picking it (0 if none).
+ivec2 pickGlow(vec3 x, out float prob) {
+  ivec2 node = ivec2(0);
+  prob = 1.0;
+  for (int level = uPowerLevels - 1; level > 0; level--) {
+    float w[4];
+    float total = 0.0;
+    for (int k = 0; k < 4; k++) {
+      w[k] = glowWeight(x, node * 2 + ivec2(k & 1, k >> 1), level - 1);
+      total += w[k];
+    }
+    if (total <= 0.0) {
+      prob = 0.0;
+      return node;
+    }
+    float r = rand() * total;
+    int pick = 0;
+    for (int k = 0; k < 4; k++) {
+      pick = k;
+      if (r < w[k]) break;
+      r -= w[k];
+    }
+    if (w[pick] <= 0.0) {
+      prob = 0.0;
+      return node;
+    }
+    prob *= w[pick] / total;
+    node = node * 2 + ivec2(pick & 1, pick >> 1);
+  }
+  return node;
+}
+
+// The chance pickGlow(x) picks cell c.
+float glowProb(vec3 x, ivec2 c) {
+  float prob = 1.0;
+  for (int level = uPowerLevels - 1; level > 0; level--) {
+    ivec2 node = c >> level;
+    float w[4];
+    float total = 0.0;
+    for (int k = 0; k < 4; k++) {
+      w[k] = glowWeight(x, node * 2 + ivec2(k & 1, k >> 1), level - 1);
+      total += w[k];
+    }
+    ivec2 child = (c >> (level - 1)) - node * 2;
+    float wc = w[child.x + 2 * child.y];
+    if (total <= 0.0 || wc <= 0.0) return 0.0;
+    prob *= wc / total;
+  }
+  return prob;
+}
+
+// The chance, per unit solid angle, of aiming from x at a point on column c
+// with normal nl, a distance d away along l. Points are picked evenly over
+// the column's surface (top and four sides).
+float glowPdf(vec3 x, ivec2 c, vec3 nl, vec3 l, float d) {
+  float cosL = -dot(nl, l);
+  if (cosL <= 0.0) return 0.0;
+  return glowProb(x, c) / (1.0 + 4.0 * column(c).a) * d * d / cosL;
+}
+
+// Light reaching x (normal n) from a glowing column picked for it, as it
+// leaves a surface of the given albedo, weighed against bounce rays.
+vec3 glowLight(vec3 x, vec3 n, vec3 albedo) {
+  float prob;
+  ivec2 c = pickGlow(x, prob);
+  if (prob <= 0.0) return vec3(0.0);
+  float h = column(c).a;
+  float area = 1.0 + 4.0 * h;
+  float a = rand() * area;
+  vec3 cell = vec3(float(c.x), 0.0, float(c.y));
+  vec3 p;
+  vec3 nl;
+  if (a < 1.0) {
+    p = cell + vec3(rand(), h, rand());
+    nl = vec3(0.0, 1.0, 0.0);
+  } else {
+    int side = min(int((a - 1.0) / h), 3);
+    float y = rand() * h;
+    float f = rand();
+    if (side == 0) { p = cell + vec3(1.0, y, f); nl = vec3(1.0, 0.0, 0.0); }
+    else if (side == 1) { p = cell + vec3(0.0, y, f); nl = vec3(-1.0, 0.0, 0.0); }
+    else if (side == 2) { p = cell + vec3(f, y, 1.0); nl = vec3(0.0, 0.0, 1.0); }
+    else { p = cell + vec3(f, y, 0.0); nl = vec3(0.0, 0.0, -1.0); }
+  }
+  vec3 toP = p - x;
+  float d = length(toP);
+  vec3 l = toP / d;
+  float cosS = dot(n, l);
+  float cosL = -dot(nl, l);
+  if (cosS <= 0.0 || cosL <= 0.0) return vec3(0.0);
+  if (abs(l.x) < 1e-7) l.x = 1e-7;
+  if (abs(l.z) < 1e-7) l.z = 1e-7;
+  vec3 sn;
+  ivec2 sc;
+  float t = trace(x, l, sn, sc);
+  if (sc != c || abs(t - d) > 1e-3 * max(1.0, d)) return vec3(0.0);
+  float pdfLight = prob / area * d * d / cosL;
+  float pdfBounce = cosS / PI;
+  float w = pdfLight * pdfLight / (pdfLight * pdfLight + pdfBounce * pdfBounce);
+  vec3 glow = albedoAt(c, p, nl);
+  return albedo / PI * glow * glow * uGlow * cosS / pdfLight * w;
+}
+
 vec3 rayThrough(vec2 frag) {
   vec2 ndc = frag / uRes * 2.0 - 1.0;
   vec4 view = uProjInv * vec4(ndc, 1.0, 1.0);
@@ -248,6 +375,7 @@ void main() {
 
   vec3 radiance = vec3(0.0);
   vec3 throughput = vec3(1.0);
+  vec3 lastN = vec3(0.0); // the last surface's normal, for weighing glow
   for (int bounce = 0; bounce <= uBounces; bounce++) {
     vec3 n;
     ivec2 c;
@@ -259,10 +387,20 @@ void main() {
     vec3 p = o + d * t;
     vec3 albedo = albedoAt(c, p, n);
     if (uGlow > 0.0 && c.x >= 0) {
-      radiance += throughput * albedo * albedo * uGlow;
+      // Seen directly it counts in full; reached by a bounce, weighed
+      // against having aimed at it from the last surface.
+      float w = 1.0;
+      if (bounce > 0) {
+        float pdfBounce = max(dot(lastN, d), 0.0) / PI;
+        float pdfLight = glowPdf(o, c, n, d, t);
+        w = pdfBounce * pdfBounce / (pdfBounce * pdfBounce + pdfLight * pdfLight);
+      }
+      radiance += throughput * albedo * albedo * uGlow * w;
       albedo = uGlowAlbedo;
     }
     o = p + n * 1e-3;
+    lastN = n;
+    if (uGlow > 0.0) radiance += throughput * glowLight(o, n, albedo);
 
     // Direct sun, from a point on its disk.
     vec2 u = bounce == 0 ? sobol2(index, pixel * 3u + 1u) : vec2(rand(), rand());
@@ -576,6 +714,8 @@ export function createPathTracer(renderer) {
       uGround: {value: linear('#ffffff')},
       uGlow: {value: 0},
       uGlowAlbedo: {value: new THREE.Vector3(0.05, 0.05, 0.05)},
+      uPower: {value: null},
+      uPowerLevels: {value: 1},
       uBase: {value: linear('#ffffff')},
       uFrame: {value: 0},
       uSeed: {value: 0},
@@ -719,6 +859,57 @@ export function createPathTracer(renderer) {
   };
 
   let columns;
+  let power;
+  // The glow's power pyramid (see pickGlow): each cell's glow brightness
+  // (its color squared) times roughly its glowing area, padded to powers of
+  // two and summed 2x2 up to one cell.
+  function setPower(data, width, height) {
+    const pow2 = (v) => 2 ** Math.ceil(Math.log2(Math.max(v, 1)));
+    let [w, h] = [pow2(width), pow2(height)];
+    let level = new Float32Array(w * h);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        const top = data[i + 3];
+        if (top <= 0) continue;
+        const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
+        const glow = 0.2126 * r * r + 0.7152 * g * g + 0.0722 * b * b;
+        level[y * w + x] = glow * (1 + 0.8 * top); // sides fade toward the ground
+      }
+    }
+    const mipmaps = [{data: level, width: w, height: h}];
+    while (w > 1 || h > 1) {
+      const [pw, ph, prev] = [w, h, level];
+      [w, h] = [Math.max(1, w >> 1), Math.max(1, h >> 1)];
+      level = new Float32Array(w * h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let sum = 0;
+          for (let k = 0; k < 4; k++) {
+            const [cx, cy] = [x * 2 + (k & 1), y * 2 + (k >> 1)];
+            if (cx < pw && cy < ph) sum += prev[cy * pw + cx];
+          }
+          level[y * w + x] = sum;
+        }
+      }
+      mipmaps.push({data: level, width: w, height: h});
+    }
+    power?.dispose();
+    power = new THREE.DataTexture(
+      mipmaps[0].data,
+      mipmaps[0].width,
+      mipmaps[0].height,
+      THREE.RedFormat,
+      THREE.FloatType,
+    );
+    power.mipmaps = mipmaps;
+    power.generateMipmaps = false;
+    power.minFilter = THREE.NearestMipmapNearestFilter;
+    power.magFilter = THREE.NearestFilter;
+    power.needsUpdate = true;
+    u.uPower.value = power;
+    u.uPowerLevels.value = mipmaps.length;
+  }
   let screen = [1, 1];
   let row = 0; // first row of the next band of the sample being drawn
   let rows = 64; // rows per band, adjusted to keep each band near budgetMs
@@ -819,6 +1010,7 @@ export function createPathTracer(renderer) {
       let maxH = 0;
       for (let i = 3; i < data.length; i += 4) maxH = Math.max(maxH, data[i]);
       u.uMaxH.value = maxH + 1e-3;
+      setPower(data, width, height);
       tracer.reset();
     },
     // Advances the full-resolution render: one whole sample per pixel, or one

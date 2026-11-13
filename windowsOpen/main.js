@@ -373,6 +373,7 @@ function resetView(seconds = 0) {
 const DAY = {
   sun: '#fff0da',
   sunScale: 1,
+  skyScale: 1,
   zenith: '#6d9be0',
   horizon: '#dce7f3',
   ground: '#f3ebdf',
@@ -384,14 +385,17 @@ const DAY = {
 };
 const NIGHT = {
   sun: '#b9c9ff',
-  sunScale: 0.1,
+  // The ground and land are ordinary pale surfaces: it's dark because little
+  // light reaches them, so the cities' glow lights them up as it would.
+  sunScale: 0.02,
+  skyScale: 0.15,
   elevation: 40, // a high moon, so the shadows don't streak the land
   zenith: '#0a1230',
   horizon: '#1d2a52',
-  ground: '#1c2238',
-  base: '#2a2f48',
+  ground: '#8a91ad',
+  base: '#000000', // sides glow from the top down
   glow: 10,
-  glowAlbedo: '#454c6e',
+  glowAlbedo: '#a4aac4',
   exposure: 1.2,
   ink: '#e9e4d8',
   halo: '#020313',
@@ -413,8 +417,9 @@ function setLighting() {
   );
   u.uSunCos.value = Math.cos(THREE.MathUtils.degToRad(params.sunRadius));
   const sun = color(L.sun).multiplyScalar(params.sunIntensity * L.sunScale);
-  const zenith = color(L.zenith).multiplyScalar(params.skyIntensity);
-  const horizon = color(L.horizon).multiplyScalar(params.skyIntensity);
+  const sky = params.skyIntensity * L.skyScale;
+  const zenith = color(L.zenith).multiplyScalar(sky);
+  const horizon = color(L.horizon).multiplyScalar(sky);
   u.uSun.value.set(sun.r, sun.g, sun.b);
   u.uSkyZenith.value.set(zenith.r, zenith.g, zenith.b);
   u.uSkyHorizon.value.set(horizon.r, horizon.g, horizon.b);
