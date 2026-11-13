@@ -198,6 +198,7 @@ const displayShader = /* glsl */ `
 precision highp float;
 uniform sampler2D uAccum;
 uniform float uExposure;
+uniform vec2 uScale; // accumulation pixels per screen pixel
 out vec4 fragColor;
 
 // Narkowicz's fit of the ACES filmic curve.
@@ -208,8 +209,25 @@ vec3 toSrgb(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
+// The accumulated sample at a screen pixel, bilinear when the accumulation
+// is smaller than the screen (a fast preview).
+vec4 accum(vec2 frag) {
+  if (uScale == vec2(1.0)) return texelFetch(uAccum, ivec2(frag), 0);
+  vec2 p = frag * uScale - 0.5;
+  ivec2 size = textureSize(uAccum, 0);
+  ivec2 i = ivec2(floor(p));
+  vec2 f = p - floor(p);
+  vec4 a = texelFetch(uAccum, clamp(i, ivec2(0), size - 1), 0);
+  vec4 b = texelFetch(uAccum, clamp(i + ivec2(1, 0), ivec2(0), size - 1), 0);
+  vec4 c = texelFetch(uAccum, clamp(i + ivec2(0, 1), ivec2(0), size - 1), 0);
+  vec4 d = texelFetch(uAccum, clamp(i + ivec2(1, 1), ivec2(0), size - 1), 0);
+  vec4 ab = mix(a / max(a.a, 1.0), b / max(b.a, 1.0), f.x);
+  vec4 cd = mix(c / max(c.a, 1.0), d / max(d.a, 1.0), f.x);
+  return vec4(mix(ab, cd, f.y).rgb, 1.0);
+}
+
 void main() {
-  vec4 a = texelFetch(uAccum, ivec2(gl_FragCoord.xy), 0);
+  vec4 a = accum(gl_FragCoord.xy);
   vec3 c = toSrgb(aces(a.rgb / max(a.a, 1.0) * uExposure));
   // A touch of noise so the smooth ground doesn't band.
   float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
@@ -265,11 +283,17 @@ export function createPathTracer(renderer) {
     glslVersion: THREE.GLSL3,
     vertexShader,
     fragmentShader: displayShader,
-    uniforms: {uAccum: {value: null}, uExposure: {value: 1}},
+    uniforms: {
+      uAccum: {value: null},
+      uExposure: {value: 1},
+      uScale: {value: new THREE.Vector2(1, 1)},
+    },
   });
   const u = trace.uniforms;
 
   let columns;
+  let full = [1, 1];
+  let scale = 1;
   const tracer = {
     samples: 0,
     uniforms: u,
@@ -277,9 +301,18 @@ export function createPathTracer(renderer) {
       tracer.samples = 0;
     },
     resize(width, height) {
-      read.setSize(width, height);
-      write.setSize(width, height);
-      u.uRes.value.set(width, height);
+      full = [width, height];
+      tracer.setScale(scale);
+    },
+    // Traces at a fraction of the screen's resolution (and shows it scaled
+    // up), for a fast preview while the view is moving. 1 is full resolution.
+    setScale(s) {
+      scale = s;
+      const [w, h] = full.map((v) => Math.max(1, Math.round(v * s)));
+      read.setSize(w, h);
+      write.setSize(w, h);
+      u.uRes.value.set(w, h);
+      display.uniforms.uScale.value.set(w / full[0], h / full[1]);
       tracer.reset();
     },
     // `data` holds RGBA floats per cell: linear albedo and height in cells.

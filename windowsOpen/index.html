@@ -15,13 +15,19 @@
   html, body { margin: 0; height: 100%; background: #edebe9; overflow: hidden; }
   canvas { display: block; }
   .overlay { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-  .maps { position: fixed; display: flex; flex-wrap: wrap; max-width: calc(100vw - 32px); align-items: center; gap: 0.5em; font: 300 12px Jost, sans-serif; color: #2b2723; }
-  .maps button { font: inherit; color: inherit; background: rgba(237, 235, 233, 0.7); border: 1px solid rgba(43, 39, 35, 0.35); border-radius: 999px; padding: 0.3em 1em; cursor: pointer; }
-  .maps button:hover { border-color: #2b2723; }
-  .maps button.active { background: #2b2723; border-color: #2b2723; color: #edebe9; }
-  .maps button.reset { margin-left: 1em; border-style: dashed; }
-  .maps .hint { margin-left: 1.2em; opacity: 0.55; }
-  .maps [hidden] { display: none; }
+  .maps, .help { position: fixed; display: flex; flex-wrap: wrap; align-items: center; font: 300 13px Jost, sans-serif; color: #2b2723; text-shadow: 0 0 3px #edebe9, 0 0 6px #edebe9; }
+  .maps { top: 14px; right: 18px; max-width: calc(100vw - 36px); justify-content: flex-end; gap: 2px 4px; }
+  .maps button, .help button { font: inherit; color: inherit; text-shadow: inherit; background: none; border: none; cursor: pointer; }
+  .maps button { padding: 6px 8px; opacity: 0.55; border-bottom: 1px solid transparent; }
+  .maps button:hover { opacity: 0.9; }
+  .maps button.active { opacity: 1; border-bottom-color: #2b2723; }
+  .help { left: 50%; bottom: 14px; transform: translateX(-50%); font-size: 12px; white-space: nowrap; }
+  .help span { opacity: 0.5; }
+  .help button { padding: 4px 14px; border: 1px solid rgba(43, 39, 35, 0.4); border-radius: 999px; background: rgba(237, 235, 233, 0.75); }
+  .help button:hover { border-color: #2b2723; }
+  .help [hidden] { display: none; }
+  @media (max-width: 700px) { .help span { display: none; } }
+  .lil-gui.autoPlace { top: auto; bottom: 0; }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

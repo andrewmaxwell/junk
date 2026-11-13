@@ -260,19 +260,77 @@ const controls = new OrbitControls(camera, renderer.domElement);
 // No damping: its glide after a drag keeps nudging the camera, and every
 // nudge restarts the render.
 controls.maxPolarAngle = Math.PI * 0.47;
-controls.addEventListener('change', () => tracer.reset());
+controls.zoomToCursor = true;
+controls.addEventListener('change', () => moving());
 controls.addEventListener('start', () => setMoved(true));
 controls.addEventListener('end', () => refine());
+
+// While the camera moves, trace a quick preview (a fraction of the pixels,
+// one bounce) so dragging and zooming keep up; full quality resumes once it
+// has been still for a moment.
+const PREVIEW_SCALE = 0.3;
+let lastMove = -Infinity;
+let previewing = false;
+function moving() {
+  lastMove = performance.now();
+  tracer.reset();
+}
+function setPreview(on) {
+  if (on === previewing) return;
+  previewing = on;
+  tracer.uniforms.uBounces.value = on ? 1 : params.bounces;
+  tracer.setScale(on ? PREVIEW_SCALE : 1);
+}
+
+// WASD or the arrow keys slide the view across the map, faster when it's
+// farther away.
+const held = new Set();
+const PAN_KEYS = {
+  w: [0, 1],
+  arrowup: [0, 1],
+  s: [0, -1],
+  arrowdown: [0, -1],
+  a: [-1, 0],
+  arrowleft: [-1, 0],
+  d: [1, 0],
+  arrowright: [1, 0],
+};
+let lastFrame = performance.now();
+function pan(dt) {
+  if (!held.size) return;
+  let [right, ahead] = [0, 0];
+  for (const key of held) {
+    right += PAN_KEYS[key][0];
+    ahead += PAN_KEYS[key][1];
+  }
+  const forward = controls.target.clone().sub(camera.position).setY(0);
+  if (forward.lengthSq() < 1e-9) forward.set(0, 0, -1);
+  forward.normalize();
+  const side = new THREE.Vector3(-forward.z, 0, forward.x);
+  const speed = camera.position.distanceTo(controls.target) * 0.2 * dt;
+  const step = forward
+    .multiplyScalar(ahead * speed)
+    .addScaledVector(side, right * speed);
+  // Keep the point the camera looks at over the map.
+  const to = controls.target.clone().add(step);
+  to.x = THREE.MathUtils.clamp(to.x, -WORLD / 2, WORLD / 2);
+  to.z = THREE.MathUtils.clamp(to.z, (-ny * CELL) / 2, (ny * CELL) / 2);
+  step.subVectors(to, controls.target);
+  controls.target.add(step);
+  camera.position.add(step);
+  controls.update();
+  moving();
+}
 
 // A low, three-quarter view from the south, framed to the window.
 function home() {
   const aspect = innerWidth / innerHeight;
   const half = THREE.MathUtils.degToRad(camera.fov / 2);
-  const fitWidth = (WORLD * 0.53) / (Math.tan(half) * aspect);
-  const fitHeight = (ny * CELL * 0.62) / Math.tan(half);
+  const fitWidth = (WORLD * 0.51) / (Math.tan(half) * aspect);
+  const fitHeight = (ny * CELL * 0.57) / Math.tan(half);
   const distance = Math.max(fitWidth, fitHeight);
   const tilt = THREE.MathUtils.degToRad(42); // from straight down
-  const target = new THREE.Vector3(0, 0, -4);
+  const target = new THREE.Vector3(0, 0, -2.5);
   const position = new THREE.Vector3(
     target.x,
     Math.cos(tilt) * distance,
@@ -301,7 +359,7 @@ function fly() {
   controls.target.lerpVectors(flight.from.target, flight.to.target, e);
   camera.position.lerpVectors(flight.from.position, flight.to.position, e);
   controls.update();
-  tracer.reset();
+  moving();
   if (k === 1) {
     flight = null;
     refine();
@@ -331,7 +389,7 @@ function setLighting() {
   u.uSkyHorizon.value.set(horizon.r, horizon.g, horizon.b);
   u.uGround.value = color('#f3ebdf');
   u.uBase.value = color('#f0e3cd');
-  u.uBounces.value = params.bounces;
+  u.uBounces.value = previewing ? 1 : params.bounces;
   tracer.reset();
 }
 
@@ -598,32 +656,29 @@ function drawOverlay(c, w, h) {
   c.fillStyle = INK;
   c.textBaseline = 'alphabetic';
 
-  // Title block, top left.
-  const pad = 44 * u;
-  c.font = `200 ${50 * u}px ${FONT}`;
-  halo(c, u, map.title, pad, pad + 40 * u);
-  c.font = `400 ${10.5 * u}px ${FONT}`;
-  c.letterSpacing = `${2.6 * u}px`;
-  halo(c, u, map.kicker(params.period), pad + 3 * u, pad + 64 * u);
-  c.letterSpacing = '0px';
-  c.font = `300 ${12.5 * u}px ${FONT}`;
-  c.globalAlpha = 0.75;
-  const lines = wrap(c, map.subtitle(params.period), 560 * u);
-  lines.forEach((line, i) =>
-    halo(c, u, line, pad + 3 * u, pad + (83 + 17 * i) * u),
-  );
-  c.globalAlpha = 1;
-  if (c === ctx) {
-    // The map buttons sit under the subtitle, in CSS pixels.
-    const css = innerWidth / w;
-    nav.style.left = `${(pad + 3 * u) * css}px`;
-    nav.style.top = `${(pad + (83 + 17 * (lines.length - 1) + 16) * u) * css}px`;
-    nav.style.fontSize = `${Math.max(11, 12 * u * css)}px`;
+  // Title block, top left. Once the camera has left the home view only the
+  // title and legend stay, so the map has the screen.
+  const pad = 36 * u;
+  const full = !moved || c !== ctx;
+  c.font = `200 ${36 * u}px ${FONT}`;
+  halo(c, u, map.title, pad, pad + 30 * u);
+  if (full) {
+    c.font = `400 ${9.5 * u}px ${FONT}`;
+    c.letterSpacing = `${2.4 * u}px`;
+    halo(c, u, map.kicker(params.period), pad + 2 * u, pad + 50 * u);
+    c.letterSpacing = '0px';
+    c.font = `300 ${11.5 * u}px ${FONT}`;
+    c.globalAlpha = 0.75;
+    const lines = wrap(c, map.subtitle(params.period), 470 * u);
+    lines.forEach((line, i) =>
+      halo(c, u, line, pad + 2 * u, pad + (67 + 15 * i) * u),
+    );
+    c.globalAlpha = 1;
   }
 
   // Legend, bottom left: the ramp with the floor and top it stands for.
   const lx = pad + 3 * u;
-  const ly = h - pad - 30 * u;
+  const ly = h - pad - 20 * u;
   const lw = 200 * u;
   const lh = 5 * u;
   const gradient = c.createLinearGradient(lx, 0, lx + lw, 0);
@@ -655,14 +710,16 @@ function drawOverlay(c, w, h) {
   halo(c, u, map.legend, lx, ly - 9 * u);
   c.letterSpacing = '0px';
 
-  // Source, bottom right.
-  c.textAlign = 'right';
-  c.globalAlpha = 0.6;
-  c.font = `300 ${10.5 * u}px ${FONT}`;
-  halo(c, u, map.source[0], w - pad, h - pad - 14 * u);
-  halo(c, u, map.source[1], w - pad, h - pad);
-  c.globalAlpha = 1;
-  c.textAlign = 'left';
+  // Source, bottom right, at the home view.
+  if (full) {
+    c.textAlign = 'right';
+    c.globalAlpha = 0.6;
+    c.font = `300 ${10 * u}px ${FONT}`;
+    halo(c, u, map.source[0], w - pad, h - pad - 13 * u);
+    halo(c, u, map.source[1], w - pad, h - pad);
+    c.globalAlpha = 1;
+    c.textAlign = 'left';
+  }
 
   if (!params.labels || map.labels === false) return;
   // City labels: a dot on the column's top and a fine leader to the name.
@@ -699,31 +756,35 @@ function drawOverlay(c, w, h) {
 
 // --- map buttons -----------------------------------------------------------
 
-// One button per map under the subtitle, then a reset button that shows once
-// the camera has moved (and a hint until it has). Keys 1-3 switch maps too,
-// and Escape resets the view.
+// The maps as a row of tabs, top right; number keys switch too. At the
+// bottom, a line on how to move, which becomes a reset button (or Escape)
+// once the camera has moved.
 const nav = document.createElement('nav');
 nav.className = 'maps';
-const buttons = Object.entries(MAPS).map(([key, map]) => {
+const buttons = Object.entries(MAPS).map(([key, map], i) => {
   const b = document.createElement('button');
   b.textContent = map.button;
+  b.title = `Key ${i + 1}`;
   b.onclick = () => (switchMap(key), b.blur());
   nav.append(b);
   return [key, b];
 });
-const resetButton = document.createElement('button');
-resetButton.className = 'reset';
-resetButton.textContent = 'Reset view';
-resetButton.onclick = () => resetView(0.7);
+const help = document.createElement('div');
+help.className = 'help';
 const hint = document.createElement('span');
-hint.className = 'hint';
-hint.textContent = 'Double-click to zoom in';
-nav.append(resetButton, hint);
-document.body.append(nav);
+hint.textContent =
+  'Drag to turn · scroll to zoom · WASD to move · double-click to fly in';
+const resetButton = document.createElement('button');
+resetButton.textContent = 'Reset view';
+resetButton.onclick = () => (resetView(0.7), resetButton.blur());
+help.append(hint, resetButton);
+document.body.append(nav, help);
 
-function setMoved(moved) {
-  resetButton.hidden = !moved;
-  hint.hidden = moved;
+let moved = false;
+function setMoved(on) {
+  moved = on;
+  resetButton.hidden = !on;
+  hint.hidden = on;
 }
 
 function showActive() {
@@ -747,11 +808,21 @@ function switchMap(key) {
 }
 
 addEventListener('keydown', (e) => {
-  if (e.target.closest?.('.lil-gui')) return;
+  if (e.target.closest?.('.lil-gui') || e.metaKey || e.ctrlKey) return;
   const keys = Object.keys(MAPS);
   if (e.key >= '1' && e.key <= String(keys.length)) switchMap(keys[e.key - 1]);
   if (e.key === 'Escape') resetView(0.7);
+  const key = e.key.toLowerCase();
+  if (PAN_KEYS[key]) {
+    e.preventDefault();
+    held.add(key);
+    setMoved(true);
+  }
 });
+addEventListener('keyup', (e) => {
+  if (held.delete(e.key.toLowerCase()) && !held.size) refine();
+});
+addEventListener('blur', () => held.clear());
 
 // --- controls --------------------------------------------------------------
 
@@ -855,8 +926,12 @@ renderer.setAnimationLoop(() => {
   // Idle while another window has focus, so a background tab or window
   // doesn't keep the GPU busy.
   if (!NO_PAUSE && !document.hasFocus()) return;
+  const now = performance.now();
+  pan(Math.min((now - lastFrame) / 1000, 0.1));
+  lastFrame = now;
   fly();
   controls.update();
+  setPreview(now - lastMove < 250);
   if (tracer.samples < params.maxSamples) tracer.step(camera);
   tracer.show(params.exposure);
   drawOverlay(ctx, overlay.width, overlay.height);
