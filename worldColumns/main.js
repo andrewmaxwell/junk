@@ -63,22 +63,22 @@ const hours = (minutes) =>
 const MAPS = {
   lights: {
     button: 'Night lights',
-    kicker: () => 'THE EARTH FROM SPACE AFTER DARK, 2016',
+    kicker: () => 'THE EARTH FROM SPACE AFTER DARK, 2023',
     subtitle: () =>
-      'How bright each place looked on cloud-free nights through the year; the brightest city centres max out the scale',
-    legend: 'HEIGHT · BRIGHTNESS AT NIGHT',
-    unit: 'brightness',
-    format: (v) => `${Math.round(v / 25.5)}%`, // of the brightest
-    readout: ' of the brightest', // after the value, on hover
+      'How much light each place sent up on cloud-free nights through the year, measured by satellite; height on a log scale',
+    legend: 'HEIGHT · LIGHT AT NIGHT, nW/cm²·sr, LOG SCALE',
+    unit: 'nW/cm²·sr ×10',
+    format: (v) => round2.format(v / 10),
+    readout: ' nW/cm²·sr', // after the value, on hover
     source: [
-      'Night lights: Black Marble 2016 (NASA), VIIRS day-night band, 3 km grid.',
+      'Night lights: Black Marble VNP46A4 (NASA), VIIRS day-night band, 2023, 500 m.',
       'In Equal Earth projection.',
     ],
     ramp: ['#14172a', '#3a2c3e', '#9a6026', '#f2b445', '#fff5d6'],
-    labels: false, // every city maxes out the scale
+    log: true, // a city centre can be 1,000 times a village
     night: true,
-    ranges: {low: [0, 1000, 10], high: [100, 2550, 10]},
-    settings: {low: 0, high: 2550, gamma: 1, height: 2.5},
+    ranges: {low: [0, 100, 1], high: [100, 6000, 10]},
+    settings: {low: 10, high: 1500, gamma: 2, height: 2.5},
   },
   windows: {
     button: 'Open windows',
@@ -510,8 +510,13 @@ function blocks({values, width}, gx0, gy0, w, h, size) {
   return out;
 }
 
-const shapeOf = (v) =>
-  Math.min(Math.max((v - params.low) / (params.high - params.low), 0), 1);
+// A value's place between the floor and the top, 0-1, on a log scale for
+// maps that ask for one.
+function shapeOf(v) {
+  const f = current().log ? Math.log1p : (x) => x;
+  const t = (f(v) - f(params.low)) / (f(params.high) - f(params.low));
+  return Math.min(Math.max(t, 0), 1);
+}
 const heightOf = (t) => 0.03 + params.height * t ** params.gamma;
 
 // The part of the map the camera sees, in scene units [x0, z0, x1, z1], with

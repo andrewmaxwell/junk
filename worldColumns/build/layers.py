@@ -11,9 +11,9 @@ since they don't depend on ERA5-Land's 9 km weather:
               mountain ranges keep their peaks.
   population  GHS-POP R2023A (EU Joint Research Centre), 2025 estimate, 30″:
               people in each cell over its area, people per km².
-  lights      Black Marble 2016 (NASA), 3 km: the average brightness of the
-              night's annual composite (the grayscale picture, so city centres
-              saturate), 0-255, stored times 10.
+  lights      Black Marble VNP46A4 (NASA), 2023, 15″: mean calibrated
+              radiance at night, nW/(cm² sr), stored times 10; from the tiles
+              lights.py downloads and reduces.
   travel      Nelson 2019, 30″ (layer 11): average minutes to the nearest
               city of at least 50,000 people in 2015, the definition of
               Weiss et al. 2018.
@@ -198,9 +198,14 @@ def mean_of(grid, image, lat, lon, valid):
 
 
 def lights(grid):
-    image, lat, lon = tiff('BlackMarble_2016_3km_gray_geo.tif')
-    gray = image.mean(axis=2) if image.ndim == 3 else image
-    return mean_of(grid, gray, lat, lon, lambda v: np.ones(v.shape, bool)) * 10
+    """Mean radiance, nW/(cm² sr), from lights.py's tiles, times 10."""
+    n = grid.width * grid.height
+    sums, counts = np.zeros(n), np.zeros(n)
+    for path in glob.glob(os.path.join(HERE, 'cache', 'vnp46', '*.npz')):
+        z = np.load(path)
+        np.add.at(sums, z['cells'], z['sums'])
+        np.add.at(counts, z['cells'], z['counts'])
+    return (np.where(counts > 0, sums / np.maximum(counts, 1), 0) * 10).reshape(grid.height, grid.width)
 
 
 def travel(grid):
@@ -263,7 +268,7 @@ def main():
     fine = {
         'elevation': (lambda: heights, 'm', 'highest point, to 10 m', 10),
         'population': (lambda: population(grid), 'people/km²', '', 1),
-        'lights': (lambda: lights(grid), 'brightness×10', '0-255 times 10', 1),
+        'lights': (lambda: lights(grid), 'nW/(cm² sr)×10', 'VNP46A4 2023 radiance times 10', 1),
         'travel': (lambda: travel(grid), 'minutes', 'to 5 minutes', 5),
     }
     for name in wanted:

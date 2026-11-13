@@ -21,9 +21,9 @@
     "lights": {
       "width": 7200,
       "height": 3164,
-      "unit": "brightness\u00d710",
-      "note": "0-255 times 10",
-      "max": 2550
+      "unit": "nW/(cm\u00b2 sr)\u00d710",
+      "note": "VNP46A4 2023 radiance times 10",
+      "max": 35050
     },
     "travel": {
       "width": 7200,
