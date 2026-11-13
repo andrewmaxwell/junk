@@ -14,8 +14,8 @@
 // to bounce) follow an Owen-scrambled Sobol sequence, so they spread evenly
 // as samples add up. Optionally (tracer.denoise) a denoiser after SVGF
 // cleans up what's shown while there are few samples: at restarts it moves
-// the last image into the new view, and it fades out between 16 and 64
-// samples, where it would only blur real detail.
+// the last image into the new view, and each pixel fades back to its own
+// samples as they get clean, past which the filter would only blur detail.
 import * as THREE from 'three';
 
 const vertexShader = /* glsl */ `
@@ -53,6 +53,11 @@ uniform vec3 uGlowAlbedo;
 // summed up a mip chain, for picking a column to aim at; see pickGlow.
 uniform sampler2D uPower;
 uniform int uPowerLevels;
+// Over 0, the ground is water: it mirrors this share of light head on (more
+// at grazing angles, by Schlick's Fresnel), blurred by uWaterRough (a GGX
+// roughness for the sun's glint), and scatters the rest by its albedo.
+uniform float uWaterF0;
+uniform float uWaterRough;
 uniform int uFrame; // this sample's number since the last restart
 uniform uint uSeed; // changes at every restart
 uniform int uBounces;
@@ -376,6 +381,7 @@ void main() {
   vec3 radiance = vec3(0.0);
   vec3 throughput = vec3(1.0);
   vec3 lastN = vec3(0.0); // the last surface's normal, for weighing glow
+  bool mirrored = false; // the last bounce was off water
   for (int bounce = 0; bounce <= uBounces; bounce++) {
     vec3 n;
     ivec2 c;
@@ -390,7 +396,7 @@ void main() {
       // Seen directly it counts in full; reached by a bounce, weighed
       // against having aimed at it from the last surface.
       float w = 1.0;
-      if (bounce > 0) {
+      if (bounce > 0 && !mirrored) {
         float pdfBounce = max(dot(lastN, d), 0.0) / PI;
         float pdfLight = glowPdf(o, c, n, d, t);
         w = pdfBounce * pdfBounce / (pdfBounce * pdfBounce + pdfLight * pdfLight);
@@ -400,7 +406,14 @@ void main() {
     }
     o = p + n * 1e-3;
     lastN = n;
-    if (uGlow > 0.0) radiance += throughput * glowLight(o, n, albedo);
+    // Water: the share it mirrors (fresnel) is left to the mirrored ray; the
+    // rest is diffuse, lit below like any surface.
+    float fresnel = 0.0;
+    if (uWaterF0 > 0.0 && c.x < 0) {
+      fresnel = uWaterF0 + (1.0 - uWaterF0) * pow(1.0 - max(dot(-d, n), 0.0), 5.0);
+    }
+    vec3 diffuse = albedo * (1.0 - fresnel);
+    if (uGlow > 0.0) radiance += throughput * glowLight(o, n, diffuse);
 
     // Direct sun, from a point on its disk.
     vec2 u = bounce == 0 ? sobol2(index, pixel * 3u + 1u) : vec2(rand(), rand());
@@ -409,14 +422,40 @@ void main() {
     if (cosL > 0.0) {
       vec3 sn;
       ivec2 sc;
-      if (trace(o, l, sn, sc) >= INF || sc.x < 0) radiance += throughput * albedo * uSun * cosL;
+      if (trace(o, l, sn, sc) >= INF || sc.x < 0) {
+        radiance += throughput * diffuse * uSun * cosL;
+        // Water's glint of the sun (or moon): a GGX microfacet reflection,
+        // found by the same shadow ray (mirrored rays don't count the sun).
+        if (fresnel > 0.0) {
+          float a2 = uWaterRough * uWaterRough;
+          float nh = max(dot(n, normalize(l - d)), 0.0);
+          float D = a2 / (PI * pow(nh * nh * (a2 - 1.0) + 1.0, 2.0));
+          radiance += throughput * fresnel * D * PI * uSun / (4.0 * max(dot(-d, n), 1e-3));
+        }
+      }
     }
     if (bounce == uBounces) break;
-    u = bounce == 0 ? sobol2(index, pixel * 3u + 2u) : vec2(rand(), rand());
-    d = sampleCosine(n, u);
+    // Mirror with the chance the water mirrors (keeping the throughput), or
+    // scatter diffusely with the rest.
+    mirrored = fresnel > 0.0 && rand() < fresnel;
+    if (mirrored) {
+      vec3 r = reflect(d, n);
+      for (int k = 0; k < 4; k++) {
+        vec3 j = vec3(rand(), rand(), rand()) * 2.0 - 1.0;
+        vec3 rough = normalize(r + uWaterRough * j);
+        if (dot(rough, n) > 0.0) {
+          r = rough;
+          break;
+        }
+      }
+      d = r;
+    } else {
+      u = bounce == 0 ? sobol2(index, pixel * 3u + 2u) : vec2(rand(), rand());
+      d = sampleCosine(n, u);
+      throughput *= albedo;
+    }
     if (abs(d.x) < 1e-7) d.x = 1e-7;
     if (abs(d.z) < 1e-7) d.z = 1e-7;
-    throughput *= albedo;
   }
 
   float l = dot(radiance, vec3(0.2126, 0.7152, 0.0722));
@@ -428,9 +467,16 @@ void main() {
 const displayShader = /* glsl */ `
 precision highp float;
 uniform sampler2D uAccum;
-uniform sampler2D uRaw; // the samples themselves, mixed in by uRawMix
-uniform float uRawMix;
+// With uDenoised, uAccum is the denoiser's result, and each pixel shows the
+// samples themselves (uRaw) instead once they're clean enough: by how noisy
+// the pixel's mean still is (uNoise's a, its variance), relative to its
+// brightness. Fine detail the filter would blur shows as soon as it's clean,
+// and noisy light (glow) stays smoothed until it is.
+uniform bool uDenoised;
+uniform sampler2D uRaw;
 uniform float uRawCount; // samples summed in uRaw
+uniform sampler2D uNoise;
+uniform vec2 uNoiseRange; // all raw at or under x, all denoised at or over y
 uniform float uExposure;
 uniform vec2 uScale; // accumulation pixels per screen pixel
 uniform float uCount; // samples summed in uAccum
@@ -461,7 +507,12 @@ vec4 accum(sampler2D tex, vec2 frag) {
 
 void main() {
   vec3 a = accum(uAccum, gl_FragCoord.xy).rgb / uCount;
-  if (uRawMix > 0.0) a = mix(a, accum(uRaw, gl_FragCoord.xy).rgb / uRawCount, uRawMix);
+  if (uDenoised) {
+    vec3 raw = accum(uRaw, gl_FragCoord.xy).rgb / uRawCount;
+    float lum = dot(raw, vec3(0.2126, 0.7152, 0.0722));
+    float noise = sqrt(max(accum(uNoise, gl_FragCoord.xy).a, 0.0)) / max(lum, 1e-3);
+    a = mix(a, raw, clamp((uNoiseRange.y - noise) / (uNoiseRange.y - uNoiseRange.x), 0.0, 1.0));
+  }
   vec3 c = toSrgb(aces(a * uExposure));
   // A touch of noise so the smooth ground doesn't band.
   float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
@@ -716,6 +767,8 @@ export function createPathTracer(renderer) {
       uGlowAlbedo: {value: new THREE.Vector3(0.05, 0.05, 0.05)},
       uPower: {value: null},
       uPowerLevels: {value: 1},
+      uWaterF0: {value: 0},
+      uWaterRough: {value: 0.1},
       uBase: {value: linear('#ffffff')},
       uFrame: {value: 0},
       uSeed: {value: 0},
@@ -732,9 +785,11 @@ export function createPathTracer(renderer) {
       uExposure: {value: 1},
       uScale: {value: new THREE.Vector2(1, 1)},
       uCount: {value: 1},
+      uDenoised: {value: false},
       uRaw: {value: null},
-      uRawMix: {value: 0},
       uRawCount: {value: 1},
+      uNoise: {value: null},
+      uNoiseRange: {value: new THREE.Vector2(0.08, 0.25)},
     },
   });
   const u = trace.uniforms;
@@ -969,6 +1024,10 @@ export function createPathTracer(renderer) {
     previewScale: 0.3, // preview resolution, as a fraction of the screen's
     previewBounces: 1,
     denoise: false,
+    // A pixel's noise (the standard error of its brightness, relative to it)
+    // at which the display switches from its own samples to the denoised
+    // image, fully by the second.
+    noiseRange: [0.08, 0.25],
     reset() {
       tracer.samples = 0;
       main.samples = 0;
@@ -1055,13 +1114,13 @@ export function createPathTracer(renderer) {
       const p = main.samples === 0 && small.samples > 0 ? small : main;
       let shown = p.read.texture;
       let count = Math.max(p.samples, 1);
-      // Once there are enough samples the filter only blurs real detail
-      // (several columns can share a pixel, and the guide sees one), so it
-      // fades out from 16 samples and stops at 64.
-      const rawMix = THREE.MathUtils.clamp((p.samples - 16) / 48, 0, 1);
+      // Each pixel fades from the denoised image to its own samples as they
+      // get clean (see uDenoised): past that the filter only blurs real
+      // detail, since several columns can share a pixel and the guide sees
+      // one.
       const du = display.uniforms;
-      du.uRawMix.value = 0;
-      if (tracer.denoise && p.samples > 0 && rawMix < 1) {
+      du.uDenoised.value = false;
+      if (tracer.denoise && p.samples > 0) {
         const f = filtered;
         if (
           f.pair !== p ||
@@ -1073,9 +1132,11 @@ export function createPathTracer(renderer) {
         }
         shown = dn.out.texture;
         count = 1;
+        du.uDenoised.value = true;
         du.uRaw.value = p.read.texture;
         du.uRawCount.value = p.samples;
-        du.uRawMix.value = rawMix;
+        du.uNoise.value = dn.temporal.textures[1];
+        du.uNoiseRange.value.fromArray(tracer.noiseRange);
       }
       display.uniforms.uAccum.value = shown;
       display.uniforms.uExposure.value = exposure;

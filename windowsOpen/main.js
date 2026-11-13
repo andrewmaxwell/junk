@@ -385,14 +385,20 @@ const DAY = {
 };
 const NIGHT = {
   sun: '#b9c9ff',
-  // The ground and land are ordinary pale surfaces: it's dark because little
-  // light reaches them, so the cities' glow lights them up as it would.
-  sunScale: 0.02,
-  skyScale: 0.15,
-  elevation: 40, // a high moon, so the shadows don't streak the land
+  // The land is an ordinary pale surface: it's dark because little light
+  // reaches it, so the cities' glow lights it up as it would. The sea
+  // (the ground between) is dark water that mirrors a little.
+  sunScale: 0.05,
+  skyScale: 0.4,
+  // A high moon behind the map, so the sea in view mirrors it in a broad
+  // glint, as oceans do in photos from orbit.
+  elevation: 40,
+  azimuth: 0,
   zenith: '#0a1230',
   horizon: '#1d2a52',
-  ground: '#8a91ad',
+  ground: '#262d42', // the sea: dark, slightly glossy water
+  waterF0: 0.04,
+  waterRough: 0.18,
   base: '#000000', // sides glow from the top down
   glow: 10,
   glowAlbedo: '#a4aac4',
@@ -409,7 +415,7 @@ function setLighting() {
   document.body.classList.toggle('dark', L === NIGHT);
   const u = tracer.uniforms;
   const el = THREE.MathUtils.degToRad(L.elevation ?? params.sunElevation);
-  const az = THREE.MathUtils.degToRad(params.sunAzimuth);
+  const az = THREE.MathUtils.degToRad(L.azimuth ?? params.sunAzimuth);
   u.uSunDir.value.set(
     Math.sin(az) * Math.cos(el),
     Math.sin(el),
@@ -426,6 +432,8 @@ function setLighting() {
   u.uGround.value = color(L.ground);
   u.uBase.value = color(L.base);
   u.uGlow.value = L.glow;
+  u.uWaterF0.value = L.waterF0 ?? 0;
+  u.uWaterRough.value = L.waterRough ?? 0;
   if (L.glowAlbedo) {
     const a = color(L.glowAlbedo);
     u.uGlowAlbedo.value.set(a.r, a.g, a.b);
