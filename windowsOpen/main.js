@@ -29,9 +29,9 @@ const params = {
   high: 100, // percent that gets the tallest
   gamma: 1.6, // >1 keeps the merely-okay places low
   height: 4,
-  sunElevation: 16,
-  sunAzimuth: 0, // degrees clockwise from north the light comes from
-  sunRadius: 3, // degrees; the real sun is 0.27, bigger gives softer shadows
+  sunElevation: 13,
+  sunAzimuth: 294, // degrees clockwise from north the light comes from
+  sunRadius: 5.72, // degrees; the real sun is 0.27, bigger gives softer shadows
   sunIntensity: 4.5,
   skyIntensity: 0.85,
   bounces: 3,
@@ -256,12 +256,12 @@ function formatDate(iso) {
   return `${MONTHS[m - 1].slice(0, 3)} ${d}, ${y}`;
 }
 function subtitle() {
-  const {lowF, highF, dewF, rainMm} = meta.test;
+  const {lowF, nightLowF, highF, dewF, rainMm, windMph} = meta.test;
   const when =
     params.period === 'all'
       ? `${formatDate(meta.start)} – ${formatDate(meta.end)}`
       : MONTHS[Number(params.period) - 1];
-  return `Share of all hours ${lowF}–${highF}°F, dew point under ${dewF}°F, under ${rainMm} mm of rain and without dust or smoke  ·  ${when}`;
+  return `Share of all hours ${lowF}–${highF}°F (${nightLowF}°F at night), dew point under ${dewF}°F, under ${rainMm} mm of rain, wind under ${windMph} mph and no dust or smoke  ·  ${when}`;
 }
 
 const projected = new THREE.Vector3();

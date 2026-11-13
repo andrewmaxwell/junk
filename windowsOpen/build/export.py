@@ -31,7 +31,7 @@ from PIL import Image
 from air import AIR_DIR, PM10_LIMIT, PM25_LIMIT
 from air import NI as AIR_NI
 from air import STEP as AIR_STEP
-from fetch import CHUNK_DIR, DEW_C, HIGH_C, LOW_C, NI, NJ, OUTCOMES, RAIN_M
+from fetch import CHUNK_DIR, DEW_C, HIGH_C, LOW_C, NI, NIGHT, NIGHT_LOW_C, NJ, OUTCOMES, RAIN_M, WIND_MS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(HERE, '..', 'data')
@@ -162,9 +162,12 @@ def main():
         'reasons': REASONS,
         'test': {
             'lowF': round(LOW_C * 1.8 + 32),
+            'nightLowF': round(NIGHT_LOW_C * 1.8 + 32),
+            'nightHours': NIGHT,
             'highF': round(HIGH_C * 1.8 + 32),
             'dewF': round(DEW_C * 1.8 + 32),
             'rainMm': RAIN_M * 1000,
+            'windMph': round(WIND_MS * 2.23694),
             'pm10': PM10_LIMIT,
             'pm25': PM25_LIMIT,
             'airComplete': missing_air == 0,

@@ -29,14 +29,21 @@
     "cold",
     "hot",
     "rain",
+    "wind",
     "humid",
     "air"
   ],
   "test": {
     "lowF": 62,
+    "nightLowF": 55,
+    "nightHours": [
+      22,
+      7
+    ],
     "highF": 80,
     "dewF": 63,
     "rainMm": 1.0,
+    "windMph": 22,
     "pm10": 154,
     "pm25": 35.4,
     "airComplete": true
