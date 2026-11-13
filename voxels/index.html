@@ -1,4 +1,49 @@
-<body style="margin: 0">
-  <canvas id="c" style="width:100%;height:100%;display:block"></canvas>
-  <script type="module" src="main.js"></script>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>3D Turmites</title>
+<meta name="description" content="Langton's ant on a cubic grid: an ant that turns, pitches and steps by a rule you type, building voxel sculptures and highways.">
+<meta property="og:title" content="3D Turmites">
+<meta property="og:description" content="Langton's ant on a cubic grid: type a rule of turns and watch an ant build a sculpture.">
+<meta property="og:image" content="https://andrewmaxwell.github.io/junk/voxels/image.png">
+<meta property="og:url" content="https://andrewmaxwell.github.io/junk/voxels/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐜</text></svg>">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #14161c; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #hud {
+    position: fixed; left: calc(12px + env(safe-area-inset-left)); bottom: calc(12px + env(safe-area-inset-bottom));
+    right: 12px; pointer-events: none; color: #c9cdd6; font: 13px/1.5 system-ui, sans-serif;
+    text-shadow: 0 1px 3px #000a;
+  }
+  #stats { font-variant-numeric: tabular-nums; }
+  #legend { opacity: 0.6; font-size: 12px; }
+  #message { color: #ffcf7a; }
+  #message:empty { display: none; }
+  .lil-gui.root { --width: 240px; }
+  .lil-gui.autoPlace { top: env(safe-area-inset-top); right: calc(15px + env(safe-area-inset-right)); }
+  @media (pointer: coarse) {
+    /* finger-sized, and 16px inputs so iOS doesn't zoom in on the rule box */
+    .lil-gui.root { --width: 250px; --widget-height: 34px; --font-size: 14px; --input-font-size: 16px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div id="message"></div>
+  <div id="stats"></div>
+  <div id="legend">L R turn · U D pitch · N straight on · B turn back</div>
+</div>
+<script type="module" src="main.js"></script>
 </body>
+</html>
