@@ -2,7 +2,7 @@ World Columns - 2026 - The world as a path-traced field of columns: city lights 
 
 The world's land in columns on an Equal Earth map, each as tall as one number for that place, path traced with soft shadows and light bouncing between them. The tabs at the top right (or keys 1–6) pick the map:
 
-- **Night lights** (the default): how much light each place sent up on cloud-free nights in 2023, measured by satellite, with height on a log scale (a city centre can be 1,000 times a village). The page goes dark, and the columns glow by their own brightness and light the pale land around them, under a faint moon whose broad glint shows on the dark, glossy sea.
+- **Night lights** (the default): how much light each place sent up on cloud-free nights in 2023, measured by satellite, with height on a log scale (a city centre can be 1,000 times a village). Zoomed out, each column is the root mean square of the cells it covers, so a lone city isn't averaged away by its dark neighbours. The page goes dark, and the columns glow by their own brightness and light the pale land around them, under a faint moon whose broad glint shows on the dark, glossy sea.
 - **Open windows**: the share of all hours, day and night, from Nov 1, 2025 to Oct 31, 2026, when the windows could have been open. Pick a month in Settings to watch the seasons move.
 - **Elevation**: the highest ground in each column, exaggerated about 70 times.
 - **Population**: people per square mile in 2025.

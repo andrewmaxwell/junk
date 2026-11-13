@@ -76,6 +76,10 @@ const MAPS = {
     ],
     ramp: ['#14172a', '#3a2c3e', '#9a6026', '#f2b445', '#fff5d6'],
     log: true, // a city centre can be 1,000 times a village
+    // Zoomed out, a column is its cells' root mean square: a plain average
+    // shrinks a city to a stub among its dark neighbours, and the brightest
+    // cell makes every block with a lit village tall.
+    power: 2,
     night: true,
     ranges: {low: [0, 100, 1], high: [100, 6000, 10]},
     settings: {low: 10, high: 1500, gamma: 2, height: 2.5},
@@ -408,7 +412,7 @@ const NIGHT = {
   base: '#000000', // sides glow from the top down
   glow: 10,
   glowAlbedo: '#a4aac4',
-  bloom: 0.1, // a soft halo around the brightest light
+  bloom: 0.05, // a soft halo around the brightest light
   exposure: 1.2,
   ink: '#e9e4d8',
   halo: '#020313',
@@ -490,8 +494,10 @@ async function loadMap(map, period) {
   return decoded.get(file);
 }
 
-// Each block's average over a window of the map, or NaN where it's mostly sea.
-function blocks({values, width}, gx0, gy0, w, h, size) {
+// Each block's power mean over a window of the map (the plain average for
+// power 1; larger powers lean toward the block's brightest cell), or NaN
+// where it's mostly sea.
+function blocks({values, width}, gx0, gy0, w, h, size, power = 1) {
   const out = new Float32Array(w * h).fill(NaN);
   for (let by = 0; by < h; by++) {
     for (let bx = 0; bx < w; bx++) {
@@ -501,10 +507,13 @@ function blocks({values, width}, gx0, gy0, w, h, size) {
       for (let y = y0; y < y0 + size; y++) {
         for (let x = x0; x < x0 + size; x++) {
           const v = values[y * width + x];
-          if (v !== NO_VALUE) [sum, n] = [sum + v, n + 1];
+          if (v !== NO_VALUE) {
+            sum += power === 1 ? v : v ** power;
+            n++;
+          }
         }
       }
-      if (n * 2 >= size * size) out[by * w + bx] = sum / n;
+      if (n * 2 >= size * size) out[by * w + bx] = (sum / n) ** (1 / power);
     }
   }
   return out;
@@ -588,7 +597,7 @@ async function build(force = true) {
     grid.gy0 + grid.h * block >= gy0 + h * block
   )
     return;
-  const values = blocks(map, gx0, gy0, w, h, block);
+  const values = blocks(map, gx0, gy0, w, h, block, current().power);
   if (params.fit) {
     const land = values.filter((v) => !isNaN(v)).sort((a, b) => a - b);
     params.low = Math.round(land[Math.floor(land.length * 0.05)]);
