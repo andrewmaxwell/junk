@@ -124,6 +124,18 @@
         color: var(--soft);
         margin-top: 8rem;
       }
+      #out-airtemp {
+        font-size: 40rem;
+        line-height: 0.9;
+        font-weight: 500;
+        color: var(--soft);
+        margin-bottom: 4rem;
+      }
+      #out-airtemp .unit {
+        font-size: 19rem;
+        color: var(--muted);
+        margin-left: 4rem;
+      }
       #sky {
         color: var(--soft);
         font-size: 16rem;
@@ -276,6 +288,7 @@
         <div id="now-outside">
           <div class="hero" id="out-felt">–</div>
           <div class="details">
+            <div id="out-airtemp" hidden></div>
             <div class="sub" id="sky"></div>
             <div class="sub" id="out-air"></div>
           </div>

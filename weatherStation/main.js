@@ -184,8 +184,16 @@ function renderOutside(now, days, {current, upcoming}) {
     : wind
       ? `${sky}, ${wind}`
       : sky;
+  // The air temperature gets its own readable number when it differs enough
+  // from feels-like to matter; otherwise it's a footnote.
+  const air = round(current.temperature_2m);
+  const showAir = Math.abs(air - round(feltNow)) >= 3;
+  const airTemp = $('out-airtemp');
+  airTemp.hidden = !showAir;
+  airTemp.innerHTML = `${air}°<span class="unit">air</span>`;
   $('out-air').innerHTML =
-    `<span class="word">${describeHumidity(current.dew_point_2m)}</span> · dew ${round(current.dew_point_2m)}° · air ${round(current.temperature_2m)}°`;
+    `<span class="word">${describeHumidity(current.dew_point_2m)}</span> · dew ${round(current.dew_point_2m)}°` +
+    (showAir ? '' : ` · air ${air}°`);
 
   const hours = upcoming.slice(0, 25).map((row, i) => ({
     time: i === 0 ? now : row.time,
