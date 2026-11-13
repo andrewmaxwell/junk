@@ -8,6 +8,7 @@
 // directly, from a disk of `sunRadius` degrees so shadows have real penumbras,
 // and bounce rays that escape pick up the sky dome. Shade is lit only by the
 // sky and by light bounced off the columns, which is what makes it blue.
+// Columns can also glow (uGlow), lighting each other and the ground.
 //
 // A sample's first choices (where in the pixel, where on the sun, which way
 // to bounce) follow an Owen-scrambled Sobol sequence, so they spread evenly
@@ -44,6 +45,10 @@ uniform vec3 uSkyZenith;
 uniform vec3 uSkyHorizon;
 uniform vec3 uGround;
 uniform vec3 uBase; // column sides fade up from this at the ground
+// Over 0, columns glow: each gives off its color squared times uGlow (so
+// bright colors glow far more than dim ones), and is uGlowAlbedo itself.
+uniform float uGlow;
+uniform vec3 uGlowAlbedo;
 uniform int uFrame; // this sample's number since the last restart
 uniform uint uSeed; // changes at every restart
 uniform int uBounces;
@@ -253,6 +258,10 @@ void main() {
     }
     vec3 p = o + d * t;
     vec3 albedo = albedoAt(c, p, n);
+    if (uGlow > 0.0 && c.x >= 0) {
+      radiance += throughput * albedo * albedo * uGlow;
+      albedo = uGlowAlbedo;
+    }
     o = p + n * 1e-3;
 
     // Direct sun, from a point on its disk.
@@ -565,6 +574,8 @@ export function createPathTracer(renderer) {
       uSkyZenith: {value: new THREE.Vector3()},
       uSkyHorizon: {value: new THREE.Vector3()},
       uGround: {value: linear('#ffffff')},
+      uGlow: {value: 0},
+      uGlowAlbedo: {value: new THREE.Vector3(0.05, 0.05, 0.05)},
       uBase: {value: linear('#ffffff')},
       uFrame: {value: 0},
       uSeed: {value: 0},

@@ -12,19 +12,21 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🪟</text></svg>">
 <style>
-  html, body { margin: 0; height: 100%; background: #edebe9; overflow: hidden; }
+  :root { --ink: #2b2723; --halo: #edebe9; }
+  body.dark { --ink: #e9e4d8; --halo: #020313; }
+  html, body { margin: 0; height: 100%; background: var(--halo); overflow: hidden; transition: background 0.4s; }
   canvas { display: block; }
   .overlay { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-  .maps, .help { position: fixed; display: flex; flex-wrap: wrap; align-items: center; font: 300 13px Jost, sans-serif; color: #2b2723; text-shadow: 0 0 3px #edebe9, 0 0 6px #edebe9; }
+  .maps, .help { position: fixed; display: flex; flex-wrap: wrap; align-items: center; font: 300 13px Jost, sans-serif; color: var(--ink); text-shadow: 0 0 3px var(--halo), 0 0 6px var(--halo); }
   .maps { top: 14px; right: 18px; max-width: calc(100vw - 36px); justify-content: flex-end; gap: 2px 4px; }
   .maps button, .help button { font: inherit; color: inherit; text-shadow: inherit; background: none; border: none; cursor: pointer; }
   .maps button { padding: 6px 8px; opacity: 0.55; border-bottom: 1px solid transparent; }
   .maps button:hover { opacity: 0.9; }
-  .maps button.active { opacity: 1; border-bottom-color: #2b2723; }
+  .maps button.active { opacity: 1; border-bottom-color: var(--ink); }
   .help { left: 50%; bottom: 14px; transform: translateX(-50%); font-size: 12px; white-space: nowrap; }
   .help span { opacity: 0.5; }
-  .help button { padding: 4px 14px; border: 1px solid rgba(43, 39, 35, 0.4); border-radius: 999px; background: rgba(237, 235, 233, 0.75); }
-  .help button:hover { border-color: #2b2723; }
+  .help button { padding: 4px 14px; border: 1px solid color-mix(in srgb, var(--ink) 40%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--halo) 75%, transparent); }
+  .help button:hover { border-color: var(--ink); }
   .help [hidden] { display: none; }
   @media (max-width: 700px) { .help span { display: none; } }
   .lil-gui.autoPlace { top: auto; bottom: 0; }

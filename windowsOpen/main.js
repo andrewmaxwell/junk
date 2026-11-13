@@ -28,8 +28,6 @@ const WORLD = 100; // map width in scene units
 const CELL = WORLD / nx;
 const KM_PER_UNIT = (2 * projection.xMax * 6371) / WORLD;
 
-const INK = '#2b2723';
-const HALO = '#edebe9'; // the lit ground as rendered
 const FONT = 'Jost';
 
 const query = new URLSearchParams(location.search);
@@ -139,8 +137,9 @@ const MAPS = {
       'Night lights: Black Marble 2016 (NASA), VIIRS day-night band, 3 km grid.',
       'In Equal Earth projection.',
     ],
-    ramp: ['#2d3250', '#4b4a6b', '#a07e3c', '#e8b84a', '#fff1b8'],
+    ramp: ['#14172a', '#3a2c3e', '#9a6026', '#f2b445', '#fff5d6'],
     labels: false, // every city maxes out the scale
+    night: true,
     ranges: {low: [0, 1000, 10], high: [100, 2550, 10]},
     settings: {low: 0, high: 2550, gamma: 1, height: 2.5},
   },
@@ -367,11 +366,45 @@ function resetView(seconds = 0) {
   setMoved(false);
 }
 
+// Day: sun and sky over a pale table. Night (the night lights map): a faint
+// moon under a deep blue sky, dark ground, and columns that glow by their
+// own color, lighting what's around them. ink and halo are the page's text
+// and the ground as rendered, which text is outlined in.
+const DAY = {
+  sun: '#fff0da',
+  sunScale: 1,
+  zenith: '#6d9be0',
+  horizon: '#dce7f3',
+  ground: '#f3ebdf',
+  base: '#f0e3cd',
+  glow: 0,
+  exposure: 1,
+  ink: '#2b2723',
+  halo: '#edebe9',
+};
+const NIGHT = {
+  sun: '#b9c9ff',
+  sunScale: 0.1,
+  elevation: 40, // a high moon, so the shadows don't streak the land
+  zenith: '#0a1230',
+  horizon: '#1d2a52',
+  ground: '#1c2238',
+  base: '#2a2f48',
+  glow: 10,
+  glowAlbedo: '#454c6e',
+  exposure: 1.2,
+  ink: '#e9e4d8',
+  halo: '#020313',
+};
+const look = () => (current().night ? NIGHT : DAY);
+
 const color = (hex) => new THREE.Color(hex); // hex is sRGB; this is linear
 function setLighting() {
   tracer.forgetHistory();
+  const L = look();
+  document.body.classList.toggle('dark', L === NIGHT);
   const u = tracer.uniforms;
-  const el = THREE.MathUtils.degToRad(params.sunElevation);
+  const el = THREE.MathUtils.degToRad(L.elevation ?? params.sunElevation);
   const az = THREE.MathUtils.degToRad(params.sunAzimuth);
   u.uSunDir.value.set(
     Math.sin(az) * Math.cos(el),
@@ -379,14 +412,19 @@ function setLighting() {
     -Math.cos(az) * Math.cos(el),
   );
   u.uSunCos.value = Math.cos(THREE.MathUtils.degToRad(params.sunRadius));
-  const sun = color('#fff0da').multiplyScalar(params.sunIntensity);
-  const zenith = color('#6d9be0').multiplyScalar(params.skyIntensity);
-  const horizon = color('#dce7f3').multiplyScalar(params.skyIntensity);
+  const sun = color(L.sun).multiplyScalar(params.sunIntensity * L.sunScale);
+  const zenith = color(L.zenith).multiplyScalar(params.skyIntensity);
+  const horizon = color(L.horizon).multiplyScalar(params.skyIntensity);
   u.uSun.value.set(sun.r, sun.g, sun.b);
   u.uSkyZenith.value.set(zenith.r, zenith.g, zenith.b);
   u.uSkyHorizon.value.set(horizon.r, horizon.g, horizon.b);
-  u.uGround.value = color('#f3ebdf');
-  u.uBase.value = color('#f0e3cd');
+  u.uGround.value = color(L.ground);
+  u.uBase.value = color(L.base);
+  u.uGlow.value = L.glow;
+  if (L.glowAlbedo) {
+    const a = color(L.glowAlbedo);
+    u.uGlowAlbedo.value.set(a.r, a.g, a.b);
+  }
   u.uBounces.value = params.bounces;
   tracer.reset();
 }
@@ -641,7 +679,7 @@ function wrap(c, text, maxWidth) {
 function halo(c, u, text, x, y) {
   c.save();
   c.lineWidth = 5 * u;
-  c.strokeStyle = HALO;
+  c.strokeStyle = look().halo;
   c.lineJoin = 'round';
   c.globalAlpha *= 0.85;
   c.strokeText(text, x, y);
@@ -654,7 +692,7 @@ function drawOverlay(c, w, h) {
   const map = current();
   const u = Math.min(w, h * 1.6) / 1000; // one unit of type scale
   c.clearRect(0, 0, w, h);
-  c.fillStyle = INK;
+  c.fillStyle = look().ink;
   c.textBaseline = 'alphabetic';
 
   // Title block, top left. Once the camera has left the home view only the
@@ -688,7 +726,7 @@ function drawOverlay(c, w, h) {
   );
   c.fillStyle = gradient;
   c.fillRect(lx, ly, lw, lh);
-  c.fillStyle = INK;
+  c.fillStyle = look().ink;
   c.font = `300 ${11 * u}px ${FONT}`;
   halo(
     c,
@@ -732,7 +770,7 @@ function drawOverlay(c, w, h) {
     // Leaders on the left run straight out over the water; the rest rise.
     const side = LEFT.has(name) ? -1 : 1;
     const top = side < 0 ? y : y - 30 * u;
-    c.strokeStyle = INK;
+    c.strokeStyle = look().ink;
     c.lineWidth = Math.max(0.75, 0.8 * u);
     c.beginPath();
     c.moveTo(x, y);
@@ -745,7 +783,7 @@ function drawOverlay(c, w, h) {
     const text = `${name}  ${value === NO_VALUE ? '–' : map.format(value)}`;
     c.font = `300 ${12 * u}px ${FONT}`;
     c.lineWidth = 4 * u;
-    c.strokeStyle = HALO;
+    c.strokeStyle = look().halo;
     c.lineJoin = 'round';
     c.textAlign = side < 0 ? 'right' : 'left';
     const tx = x + side * (side < 0 ? 34 : 11) * u;
@@ -805,6 +843,7 @@ function switchMap(key) {
   history.replaceState(null, '', url);
   showActive();
   fitControllers();
+  setLighting(); // day or night
   build();
 }
 
@@ -891,7 +930,7 @@ gui.close();
 
 // The image as it stands, at the render's own resolution, with the overlay.
 function save() {
-  tracer.show(params.exposure);
+  tracer.show(params.exposure * look().exposure);
   const out = document.createElement('canvas');
   [out.width, out.height] = [overlay.width, overlay.height];
   const c = out.getContext('2d');
@@ -937,6 +976,6 @@ renderer.setAnimationLoop(() => {
   controls.update();
   if (now - lastMove < 200) tracer.preview(camera);
   else if (tracer.samples < params.maxSamples) tracer.step(camera);
-  tracer.show(params.exposure);
+  tracer.show(params.exposure * look().exposure);
   drawOverlay(ctx, overlay.width, overlay.height);
 });
