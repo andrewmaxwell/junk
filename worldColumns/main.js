@@ -5,8 +5,7 @@
 // population, travel time and rain (build/layers.py, on the same projection,
 // most of them twice as fine). The tracer is the Comfort spike map's, and the
 // picture sharpens as samples add up. The caption, labels and legend are
-// drawn on a 2D canvas over it, so "save PNG" can stack the two into one
-// image.
+// drawn on a 2D canvas over it; "save PNG" saves the map alone.
 //
 // The tracer gets a fixed budget of columns: the whole map at the home view,
 // and only what's in view, in finer columns, after zooming in.
@@ -281,7 +280,12 @@ function toGrid(lat, lon) {
 
 // --- scene -----------------------------------------------------------------
 
-const renderer = new THREE.WebGLRenderer({antialias: false});
+// preserveDrawingBuffer keeps the picture readable after it's drawn, for
+// "save PNG"; without it the browser may have cleared it by then.
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  preserveDrawingBuffer: true,
+});
 renderer.setPixelRatio(params.pixelRatio);
 document.body.append(renderer.domElement);
 const tracer = createPathTracer(renderer);
@@ -1120,16 +1124,12 @@ gui.add({reset: () => resetView(0.7)}, 'reset').name('reset view');
 gui.add({save}, 'save').name('save PNG');
 gui.close();
 
-// The image as it stands, at the render's own resolution, with the overlay.
+// The map as it stands, at the render's own resolution, without the
+// labels and text.
 function save() {
   tracer.show(params.exposure * look().exposure);
-  const out = document.createElement('canvas');
-  [out.width, out.height] = [overlay.width, overlay.height];
-  const c = out.getContext('2d');
-  c.drawImage(renderer.domElement, 0, 0);
-  drawOverlay(c, out.width, out.height);
   const a = document.createElement('a');
-  a.href = out.toDataURL('image/png');
+  a.href = renderer.domElement.toDataURL('image/png');
   const name =
     params.map === 'windows' ? `windows-open-${params.period}` : params.map;
   a.download = `${name}.png`;
