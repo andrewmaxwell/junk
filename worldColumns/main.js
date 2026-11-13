@@ -220,21 +220,48 @@ const current = () => MAPS[params.map];
 // Where the labels point: mild highlands and coasts, and the hot, cold and
 // muggy places that make the contrast. Names on the left sit out over the
 // water.
-const LEFT = new Set(['San Francisco', 'Lima', 'Lisbon', 'Cape Town']);
+const LEFT = new Set([
+  'San Francisco',
+  'Lima',
+  'Lisbon',
+  'Cape Town',
+  'Los Angeles',
+  'São Paulo',
+  'Lagos',
+]);
+// In order of priority: where labels would overlap, the later one is left
+// out, so zooming in shows more of them.
 const PLACES = {
+  'St. Louis': [38.63, -90.2],
+  London: [51.51, -0.13],
+  Tokyo: [35.68, 139.69],
+  'New York': [40.71, -74.01],
   'San Francisco': [37.77, -122.42],
   'Mexico City': [19.43, -99.13],
-  Bogotá: [4.71, -74.07],
-  Lima: [-12.05, -77.04],
-  Lisbon: [38.72, -9.14],
-  London: [51.51, -0.13],
-  Nairobi: [-1.29, 36.82],
-  'Cape Town': [-33.92, 18.42],
-  Dubai: [25.2, 55.27],
-  Kunming: [25.04, 102.71],
-  Singapore: [1.35, 103.82],
-  Tokyo: [35.68, 139.69],
+  'São Paulo': [-23.55, -46.63],
+  Lagos: [6.52, 3.38],
+  Cairo: [30.04, 31.24],
+  Moscow: [55.76, 37.62],
+  Delhi: [28.61, 77.21],
+  Beijing: [39.9, 116.4],
   Sydney: [-33.87, 151.21],
+  'Cape Town': [-33.92, 18.42],
+  Nairobi: [-1.29, 36.82],
+  Dubai: [25.2, 55.27],
+  Singapore: [1.35, 103.82],
+  Lima: [-12.05, -77.04],
+  Bogotá: [4.71, -74.07],
+  Lisbon: [38.72, -9.14],
+  Kunming: [25.04, 102.71],
+  Chicago: [41.88, -87.63],
+  'Los Angeles': [34.05, -118.24],
+  Paris: [48.86, 2.35],
+  Mumbai: [19.08, 72.88],
+  Shanghai: [31.23, 121.47],
+  Jakarta: [-6.21, 106.85],
+  'Buenos Aires': [-34.6, -58.38],
+  Reykjavík: [64.15, -21.94],
+  Anchorage: [61.22, -149.9],
 };
 
 // Equal Earth (Šavrič, Patterson and Jenny 2018), as in build/export.py,
@@ -913,7 +940,10 @@ function drawOverlay(c, w, h) {
   }
 
   if (!params.labels || map.labels === false) return;
-  // City labels: a dot on the column's top and a fine leader to the name.
+  // City labels: a dot on the column's top and a fine leader to the name,
+  // skipping any whose name would overlap one already drawn.
+  const taken = [];
+  c.font = `300 ${12 * u}px ${FONT}`;
   for (const {name, value, tip} of labels) {
     projected.copy(tip).project(camera);
     if (projected.z > 1 || Math.abs(projected.x) > 1.2) continue;
@@ -922,6 +952,19 @@ function drawOverlay(c, w, h) {
     // Leaders on the left run straight out over the water; the rest rise.
     const side = LEFT.has(name) ? -1 : 1;
     const top = side < 0 ? y : y - 30 * u;
+    const text = `${name}  ${value === NO_VALUE ? '–' : map.format(value)}`;
+    const tx = x + side * (side < 0 ? 34 : 11) * u;
+    const tw = c.measureText(text).width;
+    const box = [
+      Math.min(x, side < 0 ? tx - tw : tx) - 4 * u,
+      top - 10 * u,
+      Math.max(x, side < 0 ? tx : tx + tw) + 4 * u,
+      Math.max(y, top + 8 * u) + 3 * u,
+    ];
+    const hits = (b) =>
+      box[0] < b[2] && b[0] < box[2] && box[1] < b[3] && b[1] < box[3];
+    if (taken.some(hits)) continue;
+    taken.push(box);
     c.strokeStyle = look().ink;
     c.lineWidth = Math.max(0.75, 0.8 * u);
     c.beginPath();
@@ -932,13 +975,10 @@ function drawOverlay(c, w, h) {
     c.beginPath();
     c.arc(x, y, 2.2 * u, 0, Math.PI * 2);
     c.fill();
-    const text = `${name}  ${value === NO_VALUE ? '–' : map.format(value)}`;
-    c.font = `300 ${12 * u}px ${FONT}`;
     c.lineWidth = 4 * u;
     c.strokeStyle = look().halo;
     c.lineJoin = 'round';
     c.textAlign = side < 0 ? 'right' : 'left';
-    const tx = x + side * (side < 0 ? 34 : 11) * u;
     c.strokeText(text, tx, top + 4 * u);
     c.fillText(text, tx, top + 4 * u);
     c.textAlign = 'left';
