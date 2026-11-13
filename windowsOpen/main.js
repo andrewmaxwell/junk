@@ -204,6 +204,7 @@ const params = {
   bounces: 3,
   exposure: 0.95,
   maxSamples: 2048,
+  denoise: true,
   pixelRatio: Math.min(devicePixelRatio, 2),
 };
 const current = () => MAPS[params.map];
@@ -271,6 +272,7 @@ controls.addEventListener('end', () => refine());
 // never more than a few milliseconds from the next frame.
 tracer.budgetMs = 20;
 tracer.previewScale = 0.3;
+tracer.denoise = params.denoise;
 let lastMove = -Infinity;
 function moving() {
   lastMove = performance.now();
@@ -367,6 +369,7 @@ function resetView(seconds = 0) {
 
 const color = (hex) => new THREE.Color(hex); // hex is sRGB; this is linear
 function setLighting() {
+  tracer.forgetHistory();
   const u = tracer.uniforms;
   const el = THREE.MathUtils.degToRad(params.sunElevation);
   const az = THREE.MathUtils.degToRad(params.sunAzimuth);
@@ -539,6 +542,9 @@ async function build(force = true) {
     ramp(t ** (params.gamma * 0.6), tint);
     data.set([tint.r, tint.g, tint.b, heightOf(t) / size], i * 4);
   }
+  // A new map or column shape shouldn't borrow the last picture's colors;
+  // finer columns for a new view can.
+  if (force) tracer.forgetHistory();
   tracer.setColumns(data, w, h, size, origin);
   grid = {w, h, size, origin, data, block, gx0, gy0};
 
@@ -872,6 +878,9 @@ light.add(params, 'bounces', 0, 6, 1).onChange(setLighting);
 light.add(params, 'exposure', 0.2, 3, 0.05);
 const quality = gui.addFolder('Quality').close();
 quality.add(params, 'maxSamples', 16, 16384, 1).name('max samples');
+quality
+  .add(params, 'denoise')
+  .onChange((on) => ((tracer.denoise = on), tracer.reset()));
 quality
   .add(params, 'pixelRatio', 0.25, 3, 0.25)
   .name('pixel ratio')
