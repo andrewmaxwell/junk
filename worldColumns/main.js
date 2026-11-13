@@ -32,7 +32,10 @@ const KM_PER_UNIT = (2 * projection.xMax * 6371) / WORLD;
 const FONT = 'Jost';
 
 const query = new URLSearchParams(location.search);
-const NO_PAUSE = query.has('noPause');
+// ?glide: a slow loop over Europe at night with nothing else on screen, for
+// the homepage's hover clip (see recordPreviews.js).
+const GLIDE = query.has('glide');
+const NO_PAUSE = query.has('noPause') || GLIDE;
 
 const MONTHS =
   'January February March April May June July August September October November December'.split(
@@ -66,6 +69,7 @@ const MAPS = {
     legend: 'HEIGHT · BRIGHTNESS AT NIGHT',
     unit: 'brightness',
     format: (v) => `${Math.round(v / 25.5)}%`, // of the brightest
+    readout: ' of the brightest', // after the value, on hover
     source: [
       'Night lights: Black Marble 2016 (NASA), VIIRS day-night band, 3 km grid.',
       'In Equal Earth projection.',
@@ -93,6 +97,7 @@ const MAPS = {
     legend: 'HEIGHT · HOURS WITH THE WINDOWS OPEN',
     unit: '% open',
     format: (v) => `${Math.round(v)}%`,
+    readout: ' of hours open', // after the value, on hover
     source: [
       'Weather: ERA5-Land reanalysis, 0.1°, hourly. Dust and smoke: CAMS PM10 and PM2.5 over AQI 100.',
       'All 24 hours of the day, in Equal Earth projection.',
@@ -117,6 +122,7 @@ const MAPS = {
     unit: 'm',
     format: (m) =>
       `${(Math.round((m * 3.28084) / 10) * 10).toLocaleString('en-US')} ft`,
+    readout: '', // after the value, on hover
     source: [
       'Elevation: ETOPO 2022 (NOAA), 60″ grid, highest point per 5 km cell.',
       'In Equal Earth projection.',
@@ -132,6 +138,7 @@ const MAPS = {
     legend: 'HEIGHT · PEOPLE PER SQUARE MILE',
     unit: 'people/km²',
     format: (perKm) => compact.format(perKm * 2.58999), // per square mile
+    readout: ' people per sq mi', // after the value, on hover
     source: [
       'Population: GHS-POP R2023A (EU Joint Research Centre), 2025 estimate, 30″ grid.',
       'In Equal Earth projection.',
@@ -148,6 +155,7 @@ const MAPS = {
     legend: 'HEIGHT · TIME TO THE NEAREST CITY',
     unit: 'min',
     format: hours,
+    readout: ' to a city of 50,000', // after the value, on hover
     source: [
       'Travel time: Nelson 2019 on the Weiss et al. 2018 friction surface, 30″ grid.',
       'In Equal Earth projection.',
@@ -166,6 +174,7 @@ const MAPS = {
     legend: 'HEIGHT · INCHES OF RAIN AND SNOW',
     unit: 'mm',
     format: (mm) => `${round2.format(mm / 25.4)} in`,
+    readout: ' of rain and snow', // after the value, on hover
     source: [
       'Rain: ERA5-Land monthly means (ECMWF), 0.1°, Nov 2025 to Oct 2026.',
       'In Equal Earth projection.',
@@ -267,6 +276,7 @@ controls.addEventListener('end', () => refine());
 // never more than a few milliseconds from the next frame.
 tracer.budgetMs = 20;
 tracer.previewScale = 0.3;
+tracer.previewClamp = 1.5; // no fireflies from the glow while moving
 tracer.denoise = params.denoise;
 let lastMove = -Infinity;
 function moving() {
@@ -398,6 +408,7 @@ const NIGHT = {
   base: '#000000', // sides glow from the top down
   glow: 10,
   glowAlbedo: '#a4aac4',
+  bloom: 0.1, // a soft halo around the brightest light
   exposure: 1.2,
   ink: '#e9e4d8',
   halo: '#020313',
@@ -429,6 +440,7 @@ function setLighting() {
   u.uBase.value = color(L.base);
   u.uGlow.value = L.glow;
   u.uWaterF0.value = L.waterF0 ?? 0;
+  tracer.bloom = L.bloom ?? 0;
   u.uWaterRough.value = L.waterRough ?? 0;
   if (L.glowAlbedo) {
     const a = color(L.glowAlbedo);
@@ -593,7 +605,7 @@ async function build(force = true) {
   // finer columns for a new view can.
   if (force) tracer.forgetHistory();
   tracer.setColumns(data, w, h, size, origin);
-  grid = {w, h, size, origin, data, block, gx0, gy0};
+  grid = {w, h, size, origin, data, block, gx0, gy0, source: map};
 
   // Each label points at the middle of its place's column top and quotes the
   // cell's own value, not the block average. A coastal city whose own cell is
@@ -625,11 +637,34 @@ async function build(force = true) {
   });
 }
 
-// After the camera settles, rebuild if the view needs other columns.
+// After the camera settles, rebuild if the view needs other columns, and
+// keep the view in the URL so a link reopens it.
 let refineTimer = 0;
 function refine() {
   clearTimeout(refineTimer);
-  refineTimer = setTimeout(() => build(false), 150);
+  refineTimer = setTimeout(() => (build(false), saveView()), 150);
+}
+const round = (v) => +v.toFixed(3);
+function saveView() {
+  const url = new URL(location.href);
+  if (moved) {
+    const {target: t} = controls;
+    const p = camera.position;
+    url.searchParams.set(
+      'view',
+      [t.x, t.y, t.z, p.x, p.y, p.z].map(round).join(','),
+    );
+  } else url.searchParams.delete('view');
+  history.replaceState(null, '', url);
+}
+// The view a link asked for (target, then camera position), or null.
+function linkedView() {
+  const v = (query.get('view') || '').split(',').map(Number);
+  if (v.length !== 6 || v.some((n) => !Number.isFinite(n))) return null;
+  return {
+    target: new THREE.Vector3(v[0], v[1], v[2]),
+    position: new THREE.Vector3(v[3], v[4], v[5]),
+  };
 }
 
 // Where a ray from the camera through a point on screen first meets a
@@ -654,6 +689,100 @@ function pick(clientX, clientY) {
     if (p.y <= grid.data[(by * grid.w + bx) * 4 + 3] * grid.size) return p;
   }
   return p.copy(d).multiplyScalar(t1).add(o); // the ground, out at sea
+}
+
+// --- hover readout ---------------------------------------------------------
+
+// Equal Earth backwards: latitude and longitude, in degrees, of a point in
+// the open-window grid's cells (Newton's method for the latitude).
+function toLatLon(gx, gy) {
+  const x = gx * projection.cell - projection.xMax;
+  const y = projection.yMax - gy * projection.cell;
+  let t = y / A1;
+  for (let i = 0; i < 8; i++) {
+    const f = A1 * t + A2 * t ** 3 + A3 * t ** 7 + A4 * t ** 9 - y;
+    t -= f / (A1 + 3 * A2 * t ** 2 + 7 * A3 * t ** 6 + 9 * A4 * t ** 8);
+  }
+  const lat = Math.asin(Math.sin(t) / (Math.sqrt(3) / 2));
+  const lon =
+    (3 * x * (9 * A4 * t ** 8 + 7 * A3 * t ** 6 + 3 * A2 * t ** 2 + A1)) /
+    (2 * Math.sqrt(3) * Math.cos(t));
+  return [(lat * 180) / Math.PI, (lon * 180) / Math.PI];
+}
+
+// Cities of 100,000 or more (GeoNames, via build/cities.py), loaded on the
+// first hover: [name, country, lat, lon].
+let cities = null;
+function nearestCity(lat, lon, withinKm = 150) {
+  if (!cities) return null;
+  const rad = Math.PI / 180;
+  let best = null;
+  let bestKm = withinKm;
+  for (const city of cities) {
+    const dLat = (city[2] - lat) * rad;
+    const dLon = (city[3] - lon) * rad;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat * rad) * Math.cos(city[2] * rad) * Math.sin(dLon / 2) ** 2;
+    const km = 12742 * Math.asin(Math.sqrt(a));
+    if (km < bestKm) [best, bestKm] = [city, km];
+  }
+  return best;
+}
+const degrees = (v, pos, neg) =>
+  `${Math.abs(v).toFixed(1)}°${v >= 0 ? pos : neg}`;
+
+// A small label by the mouse: the nearest city (or the coordinates) and the
+// value of the cell under it. Hidden over the sea and while dragging.
+const readout = document.createElement('div');
+readout.className = 'readout';
+readout.hidden = true;
+document.body.append(readout);
+let hover = null;
+let hoverFrame = 0;
+function showReadout() {
+  hoverFrame = 0;
+  if (!hover || !grid) return (readout.hidden = true);
+  const hit = pick(hover.x, hover.y);
+  const src = grid.source;
+  const cx = hit && Math.floor((hit.x + WORLD / 2) / src.cell);
+  const cy =
+    hit && Math.floor((hit.z + (src.height * src.cell) / 2) / src.cell);
+  const inside = hit && cx >= 0 && cy >= 0 && cx < src.width && cy < src.height;
+  const value = inside ? src.values[cy * src.width + cx] : NO_VALUE;
+  if (value === NO_VALUE) return (readout.hidden = true);
+  const [lat, lon] = toLatLon(
+    (hit.x + WORLD / 2) / CELL,
+    (hit.z + (ny * CELL) / 2) / CELL,
+  );
+  const city = nearestCity(lat, lon);
+  const place = city
+    ? `${city[0]}, ${city[1]}`
+    : `${degrees(lat, 'N', 'S')} ${degrees(lon, 'E', 'W')}`;
+  const map = current();
+  readout.replaceChildren(place, document.createElement('br'));
+  const b = document.createElement('b');
+  b.textContent = map.format(value) + map.readout;
+  readout.append(b);
+  readout.style.transform = `translate(${hover.x + 14}px, ${hover.y + 14}px)`;
+  readout.hidden = false;
+}
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse' || e.buttons) return (readout.hidden = true);
+  if (!cities) {
+    cities = [];
+    fetch('data/cities.json')
+      .then((r) => r.json())
+      .then((list) => ((cities = list), hover && showReadout()));
+  }
+  hover = {x: e.clientX, y: e.clientY};
+  hoverFrame ||= requestAnimationFrame(showReadout);
+});
+for (const type of ['pointerleave', 'pointerdown', 'wheel']) {
+  renderer.domElement.addEventListener(type, () => {
+    hover = null;
+    readout.hidden = true;
+  });
 }
 
 // Double-click: glide there and halve the distance to it, keeping the angle.
@@ -701,6 +830,7 @@ function drawOverlay(c, w, h) {
   const map = current();
   const u = Math.min(w, h * 1.6) / 1000; // one unit of type scale
   c.clearRect(0, 0, w, h);
+  if (GLIDE) return;
   c.fillStyle = look().ink;
   c.textBaseline = 'alphabetic';
 
@@ -960,7 +1090,7 @@ function resize() {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 }
-addEventListener('resize', () => (resize(), resetView()));
+addEventListener('resize', () => (resize(), moved ? refine() : resetView()));
 
 await Promise.all(
   ['200', '300', '400'].map((weight) =>
@@ -971,6 +1101,47 @@ showActive();
 fitControllers();
 resize();
 resetView();
+const linked = linkedView();
+if (linked) {
+  moveTo(linked);
+  setMoved(true);
+}
+// The glide circles a point over Europe once every 4 seconds (the clip's
+// length, so it loops), from a third of the home view's distance. Each frame
+// is a few samples at the clip's own resolution, which the denoiser and its
+// history keep clean.
+let glide = null;
+if (GLIDE) {
+  document.body.classList.add('glide');
+  tracer.previewScale = 0.8; // the clip is scaled to 80% anyway
+  tracer.previewBounces = 1;
+  resize();
+  const [gx, gy] = toGrid(48, 12);
+  const center = new THREE.Vector3(
+    gx * CELL - WORLD / 2,
+    0,
+    gy * CELL - (ny * CELL) / 2,
+  );
+  const {target, position} = home();
+  const offset = position.sub(target).multiplyScalar(0.3);
+  glide = {center, offset, radius: 1.2, samples: 3};
+  moveTo({target: center, position: center.clone().add(offset)});
+}
+function glideStep(now) {
+  const a = (now / 4000) * 2 * Math.PI;
+  const t = glide.center
+    .clone()
+    .add(
+      new THREE.Vector3(Math.cos(a), 0, Math.sin(a)).multiplyScalar(
+        glide.radius,
+      ),
+    );
+  controls.target.copy(t);
+  camera.position.copy(t).add(glide.offset);
+  controls.update();
+  moving();
+}
+
 setLighting();
 await build();
 renderer.setAnimationLoop(() => {
@@ -981,8 +1152,10 @@ renderer.setAnimationLoop(() => {
   pan(Math.min((now - lastFrame) / 1000, 0.1));
   lastFrame = now;
   fly();
+  if (glide) glideStep(now);
   controls.update();
-  if (now - lastMove < 200) tracer.preview(camera);
+  if (glide) for (let i = 0; i < glide.samples; i++) tracer.preview(camera);
+  else if (now - lastMove < 200) tracer.preview(camera);
   else if (tracer.samples < params.maxSamples) tracer.step(camera);
   tracer.show(params.exposure * look().exposure);
   drawOverlay(ctx, overlay.width, overlay.height);

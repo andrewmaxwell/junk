@@ -58,6 +58,10 @@ uniform int uPowerLevels;
 // roughness for the sun's glint), and scatters the rest by its albedo.
 uniform float uWaterF0;
 uniform float uWaterRough;
+// Over 0, glow found by a bounce ray adds at most this much per channel: in
+// previews, where a few samples can't average out a bright column hit by
+// chance (a firefly). 0 (full quality) counts it all.
+uniform float uClamp;
 uniform int uFrame; // this sample's number since the last restart
 uniform uint uSeed; // changes at every restart
 uniform int uBounces;
@@ -401,7 +405,9 @@ void main() {
         float pdfLight = glowPdf(o, c, n, d, t);
         w = pdfBounce * pdfBounce / (pdfBounce * pdfBounce + pdfLight * pdfLight);
       }
-      radiance += throughput * albedo * albedo * uGlow * w;
+      vec3 glow = throughput * albedo * albedo * uGlow * w;
+      if (uClamp > 0.0 && bounce > 0) glow = min(glow, vec3(uClamp));
+      radiance += glow;
       albedo = uGlowAlbedo;
     }
     o = p + n * 1e-3;
@@ -476,6 +482,9 @@ uniform bool uDenoised;
 uniform sampler2D uRaw;
 uniform float uRawCount; // samples summed in uRaw
 uniform sampler2D uNoise;
+uniform sampler2D uBloom; // the glow around bright light (see bloom), added
+uniform float uBloomStrength;
+uniform vec2 uScreen;
 uniform vec2 uNoiseRange; // all raw at or under x, all denoised at or over y
 uniform float uExposure;
 uniform vec2 uScale; // accumulation pixels per screen pixel
@@ -512,6 +521,9 @@ void main() {
     float lum = dot(raw, vec3(0.2126, 0.7152, 0.0722));
     float noise = sqrt(max(accum(uNoise, gl_FragCoord.xy).a, 0.0)) / max(lum, 1e-3);
     a = mix(a, raw, clamp((uNoiseRange.y - noise) / (uNoiseRange.y - uNoiseRange.x), 0.0, 1.0));
+  }
+  if (uBloomStrength > 0.0) {
+    a += texture(uBloom, gl_FragCoord.xy / uScreen).rgb * uBloomStrength;
   }
   vec3 c = toSrgb(aces(a * uExposure));
   // A touch of noise so the smooth ground doesn't band.
@@ -698,6 +710,68 @@ void main() {
 }
 `;
 
+// --- bloom -------------------------------------------------------------------
+// Light brighter than a threshold spreads into a soft glow around it, as it
+// does in a camera lens: the bright part is halved in size down a chain of
+// images, then added back up the chain, each level blurring a little wider,
+// and the result added to the picture. Only what's shown changes.
+
+// The bright part of a 2x2 block of the shown image (its sum over uCount).
+const bloomBrightShader = /* glsl */ `
+precision highp float;
+uniform sampler2D uSource;
+uniform float uCount;
+uniform float uThreshold;
+out vec4 fragColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy) * 2;
+  ivec2 size = textureSize(uSource, 0) - 1;
+  vec3 sum = vec3(0.0);
+  for (int k = 0; k < 4; k++) {
+    vec3 c = texelFetch(uSource, min(p + ivec2(k & 1, k >> 1), size), 0).rgb / uCount;
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    sum += c * max(l - uThreshold, 0.0) / max(l, 1e-4);
+  }
+  fragColor = vec4(sum / 4.0, 1.0);
+}
+`;
+
+// Half size, averaging (bilinear taps between texels cover a 4x4 block).
+const bloomDownShader = /* glsl */ `
+precision highp float;
+uniform sampler2D uSource;
+out vec4 fragColor;
+void main() {
+  vec2 texel = 1.0 / vec2(textureSize(uSource, 0));
+  vec2 uv = gl_FragCoord.xy * 2.0 * texel;
+  vec3 sum = texture(uSource, uv + texel * vec2(-1.0, -1.0)).rgb
+    + texture(uSource, uv + texel * vec2(1.0, -1.0)).rgb
+    + texture(uSource, uv + texel * vec2(-1.0, 1.0)).rgb
+    + texture(uSource, uv + texel * vec2(1.0, 1.0)).rgb;
+  fragColor = vec4(sum / 4.0, 1.0);
+}
+`;
+
+// Double size: this level plus the smaller one blurred up with a tent.
+const bloomUpShader = /* glsl */ `
+precision highp float;
+uniform sampler2D uSource; // this level
+uniform sampler2D uSmaller; // the level below, already summed up
+out vec4 fragColor;
+void main() {
+  vec2 uv = gl_FragCoord.xy / vec2(textureSize(uSource, 0));
+  vec2 t = 1.0 / vec2(textureSize(uSmaller, 0));
+  vec3 up = vec3(0.0);
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      float w = (x == 0 ? 2.0 : 1.0) * (y == 0 ? 2.0 : 1.0) / 16.0;
+      up += w * texture(uSmaller, uv + vec2(x, y) * t).rgb;
+    }
+  }
+  fragColor = vec4(texelFetch(uSource, ivec2(gl_FragCoord.xy), 0).rgb + up, 1.0);
+}
+`;
+
 export function createPathTracer(renderer) {
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
   quad.frustumCulled = false;
@@ -769,6 +843,7 @@ export function createPathTracer(renderer) {
       uPowerLevels: {value: 1},
       uWaterF0: {value: 0},
       uWaterRough: {value: 0.1},
+      uClamp: {value: 0},
       uBase: {value: linear('#ffffff')},
       uFrame: {value: 0},
       uSeed: {value: 0},
@@ -790,6 +865,9 @@ export function createPathTracer(renderer) {
       uRawCount: {value: 1},
       uNoise: {value: null},
       uNoiseRange: {value: new THREE.Vector2(0.08, 0.25)},
+      uBloom: {value: null},
+      uBloomStrength: {value: 0},
+      uScreen: {value: new THREE.Vector2(1, 1)},
     },
   });
   const u = trace.uniforms;
@@ -853,6 +931,69 @@ export function createPathTracer(renderer) {
   }
 
   // Runs the denoiser on pair p's samples; the result is in dn.out.
+  // The bloom chain: down[0] is half the shown image's size, each next level
+  // half again; up[i] is down[i] plus everything below it, blurred up.
+  const bloomPass = (fragmentShader, uniforms) =>
+    new THREE.RawShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      vertexShader,
+      fragmentShader,
+      uniforms,
+    });
+  const bloomBright = bloomPass(bloomBrightShader, {
+    uSource: {value: null},
+    uCount: {value: 1},
+    uThreshold: {value: 1},
+  });
+  const bloomDown = bloomPass(bloomDownShader, {uSource: {value: null}});
+  const bloomUp = bloomPass(bloomUpShader, {
+    uSource: {value: null},
+    uSmaller: {value: null},
+  });
+  const bloomTarget = () => {
+    const t = floatTarget(1, THREE.HalfFloatType);
+    t.texture.minFilter = t.texture.magFilter = THREE.LinearFilter;
+    return t;
+  };
+  const bloomLevels = [];
+  let bloomKey = '';
+  function bloom(source, count, width, height) {
+    const sizes = [];
+    for (
+      let [w, h] = [width >> 1, height >> 1];
+      w >= 4 && h >= 4 && sizes.length < 7;
+
+    ) {
+      sizes.push([w, h]);
+      [w, h] = [w >> 1, h >> 1];
+    }
+    while (bloomLevels.length < sizes.length) {
+      bloomLevels.push({down: bloomTarget(), up: bloomTarget()});
+    }
+    sizes.forEach(([w, h], i) => {
+      for (const t of [bloomLevels[i].down, bloomLevels[i].up]) {
+        if (t.width !== w || t.height !== h) t.setSize(w, h);
+      }
+    });
+    bloomBright.uniforms.uSource.value = source;
+    bloomBright.uniforms.uCount.value = count;
+    bloomBright.uniforms.uThreshold.value = tracer.bloomThreshold;
+    run(bloomBright, bloomLevels[0].down);
+    for (let i = 1; i < sizes.length; i++) {
+      bloomDown.uniforms.uSource.value = bloomLevels[i - 1].down.texture;
+      run(bloomDown, bloomLevels[i].down);
+    }
+    const last = sizes.length - 1;
+    let smaller = bloomLevels[last].down.texture;
+    for (let i = last - 1; i >= 0; i--) {
+      bloomUp.uniforms.uSource.value = bloomLevels[i].down.texture;
+      bloomUp.uniforms.uSmaller.value = smaller;
+      run(bloomUp, bloomLevels[i].up);
+      smaller = bloomLevels[i].up.texture;
+    }
+    return smaller;
+  }
+
   function denoise(p) {
     if (!dn) {
       dn = {
@@ -993,6 +1134,7 @@ export function createPathTracer(renderer) {
     u.uRes.value.set(p.width, p.height);
     const saved = u.uBounces.value;
     u.uBounces.value = bounces;
+    u.uClamp.value = p === small ? tracer.previewClamp : 0;
     u.uPrev.value = p.read.texture;
     quad.material = trace;
     // three only uploads uniforms when the material changes between draws,
@@ -1023,11 +1165,16 @@ export function createPathTracer(renderer) {
     budgetMs: 0,
     previewScale: 0.3, // preview resolution, as a fraction of the screen's
     previewBounces: 1,
+    previewClamp: 0, // see uClamp
     denoise: false,
     // A pixel's noise (the standard error of its brightness, relative to it)
     // at which the display switches from its own samples to the denoised
     // image, fully by the second.
     noiseRange: [0.08, 0.25],
+    // How much of the light over bloomThreshold (in radiance, before
+    // exposure) spreads into a glow around it; 0 for none.
+    bloom: 0,
+    bloomThreshold: 1,
     reset() {
       tracer.samples = 0;
       main.samples = 0;
@@ -1138,6 +1285,15 @@ export function createPathTracer(renderer) {
         du.uNoise.value = dn.temporal.textures[1];
         du.uNoiseRange.value.fromArray(tracer.noiseRange);
       }
+      du.uBloomStrength.value = tracer.bloom;
+      if (tracer.bloom > 0 && p.samples > 0) {
+        const key = `${p === main}|${p.samples}|${p.restart}|${count}`;
+        if (key !== bloomKey) {
+          du.uBloom.value = bloom(shown, count, p.width, p.height);
+          bloomKey = key;
+        }
+      }
+      du.uScreen.value.set(screen[0], screen[1]);
       display.uniforms.uAccum.value = shown;
       display.uniforms.uExposure.value = exposure;
       display.uniforms.uCount.value = count;

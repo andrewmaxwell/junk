@@ -23,6 +23,11 @@ const MIN_FRAMES = 30; // fewer changed frames than this is a jump or two, not m
 const setup = {
   lambdagator: {warmup: 300, act: (page) => page.click('#watch')},
   bz: {warmup: 8000}, // let the broken fronts curl up into spirals
+  // a slow, seamlessly looping glide over Europe at night (see ?glide in its main.js)
+  worldColumns: {
+    warmup: 4000,
+    act: (page) => page.goto(`${page.url()}?glide`, {waitUntil: 'load'}),
+  },
   turmite3D: {warmup: 2500}, // let the ant build something worth orbiting
   // let the opening world come alive and the camera glide in to it
   'particle-life': {
