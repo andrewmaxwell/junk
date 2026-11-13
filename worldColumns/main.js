@@ -1,11 +1,12 @@
-// The world as a field of columns. The main map makes each as tall as the
-// share of the year's hours you could have left the windows open there
-// (ERA5-Land, about 9 km, hourly, reduced by build/fetch.py and resampled onto
-// an Equal Earth grid by build/export.py). The other maps, from
-// build/layers.py, are on the same projection, most of them twice as fine.
-// The picture is path traced with the Comfort spike map's tracer and sharpens
-// as samples add up. Titles, labels and the legend are drawn on a 2D canvas
-// over it, so "save PNG" can stack the two into one image.
+// The world as a field of columns, path traced: night lights (the default,
+// glowing under a moon), the share of the year's hours you could have left
+// the windows open (ERA5-Land, about 9 km, hourly, reduced by build/fetch.py
+// and resampled onto an Equal Earth grid by build/export.py), and elevation,
+// population, travel time and rain (build/layers.py, on the same projection,
+// most of them twice as fine). The tracer is the Comfort spike map's, and the
+// picture sharpens as samples add up. The caption, labels and legend are
+// drawn on a 2D canvas over it, so "save PNG" can stack the two into one
+// image.
 //
 // The tracer gets a fixed budget of columns: the whole map at the home view,
 // and only what's in view, in finer columns, after zooming in.
@@ -57,9 +58,26 @@ const hours = (minutes) =>
       ? `${round2.format(minutes / 60)} h`
       : `${round2.format(minutes / 1440)} days`;
 const MAPS = {
+  lights: {
+    button: 'Night lights',
+    kicker: () => 'THE EARTH FROM SPACE AFTER DARK, 2016',
+    subtitle: () =>
+      'How bright each place looked on cloud-free nights through the year; the brightest city centres max out the scale',
+    legend: 'HEIGHT · BRIGHTNESS AT NIGHT',
+    unit: 'brightness',
+    format: (v) => `${Math.round(v / 25.5)}%`, // of the brightest
+    source: [
+      'Night lights: Black Marble 2016 (NASA), VIIRS day-night band, 3 km grid.',
+      'In Equal Earth projection.',
+    ],
+    ramp: ['#14172a', '#3a2c3e', '#9a6026', '#f2b445', '#fff5d6'],
+    labels: false, // every city maxes out the scale
+    night: true,
+    ranges: {low: [0, 1000, 10], high: [100, 2550, 10]},
+    settings: {low: 0, high: 2550, gamma: 1, height: 2.5},
+  },
   windows: {
     button: 'Open windows',
-    title: 'Windows open',
     kicker: (period) =>
       period === 'all'
         ? 'A YEAR OF OPEN-WINDOW WEATHER AROUND THE WORLD'
@@ -85,7 +103,6 @@ const MAPS = {
   },
   elevation: {
     button: 'Elevation',
-    title: 'Elevation',
     kicker: () => 'THE LAND, STRETCHED UPWARD',
     subtitle() {
       const {low, high, gamma, height} = params;
@@ -110,7 +127,6 @@ const MAPS = {
   },
   population: {
     button: 'Population',
-    title: 'Where people live',
     kicker: () => 'PEOPLE PER SQUARE MILE IN 2025',
     subtitle: () => 'Everyone on Earth, counted on a 1 km grid',
     legend: 'HEIGHT · PEOPLE PER SQUARE MILE',
@@ -124,28 +140,8 @@ const MAPS = {
     ranges: {low: [0, 1000, 10], high: [100, 60000, 100]},
     settings: {low: 0, high: 8000, gamma: 0.7, height: 3},
   },
-  lights: {
-    button: 'Night lights',
-    title: 'Lights at night',
-    kicker: () => 'THE EARTH FROM SPACE AFTER DARK, 2016',
-    subtitle: () =>
-      'How bright each place looked on cloud-free nights through the year; the brightest city centres max out the scale',
-    legend: 'HEIGHT · BRIGHTNESS AT NIGHT',
-    unit: 'brightness',
-    format: (v) => `${Math.round(v / 25.5)}%`, // of the brightest
-    source: [
-      'Night lights: Black Marble 2016 (NASA), VIIRS day-night band, 3 km grid.',
-      'In Equal Earth projection.',
-    ],
-    ramp: ['#14172a', '#3a2c3e', '#9a6026', '#f2b445', '#fff5d6'],
-    labels: false, // every city maxes out the scale
-    night: true,
-    ranges: {low: [0, 1000, 10], high: [100, 2550, 10]},
-    settings: {low: 0, high: 2550, gamma: 1, height: 2.5},
-  },
   travel: {
     button: 'Travel time',
-    title: 'Far from everywhere',
     kicker: () => 'TRAVEL TIME TO THE NEAREST CITY, 2015',
     subtitle: () =>
       'The fastest way by road, rail, river or on foot to a city of at least 50,000 people',
@@ -163,7 +159,6 @@ const MAPS = {
   },
   rain: {
     button: 'Rain',
-    title: 'Rain',
     kicker: () =>
       `RAIN AND SNOW, ${formatDate(meta.start)} – ${formatDate(meta.end)}`.toUpperCase(),
     subtitle: () =>
@@ -187,7 +182,8 @@ for (const map of Object.values(MAPS)) {
   map.rampColors = map.ramp.map((hex) => new THREE.Color(hex));
 }
 
-const startMap = MAPS[query.get('map')] ? query.get('map') : 'windows';
+const DEFAULT_MAP = 'lights';
+const startMap = MAPS[query.get('map')] ? query.get('map') : DEFAULT_MAP;
 const params = {
   map: startMap,
   period: 'all',
@@ -708,22 +704,21 @@ function drawOverlay(c, w, h) {
   c.fillStyle = look().ink;
   c.textBaseline = 'alphabetic';
 
-  // Title block, top left. Once the camera has left the home view only the
-  // title and legend stay, so the map has the screen.
+  // Caption, top left: what the map shows, in small type, since the tabs
+  // name it. It hides once the camera leaves the home view, so the map has
+  // the screen.
   const pad = 36 * u;
   const full = !moved || c !== ctx;
-  c.font = `200 ${36 * u}px ${FONT}`;
-  halo(c, u, map.title, pad, pad + 30 * u);
   if (full) {
     c.font = `400 ${9.5 * u}px ${FONT}`;
     c.letterSpacing = `${2.4 * u}px`;
-    halo(c, u, map.kicker(params.period), pad + 2 * u, pad + 50 * u);
+    halo(c, u, map.kicker(params.period), pad + 2 * u, pad + 12 * u);
     c.letterSpacing = '0px';
     c.font = `300 ${11.5 * u}px ${FONT}`;
     c.globalAlpha = 0.75;
     const lines = wrap(c, map.subtitle(params.period), 470 * u);
     lines.forEach((line, i) =>
-      halo(c, u, line, pad + 2 * u, pad + (67 + 15 * i) * u),
+      halo(c, u, line, pad + 2 * u, pad + (29 + 15 * i) * u),
     );
     c.globalAlpha = 1;
   }
@@ -851,7 +846,7 @@ function switchMap(key) {
   params.map = key;
   Object.assign(params, current().settings);
   const url = new URL(location.href);
-  if (key === 'windows') url.searchParams.delete('map');
+  if (key === DEFAULT_MAP) url.searchParams.delete('map');
   else url.searchParams.set('map', key);
   history.replaceState(null, '', url);
   showActive();

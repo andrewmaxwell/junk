@@ -1,6 +1,19 @@
-Windows Open - 2026 - How much of the year you could have left the windows open, everywhere on Earth, from hourly weather and air quality.
+World Columns - 2026 - The world as a path-traced field of columns: city lights glowing under the moon, open-window weather, elevation, population, travel time and rain.
 
-A path-traced map of the world's land in columns, each as tall as the share of all hours, day and night, from Nov 1, 2025 to Oct 31, 2026, when the windows could have been open. An hour counts when:
+The world's land in columns on an Equal Earth map, each as tall as one number for that place, path traced with soft shadows and light bouncing between them. The tabs at the top right (or keys 1–6) pick the map:
+
+- **Night lights** (the default): how bright each place looked from space on cloud-free nights. The page goes dark, and the columns glow by their own brightness and light the pale land around them, under a faint moon whose broad glint shows on the dark, glossy sea.
+- **Open windows**: the share of all hours, day and night, from Nov 1, 2025 to Oct 31, 2026, when the windows could have been open. Pick a month in Settings to watch the seasons move.
+- **Elevation**: the highest ground in each column, exaggerated about 70 times.
+- **Population**: people per square mile in 2025.
+- **Travel time** to the nearest city of 50,000 people.
+- **Rain** over the same year as the open-window map.
+
+Drag to turn, scroll to zoom toward the pointer, WASD or the arrow keys to slide across, and double-click to glide in; Reset view or Escape goes back. Away from the home view only the legend stays on screen. `?map=windows`, `elevation`, `population`, `travel` or `rain` opens another map, and `?noPause` keeps rendering while the window isn't focused (it pauses otherwise, to spare the GPU). The project was called Windows Open until it grew more maps; old links redirect.
+
+## Open windows
+
+An hour counts when:
 
 - the air was 62–80°F, or 55–80°F at night (10 pm to 7 am local solar time), when cool air is good for sleeping and the house's own heat keeps the inside warmer,
 - the dew point was under 63°F (not muggy),
@@ -8,13 +21,22 @@ A path-traced map of the world's land in columns, each as tall as the share of a
 - the wind averaged under 10 m/s (22 mph) for the hour, and
 - there was no dust or smoke: CAMS PM10 under 154 µg/m³ and PM2.5 under 35.4 µg/m³, the US EPA's AQI 100 lines, applied hour by hour.
 
-Pick a month to watch the seasons move. There are five other maps on the same projection: **Elevation** (the highest ground in each column, exaggerated about 70 times), **Population** (people per square mile in 2025), **Night lights** (at night: the page goes dark, the columns glow by their own brightness and light the pale land around them, and the sea is dark water with a broad glint of a moon behind the map), **Travel time** to the nearest city of 50,000 people, and **Rain** over the same year as the open-window map. The tabs at the top right (or keys 1–6) pick the map. Drag to turn, scroll to zoom toward the pointer, WASD or the arrow keys to slide across, and double-click to glide in; Reset view or Escape goes back. While the camera moves the page traces a quick preview (30% of the pixels, one bounce), and once it settles it goes back to full quality, with columns sharpened to the new view. Full-quality samples are drawn a band of rows at a time, sized to about 20 ms of GPU work, so a Retina-sized frame (which takes about half a second whole) never holds up the camera. A denoiser after SVGF (as in [anotherRaytracer](../anotherRaytracer/)) cleans up what's shown while samples are few: when the view changes it moves the last image to where its surfaces are now and counts it as up to 8 samples, and five edge-avoiding wavelet passes average each pixel with neighbours on the same face, plane and color whose brightness differs by no more than the noise explains. Against a 4,096-sample render it halves the error at 1 sample (19.8 to 10.1, on a 0-255 scale) and cuts it by a fifth at 4; each pixel fades back to its own samples as their noise drops (fully under 8% relative error, fully denoised over 25%), since once they're clean the filter would only blur real detail where several columns share a pixel. On the elevation map that's never worse than the raw samples from 16 on, and glow-lit ground at night stays smoothed until it really is clean. **denoise** in Settings > Quality turns it off. Glowing columns are lights the tracer aims at, like the sun: at every surface it picks one, the brighter and nearer the likelier, by walking down a pyramid of their summed power, and weighs those rays against bounce rays that happen to hit one (multiple importance sampling). Against bounce rays alone it gives the same brightness with about half the noise. A sample's first choices (where in the pixel, where on the sun's disk, which way to bounce) follow an Owen-scrambled Sobol sequence, so they spread evenly as samples add up: the page always gives the path tracer the same number of columns (650,000 by default) and spends them on what's in view. Away from the home view only the title and legend stay on screen. Rendering pauses while the window isn't focused, to spare the GPU; add `?noPause` to the URL to keep it going (for screenshots), and `?map=elevation`, `population`, `lights`, `travel` or `rain` to open another map.
-
- Each closed hour is blamed on one thing, in the order cold, hot, rain, wind, muggy, air; the data keeps the main reason per cell, though the page doesn't show it yet.
+Each closed hour is blamed on one thing, in the order cold, hot, rain, wind, muggy, air; the data keeps the main reason per cell, though the page doesn't show it yet.
 
 What stands out: the East African highlands (Nairobi 92%) are far ahead of anywhere else, then the high plateaus and mild coasts (Kunming, Sydney, Los Angeles, Cape Town, Johannesburg, Mexico City). The Sahara is mild all autumn but loses its summer to heat and its spring to dust, ending the year at about 21%, just below Kansas City and Dallas. Delhi falls to 1% once smoke and pollution count, and Singapore is too hot or muggy every hour of the year. The cooler night floor helps dry places with cold nights most (San Francisco 27% → 42%). Wind rarely decides anything: it closes over 10% of hours only on a few windy coasts and ridges, like the Canary Islands and the Western Sahara coast.
 
 Why Nairobi beats San Francisco: every hour counts, night included. Nairobi, at 1,700 m on the equator, has days around 77°F and nights that seldom fall below 55°F, so it's open 85–99% of the hours in every month. San Francisco's cool days and nights leave 57% of its hours too cold, from 3% open in its worst month to 83% in its best.
+
+## Rendering
+
+The renderer is the Comfort spike map's [path tracer](../comfort/map/spikes/pathtracer.js): every column fills its grid cell, so a ray walks the grid cell by cell and hits the boxes exactly. Each sample is a jittered camera ray and up to three diffuse bounces, with the sun (or moon) sampled directly from a disk of a few degrees, so shadows have soft edges.
+
+- **Detail where you look.** The page always gives the tracer the same number of columns (650,000 by default) and spends them on what's in view: 33 km columns for the whole world, down to 5.5 km zoomed in, rebuilt once the camera settles.
+- **Moving.** While the camera moves it traces a quick preview (30% of the pixels, one bounce). Full-quality samples are drawn a band of rows at a time, sized to about 20 ms of GPU work, so a Retina-sized frame (about half a second whole) never holds up the camera.
+- **Denoising**, after SVGF (as in [anotherRaytracer](../anotherRaytracer/)): when the view changes, the last image is moved to where its surfaces are now and counts as up to 8 samples, and five edge-avoiding wavelet passes average each pixel with neighbours on the same face, plane and color whose brightness differs by no more than the noise explains. Against a 4,096-sample render it halves the error at 1 sample (19.8 to 10.1, on a 0–255 scale) and cuts it by a fifth at 4. Each pixel fades back to its own samples as their noise drops (fully under 8% relative error, fully denoised over 25%), since past that the filter would only blur detail where several columns share a pixel; on the elevation map that's never worse than the raw samples from 16 on. **denoise** in Settings › Quality turns it off.
+- **Glowing columns are lights** the tracer aims at, like the sun: at every surface it picks one, the brighter and nearer the likelier, by walking down a pyramid of their summed power, and weighs those rays against bounce rays that happen to hit one (multiple importance sampling). Against bounce rays alone it gives the same brightness with about half the noise.
+- **Water** (night only) mirrors a Fresnel share of the light, blurred, and the moon's glint comes from a GGX lobe on the ray already aimed at the moon.
+- **Sampling.** A sample's first choices (where in the pixel, where on the sun's disk, which way to bounce) follow an Owen-scrambled Sobol sequence, so they spread evenly as samples add up.
 
 ## Checks
 
@@ -41,7 +63,7 @@ These were run under the original test, 62°F around the clock and no wind limit
 Python in `build/.venv` (`cdsapi eccodes numpy pillow tifffile imagecodecs h5py`), with a Copernicus key in `~/.cdsapirc` and the ERA5-Land and CAMS licences accepted.
 
 ```
-cd windowsOpen/build
+cd worldColumns/build
 .venv/bin/python fetch.py --start 2025-11-01 --end 2026-10-31   # weather, about 6 hours
 .venv/bin/python air.py --start 2025-11-01 --end 2026-10-31     # dust and smoke, about 3-5 hours, can run alongside
 .venv/bin/python export.py                                      # about 30 s
@@ -49,5 +71,3 @@ cd windowsOpen/build
 ```
 
 `fetch.py` downloads ERA5-Land in 48 chunks of about eight days (about 5.6 GB of GRIB each), three at a time, reduces each to hour counts per cell plus a packed per-hour bit of whether the weather allowed open windows, and deletes the GRIB. `air.py` does the same for CAMS a month at a time, keeping a bit per hour per CAMS cell where the air was bad. Both skip what's already done, so an interrupted run resumes. `export.py` combines them, so changing the air limits needs only an export, not new downloads, and writes `data/`: one PNG per period (red is the percent of open hours, green the main reason the rest were closed, 255 off land) and `meta.json`. `layers.py` writes one PNG per other map as 16-bit values (high byte in red, low in green, 65535 off land), with `layers.json` giving each one's grid and units. Its sources go in `build/cache/sources/` first: the files linked above (the population zip unzipped), plus the ERA5-Land monthly precipitation, which is a small Climate Data Store request. `layers.py name ...` rebuilds just those maps.
-
-The renderer is the Comfort Spikes [path tracer](../comfort/map/spikes/pathtracer.js).

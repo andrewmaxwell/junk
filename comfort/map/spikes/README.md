@@ -8,4 +8,4 @@ The lighting is path traced in [pathtracer.js](pathtracer.js), a progressive tra
 - The light comes from the north so the tall West Coast's shadows fall toward the viewer, not across the country.
 - Labels quote the 3 km cell under the city, not the block's average.
 
-The tracer is shared with [Windows Open](../../../windowsOpen/).
+The tracer is shared with [World Columns](../../../worldColumns/).
