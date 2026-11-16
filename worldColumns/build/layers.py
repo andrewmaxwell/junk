@@ -281,7 +281,8 @@ def household(grid, people, land):
     CORESIDENCE has none; Saudi Arabia, Taiwan and the UAE, with neither,
     have none. The US and Puerto Rico come from census tracts instead (see
     us_tracts). 0 where fewer than 1 person per km² lives, 1 on land no
-    source covers."""
+    source covers. Also returns where each cell's figure comes from, as an
+    index into the list of labels it returns too (0 for none)."""
     import csv
     import sqlite3
     un = un_household_sizes()
@@ -299,17 +300,31 @@ def household(grid, people, land):
     db = sqlite3.connect(os.path.join(SOURCES, 'SUBNATIONAL_BOUNDARIES_CORESIDENCE_PROJECT.gpkg'))
     db_country = dict(db.execute('select GEOLEVEL1, C1 from a1_world_subnational_coresidence_new'))
     fix = {'URU': 'URY'}
-    values = []
+    labels = ['']
+    def label(text):
+        if text not in labels:
+            labels.append(text)
+        return labels.index(text)
+
+    kinds = {'IPUMS': 'census', 'DHS': 'DHS survey', 'MICS': 'MICS survey', 'LFS': 'labour force survey',
+             'SILC': 'EU income survey', 'HILDA': 'HILDA survey'}
+    values, sources = [], []
     for code in codes:
         iso = fix.get(db_country[code], db_country[code])
         if code in latest:
             year, sample, v = latest[code]
+            _, when, kind = sample.split('_')
+            text = f"{when.replace('-', '–')} {kinds.get(kind, 'survey')}"
             if iso in un and un[iso][0] > year and sample in national:
                 v *= un[iso][1] / national[sample]
+                text += f", scaled to the UN's {un[iso][0]} figure"
+            sources.append(label(text))
         else:
             v = un.get(iso, (0, np.nan))[1]
+            sources.append(label(f'UN national figure, {un[iso][0]}') if iso in un else 0)
         values.append(v)
     values = np.array(values + [np.nan])  # the last for cells in no region
+    sources = np.array(sources + [0])
     region = spread(rasterize(grid, [shapes[c] for c in codes]), land, 2)
     region_iso = np.array([fix.get(db_country[c], db_country[c]) for c in codes] + [''])[region]
     # Under the regions, every country with a UN figure, for the places
@@ -317,7 +332,7 @@ def household(grid, people, land):
     countries = json.load(open(os.path.join(SOURCES, 'ne_10m_admin_0_countries.geojson')))['features']
     # CORESIDENCE's outlines are generalized: Malaysia's covers Singapore and
     # China's Taiwan, so a region counts only inside its own country.
-    outlines, sizes, isos = [], [], []
+    outlines, sizes, isos, country_sources = [], [], [], []
     for f in countries:
         p = f['properties']
         iso = p['ISO_A3'] if p['ISO_A3'] != '-99' else p['ADM0_A3']
@@ -327,16 +342,25 @@ def household(grid, people, land):
         outlines.append([np.array(poly[0]) for poly in polygons])
         sizes.append(un.get(iso, (0, np.nan))[1])
         isos.append(iso)
+        country_sources.append(label(f'UN national figure, {un[iso][0]}') if iso in un else 0)
     country = spread(rasterize(grid, outlines), land, 6)
     country_iso = np.array(isos + [''])[country]
-    out = values[region]
-    out = np.where((country_iso == '') | (country_iso == region_iso), out, np.nan)
-    out = np.where(np.isnan(out), np.array(sizes + [np.nan])[country], out)
+    own = (country_iso == '') | (country_iso == region_iso)
+    out = np.where(own, values[region], np.nan)
+    source = np.where(own & ~np.isnan(out), sources[region], 0)
+    fallback = np.isnan(out)
+    out = np.where(fallback, np.array(sizes + [np.nan])[country], out)
+    source = np.where(fallback, np.array(country_sources + [0])[country], source)
     # The US and Puerto Rico by census tract, far finer than their states.
-    tract = us_tracts(grid)
-    out = np.where(np.isin(country_iso, ['USA', 'PRI']) & ~np.isnan(tract), tract, out)
+    tract = us_tracts(grid, people)
+    us = np.isin(country_iso, ['USA', 'PRI']) & ~np.isnan(tract)
+    out = np.where(us, tract, out)
+    source = np.where(us, label('ACS 2020–2024, by census tract'), source)
+    lived = people >= 1
+    source = np.where(lived & ~np.isnan(out), source, 0)
     out = np.where(np.isnan(out), 0.01, out)  # stored as 1: no data
-    return np.where(people >= 1, out * 100, 0)
+    assert len(labels) <= 256
+    return np.where(lived, out * 100, 0), source.astype(np.uint8), labels
 
 
 # --- regions -----------------------------------------------------------------
@@ -453,12 +477,15 @@ def shapefile(path):
     return out
 
 
-def us_tracts(grid):
+def us_tracts(grid, density):
     """People per household in each cell from the ACS 2020-2024 tract
-    figures, NaN where no tract has households. A tract's households are
-    spread evenly over its area, drawn 6 pixels to a cell each way, so a cell
-    is its tracts' people over their households; a tract too small to cover
-    a pixel puts all of them in the cell at its middle."""
+    figures, NaN where no tract has households. Tracts are drawn 6 pixels to
+    a cell each way, and a tract's households are shared among its pixels by
+    how many people live there (`density`, GHS-POP), not by area, so a huge
+    rural tract's households go to its towns rather than its empty range. A
+    cell is then its tracts' people over their households. A tract with no
+    one in its pixels shares them by area; one too small to cover a pixel
+    puts all of them in the cell at its middle."""
     import csv
 
     def table(name, column):
@@ -486,6 +513,8 @@ def us_tracts(grid):
     group = np.array([(g[:2] if g[:2] in ('02', '15') else 'rest') + ('+' if rings[0][0, 0] > 0 else '')
                       for g, rings in tracts])
     pixels = np.zeros(len(tracts))
+    weight = np.zeros(len(tracts))
+    density = density.ravel()
     drawn = []
     for key in np.unique(group):
         members = np.flatnonzero(group == key)
@@ -499,9 +528,10 @@ def us_tracts(grid):
         t = members[index[ok]]
         cell = (row0 + rr // scale) * grid.width + col0 + cc // scale
         pixels += np.bincount(t, minlength=len(tracts))
+        weight += np.bincount(t, density[cell], len(tracts))
         drawn.append((t, cell))
     for t, cell in drawn:
-        share = 1 / pixels[t]
+        share = np.where(weight[t] > 0, density[cell] / np.maximum(weight[t], 1e-12), 1 / pixels[t])
         cell_people += np.bincount(cell, people[t] * share, n)
         cell_hh += np.bincount(cell, hh[t] * share, n)
     for i in np.flatnonzero(pixels == 0):
@@ -509,7 +539,8 @@ def us_tracts(grid):
         cell = int(row) * grid.width + int(col)
         cell_people[cell] += people[i]
         cell_hh[cell] += hh[i]
-    print(f'  {len(tracts)} tracts, {np.sum(pixels == 0)} too small to draw, {hh.sum() / 1e6:.1f} M households, '
+    print(f'  {len(tracts)} tracts, {np.sum(pixels == 0)} too small to draw, '
+          f'{np.sum((pixels > 0) & (weight == 0))} with no one in GHS-POP, {hh.sum() / 1e6:.1f} M households, '
           f'{people.sum() / hh.sum():.2f} people each')
     out = np.where(cell_hh > 0, cell_people / np.maximum(cell_hh, 1e-9), np.nan)
     return out.reshape(grid.height, grid.width)
@@ -533,14 +564,17 @@ def spread(index, land, steps):
 
 # --- output ------------------------------------------------------------------
 
-def write(name, values, land, width, unit, note, step=1):
-    """Rounds to `step` (which compresses far better) and saves."""
+def write(name, values, land, width, unit, note, step=1, blue=None):
+    """Rounds to `step` (which compresses far better) and saves, with
+    `blue` (one byte per cell) in the blue channel if given."""
     v = np.round(np.nan_to_num(values) / step) * step
     v = np.clip(v, 0, NO_DATA - 1).astype(np.uint16)
     v = np.where(land, v, NO_DATA)
     rgb = np.zeros(v.shape + (3,), np.uint8)
     rgb[..., 0] = v >> 8
     rgb[..., 1] = v & 255
+    if blue is not None:
+        rgb[..., 2] = np.where(land, blue, 0)
     path = os.path.join(DATA_DIR, f'{name}.png')
     Image.fromarray(rgb).save(path, optimize=True)
     shown = v[land]
@@ -571,12 +605,16 @@ def main():
         'population': (lambda: people() / 2, 'people per ½ km²', 'people/km² halved', 1),
         'lights': (lambda: lights(grid, people(), land), 'nW/(cm² sr)×10', 'VNP46A4 2023 radiance times 10', 1),
         'travel': (lambda: travel(grid), 'minutes', 'to 5 minutes', 5),
-        'household': (lambda: household(grid, people(), land), 'people ×100', 'people per household times 100', 1),
     }
     for name in wanted:
         if name in fine:
             make, unit, note, step = fine[name]
             info['layers'][name] = write(name, make(), land, FINE, unit, note, step)
+    if 'household' in wanted:
+        values, source, labels = household(grid, people(), land)
+        info['layers']['household'] = write('household', values, land, FINE, 'people ×100',
+                                            'people per household times 100; blue: index into sources', 1, source)
+        info['layers']['household']['sources'] = labels
     if 'rain' in wanted:
         row, col, on_land, _, _ = equal_earth(era5_land())
         info['layers']['rain'] = write('rain', rain()[row, col], on_land, NI, 'mm', '')

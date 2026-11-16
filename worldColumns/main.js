@@ -598,7 +598,22 @@ async function loadMap(map, period) {
       if (map === 'windows') values[i] = r === noData ? NO_VALUE : r;
       else values[i] = (r << 8) | g;
     }
-    decoded.set(file, {values, width, height, cell: WORLD / width});
+    // A map with `sources` keeps, in blue, which one each cell's figure
+    // comes from (the household map: which census or survey, and its year).
+    const labels = map === 'windows' ? null : layers.layers[map].sources;
+    let source = null;
+    if (labels) {
+      source = new Uint8Array(width * height);
+      for (let i = 0; i < source.length; i++) source[i] = rgba[i * 4 + 2];
+    }
+    decoded.set(file, {
+      values,
+      width,
+      height,
+      cell: WORLD / width,
+      source,
+      labels,
+    });
   }
   return decoded.get(file);
 }
@@ -1118,6 +1133,12 @@ function showReadout() {
   b.textContent = emptyText(value) ?? map.format(value) + map.readout;
   if (map.top && value > map.top) b.textContent += map.doubt;
   readout.append(b);
+  const from = src.source?.[cy * src.width + cx];
+  if (from) {
+    const note = document.createElement('small');
+    note.textContent = src.labels[from];
+    readout.append(document.createElement('br'), note);
+  }
   // Beside the pointer, kept on screen: to the left of it near the right
   // edge, above it near the bottom (a finger covers what's below).
   readout.hidden = false;
