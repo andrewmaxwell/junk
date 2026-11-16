@@ -38,6 +38,13 @@
       "unit": "mm",
       "note": "",
       "max": 24839
+    },
+    "household": {
+      "width": 7200,
+      "height": 3164,
+      "unit": "people \u00d7100",
+      "note": "people per household times 100",
+      "max": 1288
     }
   }
 }

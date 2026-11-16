@@ -19,6 +19,10 @@ since they don't depend on ERA5-Land's 9 km weather:
               Weiss et al. 2018.
   rain        ERA5-Land monthly means, 0.1°, Nov 2025 to Oct 2026: total
               rain and snow in mm, on the open-window map's own grid.
+  household   CORESIDENCE (Galeano et al. 2024) and UN DESA Household Size
+              and Composition 2026: people per household times 100, by
+              region, where at least 1 person per km² lives (0 elsewhere, 1
+              where no source covers).
 
 Land is where most of a cell is above sea level in ETOPO and ERA5-Land has
 land within 0.1° (which keeps big lakes as water), plus anywhere ERA5-Land
@@ -250,6 +254,174 @@ def rain():
     return total.reshape(NJ, NI)
 
 
+def un_household_sizes():
+    """{ISO3: (year, people per household)}, each country's latest in the UN
+    DESA Database on Household Size and Composition."""
+    import openpyxl
+    book = openpyxl.load_workbook(os.path.join(SOURCES, 'UNDESA_PD_2026_hh-size-composition.xlsx'), read_only=True)
+    out = {}
+    for row in book['HH size and composition 2026'].iter_rows(min_row=6, values_only=True):
+        try:
+            iso, year, size = row[2], int(str(row[8])[:4]), float(row[10])
+        except (TypeError, ValueError):
+            continue
+        # Pakistan's 2017 census reads 0.81 in this edition, a slip.
+        if iso and 1.5 <= size <= 15 and year >= out.get(iso, (0,))[0]:
+            out[iso] = (year, size)
+    return out
+
+
+def household(grid, people, land):
+    """People per household, times 100, by region: each region's figure from
+    the latest CORESIDENCE census or survey that has it, scaled by how much
+    its country's average has changed since (to the UN's latest national
+    figure, where that's newer). Countries the harmonized regions don't cover
+    take the UN's national figure, on Natural Earth's outlines where
+    CORESIDENCE has none; Saudi Arabia, Taiwan and the UAE, with neither,
+    have none. 0 where fewer than 1 person per km² lives, 1 on land no
+    source covers."""
+    import csv
+    import sqlite3
+    un = un_household_sizes()
+    national = {r['S1']: float(r['HS17']) for r in csv.DictReader(open(os.path.join(SOURCES, 'A0_CORESIDENCE_NATIONAL_DATASET_2024.csv'))) if r['HS17'] not in ('', 'NA')}
+    latest = {}  # region code: (year, sample, value)
+    for r in csv.DictReader(open(os.path.join(SOURCES, 'A2_CORESIDENCE_SUBNATIONAL_HARMONIZED_DATASET_2024.csv'))):
+        if r['HS17'] in ('', 'NA'):
+            continue
+        year = int(r['T1'])
+        if year >= latest.get(r['C5'], (0,))[0]:
+            latest[r['C5']] = (year, r['S1'], float(r['HS17']))
+    shapes = gpkg_polygons(os.path.join(SOURCES, 'SUBNATIONAL_BOUNDARIES_CORESIDENCE_PROJECT.gpkg'),
+                           'a1_world_subnational_coresidence_new', 'GEOLEVEL1')
+    codes = list(shapes)
+    db = sqlite3.connect(os.path.join(SOURCES, 'SUBNATIONAL_BOUNDARIES_CORESIDENCE_PROJECT.gpkg'))
+    db_country = dict(db.execute('select GEOLEVEL1, C1 from a1_world_subnational_coresidence_new'))
+    fix = {'URU': 'URY'}
+    values = []
+    for code in codes:
+        iso = fix.get(db_country[code], db_country[code])
+        if code in latest:
+            year, sample, v = latest[code]
+            if iso in un and un[iso][0] > year and sample in national:
+                v *= un[iso][1] / national[sample]
+        else:
+            v = un.get(iso, (0, np.nan))[1]
+        values.append(v)
+    values = np.array(values + [np.nan])  # the last for cells in no region
+    region = spread(rasterize(grid, [shapes[c] for c in codes]), land, 2)
+    region_iso = np.array([fix.get(db_country[c], db_country[c]) for c in codes] + [''])[region]
+    # Under the regions, every country with a UN figure, for the places
+    # CORESIDENCE has no outline for (Singapore, Hong Kong, small islands).
+    countries = json.load(open(os.path.join(SOURCES, 'ne_10m_admin_0_countries.geojson')))['features']
+    # CORESIDENCE's outlines are generalized: Malaysia's covers Singapore and
+    # China's Taiwan, so a region counts only inside its own country.
+    outlines, sizes, isos = [], [], []
+    for f in countries:
+        p = f['properties']
+        iso = p['ISO_A3'] if p['ISO_A3'] != '-99' else p['ADM0_A3']
+        iso = {'SOL': 'SOM', 'CYN': 'CYP', 'KAB': 'KAZ', 'KAS': 'IND'}.get(iso, iso)  # disputed or leased land
+        g = f['geometry']
+        polygons = g['coordinates'] if g['type'] == 'MultiPolygon' else [g['coordinates']]
+        outlines.append([np.array(poly[0]) for poly in polygons])
+        sizes.append(un.get(iso, (0, np.nan))[1])
+        isos.append(iso)
+    country = spread(rasterize(grid, outlines), land, 6)
+    country_iso = np.array(isos + [''])[country]
+    out = values[region]
+    out = np.where((country_iso == '') | (country_iso == region_iso), out, np.nan)
+    out = np.where(np.isnan(out), np.array(sizes + [np.nan])[country], out)
+    out = np.where(np.isnan(out), 0.01, out)  # stored as 1: no data
+    return np.where(people >= 1, out * 100, 0)
+
+
+# --- regions -----------------------------------------------------------------
+
+def gpkg_polygons(path, table, key):
+    """{key value: [ring, ...]} for a GeoPackage table of (multi)polygons in
+    longitude and latitude, outer rings only (each ring an (n, 2) array)."""
+    import sqlite3
+    import struct
+    db = sqlite3.connect(path)
+    geom = db.execute('select column_name from gpkg_geometry_columns where table_name = ?', (table,)).fetchone()[0]
+    out = {}
+    for k, blob in db.execute(f'select "{key}", "{geom}" from "{table}"'):
+        if blob is None:
+            continue
+        # GeoPackage header: "GP", version, flags (bit 0 byte order, bits 1-3
+        # envelope kind), srs id, envelope; then plain WKB.
+        flags = blob[3]
+        envelope = [0, 32, 48, 48, 64][(flags >> 1) & 7]
+        wkb = memoryview(blob)[8 + envelope:]
+        rings = []
+
+        def read(at):
+            order = '<' if wkb[at] == 1 else '>'
+            kind = struct.unpack_from(order + 'I', wkb, at + 1)[0]
+            dims = 2 + (kind // 1000 in (1, 2)) + 2 * (kind // 1000 == 3) + bool(kind & 0x80000000) + bool(kind & 0x40000000)
+            kind = (kind & 0xFFFF) % 1000
+            at += 5
+            if kind == 3:  # polygon
+                count = struct.unpack_from(order + 'I', wkb, at)[0]
+                at += 4
+                for i in range(count):
+                    n = struct.unpack_from(order + 'I', wkb, at)[0]
+                    at += 4
+                    ring = np.frombuffer(wkb, np.dtype(order + 'f8'), n * dims, at).reshape(n, dims)[:, :2]
+                    at += 8 * n * dims
+                    if i == 0:
+                        rings.append(ring)
+            elif kind == 6:  # multipolygon
+                count = struct.unpack_from(order + 'I', wkb, at)[0]
+                at += 4
+                for _ in range(count):
+                    at = read(at)
+            else:
+                raise ValueError(f'geometry type {kind} in {table}')
+            return at
+
+        read(0)
+        out.setdefault(k, []).extend(rings)
+    return out
+
+
+def rasterize(grid, regions):
+    """Each cell's region (an index into `regions`, a list of ring lists),
+    -1 where there's none. Bigger regions are drawn first, so one inside
+    another (Berlin in Brandenburg, Lesotho in South Africa) stays on top;
+    holes are ignored for the same reason."""
+    from PIL import ImageDraw
+    image = Image.new('I', (grid.width, grid.height), 0)
+    draw = ImageDraw.Draw(image)
+
+    def area(rings):
+        return sum(abs(np.dot(r[:-1, 0], r[1:, 1]) - np.dot(r[1:, 0], r[:-1, 1])) for r in rings)
+
+    for i in sorted(range(len(regions)), key=lambda i: -area(regions[i])):
+        for ring in regions[i]:
+            x, y = forward(ring[:, 0], np.clip(ring[:, 1], -89.9, 89.9))
+            col = (x + grid.x_max) / grid.cell
+            row = (grid.y_max - y) / grid.cell
+            if len(ring) >= 3:
+                draw.polygon(list(zip(col.tolist(), row.tolist())), fill=i + 1)
+    return np.asarray(image, np.int64).reshape(grid.height, grid.width) - 1
+
+
+def spread(index, land, steps):
+    """Fills land cells just outside every region (coastlines drawn a little
+    differently) from their neighbours, up to `steps` cells out."""
+    index = index.copy()
+    for _ in range(steps):
+        gap = land & (index < 0)
+        if not gap.any():
+            break
+        for dy, dx in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+            near = np.roll(np.roll(index, dy, 0), dx, 1)
+            take = gap & (near >= 0)
+            index[take] = near[take]
+            gap &= ~take
+    return index
+
+
 # --- output ------------------------------------------------------------------
 
 def write(name, values, land, width, unit, note, step=1):
@@ -269,7 +441,7 @@ def write(name, values, land, width, unit, note, step=1):
 
 
 def main():
-    wanted = sys.argv[1:] or ['elevation', 'population', 'lights', 'travel', 'rain']
+    wanted = sys.argv[1:] or ['elevation', 'population', 'lights', 'travel', 'rain', 'household']
     info_path = os.path.join(DATA_DIR, 'layers.json')
     info = {'encoding': {'noData': NO_DATA, 'bytes': 'R high, G low'}, 'layers': {}}
     if os.path.exists(info_path):
@@ -290,6 +462,7 @@ def main():
         'population': (lambda: people() / 2, 'people per ½ km²', 'people/km² halved', 1),
         'lights': (lambda: lights(grid, people(), land), 'nW/(cm² sr)×10', 'VNP46A4 2023 radiance times 10', 1),
         'travel': (lambda: travel(grid), 'minutes', 'to 5 minutes', 5),
+        'household': (lambda: household(grid, people(), land), 'people ×100', 'people per household times 100', 1),
     }
     for name in wanted:
         if name in fine:

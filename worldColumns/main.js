@@ -2,9 +2,9 @@
 // glowing under a moon), the share of the year's hours you could have left
 // the windows open (ERA5-Land, about 9 km, hourly, reduced by build/fetch.py
 // and resampled onto an Equal Earth grid by build/export.py), and elevation,
-// population, travel time and rain (build/layers.py, on the same projection,
-// most of them twice as fine). The tracer is the Comfort spike map's, and the
-// picture sharpens as samples add up. The caption, labels and legend are
+// population, travel time, rain and household size (build/layers.py, on the
+// same projection, most of them twice as fine). The tracer is the Comfort
+// spike map's, and the picture sharpens as samples add up. The caption, labels and legend are
 // drawn on a 2D canvas over it; "save PNG" saves the map alone.
 //
 // Columns are sized to look a few pixels wide where they stand: a finer grid
@@ -195,6 +195,27 @@ const MAPS = {
     ramp: ['#e8eef4', '#a9c6e0', '#5b93c7', '#2a5f9e', '#0f2f63'],
     ranges: {low: [0, 1000, 10], high: [500, 50]},
     settings: {low: 0, gamma: 0.65, height: 3},
+  },
+  household: {
+    button: 'Household size',
+    kicker: () => 'HOW MANY PEOPLE SHARE A HOME',
+    subtitle: () =>
+      "People in the average household, by province or state, from each country's latest census or survey with regions, scaled to the UN's latest national figure",
+    legend: 'HEIGHT · PEOPLE PER HOUSEHOLD',
+    unit: 'people ×100',
+    format: (v) => (v / 100).toFixed(1),
+    readout: ' people per household', // after the value, on hover
+    // Land with no value: no one lives there (under 1 person per km²), or
+    // no census or survey covers it.
+    empty: {0: 'No one lives here', 1: 'No data'},
+    source: [
+      'Households: CORESIDENCE (Galeano et al. 2024), censuses and surveys by region, 3 in 4 since 2010,',
+      'scaled to UN DESA Household Size and Composition 2026. Shown where 1+ person per km² lives (GHS-POP).',
+    ],
+    ramp: ['#f6e8dc', '#ecbf9a', '#d98a64', '#b0524a', '#6e2338'],
+    ranges: {low: [0, 500, 10], high: [300, 10]},
+    // From one person living alone, so the differences show.
+    settings: {low: 100, gamma: 1, height: 2.5},
   },
 };
 // Each map's top is its highest value, so no column is cut off flat (unless
@@ -585,27 +606,38 @@ async function loadMap(map, period) {
 // Each block's power mean over a window of the map (the plain average for
 // power 1; larger powers lean toward the block's brightest cell), or NaN
 // where it's mostly sea.
-function blocks({values, width}, gx0, gy0, w, h, size, power = 1) {
+// Values under `blank` are land without a number (see the household map's
+// `empty`): they count as land but not toward the mean, and a block of land
+// that's mostly without is -1, so the empty Sahara stays empty zoomed out.
+function blocks({values, width}, gx0, gy0, w, h, size, power = 1, blank = 0) {
   const out = new Float32Array(w * h).fill(NaN);
   for (let by = 0; by < h; by++) {
     for (let bx = 0; bx < w; bx++) {
       let sum = 0;
       let n = 0;
+      let land = 0;
       const [x0, y0] = [gx0 + bx * size, gy0 + by * size];
       for (let y = y0; y < y0 + size; y++) {
         for (let x = x0; x < x0 + size; x++) {
           const v = values[y * width + x];
-          if (v !== NO_VALUE) {
-            sum += power === 1 ? v : v ** power;
-            n++;
-          }
+          if (v === NO_VALUE) continue;
+          land++;
+          if (v < blank) continue;
+          sum += power === 1 ? v : v ** power;
+          n++;
         }
       }
-      if (n * 2 >= size * size) out[by * w + bx] = (sum / n) ** (1 / power);
+      if (land * 2 < size * size) continue;
+      out[by * w + bx] = n * 2 > land ? (sum / n) ** (1 / power) : -1;
     }
   }
   return out;
 }
+const blankBelow = (map) =>
+  map.empty ? Math.max(...Object.keys(map.empty).map(Number)) + 1 : 0;
+// What a cell's value says: the map's own words for land without a number,
+// or null for a real value.
+const emptyText = (v) => current().empty?.[v] ?? null;
 
 // A value's place between the floor and the top, 0-1, on a log scale for
 // maps that ask for one.
@@ -812,17 +844,25 @@ function columnData(map, {block, x, y, w, h}) {
     h,
     block,
     current().power,
+    blankBelow(current()),
   );
   const data = new Float32Array(w * h * 4);
   const tint = new THREE.Color();
   for (let i = 0; i < w * h; i++) {
     if (isNaN(values[i])) continue;
+    if (values[i] < 0) {
+      // Land without a number: the lowest stub, in plain grey.
+      data.set([BLANK.r, BLANK.g, BLANK.b, heightOf(0) / size], i * 4);
+      continue;
+    }
     const t = shapeOf(values[i]);
     ramp(t ** (params.gamma * 0.6), tint);
     data.set([tint.r, tint.g, tint.b, heightOf(t) / size], i * 4);
   }
   return {data, values};
 }
+
+const BLANK = new THREE.Color('#d9d4cc');
 
 // Builds the columns for the view. `why` is 'scene' (a new map, column shape
 // or column size: always rebuild) or 'view' (the camera settled: keep the
@@ -841,7 +881,7 @@ async function build(why = 'scene') {
   const top = (-H * cell) / 2;
   const {data, values} = columnData(map, main);
   if (params.fit) {
-    const land = values.filter((v) => !isNaN(v)).sort((a, b) => a - b);
+    const land = values.filter((v) => v >= 0).sort((a, b) => a - b);
     params.low = Math.round(land[Math.floor(land.length * 0.05)]);
     params.high = Math.round(land[Math.floor(land.length * 0.995)]);
     gui.controllersRecursive().forEach((c) => c.updateDisplay());
@@ -1075,7 +1115,7 @@ function showReadout() {
   const map = current();
   readout.replaceChildren(place, document.createElement('br'));
   const b = document.createElement('b');
-  b.textContent = map.format(value) + map.readout;
+  b.textContent = emptyText(value) ?? map.format(value) + map.readout;
   if (map.top && value > map.top) b.textContent += map.doubt;
   readout.append(b);
   // Beside the pointer, kept on screen: to the left of it near the right
@@ -1304,7 +1344,7 @@ function drawOverlay(c, w, h) {
     // Leaders on the left run straight out over the water (when north is
     // up); the rest rise. A label that would run off the screen tries the
     // other side, and is left out if it doesn't fit there either.
-    const text = `${name}  ${value === NO_VALUE ? '–' : map.format(value)}`;
+    const text = `${name}  ${value === NO_VALUE || emptyText(value) ? '–' : map.format(value)}`;
     const tw = c.measureText(text).width;
     const layout = (side) => {
       const top = side < 0 ? y : y - 30 * u;
