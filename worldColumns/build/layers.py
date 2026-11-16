@@ -21,8 +21,9 @@ since they don't depend on ERA5-Land's 9 km weather:
               rain and snow in mm, on the open-window map's own grid.
   household   CORESIDENCE (Galeano et al. 2024) and UN DESA Household Size
               and Composition 2026: people per household times 100, by
-              region, where at least 1 person per km² lives (0 elsewhere, 1
-              where no source covers).
+              region (census tract in the US, from the ACS 2020-2024), where
+              at least 1 person per km² lives (0 elsewhere, 1 where no
+              source covers).
 
 Land is where most of a cell is above sea level in ETOPO and ERA5-Land has
 land within 0.1° (which keeps big lakes as water), plus anywhere ERA5-Land
@@ -278,7 +279,8 @@ def household(grid, people, land):
     figure, where that's newer). Countries the harmonized regions don't cover
     take the UN's national figure, on Natural Earth's outlines where
     CORESIDENCE has none; Saudi Arabia, Taiwan and the UAE, with neither,
-    have none. 0 where fewer than 1 person per km² lives, 1 on land no
+    have none. The US and Puerto Rico come from census tracts instead (see
+    us_tracts). 0 where fewer than 1 person per km² lives, 1 on land no
     source covers."""
     import csv
     import sqlite3
@@ -330,6 +332,9 @@ def household(grid, people, land):
     out = values[region]
     out = np.where((country_iso == '') | (country_iso == region_iso), out, np.nan)
     out = np.where(np.isnan(out), np.array(sizes + [np.nan])[country], out)
+    # The US and Puerto Rico by census tract, far finer than their states.
+    tract = us_tracts(grid)
+    out = np.where(np.isin(country_iso, ['USA', 'PRI']) & ~np.isnan(tract), tract, out)
     out = np.where(np.isnan(out), 0.01, out)  # stored as 1: no data
     return np.where(people >= 1, out * 100, 0)
 
@@ -384,13 +389,16 @@ def gpkg_polygons(path, table, key):
     return out
 
 
-def rasterize(grid, regions):
+def rasterize(grid, regions, scale=1, box=None):
     """Each cell's region (an index into `regions`, a list of ring lists),
     -1 where there's none. Bigger regions are drawn first, so one inside
     another (Berlin in Brandenburg, Lesotho in South Africa) stays on top;
-    holes are ignored for the same reason."""
+    holes are ignored for the same reason. With `scale` and `box` (first
+    row, first column, rows, columns, in cells), just that part of the
+    grid, `scale` pixels to a cell each way."""
     from PIL import ImageDraw
-    image = Image.new('I', (grid.width, grid.height), 0)
+    row0, col0, rows, cols = box or (0, 0, grid.height, grid.width)
+    image = Image.new('I', (cols * scale, rows * scale), 0)
     draw = ImageDraw.Draw(image)
 
     def area(rings):
@@ -399,11 +407,112 @@ def rasterize(grid, regions):
     for i in sorted(range(len(regions)), key=lambda i: -area(regions[i])):
         for ring in regions[i]:
             x, y = forward(ring[:, 0], np.clip(ring[:, 1], -89.9, 89.9))
-            col = (x + grid.x_max) / grid.cell
-            row = (grid.y_max - y) / grid.cell
+            col = ((x + grid.x_max) / grid.cell - col0) * scale
+            row = ((grid.y_max - y) / grid.cell - row0) * scale
             if len(ring) >= 3:
                 draw.polygon(list(zip(col.tolist(), row.tolist())), fill=i + 1)
-    return np.asarray(image, np.int64).reshape(grid.height, grid.width) - 1
+    return np.asarray(image, np.int64).reshape(rows * scale, cols * scale) - 1
+
+
+def shapefile(path):
+    """[(record, [outer ring, ...])] from a polygon shapefile in longitude and
+    latitude: each record's attributes as a dict, and the rings that wind
+    clockwise (the outer ones; holes wind the other way)."""
+    import struct
+    shp = open(path + '.shp', 'rb').read()
+    dbf = open(path + '.dbf', 'rb').read()
+    count, header, size = struct.unpack_from('<IHH', dbf, 4)
+    fields, at = [], 32
+    while dbf[at] != 0x0D:
+        name = dbf[at:at + 11].split(b'\0')[0].decode()
+        fields.append((name, dbf[at + 16]))
+        at += 32
+    records = []
+    for i in range(count):
+        at = header + i * size + 1
+        record = {}
+        for name, width in fields:
+            record[name] = dbf[at:at + width].decode('latin-1').strip()
+            at += width
+        records.append(record)
+    out, at = [], 100
+    for record in records:
+        _, words = struct.unpack_from('>II', shp, at)
+        kind = struct.unpack_from('<i', shp, at + 8)[0]
+        rings = []
+        if kind == 5:
+            parts, points = struct.unpack_from('<ii', shp, at + 44)
+            starts = list(struct.unpack_from(f'<{parts}i', shp, at + 52)) + [points]
+            xy = np.frombuffer(shp, '<f8', points * 2, at + 52 + 4 * parts).reshape(points, 2)
+            for a, b in zip(starts, starts[1:]):
+                r = xy[a:b]
+                if np.dot(r[:-1, 0], r[1:, 1]) - np.dot(r[1:, 0], r[:-1, 1]) < 0:
+                    rings.append(r)
+        out.append((record, rings))
+        at += 8 + 2 * words
+    return out
+
+
+def us_tracts(grid):
+    """People per household in each cell from the ACS 2020-2024 tract
+    figures, NaN where no tract has households. A tract's households are
+    spread evenly over its area, drawn 6 pixels to a cell each way, so a cell
+    is its tracts' people over their households; a tract too small to cover
+    a pixel puts all of them in the cell at its middle."""
+    import csv
+
+    def table(name, column):
+        with open(os.path.join(SOURCES, f'acsdt5y2024-{name}.dat')) as f:
+            return {r['GEO_ID'][9:]: float(r[column]) for r in csv.DictReader(f, delimiter='|')
+                    if r['GEO_ID'].startswith('1400000US') and r[column] not in ('', 'null')}
+
+    size = table('b25010', 'B25010_E001')
+    households = table('b25003', 'B25003_E001')
+    tracts = [(r['GEOID'], rings) for r, rings in shapefile(os.path.join(SOURCES, 'cb_2024_us_tract_500k', 'cb_2024_us_tract_500k'))
+              if rings and households.get(r['GEOID'], 0) > 0 and size.get(r['GEOID'], -1) > 0]
+    hh = np.array([households[g] for g, _ in tracts])
+    people = hh * np.array([size[g] for g, _ in tracts])
+    n = grid.width * grid.height
+    cell_people, cell_hh = np.zeros(n), np.zeros(n)
+    scale = 6
+    # Drawn in a few boxes (the lower 48 and Puerto Rico, Alaska each side of
+    # the date line, Hawaii) rather than the whole grid six times over.
+    def where(rings):
+        r = np.concatenate(rings)
+        x, y = forward(r[:, 0], np.clip(r[:, 1], -89.9, 89.9))
+        return (x + grid.x_max) / grid.cell, (grid.y_max - y) / grid.cell
+
+    spots = [where(rings) for _, rings in tracts]
+    group = np.array([(g[:2] if g[:2] in ('02', '15') else 'rest') + ('+' if rings[0][0, 0] > 0 else '')
+                      for g, rings in tracts])
+    pixels = np.zeros(len(tracts))
+    drawn = []
+    for key in np.unique(group):
+        members = np.flatnonzero(group == key)
+        cols = np.concatenate([spots[i][0] for i in members])
+        rows = np.concatenate([spots[i][1] for i in members])
+        row0, col0 = int(rows.min()), int(cols.min())
+        box = (row0, col0, int(rows.max()) - row0 + 2, int(cols.max()) - col0 + 2)
+        index = rasterize(grid, [tracts[i][1] for i in members], scale, box)
+        ok = index >= 0
+        rr, cc = np.nonzero(ok)
+        t = members[index[ok]]
+        cell = (row0 + rr // scale) * grid.width + col0 + cc // scale
+        pixels += np.bincount(t, minlength=len(tracts))
+        drawn.append((t, cell))
+    for t, cell in drawn:
+        share = 1 / pixels[t]
+        cell_people += np.bincount(cell, people[t] * share, n)
+        cell_hh += np.bincount(cell, hh[t] * share, n)
+    for i in np.flatnonzero(pixels == 0):
+        col, row = spots[i][0].mean(), spots[i][1].mean()
+        cell = int(row) * grid.width + int(col)
+        cell_people[cell] += people[i]
+        cell_hh[cell] += hh[i]
+    print(f'  {len(tracts)} tracts, {np.sum(pixels == 0)} too small to draw, {hh.sum() / 1e6:.1f} M households, '
+          f'{people.sum() / hh.sum():.2f} people each')
+    out = np.where(cell_hh > 0, cell_people / np.maximum(cell_hh, 1e-9), np.nan)
+    return out.reshape(grid.height, grid.width)
 
 
 def spread(index, land, steps):

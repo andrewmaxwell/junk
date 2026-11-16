@@ -200,7 +200,7 @@ const MAPS = {
     button: 'Household size',
     kicker: () => 'HOW MANY PEOPLE SHARE A HOME',
     subtitle: () =>
-      "People in the average household, by province or state, from each country's latest census or survey with regions, scaled to the UN's latest national figure",
+      "People in the average household, by province or state (by census tract in the US), from each country's latest census or survey with regions, scaled to the UN's latest national figure",
     legend: 'HEIGHT · PEOPLE PER HOUSEHOLD',
     unit: 'people ×100',
     format: (v) => (v / 100).toFixed(1),
@@ -209,8 +209,8 @@ const MAPS = {
     // no census or survey covers it.
     empty: {0: 'No one lives here', 1: 'No data'},
     source: [
-      'Households: CORESIDENCE (Galeano et al. 2024), censuses and surveys by region, 3 in 4 since 2010,',
-      'scaled to UN DESA Household Size and Composition 2026. Shown where 1+ person per km² lives (GHS-POP).',
+      'Households: CORESIDENCE (Galeano et al. 2024) by region, 3 in 4 since 2010, scaled to UN DESA 2026;',
+      'US by census tract, ACS 2020–2024. Shown where 1+ person per km² lives (GHS-POP).',
     ],
     ramp: ['#f6e8dc', '#ecbf9a', '#d98a64', '#b0524a', '#6e2338'],
     ranges: {low: [0, 500, 10], high: [300, 10]},
