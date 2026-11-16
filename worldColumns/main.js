@@ -222,6 +222,8 @@ const MAPS = {
     ramp: ['#24577a', '#7fb3c2', '#f1e9d6', '#e48a4e', '#7a1f33'],
     colorCurve: 1,
     centered: true, // fitted, the middle color is the view's median
+    weighted: true, // averaged by households (see blocks)
+    labelKm: 15, // labels speak for 15 km around the city
     log: true,
     ticks: [200, 300, 500],
     ranges: {low: [0, 500, 10], high: [300, 10]},
@@ -628,7 +630,12 @@ async function loadMap(map, period) {
       labels,
     });
   }
-  return decoded.get(file);
+  // A map averaged by households (`weighted`) needs how many people each
+  // cell holds: the population map, on the same grid.
+  const entry = decoded.get(file);
+  if (MAPS[map]?.weighted && !entry.weights)
+    entry.weights = (await loadMap('population')).values;
+  return entry;
 }
 
 // Each block's power mean over a window of the map (the plain average for
@@ -637,29 +644,56 @@ async function loadMap(map, period) {
 // Values under `blank` are land without a number (see the household map's
 // `empty`): they count as land but not toward the mean, and a block of land
 // that's mostly without is -1, so the empty Sahara stays empty zoomed out.
-function blocks({values, width}, gx0, gy0, w, h, size, power = 1, blank = 0) {
+//
+// A map with `weights` (people per cell) is a ratio, people per household,
+// so a block is its cells' people over their households, not the mean of
+// their values: a city cell then counts for its hundred times the homes of
+// a farm cell. `mass` is how much each block counts for when ranking them:
+// its households, or for other maps its cells.
+function blocks(
+  {values, width, weights},
+  gx0,
+  gy0,
+  w,
+  h,
+  size,
+  power = 1,
+  blank = 0,
+) {
   const out = new Float32Array(w * h).fill(NaN);
+  const mass = new Float32Array(w * h);
   for (let by = 0; by < h; by++) {
     for (let bx = 0; bx < w; bx++) {
       let sum = 0;
+      let homes = 0;
       let n = 0;
       let land = 0;
       const [x0, y0] = [gx0 + bx * size, gy0 + by * size];
       for (let y = y0; y < y0 + size; y++) {
         for (let x = x0; x < x0 + size; x++) {
-          const v = values[y * width + x];
+          const i = y * width + x;
+          const v = values[i];
           if (v === NO_VALUE) continue;
           land++;
           if (v < blank) continue;
-          sum += power === 1 ? v : v ** power;
           n++;
+          if (weights) {
+            const people = Math.max(weights[i], 1); // valued cells are lived in
+            sum += people;
+            homes += people / v;
+          } else sum += power === 1 ? v : v ** power;
         }
       }
       if (land * 2 < size * size) continue;
-      out[by * w + bx] = n * 2 > land ? (sum / n) ** (1 / power) : -1;
+      const k = by * w + bx;
+      if (n * 2 <= land) out[k] = -1;
+      else {
+        out[k] = weights ? sum / homes : (sum / n) ** (1 / power);
+        mass[k] = weights ? homes : n;
+      }
     }
   }
-  return out;
+  return {values: out, mass};
 }
 const blankBelow = (map) =>
   map.empty ? Math.max(...Object.keys(map.empty).map(Number)) + 1 : 0;
@@ -858,6 +892,42 @@ function serves(have, want) {
 
 let labels = [];
 let fitMid = null; // the view's median, when a centered map is fitted
+// The blocks in view sorted by value, with the running total of how much
+// they count for (households, on the household map), for the fit and for
+// placing a value among them.
+let inView = {values: [], below: [], total: 0};
+function ranked({values, mass}) {
+  const order = [...values.keys()]
+    .filter((i) => values[i] >= 0 && mass[i] > 0)
+    .sort((a, b) => values[a] - values[b]);
+  const below = new Float64Array(order.length);
+  let total = 0;
+  order.forEach((i, j) => {
+    below[j] = total;
+    total += mass[i];
+  });
+  return {values: order.map((i) => values[i]), below, total};
+}
+// The value with share q of the mass below it.
+function quantile({values, below, total}, q) {
+  let [lo, hi] = [0, values.length - 1];
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (below[mid] <= q * total) lo = mid;
+    else hi = mid - 1;
+  }
+  return values[lo];
+}
+// The share of the mass in view below a value.
+function shareBelow({values, below, total}, v) {
+  let [lo, hi] = [0, values.length];
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (values[mid] < v) lo = mid + 1;
+    else hi = mid;
+  }
+  return total ? (lo < values.length ? below[lo] : total) / total : 0;
+}
 let grid = null; // the columns as built, for clicks and for knowing what's covered
 let building = 0;
 
@@ -875,7 +945,7 @@ function columnValues(map, {block, x, y, w, h}) {
     blankBelow(current()),
   );
 }
-function columnData(map, win, values = columnValues(map, win)) {
+function columnData(map, win, {values} = columnValues(map, win)) {
   const {block, w, h} = win;
   const size = block * map.cell;
   const data = new Float32Array(w * h * 4);
@@ -918,16 +988,17 @@ async function build(why = 'scene') {
   const size = main.block * cell;
   const left = -WORLD / 2;
   const top = (-H * cell) / 2;
-  const values = columnValues(map, main);
+  const columns = columnValues(map, main);
   // Fitted, the floor and top are the view's 5th and 99.5th percentiles,
   // set before the columns are shaped from them. A map with a two-sided
   // ramp (`centered`) instead puts the view's median in the middle, as far
   // (on its scale) from the floor as from the top, so its neutral color
   // means typical for what's in view.
   fitMid = null;
+  inView = ranked(columns);
   if (params.fit) {
-    const land = values.filter((v) => v >= 0).sort((a, b) => a - b);
-    const at = (q) => land[Math.floor(land.length * q)];
+    const land = inView.values;
+    const at = (q) => quantile(inView, q);
     if (land.length && current().centered) {
       const mid = at(0.5);
       const reach = Math.max(mid / Math.max(at(0.05), 1), at(0.95) / mid);
@@ -940,7 +1011,7 @@ async function build(why = 'scene') {
     }
     gui.controllersRecursive().forEach((c) => c.updateDisplay());
   }
-  const {data} = columnData(map, main, values);
+  const {data} = columnData(map, main, columns);
   let fine = null;
   if (detail) {
     // The main grid's cells under the detail grid stand empty.
@@ -1008,8 +1079,31 @@ async function build(why = 'scene') {
     const column = columnAt(x, z);
     if (!column) return [];
     const tip = new THREE.Vector3(column.x, column.height, column.z);
-    return [{name, value: map.values[gy * W + gx], tip}];
+    const around = current().labelKm && averageAround(map, gx, gy);
+    return [{name, value: around || map.values[gy * W + gx], tip}];
   });
+}
+
+// People per household within the map's labelKm of a cell: its cells'
+// people over their households, so a city label speaks for the city rather
+// than the one downtown cell under its dot (Chicago's Loop is 1.6, the city
+// about 2.4). 0 if no cell there has a value.
+function averageAround({values, weights, width, height, cell}, gx, gy) {
+  const r = current().labelKm / (KM_PER_UNIT * cell);
+  const blank = blankBelow(current());
+  let [people, homes] = [0, 0];
+  for (let y = Math.floor(gy - r); y <= gy + r; y++) {
+    for (let x = Math.floor(gx - r); x <= gx + r; x++) {
+      if ((x - gx) ** 2 + (y - gy) ** 2 > r * r) continue;
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      const v = values[y * width + x];
+      if (v === NO_VALUE || v < blank) continue;
+      const p = Math.max(weights[y * width + x], 1);
+      people += p;
+      homes += p / v;
+    }
+  }
+  return homes ? Math.round(people / homes) : 0;
 }
 
 // The column standing at a point of the ground (x, z), from whichever grid
@@ -1173,6 +1267,16 @@ function showReadout() {
   b.textContent = emptyText(value) ?? map.format(value) + map.readout;
   if (map.top && value > map.top) b.textContent += map.doubt;
   readout.append(b);
+  // Where it stands among the households in view.
+  if (map.weighted && !emptyText(value) && inView.total) {
+    const below = shareBelow(inView, value);
+    const rank = document.createElement('small');
+    rank.textContent =
+      below >= 0.5
+        ? `bigger than ${Math.round(below * 100)}% of the homes in view`
+        : `smaller than ${Math.round((1 - below) * 100)}% of the homes in view`;
+    readout.append(document.createElement('br'), rank);
+  }
   const from = src.source?.[cy * src.width + cx];
   if (from) {
     const note = document.createElement('small');
