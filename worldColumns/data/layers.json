@@ -76,7 +76,7 @@
         "2000 census",
         "2002 census, scaled to the UN's 2024 figure",
         "UN national figure, 2024",
-        "2000 census, scaled to the UN's 2020 figure",
+        "2020 census",
         "UN national figure, 2020",
         "2011\u201312 DHS survey, scaled to the UN's 2021 figure",
         "2018 DHS survey, scaled to the UN's 2022 figure",
@@ -123,7 +123,6 @@
         "2003\u201304 DHS survey, scaled to the UN's 2024 figure",
         "2011 MICS survey, scaled to the UN's 2014 figure",
         "2021 DHS survey",
-        "2020 census",
         "2018 MICS survey, scaled to the UN's 2019 figure",
         "2018 DHS survey, scaled to the UN's 2024 figure",
         "2013 MICS survey, scaled to the UN's 2018 figure",
@@ -180,7 +179,9 @@
         "UN national figure, 2014",
         "UN national figure, 2025",
         "UN national figure, 2002",
-        "ACS 2020\u20132024, by census tract"
+        "ACS 2020\u20132024, by census tract",
+        "2020 census, by locality",
+        "2011 census districts, scaled to the 2019\u201321 DHS"
       ]
     }
   }

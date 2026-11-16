@@ -200,8 +200,13 @@ const MAPS = {
     button: 'Household size',
     kicker: () => 'HOW MANY PEOPLE SHARE A HOME',
     subtitle: () =>
-      "People in the average household, by province or state (by census tract in the US), from each country's latest census or survey with regions, scaled to the UN's latest national figure. The middle color is the middle of what's in view",
+      "People in the average household within 15 km, from each country's finest recent census or survey. The middle color is the typical home in view",
     legend: 'HEIGHT · PEOPLE PER HOUSEHOLD',
+    // Fitted (the default), the colors center on the view and the legend's
+    // bar is theirs; the heights keep one scale, which this line gives.
+    colorLegend: 'COLOR · PEOPLE PER HOUSEHOLD',
+    heightNote: () =>
+      `Height: ${(params.low / 100).toFixed(0)} to ${(params.high / 100).toFixed(0)} people at any zoom`,
     unit: 'people ×100',
     format: (v) => (v / 100).toFixed(1),
     readout: ' people per household', // after the value, on hover
@@ -209,8 +214,8 @@ const MAPS = {
     // no census or survey covers it.
     empty: {0: 'No one lives here', 1: 'No data'},
     source: [
-      'Households: CORESIDENCE (Galeano et al. 2024) by region, 3 in 4 since 2010, scaled to UN DESA 2026;',
-      'US by census tract, ACS 2020–2024. Shown where 1+ person per km² lives (GHS-POP).',
+      'Households: CORESIDENCE (Galeano et al. 2024) and UN DESA 2026; US ACS 2020–2024, Mexico 2020,',
+      'China 2020 and India 2011 censuses. Where 1+ person per km² lives (GHS-POP). Hover for each source.',
     ],
     // Small households cool, big ones warm, with the neutral middle at about
     // 2.8, so a city's small homes stand apart from its suburbs' families.
@@ -223,14 +228,13 @@ const MAPS = {
     colorCurve: 1,
     centered: true, // fitted, the middle color is the view's median
     weighted: true, // averaged by households (see blocks)
-    labelKm: 15, // labels speak for 15 km around the city
     log: true,
     ticks: [200, 300, 500],
     ranges: {low: [0, 500, 10], high: [300, 10]},
     // Fitted to the view, so the US's narrow range (90% of its cells 2.1 to
     // 3.1) spans the colors when you look at it, as Africa's does at its:
     // cool is smaller than is typical in view, warm bigger.
-    settings: {low: 100, high: 800, gamma: 1, height: 0.5, fit: true},
+    settings: {low: 100, high: 800, gamma: 1, height: 0.8, fit: true},
   },
 };
 // Each map's top is its highest value, so no column is cut off flat (unless
@@ -591,51 +595,47 @@ function ramp(t, out) {
 // The open-window maps keep their value in R (255 off land); the others are
 // 16-bit, high byte in R and low in G (65535 off land). Either way a map
 // decodes to one number per cell, NO_VALUE off land, on its own grid.
+// Each file is decoded once; the cache holds the promise, so two builds
+// asking at once share one download.
 const decoded = new Map();
 async function loadMap(map, period) {
   const file = map === 'windows' ? period : map;
-  if (!decoded.has(file)) {
-    const {width, height} = map === 'windows' ? meta : layers.layers[map];
-    const blob = await fetch(`data/${file}.png`).then((r) => r.blob());
-    const bitmap = await createImageBitmap(blob, {
-      premultiplyAlpha: 'none',
-      colorSpaceConversion: 'none',
-    });
-    const c = new OffscreenCanvas(width, height).getContext('2d', {
-      willReadFrequently: true,
-    });
-    c.drawImage(bitmap, 0, 0);
-    const rgba = c.getImageData(0, 0, width, height).data;
-    const values = new Uint16Array(width * height);
-    const noData = meta.encoding.noData;
-    for (let i = 0; i < values.length; i++) {
-      const [r, g] = [rgba[i * 4], rgba[i * 4 + 1]];
-      if (map === 'windows') values[i] = r === noData ? NO_VALUE : r;
-      else values[i] = (r << 8) | g;
-    }
-    // A map with `sources` keeps, in blue, which one each cell's figure
-    // comes from (the household map: which census or survey, and its year).
-    const labels = map === 'windows' ? null : layers.layers[map].sources;
-    let source = null;
-    if (labels) {
-      source = new Uint8Array(width * height);
-      for (let i = 0; i < source.length; i++) source[i] = rgba[i * 4 + 2];
-    }
-    decoded.set(file, {
-      values,
-      width,
-      height,
-      cell: WORLD / width,
-      source,
-      labels,
-    });
-  }
+  if (!decoded.has(file)) decoded.set(file, decode(map, file));
+  const entry = await decoded.get(file);
   // A map averaged by households (`weighted`) needs how many people each
   // cell holds: the population map, on the same grid.
-  const entry = decoded.get(file);
   if (MAPS[map]?.weighted && !entry.weights)
     entry.weights = (await loadMap('population')).values;
   return entry;
+}
+async function decode(map, file) {
+  const {width, height} = map === 'windows' ? meta : layers.layers[map];
+  const blob = await fetch(`data/${file}.png`).then((r) => r.blob());
+  const bitmap = await createImageBitmap(blob, {
+    premultiplyAlpha: 'none',
+    colorSpaceConversion: 'none',
+  });
+  const c = new OffscreenCanvas(width, height).getContext('2d', {
+    willReadFrequently: true,
+  });
+  c.drawImage(bitmap, 0, 0);
+  const rgba = c.getImageData(0, 0, width, height).data;
+  const values = new Uint16Array(width * height);
+  const noData = meta.encoding.noData;
+  for (let i = 0; i < values.length; i++) {
+    const [r, g] = [rgba[i * 4], rgba[i * 4 + 1]];
+    if (map === 'windows') values[i] = r === noData ? NO_VALUE : r;
+    else values[i] = (r << 8) | g;
+  }
+  // A map with `sources` keeps, in blue, which one each cell's figure
+  // comes from (the household map: which census or survey, and its year).
+  const labels = map === 'windows' ? null : layers.layers[map].sources;
+  let source = null;
+  if (labels) {
+    source = new Uint8Array(width * height);
+    for (let i = 0; i < source.length; i++) source[i] = rgba[i * 4 + 2];
+  }
+  return {values, width, height, cell: WORLD / width, source, labels};
 }
 
 // Each block's power mean over a window of the map (the plain average for
@@ -703,9 +703,9 @@ const emptyText = (v) => current().empty?.[v] ?? null;
 
 // A value's place between the floor and the top, 0-1, on a log scale for
 // maps that ask for one.
-function shapeOf(v) {
+function shapeOf(v, {low, high} = params) {
   const f = current().log ? Math.log1p : (x) => x;
-  const t = (f(v) - f(params.low)) / (f(params.high) - f(params.low));
+  const t = (f(v) - f(low)) / (f(high) - f(low));
   return Math.min(Math.max(t, 0), 1);
 }
 const heightOf = (t) => 0.03 + params.height * t ** params.gamma;
@@ -892,6 +892,7 @@ function serves(have, want) {
 
 let labels = [];
 let fitMid = null; // the view's median, when a centered map is fitted
+let colorRange = null; // then its colors' floor and top
 // The blocks in view sorted by value, with the running total of how much
 // they count for (households, on the household map), for the fit and for
 // placing a value among them.
@@ -958,7 +959,8 @@ function columnData(map, win, {values} = columnValues(map, win)) {
       continue;
     }
     const t = shapeOf(values[i]);
-    ramp(t ** (current().colorCurve ?? params.gamma * 0.6), tint);
+    const c = colorRange ? shapeOf(values[i], colorRange) : t;
+    ramp(c ** (current().colorCurve ?? params.gamma * 0.6), tint);
     data.set([tint.r, tint.g, tint.b, heightOf(t) / size], i * 4);
   }
   return {data, values};
@@ -994,7 +996,10 @@ async function build(why = 'scene') {
   // ramp (`centered`) instead puts the view's median in the middle, as far
   // (on its scale) from the floor as from the top, so its neutral color
   // means typical for what's in view.
+  // Only the colors follow the view on a centered map: its heights stay on
+  // the map's own scale, so they don't jump as the view changes.
   fitMid = null;
+  colorRange = null;
   inView = ranked(columns);
   if (params.fit) {
     const land = inView.values;
@@ -1002,8 +1007,8 @@ async function build(why = 'scene') {
     if (land.length && current().centered) {
       const mid = at(0.5);
       const reach = Math.max(mid / Math.max(at(0.05), 1), at(0.95) / mid);
-      params.low = Math.round(mid / reach);
-      params.high = Math.max(Math.round(mid * reach), params.low + 1);
+      const low = Math.round(mid / reach);
+      colorRange = {low, high: Math.max(Math.round(mid * reach), low + 1)};
       fitMid = mid;
     } else if (land.length) {
       params.low = Math.round(at(0.05));
@@ -1079,31 +1084,8 @@ async function build(why = 'scene') {
     const column = columnAt(x, z);
     if (!column) return [];
     const tip = new THREE.Vector3(column.x, column.height, column.z);
-    const around = current().labelKm && averageAround(map, gx, gy);
-    return [{name, value: around || map.values[gy * W + gx], tip}];
+    return [{name, value: map.values[gy * W + gx], tip}];
   });
-}
-
-// People per household within the map's labelKm of a cell: its cells'
-// people over their households, so a city label speaks for the city rather
-// than the one downtown cell under its dot (Chicago's Loop is 1.6, the city
-// about 2.4). 0 if no cell there has a value.
-function averageAround({values, weights, width, height, cell}, gx, gy) {
-  const r = current().labelKm / (KM_PER_UNIT * cell);
-  const blank = blankBelow(current());
-  let [people, homes] = [0, 0];
-  for (let y = Math.floor(gy - r); y <= gy + r; y++) {
-    for (let x = Math.floor(gx - r); x <= gx + r; x++) {
-      if ((x - gx) ** 2 + (y - gy) ** 2 > r * r) continue;
-      if (x < 0 || y < 0 || x >= width || y >= height) continue;
-      const v = values[y * width + x];
-      if (v === NO_VALUE || v < blank) continue;
-      const p = Math.max(weights[y * width + x], 1);
-      people += p;
-      homes += p / v;
-    }
-  }
-  return homes ? Math.round(people / homes) : 0;
 }
 
 // The column standing at a point of the ground (x, z), from whichever grid
@@ -1459,6 +1441,7 @@ function drawOverlay(c, w, h) {
   const lh = 5 * u;
   // The bar runs from floor to top as the columns' heights do, colored as
   // the columns are (their color leans toward the top of the ramp).
+  const range = colorRange ?? params;
   const gradient = c.createLinearGradient(lx, 0, lx + lw, 0);
   for (let i = 0; i <= 32; i++) {
     ramp((i / 32) ** (map.colorCurve ?? params.gamma * 0.6), legendTint);
@@ -1473,7 +1456,7 @@ function drawOverlay(c, w, h) {
   const ticks = fitMid === null ? (map.ticks ?? []) : [fitMid];
   c.textAlign = 'center';
   for (const v of ticks) {
-    const t = shapeOf(v);
+    const t = shapeOf(v, range);
     if (t <= 0.15 || t >= 0.85) continue;
     c.fillRect(lx + t * lw - 0.5 * u, ly + lh, u, 3 * u);
     halo(c, u, map.format(v), lx + t * lw, ly + lh + 15 * u);
@@ -1483,11 +1466,11 @@ function drawOverlay(c, w, h) {
   halo(
     c,
     u,
-    params.low > 0
+    range.low > 0
       ? ticks.length
-        ? less + map.format(params.low)
-        : `${map.format(params.low)} or less`
-      : map.format(params.low),
+        ? less + map.format(range.low)
+        : `${map.format(range.low)} or less`
+      : map.format(range.low),
     lx,
     ly + lh + 15 * u,
   );
@@ -1495,14 +1478,22 @@ function drawOverlay(c, w, h) {
   halo(
     c,
     u,
-    `${map.format(params.high)}${params.high < map.max ? more : ''}`,
+    `${map.format(range.high)}${range.high < map.max ? more : ''}`,
     lx + lw,
     ly + lh + 15 * u,
   );
   c.textAlign = 'left';
   c.font = `400 ${10 * u}px ${FONT}`;
   c.letterSpacing = `${2 * u}px`;
-  halo(c, u, map.legend, lx, ly - 9 * u);
+  halo(c, u, colorRange ? map.colorLegend : map.legend, lx, ly - 9 * u);
+  if (colorRange) {
+    // The heights, which keep the map's own scale.
+    c.letterSpacing = '0px';
+    c.font = `300 ${10 * u}px ${FONT}`;
+    c.globalAlpha = 0.75;
+    halo(c, u, map.heightNote(), lx, ly - 25 * u);
+    c.globalAlpha = 1;
+  }
   c.letterSpacing = '0px';
 
   // Source, bottom right, at the home view.
@@ -1619,6 +1610,7 @@ function switchMap(key) {
   Object.assign(current().settings, {low, high, gamma, height, fit});
   params.map = key;
   Object.assign(params, {fit: false}, current().settings);
+  fitMid = colorRange = null; // the last map's, until this one is built
   const url = new URL(location.href);
   if (key === DEFAULT_MAP) url.searchParams.delete('map');
   else url.searchParams.set('map', key);

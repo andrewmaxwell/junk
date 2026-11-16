@@ -280,8 +280,10 @@ def household(grid, people, land):
     take the UN's national figure, on Natural Earth's outlines where
     CORESIDENCE has none; Saudi Arabia, Taiwan and the UAE, with neither,
     have none. The US and Puerto Rico come from census tracts instead (see
-    us_tracts). 0 where fewer than 1 person per km² lives, 1 on land no
-    source covers. Also returns where each cell's figure comes from, as an
+    us_tracts), Mexico from localities and India from districts within
+    each region; China's regions from its 2020 census. Then smoothed over 15
+    km. 0 where fewer than 1 person per km² lives, 1 on land no source
+    covers. Also returns where each cell's figure comes from, as an
     index into the list of labels it returns too (0 for none)."""
     import csv
     import sqlite3
@@ -309,8 +311,13 @@ def household(grid, people, land):
     kinds = {'IPUMS': 'census', 'DHS': 'DHS survey', 'MICS': 'MICS survey', 'LFS': 'labour force survey',
              'SILC': 'EU income survey', 'HILDA': 'HILDA survey'}
     values, sources = [], []
+    china = china_2020()
     for code in codes:
         iso = fix.get(db_country[code], db_country[code])
+        if code in china:  # newer and from the full census
+            values.append(china[code])
+            sources.append(label('2020 census'))
+            continue
         if code in latest:
             year, sample, v = latest[code]
             _, when, kind = sample.split('_')
@@ -351,16 +358,139 @@ def household(grid, people, land):
     fallback = np.isnan(out)
     out = np.where(fallback, np.array(sizes + [np.nan])[country], out)
     source = np.where(fallback, np.array(country_sources + [0])[country], source)
-    # The US and Puerto Rico by census tract, far finer than their states.
-    tract = us_tracts(grid, people)
-    us = np.isin(country_iso, ['USA', 'PRI']) & ~np.isnan(tract)
-    out = np.where(us, tract, out)
-    source = np.where(us, label('ACS 2020–2024, by census tract'), source)
+    # Each cell's people and households, for the smoothing to add up: real
+    # counts where a census gives them, otherwise the cell's people
+    # (GHS-POP) over its figure.
     lived = people >= 1
+    regional = out.copy()
+    weight = people * grid.km2
+    homes = weight / out
+    # Finer than the regions: the US and Puerto Rico by census tract, Mexico
+    # by locality, India by district.
+    tract_people, tract_homes = us_tracts(grid, people)
+    us = np.isin(country_iso, ['USA', 'PRI']) & (tract_homes > 0)
+    weight = np.where(us, tract_people, weight)
+    homes = np.where(us, tract_homes, homes)
+    source = np.where(us, label('ACS 2020–2024, by census tract'), source)
+    # A locality is a point, and a city is one locality (Tijuana's 1.8
+    # million people), so Mexico's lived-in cells without one have no figure
+    # of their own: the smoothing fills them from the localities within 15
+    # km, and only past that do they take their state's.
+    place_people, place_homes = mexico_localities(grid)
+    mx = (country_iso == 'MEX') & lived
+    weight = np.where(mx, place_people, weight)
+    homes = np.where(mx, place_homes, homes)
+    source = np.where(mx, label('2020 census, by locality'), source)
+    # India's 2011 census districts carry the pattern within each region; the
+    # region's newer figure (the 2019-21 DHS, scaled to the UN's) sets its
+    # level, so each region keeps its own average.
+    districts = india_districts(grid)
+    inside = (country_iso == 'IND') & own & ~np.isnan(districts) & (region >= 0) & ~np.isnan(values[region])
+    r = region[inside]
+    w = np.maximum(people[inside], 1e-6)
+    then = np.bincount(r, w, len(values)) / np.maximum(np.bincount(r, w / districts[inside], len(values)), 1e-12)
+    homes[inside] = weight[inside] / (districts[inside] * values[r] / then[r])
+    source[inside] = label("2011 census districts, scaled to the 2019–21 DHS")
+    out = smooth(grid, weight, homes, country_iso, lived, 15)
+    late = lived & np.isnan(out) & ~np.isnan(regional)
+    out = np.where(late, regional, out)
+    source = np.where(late & mx, label('2020 census'), source)
     source = np.where(lived & ~np.isnan(out), source, 0)
     out = np.where(np.isnan(out), 0.01, out)  # stored as 1: no data
     assert len(labels) <= 256
     return np.where(lived, out * 100, 0), source.astype(np.uint8), labels
+
+
+def china_2020():
+    """{CORESIDENCE region code: people per family household} from the 2020
+    census (table 1-1 of the National Bureau of Statistics' tabulation),
+    with CORESIDENCE's merged regions (Guangdong with Hainan, Sichuan with
+    Chongqing) as their combined people over households."""
+    import csv
+    order = '北京 天津 河北 山西 内蒙古 辽宁 吉林 黑龙江 上海 江苏 浙江 安徽 福建 江西 山东 河南 湖北 湖南 广东 广西 海南 重庆 四川 贵州 云南 西藏 陕西 甘肃 青海 宁夏 新疆'.split()
+    codes = [11, 12, 13, 14, 15, 21, 22, 23, 31, 32, 33, 34, 35, 36, 37, 41, 42, 43, 44, 45, 46, 50, 51, 52, 53, 54, 61, 62, 63, 64, 65]
+    rows = [r for r in csv.reader(open(os.path.join(SOURCES, 'china', 'A0101.csv'))) if r and r[0].replace(' ', '') in order]
+    assert [r[0].replace(' ', '') for r in rows] == order
+    people = {c: int(r[8]) for c, r in zip(codes, rows)}  # in family households
+    homes = {c: int(r[2]) for c, r in zip(codes, rows)}  # family households
+    merged = {44: [44, 46], 51: [51, 50]}
+    out = {}
+    for c in codes:
+        if c in (46, 50):
+            continue
+        parts = merged.get(c, [c])
+        out[str(156000 + c)] = sum(people[p] for p in parts) / sum(homes[p] for p in parts)
+    return out
+
+
+def india_districts(grid):
+    """People per household in each cell from the 2011 census's 640
+    districts (Primary Census Abstract, as scraped by pigshell; outlines from
+    DataMeet), NaN outside them."""
+    import csv
+    size = {}
+    for r in csv.DictReader(open(os.path.join(SOURCES, 'india', 'pca-total.csv'))):
+        if r['Level'] == 'DISTRICT' and int(r['No_HH']) > 0:
+            size[int(r['District'])] = int(r['TOT_P']) / int(r['No_HH'])
+    shapes = [(int(rec['censuscode']), rings) for rec, rings in shapefile(os.path.join(SOURCES, 'india', '2011_Dist'))
+              if rings and int(rec['censuscode'] or 0) in size]
+    index = rasterize(grid, [rings for _, rings in shapes])
+    return np.array([size[c] for c, _ in shapes] + [np.nan])[index]
+
+
+def mexico_localities(grid):
+    """People per household in each cell from the 2020 census's results by
+    locality (INEGI's ITER, about 189,000 places with coordinates), as the
+    people in households and the households of the localities in each cell
+    (0 where none falls)."""
+    import csv
+    import re
+
+    def degrees(text):
+        d, m, s, side = re.match(r"(\d+)°(\d+)'([\d.]+)\" ([NSEW])", text.strip()).groups()
+        v = int(d) + int(m) / 60 + float(s) / 3600
+        return -v if side in 'SW' else v
+
+    path = os.path.join(SOURCES, 'mexico', 'iter_00_cpv2020', 'conjunto_de_datos', 'conjunto_de_datos_iter_00CSV20.csv')
+    lat, lon, people, homes = [], [], [], []
+    for r in csv.DictReader(open(path, encoding='utf-8-sig')):
+        if not r['LATITUD'] or not r['POBHOG'].isdigit() or not r['TOTHOG'].isdigit() or r['TOTHOG'] == '0':
+            continue
+        lat.append(degrees(r['LATITUD']))
+        lon.append(degrees(r['LONGITUD']))
+        people.append(int(r['POBHOG']))
+        homes.append(int(r['TOTHOG']))
+    x, y = forward(np.array(lon), np.array(lat))
+    cell = np.floor((grid.y_max - y) / grid.cell).astype(int) * grid.width + np.floor((x + grid.x_max) / grid.cell).astype(int)
+    n = grid.width * grid.height
+    p = np.bincount(cell, np.array(people, float), n)
+    h = np.bincount(cell, np.array(homes, float), n)
+    print(f'  Mexico: {len(people)} localities, {sum(people) / sum(homes):.2f} people per household')
+    return p.reshape(grid.height, grid.width), h.reshape(grid.height, grid.width)
+
+
+def smooth(grid, people, homes, country, lived, km):
+    """People per household within `km` of each lived-in cell, counting only
+    cells in the same country: their people over their households, so a big
+    city outweighs the farms around it. Calms the jumps between neighbouring
+    tracts and districts, which are real but too fine to read at 5.5 km a
+    cell. NaN where nothing within reach has households."""
+    r = km / (grid.cell * EARTH_KM)
+    ok = lived & (homes > 0) & np.isfinite(homes)
+    p = np.where(ok, people, 0.0)
+    homes = np.where(ok, homes, 0.0)
+    codes = np.unique(country, return_inverse=True)[1].reshape(country.shape)
+    total_p, total_h = np.zeros_like(p), np.zeros_like(p)
+    reach = int(np.ceil(r))
+    for dy in range(-reach, reach + 1):
+        for dx in range(-reach, reach + 1):
+            if dx * dx + dy * dy > r * r:
+                continue
+            same = np.roll(np.roll(codes, dy, 0), dx, 1) == codes
+            total_p += np.where(same, np.roll(np.roll(p, dy, 0), dx, 1), 0)
+            total_h += np.where(same, np.roll(np.roll(homes, dy, 0), dx, 1), 0)
+    # Lived-in cells without a figure of their own take their neighbours'.
+    return np.where(lived & (total_h > 0), total_p / np.maximum(total_h, 1e-12), np.nan)
 
 
 # --- regions -----------------------------------------------------------------
@@ -479,7 +609,8 @@ def shapefile(path):
 
 def us_tracts(grid, density):
     """People per household in each cell from the ACS 2020-2024 tract
-    figures, NaN where no tract has households. Tracts are drawn 6 pixels to
+    figures, as each cell's people in households and households (0 where no
+    tract has any). Tracts are drawn 6 pixels to
     a cell each way, and a tract's households are shared among its pixels by
     how many people live there (`density`, GHS-POP), not by area, so a huge
     rural tract's households go to its towns rather than its empty range. A
@@ -542,8 +673,8 @@ def us_tracts(grid, density):
     print(f'  {len(tracts)} tracts, {np.sum(pixels == 0)} too small to draw, '
           f'{np.sum((pixels > 0) & (weight == 0))} with no one in GHS-POP, {hh.sum() / 1e6:.1f} M households, '
           f'{people.sum() / hh.sum():.2f} people each')
-    out = np.where(cell_hh > 0, cell_people / np.maximum(cell_hh, 1e-9), np.nan)
-    return out.reshape(grid.height, grid.width)
+    shape = (grid.height, grid.width)
+    return cell_people.reshape(shape), cell_hh.reshape(shape)
 
 
 def spread(index, land, steps):
