@@ -214,8 +214,8 @@ const MAPS = {
     // no census or survey covers it.
     empty: {0: 'No one lives here', 1: 'No data'},
     source: [
-      'Households: CORESIDENCE (Galeano et al. 2024) and UN DESA 2026; US ACS 2020–2024, Mexico 2020,',
-      'China 2020 and India 2011 censuses. Where 1+ person per km² lives (GHS-POP). Hover for each source.',
+      'Households: CORESIDENCE (Galeano et al. 2024) and UN DESA 2026; US ACS 2020–2024, Canada 2021,',
+      'Mexico 2020, China 2020 and India 2011 censuses. Where 1+ person per km² lives (GHS-POP). Hover for each source.',
     ],
     // Small households cool, big ones warm, with the neutral middle at about
     // 2.8, so a city's small homes stand apart from its suburbs' families.

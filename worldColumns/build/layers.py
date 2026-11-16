@@ -280,7 +280,8 @@ def household(grid, people, land):
     take the UN's national figure, on Natural Earth's outlines where
     CORESIDENCE has none; Saudi Arabia, Taiwan and the UAE, with neither,
     have none. The US and Puerto Rico come from census tracts instead (see
-    us_tracts), Mexico from localities and India from districts within
+    us_tracts), Mexico and Canada from localities and dissemination areas,
+    India from districts within
     each region; China's regions from its 2020 census. Then smoothed over 15
     km. 0 where fewer than 1 person per km² lives, 1 on land no source
     covers. Also returns where each cell's figure comes from, as an
@@ -381,6 +382,13 @@ def household(grid, people, land):
     weight = np.where(mx, place_people, weight)
     homes = np.where(mx, place_homes, homes)
     source = np.where(mx, label('2020 census, by locality'), source)
+    # Canada by dissemination area (a few hundred people each), likewise
+    # points to be spread by the smoothing.
+    area_people, area_homes = canada_areas(grid, un['CAN'][1])
+    ca = (country_iso == 'CAN') & lived
+    weight = np.where(ca, area_people, weight)
+    homes = np.where(ca, area_homes, homes)
+    source = np.where(ca, label('2021 census, by dissemination area'), source)
     # India's 2011 census districts carry the pattern within each region; the
     # region's newer figure (the 2019-21 DHS, scaled to the UN's) sets its
     # level, so each region keeps its own average.
@@ -395,6 +403,7 @@ def household(grid, people, land):
     late = lived & np.isnan(out) & ~np.isnan(regional)
     out = np.where(late, regional, out)
     source = np.where(late & mx, label('2020 census'), source)
+    source = np.where(late & ca, label(f"2011 census, scaled to the UN's {un['CAN'][0]} figure"), source)
     source = np.where(lived & ~np.isnan(out), source, 0)
     out = np.where(np.isnan(out), 0.01, out)  # stored as 1: no data
     assert len(labels) <= 256
@@ -467,6 +476,41 @@ def mexico_localities(grid):
     h = np.bincount(cell, np.array(homes, float), n)
     print(f'  Mexico: {len(people)} localities, {sum(people) / sum(homes):.2f} people per household')
     return p.reshape(grid.height, grid.width), h.reshape(grid.height, grid.width)
+
+
+def canada_areas(grid, national):
+    """People and households in each cell from the 2021 census's 57,936
+    dissemination areas (Statistics Canada's Geographic Attribute File,
+    92-151-X: each dissemination block's population and private dwellings
+    occupied by usual residents, summed to its area and placed at the
+    area's representative point). The population also counts people in
+    collective dwellings (care homes, prisons, residences), who aren't in
+    any household, so blocks without households are left out, an area's
+    people are capped at 7 per household (its 99.9th percentile is 6.5; a
+    few areas with a care home and a handful of houses reach 300), and the
+    rest is scaled so all of Canada comes to `national`, the UN's figure
+    from the same census (the file alone gives 2.47)."""
+    import csv
+    areas = {}
+    with open(os.path.join(SOURCES, 'canada', '2021_92-151_X.csv'), encoding='latin-1') as f:
+        for r in csv.DictReader(f):
+            homes = int(r['DBURDWELL2021_IDRHLOG2021'] or 0)
+            if homes == 0:
+                continue
+            a = areas.setdefault(r['DAUID_ADIDU'], [0, 0, float(r['DARPLAT_ADLAT']), float(r['DARPLONG_ADLONG'])])
+            a[0] += int(r['DBPOP2021_IDPOP2021'] or 0)
+            a[1] += homes
+    people = np.array([min(a[0], 7 * a[1]) for a in areas.values()], float)
+    homes = np.array([a[1] for a in areas.values()], float)
+    lat = np.array([a[2] for a in areas.values()])
+    lon = np.array([a[3] for a in areas.values()])
+    homes *= people.sum() / homes.sum() / national
+    x, y = forward(lon, lat)
+    cell = np.floor((grid.y_max - y) / grid.cell).astype(int) * grid.width + np.floor((x + grid.x_max) / grid.cell).astype(int)
+    n = grid.width * grid.height
+    print(f'  Canada: {len(areas)} dissemination areas, scaled to {national}')
+    shape = (grid.height, grid.width)
+    return np.bincount(cell, people, n).reshape(shape), np.bincount(cell, homes, n).reshape(shape)
 
 
 def smooth(grid, people, homes, country, lived, km):
