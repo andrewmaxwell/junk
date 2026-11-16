@@ -200,13 +200,13 @@ const MAPS = {
     button: 'Household size',
     kicker: () => 'HOW MANY PEOPLE SHARE A HOME',
     subtitle: () =>
-      "People in the average household within 15 km, from each country's finest recent census or survey. The middle color is the typical home in view",
+      "People in the average household within 15 km, from each country's finest recent census or survey",
     legend: 'HEIGHT · PEOPLE PER HOUSEHOLD',
-    // Fitted (the default), the colors center on the view and the legend's
-    // bar is theirs; the heights keep one scale, which this line gives.
+    // The colors have their own fixed range (`colors`), so the legend's bar
+    // is theirs; this line gives the heights'.
     colorLegend: 'COLOR · PEOPLE PER HOUSEHOLD',
     heightNote: () =>
-      `Height: ${(params.low / 100).toFixed(0)} to ${(params.high / 100).toFixed(0)} people at any zoom`,
+      `Height: ${(params.low / 100).toFixed(0)} to ${(params.high / 100).toFixed(0)} people`,
     unit: 'people ×100',
     format: (v) => (v / 100).toFixed(1),
     readout: ' people per household', // after the value, on hover
@@ -229,12 +229,14 @@ const MAPS = {
     centered: true, // fitted, the middle color is the view's median
     weighted: true, // averaged by households (see blocks)
     log: true,
-    ticks: [200, 300, 500],
+    // Colors run 1.5 to 6 on the same log scale, a narrower range than the
+    // heights', so the US's 2.1 to 3.1 spans a quarter of the ramp instead of
+    // a sixth, with the neutral middle at 3. Fixed, so a place keeps its
+    // color as you zoom (fitting them to the view made them shift).
+    colors: {low: 150, high: 600},
+    ticks: [200, 300, 400],
     ranges: {low: [0, 500, 10], high: [300, 10]},
-    // Fitted to the view, so the US's narrow range (90% of its cells 2.1 to
-    // 3.1) spans the colors when you look at it, as Africa's does at its:
-    // cool is smaller than is typical in view, warm bigger.
-    settings: {low: 100, high: 800, gamma: 1, height: 0.8, fit: true},
+    settings: {low: 100, high: 800, gamma: 1, height: 0.8},
   },
 };
 // Each map's top is its highest value, so no column is cut off flat (unless
@@ -999,7 +1001,7 @@ async function build(why = 'scene') {
   // Only the colors follow the view on a centered map: its heights stay on
   // the map's own scale, so they don't jump as the view changes.
   fitMid = null;
-  colorRange = null;
+  colorRange = current().colors ?? null;
   inView = ranked(columns);
   if (params.fit) {
     const land = inView.values;
