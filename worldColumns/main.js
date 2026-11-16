@@ -200,7 +200,7 @@ const MAPS = {
     button: 'Household size',
     kicker: () => 'HOW MANY PEOPLE SHARE A HOME',
     subtitle: () =>
-      "People in the average household, by province or state (by census tract in the US), from each country's latest census or survey with regions, scaled to the UN's latest national figure",
+      "People in the average household, by province or state (by census tract in the US), from each country's latest census or survey with regions, scaled to the UN's latest national figure. The middle color is the middle of what's in view",
     legend: 'HEIGHT · PEOPLE PER HOUSEHOLD',
     unit: 'people ×100',
     format: (v) => (v / 100).toFixed(1),
@@ -212,10 +212,23 @@ const MAPS = {
       'Households: CORESIDENCE (Galeano et al. 2024) by region, 3 in 4 since 2010, scaled to UN DESA 2026;',
       'US by census tract, ACS 2020–2024. Shown where 1+ person per km² lives (GHS-POP).',
     ],
-    ramp: ['#f6e8dc', '#ecbf9a', '#d98a64', '#b0524a', '#6e2338'],
+    // Small households cool, big ones warm, with the neutral middle at about
+    // 2.8, so a city's small homes stand apart from its suburbs' families.
+    // On a log scale from 1 (living alone) to 8 (the tallest are 12.9, in
+    // the Gambia): going from 2 to 3 people is as big a step as from 4 to 6.
+    // On the old straight scale to 12.9, most of the US (2.1 to 3.1) was one
+    // shade and nearly one height. Color follows the value straight (no lean
+    // toward the top), and the relief is low, since color tells it better.
+    ramp: ['#24577a', '#7fb3c2', '#f1e9d6', '#e48a4e', '#7a1f33'],
+    colorCurve: 1,
+    centered: true, // fitted, the middle color is the view's median
+    log: true,
+    ticks: [200, 300, 500],
     ranges: {low: [0, 500, 10], high: [300, 10]},
-    // From one person living alone, so the differences show.
-    settings: {low: 100, gamma: 1, height: 2.5},
+    // Fitted to the view, so the US's narrow range (90% of its cells 2.1 to
+    // 3.1) spans the colors when you look at it, as Africa's does at its:
+    // cool is smaller than is typical in view, warm bigger.
+    settings: {low: 100, high: 800, gamma: 1, height: 0.5, fit: true},
   },
 };
 // Each map's top is its highest value, so no column is cut off flat (unless
@@ -223,7 +236,7 @@ const MAPS = {
 // top slider can't go past the highest value.
 for (const [key, map] of Object.entries(MAPS)) {
   map.max = key === 'windows' ? 100 : layers.layers[key].max;
-  map.settings.high = map.top ?? map.max;
+  map.settings.high ??= map.top ?? map.max;
   const [min, step] = map.ranges.high;
   map.ranges.high = [min, map.max, step];
 }
@@ -237,7 +250,7 @@ const params = {
   map: startMap,
   period: 'all',
   labels: true,
-  fit: false, // stretch floor and top to this period's 5th and 99.5th percentiles
+  fit: false, // floor and top at the view's 5th and 99.5th percentiles
   ...MAPS[startMap].settings, // low, high, gamma (>1 keeps the merely-okay low), height
   sunElevation: 13,
   sunAzimuth: 294, // degrees clockwise from north the light comes from
@@ -844,14 +857,14 @@ function serves(have, want) {
 }
 
 let labels = [];
+let fitMid = null; // the view's median, when a centered map is fitted
 let grid = null; // the columns as built, for clicks and for knowing what's covered
 let building = 0;
 
 // Each column's color and height (in its own cells) for a window of the map,
 // as the tracer takes them.
-function columnData(map, {block, x, y, w, h}) {
-  const size = block * map.cell;
-  const values = blocks(
+function columnValues(map, {block, x, y, w, h}) {
+  return blocks(
     map,
     x * block,
     y * block,
@@ -861,6 +874,10 @@ function columnData(map, {block, x, y, w, h}) {
     current().power,
     blankBelow(current()),
   );
+}
+function columnData(map, win, values = columnValues(map, win)) {
+  const {block, w, h} = win;
+  const size = block * map.cell;
   const data = new Float32Array(w * h * 4);
   const tint = new THREE.Color();
   for (let i = 0; i < w * h; i++) {
@@ -871,7 +888,7 @@ function columnData(map, {block, x, y, w, h}) {
       continue;
     }
     const t = shapeOf(values[i]);
-    ramp(t ** (params.gamma * 0.6), tint);
+    ramp(t ** (current().colorCurve ?? params.gamma * 0.6), tint);
     data.set([tint.r, tint.g, tint.b, heightOf(t) / size], i * 4);
   }
   return {data, values};
@@ -888,19 +905,42 @@ async function build(why = 'scene') {
   if (ticket !== building) return; // a newer build started meanwhile
   const view = viewNow();
   const want = plan(map, view, lod.pixels);
-  if (why === 'view' && grid?.source === map && serves(grid, want)) return;
+  // Fitted to the view, the floor and top follow every move.
+  if (
+    why === 'view' &&
+    !params.fit &&
+    grid?.source === map &&
+    serves(grid, want)
+  )
+    return;
   const {width: W, height: H, cell} = map;
   const {main, detail} = want;
   const size = main.block * cell;
   const left = -WORLD / 2;
   const top = (-H * cell) / 2;
-  const {data, values} = columnData(map, main);
+  const values = columnValues(map, main);
+  // Fitted, the floor and top are the view's 5th and 99.5th percentiles,
+  // set before the columns are shaped from them. A map with a two-sided
+  // ramp (`centered`) instead puts the view's median in the middle, as far
+  // (on its scale) from the floor as from the top, so its neutral color
+  // means typical for what's in view.
+  fitMid = null;
   if (params.fit) {
     const land = values.filter((v) => v >= 0).sort((a, b) => a - b);
-    params.low = Math.round(land[Math.floor(land.length * 0.05)]);
-    params.high = Math.round(land[Math.floor(land.length * 0.995)]);
+    const at = (q) => land[Math.floor(land.length * q)];
+    if (land.length && current().centered) {
+      const mid = at(0.5);
+      const reach = Math.max(mid / Math.max(at(0.05), 1), at(0.95) / mid);
+      params.low = Math.round(mid / reach);
+      params.high = Math.max(Math.round(mid * reach), params.low + 1);
+      fitMid = mid;
+    } else if (land.length) {
+      params.low = Math.round(at(0.05));
+      params.high = Math.max(Math.round(at(0.995)), params.low + 1);
+    }
     gui.controllersRecursive().forEach((c) => c.updateDisplay());
   }
+  const {data} = columnData(map, main, values);
   let fine = null;
   if (detail) {
     // The main grid's cells under the detail grid stand empty.
@@ -1245,6 +1285,7 @@ const isPhone = () => innerWidth <= 600 || innerHeight <= 500;
 const TOUCH_HINT =
   'Drag to turn · two fingers to zoom and slide · tap a column for its value';
 const projected = new THREE.Vector3();
+const legendTint = new THREE.Color();
 function drawOverlay(c, w, h) {
   const map = current();
   const dpr = w / innerWidth;
@@ -1312,18 +1353,37 @@ function drawOverlay(c, w, h) {
   const ly = bottom - 20 * u;
   const lw = 200 * u;
   const lh = 5 * u;
+  // The bar runs from floor to top as the columns' heights do, colored as
+  // the columns are (their color leans toward the top of the ramp).
   const gradient = c.createLinearGradient(lx, 0, lx + lw, 0);
-  map.ramp.forEach((col, i) =>
-    gradient.addColorStop(i / (map.ramp.length - 1), col),
-  );
+  for (let i = 0; i <= 32; i++) {
+    ramp((i / 32) ** (map.colorCurve ?? params.gamma * 0.6), legendTint);
+    gradient.addColorStop(i / 32, `#${legendTint.getHexString()}`);
+  }
   c.fillStyle = gradient;
   c.fillRect(lx, ly, lw, lh);
   c.fillStyle = look().ink;
   c.font = `300 ${11 * u}px ${FONT}`;
+  // In-between values, for maps that name some, under a small tick each;
+  // the ends then say "≤" and "+" to leave them room.
+  const ticks = fitMid === null ? (map.ticks ?? []) : [fitMid];
+  c.textAlign = 'center';
+  for (const v of ticks) {
+    const t = shapeOf(v);
+    if (t <= 0.15 || t >= 0.85) continue;
+    c.fillRect(lx + t * lw - 0.5 * u, ly + lh, u, 3 * u);
+    halo(c, u, map.format(v), lx + t * lw, ly + lh + 15 * u);
+  }
+  const [less, more] = ticks.length ? ['≤ ', '+'] : ['', ' or more'];
+  c.textAlign = 'left';
   halo(
     c,
     u,
-    `${map.format(params.low)}${params.low > 0 ? ' or less' : ''}`,
+    params.low > 0
+      ? ticks.length
+        ? less + map.format(params.low)
+        : `${map.format(params.low)} or less`
+      : map.format(params.low),
     lx,
     ly + lh + 15 * u,
   );
@@ -1331,7 +1391,7 @@ function drawOverlay(c, w, h) {
   halo(
     c,
     u,
-    `${map.format(params.high)}${params.high < map.max ? ' or more' : ''}`,
+    `${map.format(params.high)}${params.high < map.max ? more : ''}`,
     lx + lw,
     ly + lh + 15 * u,
   );
@@ -1451,10 +1511,10 @@ function showActive() {
 
 function switchMap(key) {
   if (key === params.map) return;
-  const {low, high, gamma, height} = params;
-  Object.assign(current().settings, {low, high, gamma, height});
+  const {low, high, gamma, height, fit} = params;
+  Object.assign(current().settings, {low, high, gamma, height, fit});
   params.map = key;
-  Object.assign(params, current().settings);
+  Object.assign(params, {fit: false}, current().settings);
   const url = new URL(location.href);
   if (key === DEFAULT_MAP) url.searchParams.delete('map');
   else url.searchParams.set('map', key);
@@ -1495,7 +1555,7 @@ const periodController = gui
 gui.add(params, 'labels');
 gui.add(tracer, 'samples').listen().disable();
 const shape = gui.addFolder('Columns').close();
-shape.add(params, 'fit').name('fit to data').onChange(rebuild);
+shape.add(params, 'fit').name('fit to view').listen().onChange(rebuild);
 const lowController = shape.add(params, 'low', 0, 1, 1).onFinishChange(manual);
 const highController = shape
   .add(params, 'high', 0, 1, 1)
