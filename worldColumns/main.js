@@ -182,20 +182,27 @@ const MAPS = {
     unit: 'mm',
     format: (mm) => `${round2.format(mm / 25.4)} in`,
     readout: ' of rain and snow', // after the value, on hover
+    // No place averages more than about 12 m a year (Mawsynram, India).
+    // ERA5-Land passes that only on steep slopes it gets wrong, up to 25 m in
+    // the Andes near Manizales (about 2 m in fact), so the top stops there
+    // and those columns say so.
+    top: 12000,
+    doubt: ' · the model overshoots here',
     source: [
-      'Rain: ERA5-Land monthly means (ECMWF), 0.1°, Nov 2025 to Oct 2026.',
-      'In Equal Earth projection.',
+      'Rain: ERA5-Land monthly means (ECMWF), 0.1°, Nov 2025 to Oct 2026. It reads',
+      'too wet on some steep tropical slopes and too dry at the very wettest spots.',
     ],
     ramp: ['#e8eef4', '#a9c6e0', '#5b93c7', '#2a5f9e', '#0f2f63'],
     ranges: {low: [0, 1000, 10], high: [500, 50]},
-    settings: {low: 0, gamma: 0.5, height: 3.5},
+    settings: {low: 0, gamma: 0.65, height: 3},
   },
 };
-// Each map's top is its highest value, so no column is cut off flat; the top
-// slider can't go past it.
+// Each map's top is its highest value, so no column is cut off flat (unless
+// the map sets a lower `top`, past which its data isn't to be believed); the
+// top slider can't go past the highest value.
 for (const [key, map] of Object.entries(MAPS)) {
   map.max = key === 'windows' ? 100 : layers.layers[key].max;
-  map.settings.high = map.max;
+  map.settings.high = map.top ?? map.max;
   const [min, step] = map.ranges.high;
   map.ranges.high = [min, map.max, step];
 }
@@ -309,9 +316,15 @@ const controls = new OrbitControls(camera, renderer.domElement);
 // nudge restarts the render.
 controls.maxPolarAngle = Math.PI * 0.47;
 controls.zoomToCursor = true;
-controls.addEventListener('change', () => moving());
-controls.addEventListener('start', () => setMoved(true));
-controls.addEventListener('end', () => refine());
+// Only a real drag, pinch or scroll leaves the home view: a tap or click
+// that doesn't move the camera keeps the caption.
+let dragging = false;
+controls.addEventListener('change', () => {
+  moving();
+  if (dragging) setMoved(true);
+});
+controls.addEventListener('start', () => (dragging = true));
+controls.addEventListener('end', () => ((dragging = false), refine()));
 
 // While the camera moves, trace a quick preview (a fraction of the pixels,
 // one bounce) so dragging and zooming keep up; full quality resumes once it
@@ -367,10 +380,14 @@ function pan(dt) {
   moving();
 }
 
-// A low, three-quarter view from the south, framed to the window.
+// A low, three-quarter view from the south, framed to the window. On a tall,
+// narrow screen (a phone) it looks from the west instead, so the map's long
+// side runs up the screen (the Americas near, Asia far, north to the left)
+// and the world fills the screen rather than a strip across its middle.
 function home() {
   const aspect = innerWidth / innerHeight;
   const half = THREE.MathUtils.degToRad(camera.fov / 2);
+  if (isTall()) return homeTall(aspect);
   const fitWidth = (WORLD * 0.51) / (Math.tan(half) * aspect);
   const fitHeight = (ny * CELL * 0.57) / Math.tan(half);
   const distance = Math.max(fitWidth, fitHeight);
@@ -382,6 +399,38 @@ function home() {
     target.z + Math.sin(tilt) * distance,
   );
   return {target, position};
+}
+const isTall = () => innerHeight > innerWidth * 1.15;
+// The phone view, pulled back just far enough that the map's corners land
+// inside the screen, leaving room for the caption above and legend below.
+function homeTall(aspect) {
+  const tilt = THREE.MathUtils.degToRad(40); // from straight down
+  const target = new THREE.Vector3(2, 0, 0);
+  const offset = new THREE.Vector3(-Math.sin(tilt), Math.cos(tilt), 0);
+  const hx = WORLD / 2;
+  const hz = (ny * CELL) / 2;
+  const corners = [];
+  for (const x of [-hx, hx])
+    for (const z of [-hz, hz]) corners.push(new THREE.Vector3(x, 0, z));
+  const probe = camera.clone();
+  probe.aspect = aspect;
+  probe.updateProjectionMatrix();
+  const fits = (distance) => {
+    probe.position.copy(target).addScaledVector(offset, distance);
+    probe.lookAt(target);
+    probe.updateMatrixWorld();
+    return corners.every((p) => {
+      const q = p.clone().project(probe);
+      return Math.abs(q.x) <= 1 && Math.abs(q.y) <= 0.8;
+    });
+  };
+  let [near, far] = [10, 2000];
+  for (let i = 0; i < 30; i++) {
+    const mid = (near + far) / 2;
+    if (fits(mid)) far = mid;
+    else near = mid;
+  }
+  return {target, position: target.clone().addScaledVector(offset, far)};
 }
 
 // Camera moves: instant, or a short eased glide that the render loop runs.
@@ -1027,23 +1076,62 @@ function showReadout() {
   readout.replaceChildren(place, document.createElement('br'));
   const b = document.createElement('b');
   b.textContent = map.format(value) + map.readout;
+  if (map.top && value > map.top) b.textContent += map.doubt;
   readout.append(b);
-  readout.style.transform = `translate(${hover.x + 14}px, ${hover.y + 14}px)`;
+  // Beside the pointer, kept on screen: to the left of it near the right
+  // edge, above it near the bottom (a finger covers what's below).
   readout.hidden = false;
+  const {offsetWidth: rw, offsetHeight: rh} = readout;
+  const gap = hover.touch ? 24 : 14;
+  const x =
+    hover.x + gap + rw > innerWidth - 8 ? hover.x - gap - rw : hover.x + gap;
+  const y =
+    hover.touch || hover.y + gap + rh > innerHeight - 8
+      ? hover.y - gap - rh
+      : hover.y + gap;
+  readout.style.transform = `translate(${Math.max(8, x)}px, ${Math.max(8, y)}px)`;
+}
+function loadCities() {
+  if (cities) return;
+  cities = [];
+  fetch('data/cities.json')
+    .then((r) => r.json())
+    .then((list) => ((cities = list), hover && showReadout()));
 }
 renderer.domElement.addEventListener('pointermove', (e) => {
-  if (e.pointerType !== 'mouse' || e.buttons) return (readout.hidden = true);
-  if (!cities) {
-    cities = [];
-    fetch('data/cities.json')
-      .then((r) => r.json())
-      .then((list) => ((cities = list), hover && showReadout()));
+  if (e.pointerType !== 'mouse' || e.buttons) {
+    if (e.pointerType === 'mouse') readout.hidden = true;
+    return;
   }
+  loadCities();
   hover = {x: e.clientX, y: e.clientY};
   hoverFrame ||= requestAnimationFrame(showReadout);
 });
+// On a touch screen a tap shows the readout, until the next touch. A touch
+// that turns into a drag or pinch, or lasts long, isn't a tap.
+let touchStart = null;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse') return;
+  touchStart = e.isPrimary
+    ? {x: e.clientX, y: e.clientY, t: performance.now()}
+    : null;
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  const tap =
+    touchStart &&
+    e.isPrimary &&
+    Math.hypot(e.clientX - touchStart.x, e.clientY - touchStart.y) < 10 &&
+    performance.now() - touchStart.t < 400;
+  touchStart = null;
+  if (!tap) return;
+  loadCities();
+  hover = {x: e.clientX, y: e.clientY, touch: true};
+  showReadout();
+});
+// A finger leaves the canvas as it lifts, so only the mouse leaving hides it.
 for (const type of ['pointerleave', 'pointerdown', 'wheel']) {
-  renderer.domElement.addEventListener(type, () => {
+  renderer.domElement.addEventListener(type, (e) => {
+    if (type === 'pointerleave' && e.pointerType !== 'mouse') return;
     hover = null;
     readout.hidden = true;
   });
@@ -1089,10 +1177,21 @@ function halo(c, u, text, x, y) {
   c.fillText(text, x, y);
 }
 
+// Narrower or shorter than this (in CSS pixels, as in index.html's media
+// query), the page is laid out for a phone: the caption goes under the tabs
+// with the sources, and the legend sits above the buttons at the bottom.
+const isPhone = () => innerWidth <= 600 || innerHeight <= 500;
+const TOUCH_HINT =
+  'Drag to turn · two fingers to zoom and slide · tap a column for its value';
 const projected = new THREE.Vector3();
 function drawOverlay(c, w, h) {
   const map = current();
-  const u = Math.min(w, h * 1.6) / 1000; // one unit of type scale
+  const dpr = w / innerWidth;
+  const narrow = isPhone();
+  // One unit of type scale, in device pixels: it grows with the window but
+  // never drops below a CSS pixel, so text stays readable on a phone.
+  const u =
+    dpr * Math.max(Math.min(innerWidth, innerHeight * 1.6) / 1000, 0.95);
   c.clearRect(0, 0, w, h);
   if (GLIDE) return;
   c.fillStyle = look().ink;
@@ -1101,25 +1200,55 @@ function drawOverlay(c, w, h) {
   // Caption, top left: what the map shows, in small type, since the tabs
   // name it. It hides once the camera leaves the home view, so the map has
   // the screen.
-  const pad = 36 * u;
-  const full = !moved || c !== ctx;
+  const pad = narrow ? 14 * dpr : 36 * u;
+  const top = narrow ? nav.getBoundingClientRect().bottom * dpr + 6 * u : pad;
+  const full = !moved;
+  let captionBottom = 0;
   if (full) {
     c.font = `400 ${9.5 * u}px ${FONT}`;
     c.letterSpacing = `${2.4 * u}px`;
-    halo(c, u, map.kicker(params.period), pad + 2 * u, pad + 12 * u);
+    const width = narrow ? w - 2 * pad - 4 * u : 470 * u;
+    let y = top + 12 * u;
+    for (const line of wrap(c, map.kicker(params.period), width)) {
+      halo(c, u, line, pad + 2 * u, y);
+      y += 14 * u;
+    }
     c.letterSpacing = '0px';
     c.font = `300 ${11.5 * u}px ${FONT}`;
     c.globalAlpha = 0.75;
-    const lines = wrap(c, map.subtitle(params.period), 470 * u);
-    lines.forEach((line, i) =>
-      halo(c, u, line, pad + 2 * u, pad + (29 + 15 * i) * u),
-    );
+    y += 3 * u;
+    for (const line of wrap(c, map.subtitle(params.period), width)) {
+      halo(c, u, line, pad + 2 * u, y);
+      y += 15 * u;
+    }
+    if (narrow) {
+      c.font = `300 ${10 * u}px ${FONT}`;
+      c.globalAlpha = 0.6;
+      y += 3 * u;
+      for (const line of wrap(c, map.source.join(' '), width)) {
+        halo(c, u, line, pad + 2 * u, y);
+        y += 13 * u;
+      }
+      c.font = `400 ${10 * u}px ${FONT}`;
+      c.globalAlpha = 0.85;
+      y += 4 * u;
+      halo(c, u, TOUCH_HINT, pad + 2 * u, y);
+    }
+    captionBottom = y;
     c.globalAlpha = 1;
   }
 
-  // Legend, bottom left: the ramp with the floor and top it stands for.
+  // Legend, bottom left: the ramp with the floor and top it stands for. On a
+  // phone it sits above the reset and settings buttons.
+  let bottom = h - pad;
+  if (narrow) {
+    const guiTop = gui._closed
+      ? gui.domElement.getBoundingClientRect().top
+      : innerHeight - 50;
+    bottom = Math.min(guiTop, help.getBoundingClientRect().top) * dpr - 8 * u;
+  }
   const lx = pad + 3 * u;
-  const ly = h - pad - 20 * u;
+  const ly = bottom - 20 * u;
   const lw = 200 * u;
   const lh = 5 * u;
   const gradient = c.createLinearGradient(lx, 0, lx + lw, 0);
@@ -1152,7 +1281,7 @@ function drawOverlay(c, w, h) {
   c.letterSpacing = '0px';
 
   // Source, bottom right, at the home view.
-  if (full) {
+  if (full && !narrow) {
     c.textAlign = 'right';
     c.globalAlpha = 0.6;
     c.font = `300 ${10 * u}px ${FONT}`;
@@ -1172,18 +1301,31 @@ function drawOverlay(c, w, h) {
     if (projected.z > 1 || Math.abs(projected.x) > 1.2) continue;
     const x = (projected.x * 0.5 + 0.5) * w;
     const y = (-projected.y * 0.5 + 0.5) * h;
-    // Leaders on the left run straight out over the water; the rest rise.
-    const side = LEFT.has(name) ? -1 : 1;
-    const top = side < 0 ? y : y - 30 * u;
+    // Leaders on the left run straight out over the water (when north is
+    // up); the rest rise. A label that would run off the screen tries the
+    // other side, and is left out if it doesn't fit there either.
     const text = `${name}  ${value === NO_VALUE ? '–' : map.format(value)}`;
-    const tx = x + side * (side < 0 ? 34 : 11) * u;
     const tw = c.measureText(text).width;
-    const box = [
-      Math.min(x, side < 0 ? tx - tw : tx) - 4 * u,
-      top - 10 * u,
-      Math.max(x, side < 0 ? tx : tx + tw) + 4 * u,
-      Math.max(y, top + 8 * u) + 3 * u,
-    ];
+    const layout = (side) => {
+      const top = side < 0 ? y : y - 30 * u;
+      const tx = x + side * (side < 0 ? 34 : 11) * u;
+      const box = [
+        Math.min(x, side < 0 ? tx - tw : tx) - 4 * u,
+        top - 10 * u,
+        Math.max(x, side < 0 ? tx : tx + tw) + 4 * u,
+        Math.max(y, top + 8 * u) + 3 * u,
+      ];
+      return {side, top, tx, box};
+    };
+    const preferred = LEFT.has(name) && !isTall() ? -1 : 1;
+    const onScreen = ({box}) =>
+      box[0] >= 0 &&
+      box[2] <= w &&
+      box[1] >= captionBottom &&
+      box[3] <= ly - 20 * u;
+    const fit = [layout(preferred), layout(-preferred)].find(onScreen);
+    if (!fit) continue;
+    const {side, top, tx, box} = fit;
     const hits = (b) =>
       box[0] < b[2] && b[0] < box[2] && box[1] < b[3] && b[1] < box[3];
     if (taken.some(hits)) continue;
@@ -1256,6 +1398,8 @@ function switchMap(key) {
   if (key === DEFAULT_MAP) url.searchParams.delete('map');
   else url.searchParams.set('map', key);
   history.replaceState(null, '', url);
+  hover = null; // the readout would quote the last map
+  readout.hidden = true;
   showActive();
   fitControllers();
   setLighting(); // day or night
