@@ -90,3 +90,11 @@ These are the things the monitor can't see:
 - The Mac stayed on 5 GHz the whole time, with a weakest signal of -52 dBm.
 - Ping loss over 4676 pings: router 0.02%, ATEM 0.04%, Cloudflare 0.02%, YouTube 0.45%, Google DNS 0.36%. The first responding Spectrum hop lost 3.1% while later hops lost far less, so it's probably just giving pings low priority.
 - Both Sundays, pings to Google's servers were lost far more often than pings to Cloudflare over the same Spectrum connection. On 11-01, from 10:22:30, YouTube lost about 1.0% and Cloudflare about 0.06%. Google may simply give pings low priority, so this isn't proof, but it fits the theory that the trouble is on the route to YouTube rather than in the building.
+
+## 2026-11-15
+
+- No problems. The monitor ran from 9:49 to 12:10, so it covered the 10:07-10:20 window and the stream's start.
+- The stream ran from 10:35:00 to 12:06:50. The cache sat at 3 from the first second and never went higher. There were no state blips and no reconnects. The stream averaged 11.2 Mbps, with a peak of 15.3, and the settings were still 12 and 20 Mbps. So this start did not show the climb seen on 11-01.
+- The Mac stayed on 5 GHz channel 36 the whole time, with a weakest signal of -51 dBm. The 10:07-10:20 window was quiet this time, unlike 11-01.
+- Ping loss during the stream, over about 5500 pings each: router 0%, ATEM 0%, Cloudflare 0.04%, Google DNS 0.36%, YouTube 0.58%, first Spectrum hop 3.5%. That's the same pattern as the last two Sundays: Google's servers lose several times more pings than Cloudflare does, even on a clean day.
+- At 10:30:07, with the stream still idle, the ATEM stopped answering pings for about 10 seconds. During that time the router answered normally, and the monitor's control link to the ATEM dropped from 10:30:12 to 10:30:17. That gap means the ATEM itself, or its cable or switch port, briefly went away, not the Mac's Wi-Fi. It was most likely someone at the booth turning equipment on and off around then, and a 10-second gap fits the ATEM restarting. If it happens again when nobody is touching anything, check the ATEM's cable and switch port, since a drop like that during a stream would force a reconnect.
