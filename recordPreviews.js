@@ -23,14 +23,17 @@ const MIN_FRAMES = 30; // fewer changed frames than this is a jump or two, not m
 const setup = {
   lambdagator: {warmup: 300, act: (page) => page.click('#watch')},
   bz: {warmup: 8000}, // let the broken fronts curl up into spirals
-  // let the first spots spread and start dividing, without the hint and the info card
+  // stirred crescents swimming and leaving trails, without the hint and the info card
   reactionDiffusion: {
-    warmup: 4000,
-    act: (page) =>
-      page.evaluate(() => {
+    warmup: 6000,
+    act: async (page) => {
+      await page.goto(page.url() + '#crescents&stir=0.4', {waitUntil: 'load'});
+      await page.reload({waitUntil: 'load'});
+      await page.evaluate(() => {
         document.querySelector('#hint').remove();
         document.querySelector('#card').remove();
-      }),
+      });
+    },
   },
   // a slow, seamlessly looping glide over Europe at night (see ?glide in its main.js)
   worldColumns: {
