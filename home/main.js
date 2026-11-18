@@ -190,5 +190,21 @@ function watchPreviews() {
   }
 }
 
+// The cards are drawn after data.json loads, too late for the browser's own scroll restoration,
+// so Back and reload would land at the top. Keep the spot in the history entry instead.
+history.scrollRestoration = 'manual';
+// Saved once scrolling pauses, since a change made while the page unloads is dropped on reload.
+let scrollSave;
+addEventListener('scroll', () => {
+  clearTimeout(scrollSave);
+  scrollSave = setTimeout(
+    () => history.replaceState({...history.state, scrollY}, ''),
+    150,
+  );
+});
+const savedScroll = history.state?.scrollY;
+if (savedScroll) animate = false;
+
 searchInput.value = new URLSearchParams(location.search).get('q') || '';
 render();
+if (savedScroll) scrollTo(0, savedScroll);

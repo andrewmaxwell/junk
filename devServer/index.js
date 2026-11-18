@@ -20,12 +20,21 @@ const requested = new Set();
 
 const reloadScript = `
 <script>
-  (function connect(reconnecting) {
+  // Leaving the page closes the socket too. Without the hidden check, a page brought back by
+  // Back (from the back-forward cache) would take that as a server restart and reload itself.
+  let hidden = false;
+  function connect(reconnecting) {
     const ws = new WebSocket('ws://' + location.host);
     ws.onopen = () => reconnecting && location.reload();
     ws.onmessage = () => location.reload();
-    ws.onclose = () => setTimeout(() => connect(true), 1000);
-  })();
+    ws.onclose = () => hidden || setTimeout(() => connect(true), 1000);
+  }
+  addEventListener('pagehide', () => (hidden = true));
+  addEventListener('pageshow', (e) => {
+    hidden = false;
+    if (e.persisted) connect(false);
+  });
+  connect(false);
 </script>`;
 
 const app = express();
