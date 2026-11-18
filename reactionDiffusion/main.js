@@ -132,7 +132,7 @@ const params = {
   speed: 20,
   palette: 'Lagoon',
   drift: 0.5,
-  stir: 0,
+  stir: 0.4,
   history: 0.7,
   relief: 0.6,
   tour: true,
