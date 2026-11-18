@@ -23,6 +23,15 @@ const MIN_FRAMES = 30; // fewer changed frames than this is a jump or two, not m
 const setup = {
   lambdagator: {warmup: 300, act: (page) => page.click('#watch')},
   bz: {warmup: 8000}, // let the broken fronts curl up into spirals
+  // let the first spots spread and start dividing, without the hint and the info card
+  reactionDiffusion: {
+    warmup: 4000,
+    act: (page) =>
+      page.evaluate(() => {
+        document.querySelector('#hint').remove();
+        document.querySelector('#card').remove();
+      }),
+  },
   // a slow, seamlessly looping glide over Europe at night (see ?glide in its main.js)
   worldColumns: {
     warmup: 4000,
