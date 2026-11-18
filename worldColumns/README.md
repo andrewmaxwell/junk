@@ -32,7 +32,7 @@ Why Nairobi beats San Francisco: every hour counts, night included. Nairobi, at 
 
 ## Rendering
 
-The renderer is [pathtracer.js](pathtracer.js), which started as the [Comfort Spikes](../comfort/map/spikes/) tracer and is still shared with it: every column fills its grid cell, so a ray walks the grid cell by cell and hits the boxes exactly. Each sample is a jittered camera ray and up to three diffuse bounces, with the sun (or moon) sampled directly from a disk of a few degrees, so shadows have soft edges.
+The renderer is [pathtracer.js](pathtracer.js), a progressive path tracer written for this scene: every column fills its grid cell, so a ray walks the grid cell by cell and hits the boxes exactly. Each sample is a jittered camera ray and up to three diffuse bounces, with the sun (or moon) sampled directly from a disk of a few degrees, so shadows have soft edges.
 
 - **Detail where you look.** Columns are sized to look about one pixel across wherever they stand (but never finer than the data's own 5.5 km cells), so near ones are finer than far ones: the view gets a detail grid near the camera inside a coarser grid for everything else, rebuilt once the camera settles and kept if the columns there are already as fine. A grid only goes coarser than that when it would need more than 6 million columns, as when the whole map is in view. **column size** in Settings › Quality makes columns wider, for a faster picture.
 - **Moving.** While the camera moves it traces a quick preview (30% of the pixels, one bounce), which caps glow found by chance bounces so a few samples don't sparkle). Full-quality samples are drawn a band of rows at a time, sized to about 20 ms of GPU work, so a Retina-sized frame (about half a second whole) never holds up the camera.
