@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
-import {createPathTracer} from '../comfort/map/spikes/pathtracer.js';
+import {createPathTracer} from './pathtracer.js';
 
 const [meta, layers] = await Promise.all(
   ['data/meta.json', 'data/layers.json'].map((url) =>

@@ -1,14 +1,14 @@
 // The comfort map as a field of columns: each column is a block of HRRR cells,
 // as tall as the share of waking hours that scored Good there. Reads the same
 // data/ PNGs as the flat map (red = percent Good, 255 = no data). The picture
-// is path traced in `pathtracer.js` and sharpens as samples add up. Titles,
+// is path traced in World Columns' `pathtracer.js` and sharpens as samples add up. Titles,
 // labels and the legend are drawn on a 2D canvas over it, so "save PNG" can
 // stack the two into one image.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {geoConicConformal} from 'https://cdn.jsdelivr.net/npm/d3-geo@3.1.1/+esm';
-import {createPathTracer} from './pathtracer.js';
+import {createPathTracer} from '../../../worldColumns/pathtracer.js';
 
 const meta = await fetch('../data/meta.json').then((r) => r.json());
 const {nx, ny, projection: grid} = meta;
