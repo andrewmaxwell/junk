@@ -92,13 +92,37 @@ const presets = {
   },
 };
 
+// Five colors from no B to the most B, then the color of newborn B.
 const palettes = {
-  Lagoon: ['#05141f', '#0b3c5d', '#1d8a99', '#e9c46a', '#fff4dc'],
-  Ink: ['#f2ede2', '#d8cfbf', '#8796a4', '#2c3b55', '#101828'],
-  Ember: ['#080403', '#3f0c0c', '#a8301a', '#ee8a2a', '#ffe9a8'],
-  Glow: ['#020a04', '#0a3512', '#1d8a2b', '#86e36d', '#ecffe0'],
-  Orchid: ['#170a22', '#461656', '#a2327a', '#ef7b88', '#ffe2d2'],
+  Lagoon: ['#05141f', '#0b3c5d', '#1d8a99', '#e9c46a', '#fff4dc', '#ff7a59'],
+  Ink: ['#f2ede2', '#d8cfbf', '#8796a4', '#2c3b55', '#101828', '#b3263a'],
+  Ember: ['#080403', '#3f0c0c', '#a8301a', '#ee8a2a', '#ffe9a8', '#fff27a'],
+  Glow: ['#020a04', '#0a3512', '#1d8a2b', '#86e36d', '#ecffe0', '#e4ff3a'],
+  Orchid: ['#170a22', '#461656', '#a2327a', '#ef7b88', '#ffe2d2', '#6fdcff'],
 };
+const tourOrder = [
+  'mitosis',
+  'coral',
+  'crescents',
+  'worms',
+  'maze',
+  'waves',
+  'holes',
+  'movingSpots',
+  'solitons',
+  'chaos',
+];
+
+// Drift: how far F wanders along the dashed line (where the patterns are), and how far k
+// wanders off it, at drift 1.
+const DRIFT_F = 0.012;
+const DRIFT_K = 0.0015;
+// Simulation steps per unit of the drift and stirring fields' time, so they change slowly
+// next to the patterns: one swirl takes tens of thousands of steps.
+const FIELD_STEPS = 10000;
+// How long trails take to fade and how long newborn B keeps its color, in steps.
+const TRAIL_STEPS = 2500;
+const YOUTH_STEPS = 5000;
 
 const params = {
   preset: 'mitosis',
@@ -107,11 +131,17 @@ const params = {
   map: false,
   speed: 20,
   palette: 'Lagoon',
+  drift: 0.5,
+  stir: 0,
+  history: 0.7,
   relief: 0.6,
+  tour: true,
   brush: 12,
   eraser: false,
   paused: false,
 };
+
+const defaults = {...params};
 
 // URL hash state, like #coral&palette=Ink, #F=0.031&k=0.06, or #map
 const readHash = () => {
@@ -125,6 +155,8 @@ const readHash = () => {
     else if (key === 'k' && isFinite(value)) params.kill = +value;
     else if (key === 'palette' && palettes[value]) params.palette = value;
     else if (key === 'map') params.map = true;
+    else if (['drift', 'stir', 'history'].includes(key) && isFinite(value))
+      params[key] = Math.min(1, Math.max(0, +value));
   }
 };
 let hashTimer;
@@ -140,6 +172,9 @@ const writeHash = () => {
         : [`F=${+feed.toFixed(4)}`, `k=${+kill.toFixed(4)}`];
     if (params.palette !== 'Lagoon') parts.push(`palette=${params.palette}`);
     if (params.map) parts.push('map');
+    for (const key of ['drift', 'stir', 'history'])
+      if (params[key] !== defaults[key])
+        parts.push(`${key}=${+params[key].toFixed(2)}`);
     history.replaceState(null, '', '#' + parts.join('&'));
   }, 300);
 };
@@ -186,22 +221,46 @@ vec4 at(ivec2 p) {
 // F and k at a point on the map, given as a fraction of the way across
 vec2 mapFK(vec2 f) { return vec2(mix(mapRange.z, mapRange.w, f.y), mix(mapRange.x, mapRange.y, f.x)); }
 float hash(vec2 p, float seed) { return fract(sin(dot(p, vec2(12.9898, 78.233)) + seed) * 43758.5453); }
+
+uniform float time, drift; // time in units of FIELD_STEPS
+uniform vec2 fk;
+const float TAU = 6.28318531;
+// A smooth field from -1 to 1 that slowly wanders and wraps around with the screen (u is the
+// fraction of the way across). It's nested sines rather than hashed noise so main.js can compute
+// the same thing for the card.
+float wander(vec2 u, float t, vec4 c) {
+  vec2 a = TAU * u;
+  return 0.5 * (sin(a.x + c.x * t + 1.3 * sin(a.y + c.y * t)) + sin(a.y - c.z * t + 1.3 * sin(a.x - c.w * t + 1.0)));
+}
+// The saddle-node line, k = √F/2 - F
+float lineK(float f) { return sqrt(f) / 2.0 - f; }
+// F and k at u. With drift, F slides along the dashed line and k keeps its distance from it,
+// plus a little, so each part of the screen sits in a slightly different, slowly changing regime.
+vec2 fkAt(vec2 u) {
+  if (mapMode) return mapFK(u);
+  if (drift == 0.0) return fk;
+  float f = clamp(fk.x + drift * ${DRIFT_F} * wander(u, time, vec4(0.7, 0.5, 0.6, 0.4)), 0.008, 0.08);
+  return vec2(f, lineK(f) + fk.y - lineK(fk.x) + drift * ${DRIFT_K} * wander(u + 0.37, time, vec4(0.5, 0.8, 0.4, 0.7)));
+}
 `;
 
+// x and y are A and B. z is a fading memory of B, for trails. w is when (in steps) B last
+// appeared here, or -1 if it's absent, to color newborn B.
 const stepShader = `${header}
-uniform vec2 fk;
-uniform float da, db;
+uniform float da, db, clock;
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
-  vec2 s = at(p).xy;
+  vec4 old = at(p);
+  vec2 s = old.xy;
   // isotropic 9-point Laplacian, so spots come out round instead of square
   vec2 lap = (4.0 * (at(p + ivec2(1, 0)).xy + at(p - ivec2(1, 0)).xy + at(p + ivec2(0, 1)).xy + at(p - ivec2(0, 1)).xy)
     + at(p + ivec2(1, 1)).xy + at(p - ivec2(1, 1)).xy + at(p + ivec2(1, -1)).xy + at(p - ivec2(1, -1)).xy
     - 20.0 * s) / 6.0;
-  vec2 f = mapMode ? mapFK(gl_FragCoord.xy / vec2(size())) : fk;
+  vec2 f = fkAt(gl_FragCoord.xy / vec2(size()));
   float r = s.x * s.y * s.y;
-  s += vec2(da * lap.x - r + f.x * (1.0 - s.x), db * lap.y + r - (f.x + f.y) * s.y);
-  color = vec4(clamp(s, 0.0, 1.0), 0, 1);
+  s = clamp(s + vec2(da * lap.x - r + f.x * (1.0 - s.x), db * lap.y + r - (f.x + f.y) * s.y), 0.0, 1.0);
+  float birth = s.y > 0.1 ? (old.w < 0.0 ? clock : old.w) : s.y < 0.06 ? -1.0 : old.w;
+  color = vec4(s, max(s.y, old.z - 0.4 / ${TRAIL_STEPS}.0), birth);
 }`;
 
 // Blobs of A = 1/2, B = 1/2, a little noisy, in a sea of pure A. (Pearson started from one
@@ -212,7 +271,7 @@ uniform float seed, spacing;
 uniform bool keep;
 void main() {
   vec2 p = gl_FragCoord.xy;
-  vec4 s = keep ? at(ivec2(p)) : vec4(1, 0, 0, 1);
+  vec4 s = keep ? at(ivec2(p)) : vec4(1, 0, 0, -1);
   vec2 cell = floor(p / spacing);
   for (int y = -1; y <= 1; y++)
     for (int x = -1; x <= 1; x++) {
@@ -220,7 +279,7 @@ void main() {
       if (hash(c, seed) > 0.6) continue;
       vec2 center = (c + vec2(hash(c + 0.3, seed), hash(c + 0.7, seed))) * spacing;
       if (length(p - center) < mix(4.0, 0.2 * spacing, hash(c + 0.5, seed)))
-        s = vec4(0.5, 0.5, 0, 1) + 0.04 * (vec4(hash(p, seed), hash(p + 0.1, seed), 0, 0) - 0.5);
+        s = vec4(0.5 + 0.04 * hash(p, seed), 0.5 + 0.04 * hash(p + 0.1, seed), s.z, -1);
     }
   color = s;
 }`;
@@ -236,13 +295,32 @@ void main() {
   vec2 ab = b - a;
   float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
   if (length(p - a - t * ab) < radius)
-    s = erase ? vec4(1, 0, 0, 1) : vec4(0.5 + 0.1 * hash(p, seed), 0.5 + 0.1 * hash(p + 0.1, seed), 0, 1);
+    s = erase ? vec4(1, 0, s.z, -1) : vec4(0.5 + 0.1 * hash(p, seed), 0.5 + 0.1 * hash(p + 0.1, seed), s.z, -1);
   color = s;
 }`;
 
 // Tiles the old grid onto a new one when the window changes size, so patterns keep their size.
 const copyShader = `${header}
 void main() { color = at(ivec2(gl_FragCoord.xy)); }`;
+
+// Stirring: carries everything along a slowly swirling flow, traced back one frame's worth of
+// steps at a time (doing it every step would blur the pattern far more). The flow is the curl
+// of a wandering stream function, so it neither piles chemicals up nor thins them out.
+const advectShader = `${header}
+uniform float amount; // cells moved per frame at the fastest
+float psi(vec2 u) { return wander(u, time, vec4(0.3, 0.45, 0.35, 0.25)); }
+void main() {
+  vec2 p = gl_FragCoord.xy, n = vec2(size()), u = p / n;
+  const float e = 0.002;
+  vec2 g = vec2(psi(u + vec2(e, 0)) - psi(u - vec2(e, 0)), psi(u + vec2(0, e)) - psi(u - vec2(0, e))) / (2.0 * e);
+  vec2 v = vec2(g.y / n.y, -g.x / n.x) * sqrt(n.x * n.y) / (2.0 * TAU);
+  vec2 q = p - amount * v - 0.5;
+  ivec2 i = ivec2(floor(q));
+  vec2 t = q - floor(q);
+  vec4 s = mix(mix(at(i), at(i + ivec2(1, 0)), t.x), mix(at(i + ivec2(0, 1)), at(i + ivec2(1, 1)), t.x), t.y);
+  // when B appeared can't be averaged, so take the nearest cell's
+  color = vec4(s.xyz, at(ivec2(floor(q + 0.5))).w);
+}`;
 
 // The most B in each of 16x16 blocks, read back now and then to notice when B has died out.
 const probeShader = `${header}
@@ -256,22 +334,35 @@ void main() {
 
 const displayShader = `${header}
 uniform vec2 scale;
-uniform vec3 pal[5];
-uniform float relief;
-vec2 sampleAt(vec2 p) {
+uniform vec3 pal[6];
+uniform float relief, history, clock;
+vec4 sampleAt(vec2 p) {
   p -= 0.5;
   ivec2 i = ivec2(floor(p));
   vec2 t = p - floor(p);
-  return mix(mix(at(i).xy, at(i + ivec2(1, 0)).xy, t.x), mix(at(i + ivec2(0, 1)).xy, at(i + ivec2(1, 1)).xy, t.x), t.y);
+  return mix(mix(at(i), at(i + ivec2(1, 0)), t.x), mix(at(i + ivec2(0, 1)), at(i + ivec2(1, 1)), t.x), t.y);
 }
 // how much B there is, 0 to 1, which picks the color and is the height for the relief
 float tone(vec2 p) { return clamp(sampleAt(p).y / 0.45, 0.0, 1.0); }
-void main() {
-  vec2 p = gl_FragCoord.xy * scale;
-  float t = tone(p);
+vec3 ramp(float t) {
   float x = t * 4.0;
   int i = min(int(x), 3);
-  vec3 c = mix(pal[i], pal[i + 1], x - float(i));
+  return mix(pal[i], pal[i + 1], x - float(i));
+}
+void main() {
+  vec2 p = gl_FragCoord.xy * scale;
+  vec4 s = sampleAt(p);
+  float t = clamp(s.y / 0.45, 0.0, 1.0);
+  vec3 c = ramp(t);
+  // trails: where B was a moment ago but isn't now
+  float ghost = clamp((s.z - s.y) / 0.45, 0.0, 1.0);
+  c = mix(c, ramp(0.5), history * 0.55 * ghost);
+  // newborn B glows in the accent color and fades to the palette
+  float birth = at(ivec2(p)).w;
+  if (birth >= 0.0) {
+    float youth = exp(-(clock - birth) / ${YOUTH_STEPS}.0);
+    c = mix(c, pal[5], history * 0.75 * youth * t);
+  }
   // lit from the upper left, as if B were raised up off the page
   vec2 g = vec2(tone(p + vec2(1, 0)) - tone(p - vec2(1, 0)), tone(p + vec2(0, 1)) - tone(p - vec2(0, 1)));
   vec3 n = normalize(vec3(-2.5 * g, 1));
@@ -344,6 +435,7 @@ const runStep = program(stepShader);
 const runSeed = program(seedShader);
 const runBrush = program(brushShader);
 const runCopy = program(copyShader);
+const runAdvect = program(advectShader);
 const runProbe = program(probeShader);
 const runDisplay = program(displayShader);
 
@@ -387,12 +479,23 @@ canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
 canvas.addEventListener('webglcontextrestored', () => location.reload());
 
 let state, next;
+let clock = 0; // simulation steps so far
 const mapRange = [MAP.kMin, MAP.kMax, MAP.fMin, MAP.fMax];
+// Uniforms most shaders share.
+const common = () => ({
+  state: 0,
+  mapMode: params.map,
+  mapRange,
+  fk: [params.feed, params.kill],
+  drift: params.drift,
+  time: clock / FIELD_STEPS,
+  clock,
+});
 // Runs a shader that reads the state and writes the next one, then swaps them.
 const pass = (run, values = {}) => {
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, state.tex);
-  run(next, {state: 0, mapMode: params.map, mapRange, ...values});
+  run(next, {...common(), ...values});
   [state, next] = [next, state];
 };
 // Blobs at least spacing cells apart, but closer on a small screen, so a phone gets enough of
@@ -449,6 +552,38 @@ const nearestPreset = (feed, kill) => {
   return best;
 };
 
+// The same drift field as fkAt in the shaders, to show on the card which F and k are on screen.
+const TAU = 2 * Math.PI;
+const wander = (ux, uy, t, c) => {
+  const ax = TAU * ux;
+  const ay = TAU * uy;
+  return (
+    0.5 *
+    (Math.sin(ax + c[0] * t + 1.3 * Math.sin(ay + c[1] * t)) +
+      Math.sin(ay - c[2] * t + 1.3 * Math.sin(ax - c[3] * t + 1)))
+  );
+};
+const lineK = (f) => Math.sqrt(f) / 2 - f;
+const fkAt = (ux, uy) => {
+  const t = clock / FIELD_STEPS;
+  const {feed, kill, drift} = params;
+  const f = Math.min(
+    0.08,
+    Math.max(
+      0.008,
+      feed + drift * DRIFT_F * wander(ux, uy, t, [0.7, 0.5, 0.6, 0.4]),
+    ),
+  );
+  return {
+    feed: f,
+    kill:
+      lineK(f) +
+      kill -
+      lineK(feed) +
+      drift * DRIFT_K * wander(ux + 0.37, uy + 0.37, t, [0.5, 0.8, 0.4, 0.7]),
+  };
+};
+
 // The info card: which pattern this is, and where it sits on the map.
 const nameEl = document.getElementById('name');
 const descEl = document.getElementById('desc');
@@ -463,7 +598,9 @@ let hover = null; // a spot under the pointer on the big map, which the card sho
 
 const drawCard = () => {
   const {feed, kill} = hover ?? params;
-  const key = nearestPreset(feed, kill);
+  // while gliding to a preset, name the preset it's headed for
+  const aim = hover ?? target ?? params;
+  const key = nearestPreset(aim.feed, aim.kill);
   if (hover) {
     nameEl.textContent = key ? presets[key].name : 'Map';
     descEl.textContent = 'Tap to use this spot’s F and k everywhere.';
@@ -477,8 +614,19 @@ const drawCard = () => {
       ? presets[key].desc
       : 'Drag on the map below, or try a preset.';
   }
-  fEl.textContent = `F ${feed.toFixed(4)}`;
-  kEl.textContent = `k ${kill.toFixed(4)}`;
+  // With drift, sample F and k across the screen, to plot and to give their range.
+  const drifting = !hover && !params.map && params.drift > 0;
+  const samples = [];
+  if (drifting)
+    for (let i = 0; i < 12; i++)
+      for (let j = 0; j < 8; j++)
+        samples.push(fkAt((i + 0.5) / 12, (j + 0.5) / 8));
+  const range = (key, digits) => {
+    const values = samples.map((s) => s[key]);
+    return `${Math.min(...values).toFixed(digits)}–${Math.max(...values).toFixed(digits)}`;
+  };
+  fEl.textContent = drifting ? `F ${range('feed', 3)}` : `F ${feed.toFixed(4)}`;
+  kEl.textContent = drifting ? `k ${range('kill', 3)}` : `k ${kill.toFixed(4)}`;
 
   const dpr = Math.min(devicePixelRatio, 2);
   const w = (mapCanvas.width = Math.round(mapCanvas.clientWidth * dpr));
@@ -505,6 +653,12 @@ const drawCard = () => {
     mapCtx.fillStyle = k === key ? '#fff' : 'rgba(255,255,255,.55)';
     mapCtx.beginPath();
     mapCtx.arc(x(p.kill), y(p.feed), 2.2 * dpr, 0, 2 * Math.PI);
+    mapCtx.fill();
+  }
+  mapCtx.fillStyle = 'rgba(255,207,90,.8)';
+  for (const s of samples) {
+    mapCtx.beginPath();
+    mapCtx.arc(x(s.kill), y(s.feed), 1.3 * dpr, 0, 2 * Math.PI);
     mapCtx.fill();
   }
   mapCtx.strokeStyle = '#ffcf5a';
@@ -548,6 +702,46 @@ const setMap = (on) => {
   else seed(true, presets[params.preset]?.spacing ?? 60);
   drawCard();
   writeHash();
+};
+
+// After a while with no input, tour the presets and palettes. Any input takes back control, and
+// once someone has touched it, it waits longer before touring again.
+const TOUR_IDLE_MS = 20000;
+const TOUR_IDLE_AFTER_INPUT_MS = 90000;
+let hadInput = false;
+const TOUR_STEP_MS = 25000;
+let lastInput = performance.now();
+let touring = false;
+let tourNext = 0;
+let tourCount = 0;
+const noteInput = () => {
+  lastInput = performance.now();
+  hadInput = true;
+  if (touring) {
+    touring = false;
+    hideHint();
+  }
+};
+for (const type of ['pointerdown', 'keydown', 'wheel'])
+  addEventListener(type, noteInput, true);
+const tour = (now) => {
+  if (!params.tour || params.map || params.paused) return;
+  const idle = hadInput ? TOUR_IDLE_AFTER_INPUT_MS : TOUR_IDLE_MS;
+  if (!touring && now - lastInput > idle) {
+    touring = true;
+    tourNext = now;
+    showHint('Touring the patterns · touch to take over');
+    setTimeout(() => touring && hideHint(), 4000);
+  }
+  if (!touring || now < tourNext) return;
+  tourNext = now + TOUR_STEP_MS;
+  const i = tourOrder.indexOf(params.preset);
+  if (++tourCount % 2 === 0) {
+    const names = Object.keys(palettes);
+    params.palette = names[(names.indexOf(params.palette) + 1) % names.length];
+    gui.controllersRecursive().forEach((c) => c.updateDisplay());
+  }
+  choosePreset(tourOrder[(i + 1) % tourOrder.length]);
 };
 
 const showHint = (text) => {
@@ -659,11 +853,13 @@ gui
 gui
   .add(params, 'feed', 0, 0.1, 0.0001)
   .name('Feed rate F')
+  .decimals(4)
   .listen()
   .onChange(() => setFK(params.feed, params.kill));
 gui
   .add(params, 'kill', 0.03, 0.075, 0.0001)
   .name('Kill rate k')
+  .decimals(4)
   .listen()
   .onChange(() => setFK(params.feed, params.kill));
 gui
@@ -673,10 +869,20 @@ gui
   .onChange((on) => setMap(on));
 gui.add(params, 'speed', 1, 100, 1).name('Speed (steps/frame)');
 gui
+  .add(params, 'drift', 0, 1)
+  .name('Drift F and k')
+  .onChange(() => {
+    drawCard();
+    writeHash();
+  });
+gui.add(params, 'stir', 0, 1).name('Stir').onChange(writeHash);
+gui.add(params, 'history', 0, 1).name('Trails & growth').onChange(writeHash);
+gui
   .add(params, 'palette', Object.keys(palettes))
   .name('Colors')
   .onChange(writeHash);
 gui.add(params, 'relief', 0, 1).name('Relief');
+gui.add(params, 'tour').name('Tour when idle');
 gui.add(params, 'brush', 3, 60, 1).name('Brush size (px)');
 gui.add(params, 'eraser').name('Brush erases');
 gui
@@ -737,8 +943,14 @@ const loop = (time) => {
     owed += (params.speed * dt) / (1000 / 60);
     const steps = Math.floor(owed);
     owed -= steps;
-    const fk = [params.feed, params.kill];
-    for (let i = 0; i < steps; i++) pass(runStep, {fk, da: DA, db: DB});
+    for (let i = 0; i < steps; i++) {
+      pass(runStep, {da: DA, db: DB});
+      clock++;
+    }
+    if (params.stir > 0 && !params.map && steps)
+      pass(runAdvect, {amount: params.stir * 0.04 * steps});
+    if (params.drift > 0 && !params.map && frame % 15 === 0 && !target)
+      drawCard();
 
     // Twice a second, check whether B is gone everywhere, which would otherwise just be a blank
     // screen. If it stays gone, scatter fresh seeds, which also shows that nothing survives here.
@@ -772,10 +984,11 @@ const loop = (time) => {
 
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, state.tex);
+  tour(time);
   runDisplay(null, {
-    state: 0,
-    mapMode: params.map,
-    mapRange,
+    ...common(),
+    // when B appeared needs full floats to keep counting steps
+    history: full ? params.history : 0,
     scale: [state.width / canvas.width, state.height / canvas.height],
     pal: shownPalette,
     relief: params.relief,

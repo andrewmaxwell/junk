@@ -6,3 +6,8 @@
 - The common "spirals" setting F 0.014, k 0.045 dies out from these seeds. Crescents (0.010, 0.047) and Waves (0.014, 0.041) were picked by scanning F 0.010–0.022, k 0.041–0.049 for settings where B survives and keeps moving.
 - `map.webp`, the card's map background, is a screenshot of map mode with UI hidden: 1200×900 window (4:3, like the card), speed 100, about 75 s (~450k steps), shrunk to 480×360. Re-bake it if the colors, tone curve, map range (`MAP`) or seeds change.
 - The 16×16 probe pass is read back twice a second to notice when B has died out. It's the only GPU→CPU readback.
+- The state texture's z is a fading memory of B (trails) and w is the step when B last appeared (−1 when absent). Birth times need 32-bit floats, so on half-float GPUs the history coloring is turned off.
+- Stirring is one semi-Lagrangian pass per frame, not per step: per step, bilinear resampling adds numerical diffusion comparable to Db. Once a frame it's a few percent of the real diffusion.
+- The drift and stir fields are nested sines with whole-number periods across the screen, so they wrap with the torus, and `fkAt` in JS matches the shader for the card's plot.
+- Tried and dropped: growth bands (cosine of birth time) to look like agate rings. In Coral and Mitosis they only came out as mottling, even at 3× strength.
+- Map mode ignores drift and stir. `map.webp` was re-baked with the trails and newborn tint.

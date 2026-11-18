@@ -19,7 +19,7 @@
   #name{font-size:15px;font-weight:600;}
   #desc{opacity:.8;margin:2px 0 8px;min-height:2.7em;}
   #map{display:block;width:100%;aspect-ratio:4/3;border-radius:6px;cursor:crosshair;touch-action:none;}
-  #fk{display:flex;justify-content:space-between;opacity:.75;margin-top:5px;font-variant-numeric:tabular-nums;}
+  #fk{display:flex;flex-wrap:wrap;gap:0 8px;justify-content:space-between;opacity:.75;margin-top:5px;font-variant-numeric:tabular-nums;}
   #hint{position:fixed;left:50%;top:calc(16px + env(safe-area-inset-top));transform:translateX(-50%);
     padding:8px 14px;border-radius:999px;background:rgba(0,0,0,.5);font-size:14px;white-space:nowrap;
     pointer-events:none;transition:opacity 1s;}
@@ -31,6 +31,7 @@
     #card{width:170px;padding:8px 10px 6px;}
     #desc{display:none;}
     #name{margin-bottom:6px;font-size:14px;}
+    #fk{font-size:11px;}
     #hint{top:auto;bottom:calc(16px + env(safe-area-inset-bottom));left:auto;right:12px;transform:none;
       white-space:normal;max-width:140px;font-size:13px;border-radius:12px;}
   }
