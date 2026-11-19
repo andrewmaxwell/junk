@@ -345,7 +345,7 @@ function diamondScene() {
   );
   return {
     objects: [
-      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.08, 0.08, 0.08]), // dark velvet
+      plate([0, 0, 0], [0, 1, 0], [1, 0, 0], big, big, [0.025, 0.025, 0.025]), // black velvet
       diamond(10, [0, 4, 0], 10),
       ...softboxes,
       ...lights,
@@ -357,7 +357,7 @@ function diamondScene() {
     // over the pavilion
     camera: {position: [0, 36, 56], target: [0, 8, 4], zoom: 0.55},
     // A clean stone: smudges would blur the sparkles into a haze
-    defaults: {dof: 0.004, detail: 0},
+    defaults: {dof: 0.004, detail: 0, dispersion: 0.63},
   };
 }
 
