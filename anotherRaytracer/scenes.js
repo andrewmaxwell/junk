@@ -27,7 +27,7 @@ import {cross, normalize} from './vec.js';
  *   lasers?: import('./photons.js').Laser[],
  *   size?: number,
  *   gathers?: number,
- *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, dof?: number, dispersion?: number, exposure?: number, contrast?: number, detail?: number, noise?: number},
+ *   defaults?: {fog?: number, fogForward?: number, fogBlue?: number, wisps?: number, wispSize?: number, dof?: number, dispersion?: number, exposure?: number, contrast?: number, detail?: number, noise?: number},
  * }} Scene
  * The camera orbits `target`, and starts focused on it, or `focus` away if
  * given. `zoom` is the image height at distance 1. `defaults` overrides the
@@ -170,6 +170,8 @@ function shaftsScene() {
   const gray = [0.2, 0.23, 0.3];
   const floor = [0.32, 0.25, 0.18];
   const wall = {oneSided: true};
+  // Varnished boards, so the balls and the light gleam in the floor
+  const varnished = {oneSided: true, gloss: 0.8, roughness: 0.06};
   // The left wall is two-sided, so it blocks the light outside it
   /** @type {(y0: number, y1: number, z0: number, z1: number) => Shape} */
   const leftWall = (y0, y1, z0, z1) =>
@@ -182,7 +184,7 @@ function shaftsScene() {
       gray,
     );
   const objects = [
-    plate([50, 0, 0], [0, 1, 0], [1, 0, 0], big, big, floor, wall), // floor
+    plate([50, 0, 0], [0, 1, 0], [1, 0, 0], big, big, floor, varnished), // floor
     // The ceiling stops at the walls, so it doesn't shade the light outside
     plate([50, 100, 0], [0, -1, 0], [1, 0, 0], 50, big, gray, wall),
     plate([50, 50, -100], [0, 0, 1], [1, 0, 0], big, big, gray, wall), // back wall
@@ -193,10 +195,10 @@ function shaftsScene() {
     leftWall(40, 80, 0, big), // in front of it
     // Outside, small and far, so the beams have sharp edges
     sphere(1.5, [-120, 150, -30], [220000, 170000, 110000], LIGHT),
-    // Dim blue sky behind the camera, through the open front, so shadows
+    // Blue sky behind the camera, through the open front, so shadows
     // and fog outside the beams are cool
-    sphere(30, [50, 60, 260], [0.8, 1.4, 3.2], LIGHT),
-    sphere(12, [49.532, 12, -14.008], [0.95, 0.95, 0.95], GLASS),
+    sphere(30, [50, 60, 260], [2, 3.5, 8], LIGHT),
+    sphere(12, [56, 12, 2], [0.95, 0.95, 0.95], GLASS),
     sphere(10, [75.715, 10, -41.197], [0.95, 0.64, 0.54], MIRROR, 0, 0.081), // brushed copper
   ];
   // Blinds across the window, 5.5 tall with gaps of 2.5. Each gap lets in a
@@ -210,7 +212,7 @@ function shaftsScene() {
       zoom: 0.8,
       focus: 149.874,
     },
-    defaults: {fog: 0.004},
+    defaults: {fog: 0.004, wisps: 0.8, wispSize: 15},
   };
 }
 

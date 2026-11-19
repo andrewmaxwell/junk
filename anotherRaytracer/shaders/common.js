@@ -141,6 +141,13 @@ struct Params {
    * (packHierarchy in shapes.js), or NONE to test them one by one
    */
   objectNodes: u32,
+  /**
+   * How uneven fog is: 0 for even, up to 1 for wisps where it's thick and
+   * gaps where it's nearly clear. See fogWisp in shaders/fog.js.
+   */
+  fogWisps: f32,
+  /** Roughly how big the wisps are, in world units */
+  fogWispSize: f32,
 }
 
 const NONE = 0xffffffffu;

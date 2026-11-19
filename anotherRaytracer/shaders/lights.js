@@ -267,7 +267,7 @@ fn lightVisibility(p: vec3f, ls: vec4f, light: u32) -> vec3f {
   if (ls.w <= 0.) { return vec3f(0.); }
   if (params.paneCount == 0u) {
     if (intersect(p, ls.xyz) != i32(light)) { return vec3f(0.); }
-    return exp(-fogDensities() * hitDist);
+    return fogTransmittance(p, ls.xyz, hitDist);
   }
   // Through any panes on the way, tinted by each, less what it reflects
   var o = p;
@@ -276,7 +276,7 @@ fn lightVisibility(p: vec3f, ls: vec4f, light: u32) -> vec3f {
   for (var i = 0; i < 8; i++) {
     let hit = intersect(o, ls.xyz);
     dist += hitDist;
-    if (hit == i32(light)) { return through * exp(-fogDensities() * dist); }
+    if (hit == i32(light)) { return through * fogTransmittance(p, ls.xyz, dist); }
     if (hit < 0 || !seesThrough(u32(hit))) { break; }
     through *= (1. - paneReflectance(u32(hit), ls.xyz)) * objects[u32(hit)].colorMaterial.rgb;
     o += ls.xyz * hitDist;

@@ -282,13 +282,19 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
       let visible = lightVisibility(p, ls, light);
       if (any(visible > vec3f(0.))) {
         let pick = lightPickProb(p, vec3f(0.), false, light, lightGuessTotal(p, vec3f(0.), false));
-        let transmittance = exp(-fogDensities() * eq.x);
+        // How much gets this far, and the fog's density there. In uneven fog,
+        // the scattering below is weighed against this by how likely it
+        // would be to stop here in even fog of the density here: not its
+        // true chance, which isn't known, but any weights that both sides
+        // agree on keep the sum right.
+        let transmittance = fogTransmittance(o, d, eq.x);
+        let local = densities * fogWisp(p);
         let pdf = lightPickProb(o, d, true, light, rayTotal) * eq.y;
-        let scatterPdf = fogScatterPdf(densities, transmittance) * pick;
+        let scatterPdf = fogScatterPdf(local, exp(-densities * eq.x)) * pick;
         var weight = powerHeuristic(pdf, scatterPdf);
         let ph = phase(d, ls.xyz);
         if (params.sampling == 0u) { weight *= powerHeuristic(pick / ls.w, ph); }
-        let scattered = transmittance * fogDensities() * FOG_ALBEDO;
+        let scattered = transmittance * local * FOG_ALBEDO;
         let c = through * emitted(light, ls.xyz) * scattered * visible * (ph * weight * ls.w / pdf);
         color += tint * c * select(indirectScale(c), 1., seenByCamera);
       }
@@ -300,7 +306,14 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
     // picked using one of them at random, and the throughput corrects for
     // how likely the others were to stop there or get past it.
     var fogDist = 1e30;
-    if (foggy) {
+    // The fog's density where it scatters
+    var local = densities;
+    if (foggy && inside < 0 && params.fogWisps > 0.) {
+      let scatter = sampleUnevenFog(o, d, end);
+      through *= scatter.weight;
+      fogDist = scatter.dist;
+      local = scatter.local;
+    } else if (foggy) {
       let u = rand2();
       let density = densities[min(u32(u.y * 3.), 2u)];
       fogDist = -log(1. - u.x) / density;
@@ -337,7 +350,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
         if (any(visible > vec3f(0.))) {
           var weight = 1.;
           if (equiangular) {
-            let scatterPdf = fogScatterPdf(densities, exp(-densities * fogDist)) * pick;
+            let scatterPdf = fogScatterPdf(local, exp(-densities * fogDist)) * pick;
             let eqPdf = lightPickProb(o, d, true, light, rayTotal) * equiangularPdf(o, d, end, light, fogDist);
             weight = powerHeuristic(scatterPdf, eqPdf);
           }
@@ -363,7 +376,7 @@ fn trace(origin: vec3f, direction: vec3f) -> vec3f {
           if (wavelength > 0.) { index = glassIndex(u32(inside), wavelength); }
           squeeze = 1. / (index * index);
         }
-        var gathered = tint * through * squeeze * gatherVolumePhotons(p, d, densities, causticState == 0u);
+        var gathered = tint * through * squeeze * gatherVolumePhotons(p, d, local, causticState == 0u);
         gathered *= select(indirectScale(gathered), 1., seenByCamera);
         color += gathered;
         photonLight += gathered;

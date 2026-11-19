@@ -250,8 +250,22 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     // it does, it's stored.
     let densities = mediumDensities(inside);
     if (any(densities > vec3f(0.))) {
-      if (!stores) {
+      let uneven = inside < 0 && params.fogWisps > 0.;
+      if (!stores && uneven) {
+        power *= fogTransmittance(o, d, end);
+      } else if (!stores) {
         power *= exp(-densities * end);
+      } else if (uneven) {
+        let scatter = sampleUnevenFog(o, d, end);
+        power *= scatter.weight;
+        if (scatter.dist < end) {
+          storePhoton(o + d * scatter.dist, power * tint, d, vec3f(0.), laser);
+          if (!laser) { return; }
+          if (rand() >= FOG_ALBEDO) { return; }
+          o += d * scatter.dist;
+          d = samplePhase(d);
+          continue;
+        }
       } else {
         let u = rand2();
         let scatter = -log(1. - u.x) / densities[min(u32(u.y * 3.), 2u)];

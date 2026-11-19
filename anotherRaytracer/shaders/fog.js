@@ -58,6 +58,116 @@ fn fogScatterPdf(densities: vec3f, transmittance: vec3f) -> f32 {
 }
 
 
+/**
+ * Uneven fog: its density at p, as a multiple of fogDensities(). Noise over a
+ * few sizes makes wisps where it's thicker and gaps where it's nearly clear,
+ * averaging about 1, so the fog is about as bright overall as even fog.
+ */
+const WISP_OCTAVES = 3;
+/** How far the noise moves the density, at params.fogWisps 1 */
+const WISP_CONTRAST = 3.;
+fn fogWisp(p: vec3f) -> f32 {
+  if (params.fogWisps <= 0.) { return 1.; }
+  var n = 0.;
+  var strength = 0.5;
+  var q = p / params.fogWispSize;
+  for (var i = 0; i < WISP_OCTAVES; i++) {
+    n += strength * wispNoise(q);
+    q = q * 2.03 + 17.1;
+    strength *= 0.5;
+  }
+  return clamp(1. + WISP_CONTRAST * params.fogWisps * n, 0., wispMax());
+}
+
+/**
+ * The most fogWisp can be. The noise rarely gets past half its range, so
+ * the thickest spots are capped there: a lower ceiling means fewer steps
+ * through the fog in fogTransmittance and trace.
+ */
+fn wispMax() -> f32 {
+  return 1. + 0.5 * WISP_CONTRAST * params.fogWisps;
+}
+
+/** Gradient noise, as noise() in detail.js, without its gradient, which fog doesn't need */
+fn wispNoise(p: vec3f) -> f32 {
+  let i = floor(p);
+  let f = p - i;
+  let u = f * f * f * (f * (f * 6. - 15.) + 10.);
+  var sum = 0.;
+  for (var k = 0u; k < 8u; k++) {
+    let corner = vec3f(vec3u(k, k >> 1u, k >> 2u) & vec3u(1u));
+    let w = mix(1. - u, u, corner);
+    sum += w.x * w.y * w.z * dot(latticeGradient(vec3i(i + corner)), f - corner);
+  }
+  return sum * 1.4;
+}
+
+/**
+ * The fraction of light in each channel that gets through the fog from o
+ * to o + d * dist. Exactly, for even fog. For uneven fog, an estimate that's
+ * right on average (ratio tracking, from "Unbiased, Adaptive Stochastic
+ * Sampling for Rendering Inhomogeneous Participating Media", Novák et al.):
+ * steps as if the fog were everywhere as thick as it ever gets, each time
+ * keeping the share that the fog actually there lets through.
+ */
+fn fogTransmittance(o: vec3f, d: vec3f, dist: f32) -> vec3f {
+  let densities = fogDensities();
+  if (params.fogWisps <= 0.) { return exp(-densities * dist); }
+  let majorant = peak(densities) * wispMax();
+  if (majorant <= 0.) { return vec3f(1.); }
+  var t = 0.;
+  var through = vec3f(1.);
+  for (var i = 0; i < 256; i++) {
+    t -= log(1. - rand()) / majorant;
+    if (t >= dist) { break; }
+    through *= 1. - densities * fogWisp(o + d * t) / majorant;
+  }
+  return through;
+}
+
+
+/**
+ * Where a ray through uneven fog scatters: dist (1e30 if it doesn't before
+ * end), the fog's densities there, and what to multiply the throughput by.
+ */
+struct FogScatter {
+  dist: f32,
+  local: vec3f,
+  weight: vec3f,
+}
+
+/**
+ * Picks where a ray from o in direction d scatters in uneven fog, before end
+ * (delta tracking, from "Monte Carlo Methods for Volumetric Light Transport
+ * Simulation", Novák et al.): steps as if the fog were everywhere as thick
+ * as it ever gets, and at each step, scatters with the chance that the fog
+ * there would, or goes on. With blue fog, the channels' average decides,
+ * and the weight corrects each channel for its own chance (spectral
+ * tracking, Kutz et al.). Camera paths and photons both use it, so they
+ * agree on where light scatters.
+ */
+fn sampleUnevenFog(o: vec3f, d: vec3f, end: f32) -> FogScatter {
+  let densities = fogDensities();
+  let majorant = peak(densities) * wispMax();
+  var result = FogScatter(1e30, densities, vec3f(1.));
+  var t = 0.;
+  for (var i = 0; i < 256; i++) {
+    t -= log(1. - rand()) / majorant;
+    if (t >= end) { break; }
+    let here = densities * fogWisp(o + d * t);
+    let scatterProb = dot(here, vec3f(1. / 3.)) / majorant;
+    if (rand() < scatterProb) {
+      result.weight *= here / (majorant * scatterProb);
+      result.dist = t;
+      result.local = here;
+      break;
+    }
+    result.weight *= (majorant - here) / (majorant * max(1. - scatterProb, 1e-30));
+  }
+  return result;
+}
+
+
 /** A random direction for light traveling in direction d to scatter in fog, picked in proportion to phase */
 fn samplePhase(d: vec3f) -> vec3f {
   let u = rand2();

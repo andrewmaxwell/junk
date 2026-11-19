@@ -35,6 +35,10 @@ export const defaults = {
   fog: 0,
   /** Which way fog scatters, -1 to 1; see `fogForward` in shaders/common.js. Scenes can change this default. */
   fogForward: 0,
+  /** How uneven fog is, 0 to 1; see `fogWisps` in shaders/common.js. Scenes can change this default. */
+  wisps: 0,
+  /** How big fog's wisps are, in world units. Scenes can change this default. */
+  wispSize: 20,
   /** 0 for gray fog, up to 1 for sky blue; see `fogBlue` in shaders/common.js. Scenes can change this default. */
   fogBlue: 0,
   /** How uneven surfaces are, 0 for mathematically smooth; see `detail` in shaders/common.js */
@@ -90,6 +94,8 @@ const sceneKeys = [
   'fog',
   'fogForward',
   'fogBlue',
+  'wisps',
+  'wispSize',
   'dof',
   'dispersion',
   'exposure',

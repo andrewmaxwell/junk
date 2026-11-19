@@ -159,7 +159,7 @@ const singleBounceBuffer = bufferWith(albedoTable(), GPUBufferUsage.UNIFORM);
 
 // Params in shaders/common.js: 4 × (vec3f + u32), then 32 scalars, padded to
 // a multiple of 16 bytes
-const paramsData = new ArrayBuffer(208);
+const paramsData = new ArrayBuffer(224);
 const paramsF32 = new Float32Array(paramsData);
 const paramsU32 = new Uint32Array(paramsData);
 const paramsBuffer = device.createBuffer({
@@ -620,6 +620,8 @@ const writeParams = (/** @type {FrameView} */ v) => {
   paramsU32[48] = paneCount;
   paramsU32[49] = v.gathers;
   paramsU32[50] = objectNodes;
+  paramsF32[51] = settings.wisps;
+  paramsF32[52] = settings.wispSize;
   device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 };
 

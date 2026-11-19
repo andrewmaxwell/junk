@@ -156,6 +156,11 @@ light
   .name('fog scatters forward')
   .onChange(changed);
 light.add(settings, 'fogBlue', 0, 1, 0.05).name('fog blue').onChange(changed);
+light.add(settings, 'wisps', 0, 1, 0.05).name('fog wisps').onChange(changed);
+light
+  .add(settings, 'wispSize', 1, 100, 1)
+  .name('fog wisp size')
+  .onChange(changed);
 light
   .add(settings, 'dispersion', 0, 5, 0.1)
   .name('glass dispersion')
