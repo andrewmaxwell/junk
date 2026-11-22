@@ -30,7 +30,8 @@ It answers five questions at a glance: what time is it, how does it feel outside
 - **Color means something.** One temperature scale, green, amber and red for advice, and neutral for the rest.
 - **Dark and calm.** No animation, and warnings only take up space when they apply.
 - **One column per place.** Outside is on the left, reading down from now to today to this week. The house is on the right, with the actions under it and the clock in the corner.
-- **Rain chances under 30% stay off the charts**, and days 6 to 10 are fainter because they're less certain.
+- **Every rain chance gets a bar**, however small, but a day's percentage only shows when it rounds to 10% or more. Days 6 to 10 are fainter because they're less certain.
+- **Rain bars**: the height is the chance, the color the kind (blue rain, white snow, purple storms) and the strength the amount, solid at 6 mm (about 0.25 in) an hour. A likely drizzle stands tall but faint. The 24-hour label adds the spell's total, like "rain 8am–1pm · 0.2 in", with snow at 10 inches per inch of water.
 
 ## Temperatures
 
@@ -42,8 +43,9 @@ It answers five questions at a glance: what time is it, how does it feel outside
 
 ## Actions
 
-Two lines at most, ranked safety, then the house, then the walk. Long window lines wrap onto two lines, and there's room for one of those beside any other.
+Two lines at most, ranked safety, then rain soon, then the house, then the walk. Long window lines wrap onto two lines, and there's room for one of those beside any other.
 
+- **Rain soon**, from Open-Meteo's 15-minute forecast: rain or snow starting or stopping in the next 2 hours, like "Rain in ~20 min" or "Rain stopping around 3:45". It takes two wet or two dry slots in a row, so one stray sprinkle doesn't count, and it ranks after safety.
 - **Safety**, in the next 12 hours: freezing rain, storms, gusts of 45+ mph. Also outdoor AQI of 151+ right now.
 - **Open windows** when the air is between the thermostat's setpoints (68° and 80° without the Sensi), the dew point is 60° or less, AQI is 100 or less, rain chance is under 40%, it lasts at least 2 hours, and the house would end up about as close to the 75° ideal, or CO₂ is 1,000+. If the AC or furnace is running, it says to turn that off.
 - **Open windows at 2pm** when the house is more than 3° from ideal and better air is coming in the next 12 hours.

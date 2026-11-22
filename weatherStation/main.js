@@ -15,7 +15,7 @@ import {
 } from './charts.js';
 import {pickActions} from './advice.js';
 import {weekSentence, fitWeek} from './week.js';
-import {SNOW_CODES, FREEZING, WET_CHANCE} from './constants.js';
+import {SNOW_CODES, STORM_CODES, FREEZING, WET_CHANCE} from './constants.js';
 
 // Rounded to ~6 miles: plenty for weather, and junk is public.
 // Override with ?lat=..&lon=.. (the Android app's page URL can carry them).
@@ -91,21 +91,38 @@ function windWords(mph) {
   return null;
 }
 
+// How much a spell brings, in inches: rain to the tenth, snow to the inch at
+// the usual 10 inches of snow per inch of water. "light" when it barely counts.
+function amountWords(rows, kind) {
+  const snowy = kind === 'snow';
+  const mm = rows
+    .filter((h) => !snowy || h.snow)
+    .reduce((sum, h) => sum + (h.amount ?? 0), 0);
+  const inches = (mm / 25.4) * (snowy ? 10 : 1);
+  if (inches < (snowy ? 0.5 : 0.05)) return 'light';
+  return `${snowy ? Math.round(inches) : inches.toFixed(1)} in`;
+}
+
 // The first run of likely rain or snow in the window, for the chart's label.
 function wetSpell(hours) {
   const start = hours.findIndex((h) => h.chance >= WET_CHANCE);
   if (start < 0) return null;
   let end = start;
   while (end + 1 < hours.length && hours[end + 1].chance >= WET_CHANCE) end++;
-  const kind = hours.slice(start, end + 1).some((h) => h.snow)
-    ? 'snow'
-    : 'rain';
+  const spell = hours.slice(start, end + 1);
+  const storm = spell.some((h) => h.storm);
+  const kind = storm ? 'storms' : spell.some((h) => h.snow) ? 'snow' : 'rain';
   const until = new Date(hours[end].time.getTime() + 3600_000);
-  const label =
+  const when =
     start === 0
       ? `${kind} till ${hourLabel(until)}m`
       : `${kind} ${hourRange(hours[start].time, until)}`;
-  return {from: start, to: end, label};
+  return {
+    from: start,
+    to: end,
+    storm,
+    label: `${when} · ${amountWords(spell, kind)}`,
+  };
 }
 
 const dateKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -144,7 +161,9 @@ function summarizeDays(rows, now) {
         air: mean(block.map(tenDayAir)),
         freezing: block.map(tenDayAir).some(isFreezing),
         chance: Math.max(...block.map((r) => r.precipitation_probability ?? 0)),
+        amount: Math.max(...block.map((r) => r.precipitation ?? 0)),
         snow: block.some((r) => SNOW_CODES.has(r.weather_code)),
+        storm: block.some((r) => STORM_CODES.has(r.weather_code)),
         radiation: mean(block.map((r) => r.shortwave_radiation ?? 0)),
       });
     }
@@ -200,8 +219,10 @@ function renderOutside(now, days, {current, upcoming}) {
     felt: i === 0 ? feltNow : felt(row),
     freezing: isFreezing((i === 0 ? current : row).temperature_2m),
     chance: row.precipitation_probability ?? 0,
+    amount: row.precipitation ?? 0,
     radiation: row.shortwave_radiation,
     snow: SNOW_CODES.has(row.weather_code),
+    storm: STORM_CODES.has(row.weather_code),
   }));
   drawHourly($('hourly'), hours, wetSpell(hours));
   const week = $('week');
@@ -357,6 +378,9 @@ function render() {
 
   renderActions({
     ...outside,
+    // A stale 15-minute forecast would say rain is coming that has come and gone.
+    minutely:
+      Date.now() - weatherAt > OUTSIDE_STALE_MS ? [] : (weather.minutely ?? []),
     inside,
     sensi,
     now,
@@ -383,10 +407,11 @@ function restoreWeather() {
     const saved = JSON.parse(localStorage.getItem(CACHE_KEY));
     if (!saved) return;
     const date = (t) => (t ? new Date(t) : null);
-    const {current, rows, sunset, nextSunrise} = saved.weather;
+    const {current, rows, sunset, nextSunrise, minutely = []} = saved.weather;
     weather = {
       current: {...current, time: date(current.time)},
       rows: rows.map((r) => ({...r, time: date(r.time)})),
+      minutely: minutely.map((m) => ({...m, time: date(m.time)})),
       sunset: date(sunset),
       nextSunrise: date(nextSunrise),
     };
@@ -417,6 +442,29 @@ async function fetchBlendAir() {
   }
 }
 
+// Open-Meteo's 15-minute precipitation for the next 3 hours (HRRR here), for
+// "Rain in ~20 min". Without it that line just doesn't show.
+async function fetchMinutely() {
+  try {
+    const res = await fetch(
+      'https://api.open-meteo.com/v1/forecast' +
+        `?latitude=${LAT}&longitude=${LON}&minutely_15=precipitation,snowfall` +
+        '&forecast_minutely_15=12&timezone=auto',
+      {signal: AbortSignal.timeout(10_000)},
+    );
+    if (!res.ok) throw new Error(`15-minute request failed (${res.status})`);
+    const {minutely_15: m} = await res.json();
+    return m.time.map((t, i) => ({
+      time: new Date(t),
+      precipitation: m.precipitation[i] ?? 0,
+      snowfall: m.snowfall[i] ?? 0,
+    }));
+  } catch (error) {
+    console.warn(error);
+    return [];
+  }
+}
+
 let retries = 0;
 let nextLoad = null;
 
@@ -425,15 +473,17 @@ async function loadWeather() {
   let wait = WEATHER_REFRESH_MS;
   try {
     // One past day so today's low counts the hours already gone.
-    const [{current, rows, sunset, nextSunrise}, blendAir] = await Promise.all([
-      fetchWeatherBundle(LAT, LON, {
-        historyDays: 1,
-        forecastDays: FORECAST_DAYS + 1,
-      }),
-      fetchBlendAir(),
-    ]);
+    const [{current, rows, sunset, nextSunrise}, blendAir, minutely] =
+      await Promise.all([
+        fetchWeatherBundle(LAT, LON, {
+          historyDays: 1,
+          forecastDays: FORECAST_DAYS + 1,
+        }),
+        fetchBlendAir(),
+        fetchMinutely(),
+      ]);
     for (const row of rows) row.blend_air = blendAir.get(row.key) ?? null;
-    weather = {current, rows, sunset, nextSunrise};
+    weather = {current, rows, sunset, nextSunrise, minutely};
     weatherAt = Date.now();
     weatherError = null;
     retries = 0;

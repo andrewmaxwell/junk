@@ -49,9 +49,20 @@ const ICE = '#f2f8ff';
 const lineColor = (a, b, temperature) =>
   a.freezing || b.freezing ? ICE : temperatureColor(temperature);
 
-// Chances of rain or snow below this are left off both charts: a 20% that
-// usually doesn't happen is just noise on an always-on screen.
-const SHOW_CHANCE = 30;
+// Chances of rain or snow below this are left off both charts. At 0 every
+// chance shows, however small.
+const SHOW_CHANCE = 0;
+
+// A bar's height is the chance; its color is the kind and its strength the
+// amount. A likely drizzle stands tall but faint, a downpour tall and solid.
+const BAR_COLORS = {rain: '#3f78ba', snow: '#c9d6ea', storm: '#9b7fd6'};
+// Millimeters an hour (water) at which a bar is fully solid: heavy rain.
+const HEAVY_MM = 6;
+const barKind = (p) => (p.storm ? 'storm' : p.snow ? 'snow' : 'rain');
+const barStyle = (p) => ({
+  fill: BAR_COLORS[barKind(p)],
+  opacity: 0.3 + 0.65 * Math.sqrt(Math.min(1, (p.amount ?? 0) / HEAVY_MM)),
+});
 
 function svgElement(parent, name, attributes, text) {
   const el = document.createElementNS(NS, name);
@@ -76,7 +87,8 @@ const skyColor = (radiation) => {
   return `rgb(${DARK_SKY.map((c, j) => Math.round(c + (LIT_SKY[j] - c) * b))})`;
 };
 
-// `hours` is [{time, felt, freezing, chance, radiation, snow}], first entry = now.
+// `hours` is [{time, felt, freezing, chance, amount, radiation, snow, storm}],
+// first entry = now. `amount` is the hour's precipitation in mm.
 // `wet` is the run of likely rain or snow to label, or null.
 export function drawHourly(svg, hours, wet) {
   svg.replaceChildren();
@@ -119,13 +131,12 @@ export function drawHourly(svg, hours, wet) {
       width: 6,
       height,
       rx: 1.5,
-      fill: h.snow ? '#c9d6ea' : '#3f78ba',
-      opacity: 0.75,
+      ...barStyle(h),
     });
   });
 
   if (wet) {
-    svgElement(
+    const label = svgElement(
       svg,
       'text',
       {
@@ -133,11 +144,16 @@ export function drawHourly(svg, hours, wet) {
         y: plotBottom - 38,
         'text-anchor': 'middle',
         'font-size': 11,
-        fill: '#7fa9d8',
+        fill: wet.storm ? '#c3b1ef' : '#7fa9d8',
         ...LABEL,
       },
       wet.label,
     );
+    // Slide it back inside when the spell sits near an edge.
+    const box = label.getBBox();
+    const shift =
+      Math.max(0, 2 - box.x) - Math.max(0, box.x + box.width - (width - 2));
+    label.setAttribute('x', x((wet.from + wet.to) / 2) + shift);
   }
 
   for (let i = 1; i < n; i++) {
@@ -248,7 +264,7 @@ const CONFIDENT_DAYS = 5;
 //
 // `days` is [{name, date, icon, hi, lo, chance, blocks}], today first. `icon`
 // is comfort's SVG markup for the day's weather; `blocks` are three-hour
-// averages, [{hour, air, freezing, chance, snow, radiation}].
+// averages, [{hour, air, freezing, chance, amount, snow, storm, radiation}].
 export function drawDaily(container, days) {
   const cells = (render) =>
     days
@@ -263,7 +279,7 @@ export function drawDaily(container, days) {
         <div class="name">${k === 0 ? 'Today' : d.name}</div>
         <div class="date">${d.date}</div>
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${d.icon}</svg>
-        <div class="chance">${d.chance >= SHOW_CHANCE ? `${Math.round(d.chance / 10) * 10}%` : ''}</div>`,
+        <div class="chance">${Math.round(d.chance / 10) ? `${Math.round(d.chance / 10) * 10}%` : ''}</div>`,
     )}</div>
     <svg class="week" role="img" aria-label="Temperature for the next ${days.length} days"></svg>
     <div class="cells temps">${cells(
@@ -322,8 +338,7 @@ export function drawDaily(container, days) {
       width: barWidth,
       height: h,
       rx: 1,
-      fill: p.snow ? '#c9d6ea' : '#3f78ba',
-      opacity: 0.75,
+      ...barStyle(p),
     });
   }
 

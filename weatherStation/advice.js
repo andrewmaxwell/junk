@@ -2,9 +2,10 @@
 // The actions area: short things to do, each one line, readable from the couch.
 //
 // There's room for two, so everything that could be said competes for them:
-// safety first, then the house (windows, stale air), then the walk. Each
-// candidate carries a `rank` and the two lowest win. What's coming later in
-// the week has its own line over the 10-day chart (week.js).
+// safety first, then rain starting or stopping soon, then the house (windows,
+// stale air), then the walk. Each candidate carries a `rank` and the two
+// lowest win. What's coming later in the week has its own line over the
+// 10-day chart (week.js).
 // ---------------------------------------------------------------------------
 
 import {
@@ -23,7 +24,7 @@ const COLORS = {
   info: 'var(--info)',
 };
 
-const RANK = {alert: 0, house: 1, walk: 2};
+const RANK = {alert: 0, soon: 1, house: 2, walk: 3};
 
 const at = (date) => hourLabel(date).replace(/([ap])$/, '$1m');
 
@@ -49,6 +50,49 @@ function alerts({current, upcoming}) {
     found.push({title: 'Unhealthy air outside'});
 
   return found.map((a) => ({...a, rank: RANK.alert, color: COLORS.bad}));
+}
+
+// --- Rain soon --------------------------------------------------------------
+
+// From the 15-minute forecast: rain about to start, or about to stop, within
+// the next two hours. The hourly chances can't say "in 20 minutes".
+const SLOT_MS = 15 * 60_000;
+const SOON_MS = 2 * 3600_000;
+// Millimeters in 15 minutes that count as raining: a light, steady rain.
+const RAINING_MM = 0.1;
+// Rain has to start or let up for this many slots running to count, so one
+// stray sprinkle in the forecast doesn't.
+const RUN_SLOTS = 2;
+
+// "any minute", "in ~20 min", or past an hour "around 3:45".
+function whenWords(time, now) {
+  const minutes = Math.round(Math.max(0, time - now) / 60_000 / 5) * 5;
+  if (minutes < 5) return 'any minute';
+  if (minutes <= 60) return `in ~${minutes} min`;
+  const m = String(time.getMinutes()).padStart(2, '0');
+  return `around ${time.getHours() % 12 || 12}:${m}`;
+}
+
+export function rainSoon({minutely = [], now}) {
+  const slots = minutely.filter((s) => s.time.getTime() + SLOT_MS > now);
+  if (!slots.length) return null;
+  const wet = (s) => s.precipitation >= RAINING_MM;
+  const kind = slots.some((s) => wet(s) && s.snowfall > 0) ? 'Snow' : 'Rain';
+
+  // The first slot that begins a run of RUN_SLOTS matching ones.
+  const firstRun = (test) =>
+    slots.find(
+      (s, i) =>
+        i + RUN_SLOTS <= slots.length &&
+        slots.slice(i, i + RUN_SLOTS).every(test),
+    );
+  const raining = wet(slots[0]);
+  const change = firstRun(raining ? (s) => !wet(s) : wet);
+  const title =
+    change &&
+    change.time - now <= SOON_MS &&
+    `${kind} ${raining ? 'stopping ' : ''}${whenWords(change.time, now)}`;
+  return title && {title, rank: RANK.soon, color: COLORS.info};
 }
 
 // --- Windows ----------------------------------------------------------------
@@ -250,7 +294,12 @@ function walkAdvice({current, upcoming, now}) {
 }
 
 export function pickActions(context) {
-  return [...alerts(context), windowAdvice(context), walkAdvice(context)]
+  return [
+    ...alerts(context),
+    rainSoon(context),
+    windowAdvice(context),
+    walkAdvice(context),
+  ]
     .filter(Boolean)
     .sort((a, b) => a.rank - b.rank)
     .slice(0, 2);
