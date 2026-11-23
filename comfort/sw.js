@@ -1,7 +1,7 @@
 // Cache version. Bumping it retires every previous cache on the next activate,
 // which is the whole update mechanism: no cache entry ever has to be reasoned
 // about across versions.
-const VERSION = 'walk-comfort-v9';
+const VERSION = 'walk-comfort-v10';
 const SHELL_CACHE = `${VERSION}-shell`;
 const DATA_CACHE = `${VERSION}-data`;
 

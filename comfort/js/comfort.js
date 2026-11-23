@@ -168,6 +168,38 @@ const coldAnchor = (activity) => activity.band[0] - activity.coldTolerance;
 // nuisance the whole way regardless, and darkness is a fact rather than a dose.
 const DARKNESS_PENALTY = 14; // visibility and safety, not comfort exactly
 
+// The cost of dressing for the cold, which UTCI cannot see. Its clothing model
+// puts on more as the air gets colder, so "no thermal stress" on a sunny 42°F
+// afternoon means fine *once you are bundled up* — and bundled up for a brisk
+// walk is its own misery: a heavy hoodie, hat and gloves that are too warm by
+// the end, off come the hat and gloves, and you finish sweaty with a cold face.
+// That walk scored 98, with the sun lifting the felt temperature to 55°F.
+//
+// Keyed on wind chill because it is the right model for exactly the part UTCI
+// averages away: it is the NWS's model of bare facial skin at walking pace
+// into the wind, with no sun credit, which is how your face and hands feel
+// however warm your back is. It is defined at 50°F and below and equals the
+// air there, so the curve starts at 50 and stays continuous.
+const BUNDLE_CURVE = [
+  [-20, 100],
+  [0, 85],
+  [15, 70],
+  [30, 50], // hat and gloves, and the sweaty-yet-cold-faced walk
+  [40, 25], // a real jacket
+  [50, 0], // a light layer and nothing on your head or hands
+];
+
+// NWS wind chill (2001), in °F from °F and mph at 10 m, which is the height
+// Open-Meteo reports and the formula was fitted to.
+export function windChill(tempF, windMph) {
+  if (tempF > 50 || !(windMph >= 3)) return tempF;
+  const v = windMph ** 0.16;
+  return Math.min(
+    tempF,
+    35.74 + 0.6215 * tempF - 35.75 * v + 0.4275 * tempF * v,
+  );
+}
+
 const SNOW_CODES = new Set([71, 73, 75, 77, 85, 86]);
 const DRIZZLE_CODES = new Set([51, 53, 55, 56, 57]);
 
@@ -236,10 +268,13 @@ export const ACTIVITIES = {
   //
   // Anchored the same way, and the asymmetry flips with it. Heat: 78 + 23 =
   // 101°F felt, a whole category further out than the walker's, because 1.2 MET
-  // in shade is not 2.3 MET in the sun. Cold: 58 - 27 = 31°F felt, only
-  // *moderate* cold stress and so the earlier of the two, because sitting still
-  // is where cold wins — a book at 85°F in shade is fine and twenty minutes at
-  // 45°F is not.
+  // in shade is not 2.3 MET in the sun. Cold: 58 - 18 = 40°F felt, only
+  // *slight* cold stress and so far the earlier of the two, because sitting
+  // still is where cold wins — a book at 85°F in shade is fine and twenty
+  // minutes at 45°F is not. UTCI's categories are judged for a walker making
+  // twice the heat, so for someone sitting still they arrive late. At 27 this
+  // anchor sat at 31°F, and a sunny 43°F afternoon, 36°F felt in the shade,
+  // came out 57, "Tolerable", when it was plainly too cold to sit out.
   sit: defineActivity({
     key: 'sit',
     label: 'Sitting in the shade',
@@ -251,8 +286,10 @@ export const ACTIVITIES = {
     shaded: true,
     band: [58, 78],
     hotTolerance: 23,
-    coldTolerance: 27,
-    skip: ['sun', 'dark'],
+    coldTolerance: 18,
+    // Bundling up to sit still is just dressing warmly: nothing makes you
+    // sweat, and the tighter cold tolerance already prices the cold.
+    skip: ['sun', 'dark', 'bundle'],
   }),
 };
 
@@ -377,6 +414,13 @@ const PENALTIES = {
     return Number.isFinite(us_aqi) ? alongCurve(AQI_CURVE, us_aqi) : 0;
   },
 
+  bundle({temperature_2m, wind_speed_10m}) {
+    return alongCurve(
+      BUNDLE_CURVE,
+      windChill(temperature_2m, wind_speed_10m ?? 0),
+    );
+  },
+
   dark({is_day}) {
     return is_day === 0 ? DARKNESS_PENALTY : 0;
   },
@@ -474,6 +518,7 @@ export const FACTOR_LABELS = {
   wind: 'Wind',
   sun: 'UV',
   air: 'Air quality',
+  bundle: 'Bundling up',
   dark: 'Darkness',
   storm: 'Storms',
   ice: 'Ice',
@@ -566,6 +611,12 @@ const LIMITER_PHRASES = {
   // the score it dragged.
   cold: (c, severe, activity) => {
     const felt = feltTemperature(c, activity);
+    // Warming up is something only a walker does.
+    if (activity.key === 'sit') {
+      if (felt >= 45) return 'Chilly sitting still, so bring a warm layer';
+      if (felt >= 15) return 'Too cold to sit still for long';
+      return 'Cold enough to hurt exposed skin';
+    }
     if (felt >= 35) return 'Cool, but you will warm up within ten minutes';
     if (felt >= 15) return 'Cold, but fine once you are moving';
     return 'Cold enough to hurt exposed skin';
@@ -581,6 +632,14 @@ const LIMITER_PHRASES = {
   // that follows already adds sunscreen above UV 6 — which is precisely when
   // this phrase fires — and it used to say it twice in one breath.
   sun: () => 'Sun is intense, so find shade where you can',
+  bundle: (c) => {
+    const chill = windChill(c.temperature_2m, c.wind_speed_10m ?? 0);
+    if (chill >= 40) return 'Cool enough for a jacket you may want off halfway';
+    if (chill >= 20)
+      return 'Cold on your face, and dressed for that you will finish sweaty';
+    if (chill >= -5) return 'Cold enough for a hat and gloves';
+    return 'Cold enough to hurt exposed skin';
+  },
   dark: () => 'It is dark out, so stay visible',
 };
 

@@ -77,6 +77,56 @@ test('the same morning is still fine for sitting in the shade', () => {
   assert.ok(scoreOf(HUMID_MORNING, sit) > scoreOf(HUMID_MORNING, walk) + 25);
 });
 
+// 23 Nov 2026, early afternoon: 42 °F air, 30 °F dew point, clear sky, 10 mph
+// breeze. The sun took UTCI to 55 °F and the walk scored 98, "Just about
+// ideal". It took a heavy hoodie, hat and gloves, the hat and gloves came off
+// halfway, and it ended sweaty with a cold face.
+const SUNNY_NOVEMBER = neutral({
+  temperature_2m: 42,
+  dew_point_2m: 30,
+  wind_speed_10m: 10,
+  wind_gusts_10m: 20,
+  cloud_cover: 0,
+  uv_index: 2,
+  us_aqi: 24,
+  shortwave_radiation: 440,
+  diffuse_radiation: 60,
+  direct_radiation: 380,
+  direct_normal_irradiance: 820,
+  soil_temperature_0cm: 52,
+});
+
+test('a sunny 42 °F walk that needs bundling up is not ideal', () => {
+  assert.ok(feltTemperature(SUNNY_NOVEMBER, walk) > 50, 'the sun is real');
+  const {score, limiter} = scoreComfort(SUNNY_NOVEMBER, {activity: walk});
+  assert.equal(limiter, 'bundle');
+  assert.ok(score < 70, `scored ${score}; "Good" starts at 70`);
+  assert.ok(score >= 50, `scored ${score}; cold and sweaty, not dangerous`);
+});
+
+test('the same sunny 42 °F afternoon is too cold to sit out', () => {
+  const {score, limiter, penalties} = scoreComfort(SUNNY_NOVEMBER, {
+    activity: sit,
+  });
+  assert.equal(limiter, 'cold');
+  assert.ok(score < 50, `scored ${score}; "Tolerable" starts at 50`);
+  assert.doesNotMatch(
+    comfortReason(SUNNY_NOVEMBER, limiter, penalties, sit),
+    /moving|warm up/i,
+  );
+});
+
+test('bundling up only costs a walk, and only below 50 °F', () => {
+  assert.equal(
+    scoreComfort(SUNNY_NOVEMBER, {activity: sit}).penalties.bundle,
+    undefined,
+  );
+  const at = (temperature_2m) =>
+    scoreComfort(neutral({temperature_2m}), {activity: walk}).penalties.bundle;
+  assert.equal(at(55), 0);
+  assert.ok(at(49) < at(40) && at(40) < at(30) && at(30) < at(10));
+});
+
 test('the reason names the mugginess', () => {
   const {limiter, penalties} = scoreComfort(HUMID_MORNING, {
     activity: walk,
@@ -258,7 +308,7 @@ test('the stress anchors survived moving the ramp inward', () => {
     [walk, walk.band[1] + walk.hotTolerance, 'strong heat stress'],
     [walk, walk.band[0] - walk.coldTolerance, 'strong cold stress'],
     [sit, sit.band[1] + sit.hotTolerance, 'very strong heat stress'],
-    [sit, sit.band[0] - sit.coldTolerance, 'moderate cold stress'],
+    [sit, sit.band[0] - sit.coldTolerance, 'slight cold stress'],
   ]) {
     const row = rowFeeling(felt, activity);
     assert.equal(
@@ -347,7 +397,7 @@ test('each tolerance lands on a named UTCI stress category', () => {
   );
   assert.equal(
     thermalStress(sit.band[0] - sit.coldTolerance),
-    'moderate cold stress',
+    'slight cold stress',
   );
 });
 

@@ -22,6 +22,7 @@ const NOT_LOWER_48 = new Set(['02', '15', '60', '66', '69', '72', '78']);
 const FACTOR_COLORS = {
   heat: '#e8603c',
   cold: '#4a90e2',
+  bundle: '#7fb8d8',
   rain: '#2bb3a3',
   wind: '#a7b0bd',
   sun: '#f2c14e',
