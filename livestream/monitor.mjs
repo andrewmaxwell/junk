@@ -96,21 +96,37 @@ const trace = async () => {
   );
 };
 
+// system_profiler makes the Wi-Fi scan, which spiked every ping for seconds, so
+// read the signal through CoreWLAN instead (band 1 is 2.4 GHz, 2 is 5 GHz)
+const wifiReader = path.join(import.meta.dirname, 'wifi');
+await run('swiftc', ['-O', `${wifiReader}.swift`, '-o', wifiReader]).catch(
+  (e) => say(`Wi-Fi reader didn't build, so no Wi-Fi rows: ${e.message}`),
+);
 const wifiInfo = async () => {
-  const {stdout} = await run('system_profiler', ['SPAirPortDataType']).catch(
-    () => ({stdout: ''}),
+  const {stdout} = await run(wifiReader).catch(() => ({stdout: ''}));
+  if (stdout) log('wifi', JSON.parse(stdout));
+};
+
+// a.rtmp.youtube.com hands out many servers, and the ATEM connects to one of
+// them, so log them all with their distance
+const ingestHost = 'a.rtmp.youtube.com';
+const ingestCheck = async () => {
+  const ips = await dns.resolve4(ingestHost).catch(() => []);
+  const servers = await Promise.all(
+    ips.map(async (ip) => {
+      const {stdout} = await run('ping', [
+        '-n',
+        '-c',
+        '1',
+        '-t',
+        '2',
+        ip,
+      ]).catch((e) => ({stdout: e.stdout ?? ''}));
+      const time = stdout.match(/time=([\d.]+)/);
+      return {ip, ms: time ? Number(time[1]) : null};
+    }),
   );
-  const current = stdout.split('Current Network Information:')[1] ?? '';
-  const signal = current.match(/Signal \/ Noise: (-?\d+) dBm \/ (-?\d+) dBm/);
-  const rate = current.match(/Transmit Rate: (\d+)/);
-  const channel = current.match(/Channel: (.+)/);
-  if (signal)
-    log('wifi', {
-      rssi: Number(signal[1]),
-      noise: Number(signal[2]),
-      rate: Number(rate?.[1]),
-      channel: channel?.[1],
-    });
+  log('ingest', {servers});
 };
 
 // --- Finding the ATEM: it answers a hello on UDP 9910 ---
@@ -149,6 +165,7 @@ const startIncident = (reason) => {
     `display notification ${JSON.stringify(reason)} with title "Livestream" sound name "Sosumi"`,
   ]).catch(() => {});
   trace();
+  ingestCheck();
 };
 const endIncident = () => {
   log('incident', {
@@ -226,7 +243,6 @@ process.on('SIGTERM', stop);
 
 const {stdout: route} = await run('route', ['-n', 'get', 'default']);
 const gateway = route.match(/gateway: (\S+)/)[1];
-const ingestHost = 'a.rtmp.youtube.com';
 const [ingest] = await dns.resolve4(ingestHost);
 // The first hop past the router that answers ping, since some of Spectrum's don't
 const {stdout: hops} = await run('traceroute', [
@@ -275,6 +291,8 @@ tcp();
 setInterval(tcp, 15000);
 wifiInfo();
 setInterval(wifiInfo, 30000);
+ingestCheck();
+setInterval(ingestCheck, 5 * 60000);
 trace();
 setInterval(() => incident && trace(), 60000);
 
