@@ -1,0 +1,6 @@
+numpy
+scipy
+laspy[lazrs]
+shapely
+manifold3d
+trimesh
