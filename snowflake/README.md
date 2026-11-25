@@ -1,0 +1,7 @@
+Snowflake - 2026 - Draw the weather a snow crystal falls through and watch it grow in 3D: plates, columns, ferny stars, and everything in between.
+
+Growth follows Gravner and Griffeath's mesoscopic model of snow crystals ("Modeling snow-crystal growth: a three-dimensional mesoscopic approach", 2009) on a lattice of hexagonal prisms, run on WebGPU. Vapor diffuses toward the crystal, condenses on its surface, and cells join the crystal once they've gathered enough, more easily the more crystal they touch. Branching, faceting, ridges and hollows all come out of that. The six-fold symmetry comes from the lattice, as it comes from ice's molecules in real snow, and only 1/24 of the crystal is simulated.
+
+The chart in the corner is temperature across and humidity up. Drag on it to draw a path, or click to hold one spot; the dot moves along the path as the crystal grows. Temperature sets how much harder a new layer is to start on the top face than on the sides (real crystals flip between plates and columns twice between 0 and -22°C), and humidity sets how much vapor there is. The mapping from the chart to the model's parameters is hand tuned, so the regions are only roughly where they are in real snow.
+
+The preview marches rays through the cells and bends them in and out of the ice, lit from behind by a ring of light the way snowflake photographers light them, so flat ice looks dark and edges and ridges glow. Drag to orbit, scroll to zoom.
