@@ -497,6 +497,9 @@ window.snow = {
     const disk = Math.PI * far * far * (2 / Math.sqrt(3));
     return {fill: ice / disk, edge: edge / far, far};
   },
+  /** For tuning: the crystal's cells, 1 for crystal, layer by layer from
+      the middle up; each layer is the wedge q 0 to n - 1, r 0 to q */
+  cells: () => sim.readCells(),
   async grow({path, model: m, steps = 20000, chunk = 100, settle = 300} = {}) {
     testing = true;
     if (m) Object.assign(manual, m);

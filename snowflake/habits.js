@@ -145,12 +145,24 @@ export const paramsFor = (weather) => {
     THRESHOLDS.map(([p, , d]) => [p, d]),
     P,
   );
+  // Columns: inside corners join easily (concave ice grows fast) instead of
+  // Gravner and Griffeath's fill-in of starved corners, which closed hollows
+  // off with floors every few layers. Easier still, and side steps too, the
+  // wetter it is, which hollows the ends deeper.
+  const c = smoothstep(0.2, -0.4, P);
+  const corner = 1 + (0.5 + 0.2 * s - 1) * c;
+  const step = 1 - 0.3 * s * c;
   const plain = {
     ...BASE,
     rho: 0.04 + 0.32 * s ** 1.3,
     b01: top,
     b10: side,
     b20: side,
+    b11: step,
+    b21: step,
+    b30: corner,
+    b31: corner,
+    theta: BASE.theta * (1 - c),
   };
   // Near water saturation where plates grow, they turn into dendrites
   const w = dendriteness(weather);

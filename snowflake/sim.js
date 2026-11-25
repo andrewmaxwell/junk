@@ -218,11 +218,9 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
     }
   }
   var attach = b >= need;
-  // Concave corners starved of vapor fill in. Gravner and Griffeath only
-  // fill cells with no crystal above or below, but then a filled cell stops
-  // the layers on either side from filling, and hollow faces grew ribbed,
-  // every other layer filled. So a groove one layer high fills in too.
-  if (!attach && nT == 3 && nZ != 1 && b >= p.xi) {
+  // Concave corners starved of vapor fill in (at column temperatures
+  // theta is 0, which turns this off; see habits.js)
+  if (!attach && nT == 3 && nZ == 0 && b >= p.xi) {
     let local = d + ${neighbors((c) => `dAt(${c})`)};
     attach = local < p.theta;
   }
@@ -437,9 +435,8 @@ export const makeSim = (device, {n, nz}) => {
     extents,
     /** The smoothed crystal, for drawing */
     field,
-    /** For tuning: the crystal seen from above, 1 where any layer is
-        crystal, read back */
-    async above() {
+    /** For tuning: the crystal's cells (1 for crystal), read back */
+    async readCells() {
       const read = device.createBuffer({
         size: cells * 8,
         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -454,7 +451,12 @@ export const makeSim = (device, {n, nz}) => {
       const [x, y] = [both.subarray(0, cells), both.subarray(cells)];
       // the newer copy has the more crystal
       const sum = (c) => c.reduce((t, v) => t + v, 0);
-      const now = sum(x) >= sum(y) ? x : y;
+      return sum(x) >= sum(y) ? x : y;
+    },
+    /** For tuning: the crystal seen from above, 1 where any layer is
+        crystal */
+    async above() {
+      const now = await this.readCells();
       const top = new Uint8Array(layer);
       for (let i = 0; i < cells; i++) if (now[i]) top[i % layer] = 1;
       return top;
