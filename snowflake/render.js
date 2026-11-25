@@ -625,9 +625,13 @@ export const makeRenderer = (device, format) => {
     i[18] = sim.layer;
     // While things change (growing, turning, the first frames after), the
     // average is only a few frames deep, so following light trapped past 8
-    // bounces only costs time; skipping it keeps turning the camera smooth
+    // bounces only costs time; skipping it keeps turning the camera smooth.
+    // While it grows, 2 (in through a surface and out through another): a
+    // frame of a thick crystal took 35-50 ms at 8, which left the growth a few
+    // steps a frame, and 2 at full size (10-14 ms) looked sharper than 8 at
+    // half size (11-15 ms).
     const quick = growing || zoomed || frames < 16;
-    i[19] = quick ? Math.min(look.bounces, 8) : look.bounces;
+    i[19] = Math.min(look.bounces, growing ? 2 : quick ? 8 : look.bounces);
     f[20] = camera.distance + look.focus;
     // The floor sits half the crystal's radius below it, so the shadow falls
     // a little to the side, and the light pass covers all of the crystal

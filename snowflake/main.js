@@ -310,12 +310,8 @@ for (const key of Object.keys(BASE)) model.add(manual, key).name(key);
 
 // ---- loop
 
-/** While it grows, the preview is drawn at half size: tracing light through
-    thick crystals took most of each frame, which left the growth a few steps
-    a frame. The full picture builds once it stops. */
-const resize = (growing) => {
-  const scale =
-    Math.min(devicePixelRatio, settings.resolution) * (growing ? 0.5 : 1);
+const resize = () => {
+  const scale = Math.min(devicePixelRatio, settings.resolution);
   const w = Math.max(1, Math.round(canvas.clientWidth * scale));
   const h = Math.max(1, Math.round(canvas.clientHeight * scale));
   if (canvas.width !== w || canvas.height !== h) {
@@ -326,7 +322,7 @@ const resize = (growing) => {
 
 let lastView = '';
 const frame = (stepCount) => {
-  resize(stepCount > 0);
+  resize();
   const encoder = device.createCommandEncoder();
   if (stepCount > 0) {
     sim.setParams(params());
