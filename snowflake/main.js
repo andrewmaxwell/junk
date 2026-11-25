@@ -370,7 +370,9 @@ const frame = (stepCount) => {
   progress = Math.min(1, out + up);
   done = out >= 1 || up >= 1 || progress >= 1;
   // Back away quickly as it grows, so it never outgrows the screen
-  const target = Math.max(1.05 * Math.hypot(radius, height) + 3, 8);
+  // (standing under the lamp, back far enough to take in the long shadow)
+  const room = LIGHTS[settings.light] === 5 ? 1.6 : 1;
+  const target = Math.max(1.05 * Math.hypot(radius, height) + 3, 8) * room;
   camera.fit += (target - camera.fit) * (target > camera.fit ? 0.3 : 0.1);
 };
 

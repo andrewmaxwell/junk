@@ -32,6 +32,7 @@ struct View {
   reach: f32, // the radius of the lamp's beam the light pass follows
   shine: f32, // 1 / frames of light counted, or 0 before there are any
   lamp: vec3f, lampSize: f32, // toward the lamp, and its angular radius
+  above: vec3f, // up from the floor
   seed: u32,
 }
 @group(0) @binding(0) var<uniform> v: View;
@@ -48,6 +49,11 @@ const BRIGHTEST = 40.0;
 const LAMP = 3.0;
 const FLOOR = vec3f(0.5, 0.53, 0.58);
 const LAMP_COLOR = vec3f(1.0, 0.9, 0.75);
+/** How rough the ice is to the lamp's light, reflected and coming through:
+    the cells' bumps. Light through the ice at 0.1 lit single pixels, which
+    read as grit; wider, it glows along the ridges. */
+const GLOSS = 0.1;
+const HAZE = 0.2;
 
 const PI = 3.14159265;
 const STEP = 0.35;
@@ -209,11 +215,10 @@ fn env(d: vec3f) -> vec3f {
       + vec3f(0.06, 0.06, 0.08) * front * front;
   }
   if (v.light == 5) {
-    // A dark room, and the lamp: a small disk, bright enough that the light
-    // it throws on the floor adds up to LAMP
-    let disk = smoothstep(cos(v.lampSize * 1.15), cos(v.lampSize * 0.85), dot(d, v.lamp));
-    return vec3f(0.002, 0.002, 0.003) * (1.0 + d.y)
-      + LAMP_COLOR * disk * LAMP / (PI * v.lampSize * v.lampSize);
+    // A dark room. The lamp itself isn't here: a path that found so small a
+    // lamp would bring back hundreds of times the light of the rest, so its
+    // reflections are added where the ice is hit (glint, below) instead
+    return vec3f(0.002, 0.002, 0.003) * (1.0 + dot(d, v.above));
   }
   if (v.light == 2) {
     let sun = normalize(vec3f(0.6, 0.7, -0.4));
@@ -238,7 +243,8 @@ fn rand() -> f32 {
 
 /** Two directions square to the lamp's, for the light pass's map */
 fn acrossLamp() -> mat2x3f {
-  let e1 = normalize(cross(v.lamp, vec3f(0.0, 0.0, 1.0)));
+  let side = select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), abs(v.lamp.z) > 0.9);
+  let e1 = normalize(cross(v.lamp, side));
   return mat2x3f(e1, cross(v.lamp, e1));
 }
 
@@ -267,31 +273,101 @@ fn lit(g: vec3f) -> f32 {
 }
 
 /** The light from past the crystal: the lights, or under the lamp, the floor */
+/** Where a ray meets the floor, or a negative distance if it doesn't */
+fn toFloor(p: vec3f, d: vec3f) -> f32 {
+  let down = dot(d, v.above);
+  if (down >= 0.0) { return -1.0; }
+  return (v.floor - dot(p, v.above)) / down;
+}
+
 fn sky(p: vec3f, d: vec3f) -> vec3f {
-  if (v.light == 5 && d.y < 0.0) {
-    let g = p + d * ((v.floor - p.y) / d.y);
-    // the lamp lights a pool on the floor around the shadow
-    let middle = v.lamp * (v.floor / v.lamp.y);
-    let pool = exp(-dot(g.xz - middle.xz, g.xz - middle.xz) / (2.5 * v.reach * v.reach));
-    return FLOOR / PI * (LAMP_COLOR * LAMP * v.lamp.y * lit(g) * pool + 0.01);
+  if (v.light == 5) {
+    let t = toFloor(p, d);
+    if (t > 0.0) {
+      let g = p + d * t;
+      // the lamp lights a pool on the floor around the shadow
+      let middle = v.lamp * (v.floor / dot(v.lamp, v.above));
+      let pool = exp(-dot(g - middle, g - middle) / (5.0 * v.reach * v.reach));
+      return FLOOR / PI
+        * (LAMP_COLOR * LAMP * dot(v.lamp, v.above) * lit(g) * pool + 0.01);
+    }
   }
   return env(d);
 }
 
-struct Ray { p: vec3f, d: vec3f, out: bool }
+/** The lamp's reflection off the ice at a point with normal n, seen from
+    direction toward: a glossy highlight (GGX), as if the cells' bumps were
+    the ice's roughness */
+fn glint(n: vec3f, toward: vec3f) -> vec3f {
+  let nl = dot(n, v.lamp);
+  let nv = dot(n, toward);
+  if (nl <= 0.0 || nv <= 0.0) { return vec3f(0.0); }
+  let h = normalize(v.lamp + toward);
+  let a2 = GLOSS * GLOSS;
+  let nh = dot(n, h);
+  let spread = a2 / (PI * (nh * nh * (a2 - 1.0) + 1.0) * (nh * nh * (a2 - 1.0) + 1.0));
+  let eta = 1.31;
+  let f0 = ((eta - 1.0) / (eta + 1.0)) * ((eta - 1.0) / (eta + 1.0));
+  let fresnel = f0 + (1.0 - f0) * pow(1.0 - dot(toward, h), 5.0);
+  return LAMP_COLOR * LAMP * fresnel * spread / (4.0 * max(nv, 0.1));
+}
+
+/** The lamp's light coming in through the ice's surface at a point with
+    normal n (facing into the ice), toward direction toward inside it: the
+    glossy (GGX) transmission that goes with glint. Inside the ice radiance
+    is counted as it will be once out, as the paths are, so no eta squared. */
+fn gleam(n: vec3f, toward: vec3f) -> vec3f {
+  let eta = 1.31;
+  let li = dot(v.lamp, n);
+  let lo = dot(toward, n);
+  if (li >= 0.0 || lo <= 0.0) { return vec3f(0.0); }
+  var h = -normalize(v.lamp + eta * toward);
+  if (dot(h, n) < 0.0) { h = -h; }
+  let ih = dot(v.lamp, h);
+  let oh = dot(toward, h);
+  // only light that really bends from the lamp into this direction
+  if (ih * li <= 0.0 || oh * lo <= 0.0) { return vec3f(0.0); }
+  let a2 = HAZE * HAZE;
+  let nh = dot(n, h);
+  let spread = a2 / (PI * (nh * nh * (a2 - 1.0) + 1.0) * (nh * nh * (a2 - 1.0) + 1.0));
+  let f0 = ((eta - 1.0) / (eta + 1.0)) * ((eta - 1.0) / (eta + 1.0));
+  let fresnel = f0 + (1.0 - f0) * pow(1.0 - abs(ih), 5.0);
+  let bend = ih + eta * oh;
+  return LAMP_COLOR * LAMP * (1.0 - fresnel) * spread * abs(ih) * abs(oh)
+    / (max(lo, 0.1) * bend * bend);
+}
+
+/** Whether the lamp shines on a point at the ice's surface: no ice on the
+    way to it, past the surface itself */
+fn clear(p: vec3f) -> bool {
+  let span = bounds(p, v.lamp);
+  return crossing(p, v.lamp, 1.0, min(span.y + 1.0, FAR), false) < 0.0;
+}
+
+struct Ray { p: vec3f, d: vec3f, out: bool, glints: vec3f }
 
 /** Follows light that just hit ice at p through the crystal, until it gets
     out (or is lost bouncing): at each surface it either reflects or goes
     through, picked at random by Fresnel's odds, and the frames average them */
-fn passage(p0: vec3f, d0: vec3f) -> Ray {
+fn passage(p0: vec3f, d0: vec3f, glints: bool) -> Ray {
   let eta = 1.31; // ice's index of refraction
   let f0 = ((eta - 1.0) / (eta + 1.0)) * ((eta - 1.0) / (eta + 1.0));
   var p = p0;
   var d = d0;
   var inside = false;
+  var shine = vec3f(0.0);
+  var gleamed = false;
   for (var k = 0; k < v.bounces; k++) {
     var n = normal(p, d);
     if (dot(n, d) > 0.0) { n = -n; } // facing where the light comes from
+    // The lamp's reflection where the camera's ray first meets the ice, and
+    // its light coming in where the ray first reaches the far side, if no
+    // other ice is in the lamp's way. (Adding it at every surface lit up
+    // the inside of thick crystals like sandpaper.)
+    if (glints && (k == 0 || (inside && !gleamed)) && clear(p)) {
+      shine += select(glint(n, -d), gleam(n, -d), inside);
+      gleamed = gleamed || inside;
+    }
     let through = refract(d, n, select(1.0 / eta, eta, inside));
     // Schlick's Fresnel, with the angle on the air side. Picking by the
     // exact odds keeps every path's weight 1: reweighting picks (reflect
@@ -308,18 +384,18 @@ fn passage(p0: vec3f, d0: vec3f) -> Ray {
     let span = bounds(p, d);
     let te = crossing(p, d, 0.05, min(span.y + 1.0, FAR), inside);
     // out into the light, or deep in the branches: let it out the way it goes
-    if (te < 0.0) { return Ray(p, d, true); }
+    if (te < 0.0) { return Ray(p, d, true, shine); }
     p = p + d * te;
   }
-  return Ray(p, d, false);
+  return Ray(p, d, false, shine);
 }
 
 /** Light reaching the camera along a ray that just hit ice at t */
 fn shade(o: vec3f, d0: vec3f, t: f32) -> vec3f {
-  let ray = passage(o + d0 * t, d0);
+  let ray = passage(o + d0 * t, d0, v.light == 5);
   // Still bouncing: let it out the way it's going, except in the furnace
   if (!ray.out && v.light == 3) { return vec3f(0.0); }
-  return sky(ray.p, ray.d);
+  return sky(ray.p, ray.d) + ray.glints;
 }
 
 /** The light pass: a ray from the lamp for each cell of the map, through the
@@ -340,14 +416,15 @@ fn light(@builtin(global_invocation_id) id: vec3u) {
   if (span.x < span.y) {
     let t = crossing(p, d, span.x, span.y, false);
     if (t >= 0.0) {
-      let ray = passage(p + d * t, d);
+      let ray = passage(p + d * t, d, false);
       if (!ray.out) { return; }
       p = ray.p;
       d = ray.d;
     }
   }
-  if (d.y >= 0.0) { return; }
-  let cell = vec2i(floor(onMap(p + d * ((v.floor - p.y) / d.y))));
+  let t = toFloor(p, d);
+  if (t <= 0.0) { return; }
+  let cell = vec2i(floor(onMap(p + d * t)));
   if (any(cell < vec2i(0)) || any(cell >= vec2i(i32(MAP)))) { return; }
   atomicAdd(&landed[u32(cell.y) * MAP + u32(cell.x)], 1u);
 }
@@ -451,13 +528,26 @@ fn fs(@builtin(position) pix: vec4f) -> @location(0) vec4f {
 
 /** Frames averaged before the picture stops changing and drawing stops */
 const SETTLED = 256;
-/** The lamp light, its direction (fixed to the world, up and off to one side)
-    and its angular radius: a small lamp, about 2.3 degrees across */
+/**
+ * The lamp light. The crystal stands on the tip of an arm under a low lamp,
+ * so its shadow falls long across the floor. The shader works in the
+ * crystal's space (c-axis y), so under the lamp the world is turned instead:
+ * the world's up is the crystal's x axis, and its c-axis lies along FACING.
+ * The lamp is fixed to the world, about 35 degrees up, in front of the
+ * starting camera and to its left, so the shadow falls to the right and the
+ * ice can reflect the lamp toward the camera; the crystal faces halfway
+ * between them.
+ */
 const LAMP_LIGHT = 5;
-const LAMP_TOWARD = (([x, y, z]) => {
-  const l = Math.hypot(x, y, z);
-  return [x / l, y / l, z / l];
-})([-0.5, 1, 0.15]);
+const unit = (u) => u.map((x) => x / Math.hypot(...u));
+const FACING = unit([0.07, 0, 1.7]);
+/** A world direction in the crystal's space, standing on an arm */
+const standing = ([x, y, z]) => {
+  const [cx, , cz] = FACING;
+  return [y, cx * x + cz * z, cz * x - cx * z];
+};
+const LAMP_TOWARD = standing(unit([-0.49, 0.7, 0.87]));
+const ABOVE = standing([0, 1, 0]);
 const LAMP_SIZE = 0.02;
 /** The light pass's map: MAP x MAP cells across the lamp's beam */
 const MAP = 512;
@@ -612,13 +702,14 @@ export const makeRenderer = (device, format) => {
     const data = new ArrayBuffer(128);
     const f = new Float32Array(data);
     const i = new Int32Array(data);
-    f.set(camera.position, 0);
+    const turn = look.light === LAMP_LIGHT ? standing : (u) => u;
+    f.set(turn(camera.position), 0);
     f[3] = camera.zoom;
-    f.set(camera.forward, 4);
+    f.set(turn(camera.forward), 4);
     f[7] = width / height;
-    f.set(camera.right, 8);
+    f.set(turn(camera.right), 8);
     i[11] = look.light;
-    f.set(camera.up, 12);
+    f.set(turn(camera.up), 12);
     f[15] = look.aperture;
     i[16] = sim.n;
     i[17] = sim.nz;
@@ -633,15 +724,15 @@ export const makeRenderer = (device, format) => {
     const quick = growing || zoomed || frames < 16;
     i[19] = Math.min(look.bounces, growing ? 2 : quick ? 8 : look.bounces);
     f[20] = camera.distance + look.focus;
-    // The floor sits half the crystal's radius below it, so the shadow falls
-    // a little to the side, and the light pass covers all of the crystal
+    // The crystal stands on the floor, and the light pass covers all of it
     const {radius, height: tall} = sim.extents;
-    f[21] = -(tall + 1 + 0.5 * radius);
+    f[21] = -(radius + 1);
     f[22] = Math.hypot(radius, tall) + 4;
     f[23] = lightFrames && !growing ? 1 / lightFrames : 0;
     f.set(LAMP_TOWARD, 24);
     f[27] = LAMP_SIZE;
-    new Uint32Array(data)[28] = (Math.random() * 2 ** 32) >>> 0;
+    f.set(ABOVE, 28);
+    new Uint32Array(data)[31] = (Math.random() * 2 ** 32) >>> 0;
     device.queue.writeBuffer(view, 0, data);
     if (counting) {
       const pass = encoder.beginComputePass();
