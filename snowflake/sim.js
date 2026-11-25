@@ -218,8 +218,11 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
     }
   }
   var attach = b >= need;
-  // Concave corners starved of vapor fill in
-  if (!attach && nT == 3 && nZ == 0 && b >= p.xi) {
+  // Concave corners starved of vapor fill in. Gravner and Griffeath only
+  // fill cells with no crystal above or below, but then a filled cell stops
+  // the layers on either side from filling, and hollow faces grew ribbed,
+  // every other layer filled. So a groove one layer high fills in too.
+  if (!attach && nT == 3 && nZ != 1 && b >= p.xi) {
     let local = d + ${neighbors((c) => `dAt(${c})`)};
     attach = local < p.theta;
   }
