@@ -30,8 +30,8 @@ const SIZES = {
   Medium: {n: 160, nz: 60},
   'Large (slow)': {n: 256, nz: 96},
 };
-/** Most steps per frame; the loop takes fewer to keep about 30 frames a second */
-const SPEEDS = {Slow: 4, Normal: 60, Fast: 200};
+/** About how many seconds a crystal takes to grow, if the GPU keeps up */
+const SPEEDS = {Slow: 15, Normal: 5, Fast: 0};
 /** How the crystal is lit, as in photos of real ones */
 const LIGHTS = {
   'Dark field': 0,
@@ -85,6 +85,8 @@ const renderer = makeRenderer(device, format);
 
 let sim = null;
 let progress = 0;
+/** Seconds the crystal has been growing, not counting pauses */
+let growingFor = 0;
 let done = false;
 
 const chart = makeChart($('chart'), (path) => {
@@ -198,6 +200,7 @@ const restart = () => {
     sim = makeSim(device, size);
   }
   progress = 0;
+  growingFor = 0;
   done = false;
   camera.fit = 8;
   renderer.restart();
@@ -306,8 +309,12 @@ for (const key of Object.keys(BASE)) model.add(manual, key).name(key);
 
 // ---- loop
 
-const resize = () => {
-  const scale = Math.min(devicePixelRatio, settings.resolution);
+/** While it grows, the preview is drawn at half size: tracing light through
+    thick crystals took most of each frame, which left the growth a few steps
+    a frame. The full picture builds once it stops. */
+const resize = (growing) => {
+  const scale =
+    Math.min(devicePixelRatio, settings.resolution) * (growing ? 0.5 : 1);
   const w = Math.max(1, Math.round(canvas.clientWidth * scale));
   const h = Math.max(1, Math.round(canvas.clientHeight * scale));
   if (canvas.width !== w || canvas.height !== h) {
@@ -318,7 +325,7 @@ const resize = () => {
 
 let lastView = '';
 const frame = (stepCount) => {
-  resize();
+  resize(stepCount > 0);
   const encoder = device.createCommandEncoder();
   if (stepCount > 0) {
     sim.setParams(params());
@@ -371,16 +378,17 @@ const frame = (stepCount) => {
 };
 
 let testing = false;
-// Steps per frame, adjusted to keep about 30 frames a second
+// Steps per frame: as many as keep about 30 frames a second, fewer when the
+// crystal is ahead of the time its speed gives it
 let stepRate = 10;
 let lastTime = 0;
 const loop = (time) => {
   const dt = time - lastTime;
   lastTime = time;
-  const most = SPEEDS[settings.speed];
-  if (dt > 40) stepRate = Math.max(1, stepRate * 0.8);
-  else if (dt < 28) stepRate = Math.min(most, stepRate * 1.1 + 1);
-  stepRate = Math.min(most, stepRate);
+  if (!settings.paused && !done) growingFor += Math.min(dt, 100) / 1000;
+  const ahead = progress > growingFor / SPEEDS[settings.speed];
+  if (dt > 40 || ahead) stepRate = Math.max(1, stepRate * 0.8);
+  else if (dt < 28) stepRate = Math.min(200, stepRate * 1.1 + 1);
   if (!testing) {
     frame(settings.paused || done ? 0 : Math.round(stepRate));
     chart.draw(progress);
