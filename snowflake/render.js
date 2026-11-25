@@ -19,8 +19,9 @@ struct View {
   pos: vec3f, zoom: f32,
   fwd: vec3f, aspect: f32,
   right: vec3f, light: i32,
-  up: vec3f, ice: f32,
+  up: vec3f, aperture: f32, // the lens's radius, for depth of field
   n: i32, nz: i32, layer: i32, bounces: i32,
+  focus: f32, // how far away things are sharp
 }
 @group(0) @binding(0) var<uniform> v: View;
 @group(0) @binding(1) var<storage, read> a: array<f32>;
@@ -170,10 +171,11 @@ fn env(d: vec3f) -> vec3f {
   if (v.light == 1) {
     // Rheinberg: a blue disk behind the crystal, a ring warm above and cool
     // below
-    let back = vec3f(0.004, 0.012, 0.06) * (1.0 - smoothstep(0.4, 0.6, ang));
+    let back = vec3f(0.003, 0.007, 0.03) * (1.0 - smoothstep(0.4, 0.6, ang));
     let lamps = mix(vec3f(0.4, 0.75, 1.0), vec3f(1.0, 0.55, 0.15), side);
     return back + lamps * ring * 2.5 + vec3f(0.06, 0.07, 0.1) * front * front;
   }
+  if (v.light == 3) { return vec3f(1.0); } // white furnace, for testing
   if (v.light == 2) {
     let sun = normalize(vec3f(0.6, 0.7, -0.4));
     let sky = mix(vec3f(0.55, 0.65, 0.8), vec3f(0.85, 0.9, 1.0), d.y)
@@ -196,42 +198,38 @@ fn rand() -> f32 {
 }
 
 /** Light reaching the camera along a ray that just hit ice at t. A path
-    tracer: at each surface the light either reflects or goes through, and one
-    of the two is followed at random. The frames average them out. */
+    tracer: at each surface the light either reflects or goes through, picked
+    at random by Fresnel's odds, and the frames average them out. */
 fn shade(o: vec3f, d0: vec3f, t: f32) -> vec3f {
-  let eta = v.ice;
+  let eta = 1.31; // ice's index of refraction
   let f0 = ((eta - 1.0) / (eta + 1.0)) * ((eta - 1.0) / (eta + 1.0));
   var p = o + d0 * t;
   var d = d0;
   var inside = false;
-  var weight = 1.0;
   for (var k = 0; k < v.bounces; k++) {
     var n = normal(p, d);
     if (dot(n, d) > 0.0) { n = -n; } // facing where the light comes from
     let through = refract(d, n, select(1.0 / eta, eta, inside));
-    // Schlick's Fresnel, with the angle on the air side
+    // Schlick's Fresnel, with the angle on the air side. Picking by the
+    // exact odds keeps every path's weight 1: reweighting picks (reflect
+    // more often, count each for less) gives a few paths huge weights, which
+    // made glass sponges in anotherRaytracer render up to half too dark.
     let c = select(-dot(d, n), -dot(through, n), inside);
     let f = f0 + (1.0 - f0) * pow(1.0 - clamp(c, 0.0, 1.0), 5.0);
-    // Reflections are only a few percent, but picking them that rarely
-    // leaves them speckled, so they're picked more often and weighted down
-    let q = clamp(f, 0.2, 0.8);
-    if (dot(through, through) < 0.5) {
-      d = reflect(d, n); // all of it reflects when it can't get out
-    } else if (rand() < q) {
+    if (dot(through, through) < 0.5 || rand() < f) {
       d = reflect(d, n);
-      weight *= f / q;
     } else {
       d = through;
-      weight *= (1.0 - f) / (1.0 - q);
       inside = !inside;
     }
     let span = bounds(p, d);
     let te = crossing(p, d, 0.05, min(span.y + 1.0, FAR), inside);
     // out into the light, or deep in the branches: let it out the way it goes
-    if (te < 0.0) { break; }
+    if (te < 0.0) { return env(d); }
     p = p + d * te;
   }
-  return weight * env(d);
+  // Still bouncing: let it out the way it's going
+  return select(env(d), vec3f(0.0), v.light == 3);
 }
 
 @vertex
@@ -255,10 +253,15 @@ struct Frame {
 fn fs(@builtin(position) pix: vec4f) -> @location(0) vec4f {
   let xy = pix.xy + frame.jitter;
   let uv = vec2f(xy.x / frame.size.x - 0.5, 0.5 - xy.y / frame.size.y);
-  let d = normalize(v.fwd + v.right * uv.x * v.zoom * v.aspect + v.up * uv.y * v.zoom);
-  let o = v.pos;
   seed = u32(pix.x) * 1973u + u32(pix.y) * 9277u + frame.seed * 26699u;
   rand();
+  // A thin lens: rays from across its disk meet at the focus distance
+  let aim = normalize(v.fwd + v.right * uv.x * v.zoom * v.aspect + v.up * uv.y * v.zoom);
+  let sharp = v.pos + aim * (v.focus / dot(aim, v.fwd));
+  let r = v.aperture * sqrt(rand());
+  let ang = 2.0 * PI * rand();
+  let o = v.pos + (v.right * cos(ang) + v.up * sin(ang)) * r;
+  let d = normalize(sharp - o);
   var col = env(d);
   let span = bounds(o, d);
   if (span.x < span.y) {
@@ -287,11 +290,39 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   return vec4f(uv * 2.0 - 1.0, 0.0, 1.0);
 }
 
+/** AgX filmic tone mapping (Troy Sobotka's, with Benjamin Wrensch's
+    polynomial fit and Blender's "punchy" look), copied from
+    anotherRaytracer's shaders/tone.js. Like film, it rolls off shadows as
+    well as highlights, so the dark background stays dark, and bright colors
+    fade toward white. Its output is already encoded for the screen. */
+fn agx(c: vec3f) -> vec3f {
+  let inset = mat3x3f(
+    0.842479062253094, 0.0423282422610123, 0.0423756549057051,
+    0.0784335999999992, 0.878468636469772, 0.0784336,
+    0.0792237451477643, 0.0791661274605434, 0.879142973793104,
+  );
+  let lo = -12.47393;
+  let hi = 4.026069;
+  var x = clamp(log2(max(inset * c, vec3f(1e-10))), vec3f(lo), vec3f(hi));
+  x = (x - lo) / (hi - lo);
+  let x2 = x * x;
+  let x4 = x2 * x2;
+  x = 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+  x = pow(max(x, vec3f(0.)), vec3f(1.35));
+  let luma = dot(x, vec3f(0.2126, 0.7152, 0.0722));
+  x = luma + 1.4 * (x - luma);
+  let outset = mat3x3f(
+    1.19687900512017, -0.0528968517574562, -0.0529716355144438,
+    -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
+    -0.0990297440797205, -0.0989611768448433, 1.15107367264116,
+  );
+  return clamp(outset * x, vec3f(0.), vec3f(1.));
+}
+
 @fragment
 fn fs(@builtin(position) pix: vec4f) -> @location(0) vec4f {
-  var col = textureLoad(image, vec2i(pix.xy), 0).rgb * exposure;
-  col = col / (1.0 + col); // Reinhard
-  return vec4f(pow(col, vec3f(1.0 / 2.2)), 1.0);
+  let col = textureLoad(image, vec2i(pix.xy), 0).rgb * exposure;
+  return vec4f(agx(col), 1.0);
 }
 `;
 
@@ -320,7 +351,7 @@ export const makeRenderer = (device, format) => {
       size,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-  const view = uniform(80);
+  const view = uniform(96);
   const frameBuffer = uniform(32);
   const exposureBuffer = uniform(16);
   const linear = device.createSampler({
@@ -373,7 +404,7 @@ export const makeRenderer = (device, format) => {
    * @param {{width: number, height: number}} canvasSize
    * @param {ReturnType<import('./sim.js').makeSim>} sim
    * @param {{position: number[], forward: number[], right: number[], up: number[], zoom: number, distance: number}} camera
-   * @param {{exposure: number, ice: number, bounces: number, light: number}} look
+   * @param {{exposure: number, bounces: number, light: number, aperture: number, focus: number}} look
    * @param {boolean} growing whether the crystal changed since the last frame
    */
   const render = (encoder, context, canvasSize, sim, camera, look, growing) => {
@@ -411,7 +442,7 @@ export const makeRenderer = (device, format) => {
       return;
     }
 
-    const data = new ArrayBuffer(80);
+    const data = new ArrayBuffer(96);
     const f = new Float32Array(data);
     const i = new Int32Array(data);
     f.set(camera.position, 0);
@@ -421,11 +452,16 @@ export const makeRenderer = (device, format) => {
     f.set(camera.right, 8);
     i[11] = look.light;
     f.set(camera.up, 12);
-    f[15] = look.ice;
+    f[15] = look.aperture;
     i[16] = sim.n;
     i[17] = sim.nz;
     i[18] = sim.layer;
-    i[19] = look.bounces;
+    // While things change (growing, turning, the first frames after), the
+    // average is only a few frames deep, so following light trapped past 8
+    // bounces only costs time; skipping it keeps turning the camera smooth
+    const quick = growing || zoomed || frames < 16;
+    i[19] = quick ? Math.min(look.bounces, 8) : look.bounces;
+    f[20] = camera.distance + look.focus;
     device.queue.writeBuffer(view, 0, data);
 
     // While the crystal grows, keep some of the old frames to smooth out the

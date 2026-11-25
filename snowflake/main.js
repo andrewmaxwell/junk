@@ -32,8 +32,6 @@ const SIZES = {
 };
 /** Most steps per frame; the loop takes fewer to keep about 30 frames a second */
 const SPEEDS = {Slow: 4, Normal: 60, Fast: 200};
-/** Refractive index of ice */
-const ICE = 1.31;
 /** How the crystal is lit, as in photos of real ones */
 const LIGHTS = {
   'Dark field': 0,
@@ -50,7 +48,9 @@ const settings = {
   time: 1,
   light: 'Dark field',
   exposure: 1.5,
-  bounces: 8,
+  bounces: 32,
+  blur: 0.5,
+  focus: 0,
   resolution: 1,
   manual: false,
   restart: () => restart(),
@@ -323,7 +323,9 @@ gui.add(settings, 'size', Object.keys(SIZES)).name('Grid').onChange(restart);
 gui.add(settings, 'light', Object.keys(LIGHTS)).name('Lighting').onChange(save);
 const look = gui.addFolder('Look').close();
 look.add(settings, 'exposure', 0.1, 8).name('Exposure');
-look.add(settings, 'bounces', 1, 16, 1).name('Light bounces');
+look.add(settings, 'blur', 0, 3).name('Focus blur');
+look.add(settings, 'focus', -1, 1).name('Focus nearer/farther');
+look.add(settings, 'bounces', 1, 64, 1).name('Light bounces');
 look.add(settings, 'resolution', 0.25, 2, 0.05).name('Pixels per point');
 const model = gui.addFolder('Model').close();
 model.add(settings, 'manual').name('Ignore the chart');
@@ -369,6 +371,8 @@ const frame = (stepCount) => {
     settings.bounces,
     settings.resolution,
     settings.light,
+    settings.blur,
+    settings.focus,
   ]);
   if (view !== lastView) renderer.restart();
   lastView = view;
@@ -378,7 +382,13 @@ const frame = (stepCount) => {
     canvas,
     sim,
     basis(),
-    {...settings, ice: ICE, light: LIGHTS[settings.light]},
+    {
+      ...settings,
+      light: settings.furnace ? 3 : LIGHTS[settings.light],
+      // in units of the crystal's size, which the camera keeps in view
+      aperture: settings.blur * 0.1 * camera.fit,
+      focus: settings.focus * camera.fit,
+    },
     stepCount > 0 || rewound,
   );
   const read = sim.readExtents(encoder);
