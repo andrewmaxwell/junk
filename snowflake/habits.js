@@ -3,7 +3,14 @@
 // more the more humid the air is. The model has no temperature; it has
 // thresholds for how much boundary mass each kind of surface cell needs to
 // join the crystal. Plateness sets how much harder a new layer is to start on
-// the top face than on the side faces, and humidity sets the vapor far away.
+// the top face than on the side faces, and supersaturation sets the vapor far
+// away.
+//
+// Supersaturation is over ice: how much more vapor the air holds than ice is
+// in balance with. Inside a cloud, droplets hold the air near water
+// saturation, which is that much over ice (16% at -15 C), so the most a
+// crystal in a cloud sees grows with the cold. Branching follows how close the
+// air is to water saturation, so that's what the model's vapor follows.
 
 /** [temperature C, plateness]: 1 makes thin plates, -1 long columns */
 const PLATENESS = [
@@ -21,6 +28,20 @@ const PLATENESS = [
 ];
 
 export const T_MIN = -30;
+/** The top of the chart: supersaturation over ice, as a fraction */
+export const SIGMA_MAX = 0.36;
+
+/** Saturation vapor pressure over water and ice (Magnus forms, WMO 2008) */
+const overWater = (T) => Math.exp((17.62 * T) / (243.12 + T));
+const overIce = (T) => Math.exp((22.46 * T) / (272.62 + T));
+/** Supersaturation over ice of air saturated over water, as a fraction */
+export const waterSaturation = (T) => overWater(T) / overIce(T) - 1;
+
+/** How far from ice saturation (0) to just past water saturation (1) */
+export const wetness = ({T, sigma}) =>
+  Math.min(1, Math.max(0, sigma / (1.1 * Math.max(0.005, waterSaturation(T)))));
+/** The supersaturation for a wetness at a temperature */
+export const sigmaFor = (T, w) => w * 1.1 * Math.max(0.005, waterSaturation(T));
 
 const lerpTable = (table, x) => {
   for (let k = 1; k < table.length; k++) {
@@ -62,16 +83,17 @@ export const BASE = {
  * last one has spread and the ends come to points.
  */
 const THRESHOLDS = [
-  [1, 3, 1.4],
-  [0.5, 2.6, 1.7],
+  [1, 4, 1.4],
+  [0.5, 3, 1.7],
   [0, 2.4, 2.3],
   [-0.5, 2.4, 3.2],
   [-1, 2.2, 4.2],
 ];
 
-/** Model parameters for a temperature (C) and humidity (0 to 1) */
-export const paramsFor = ({T, s}) => {
-  const P = plateness(T);
+/** Model parameters for a temperature (C) and supersaturation over ice */
+export const paramsFor = (weather) => {
+  const P = plateness(weather.T);
+  const s = wetness(weather);
   const top = lerpTable(
     THRESHOLDS.map(([p, t]) => [p, t]),
     P,
@@ -89,13 +111,14 @@ export const paramsFor = ({T, s}) => {
   };
 };
 
-/** Labels for the chart's regions: [text, T, s] */
+/** Labels for the chart's regions, after Libbrecht's morphology diagram:
+    [text, T, supersaturation] */
 export const LABELS = [
-  ['plates', -1.5, 0.25],
-  ['columns', -7, 0.2],
-  ['needles', -5, 0.85],
-  ['plates', -18, 0.15],
-  ['sectored plates', -15, 0.45],
-  ['stars & ferns', -15, 0.85],
-  ['columns', -27, 0.6],
+  ['plates', -1.5, 0.012],
+  ['columns', -7.5, 0.025],
+  ['needles', -5, 0.075],
+  ['plates', -18, 0.03],
+  ['sectored', -14.5, 0.085],
+  ['stars & ferns', -15, 0.2],
+  ['columns', -26, 0.18],
 ];

@@ -2,8 +2,15 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
     <title>Snowflake</title>
+    <meta
+      name="description"
+      content="Draw the weather a snow crystal falls through and watch it grow in 3D."
+    />
     <style>
       body {
         margin: 0;
@@ -27,7 +34,7 @@
       #chart {
         position: fixed;
         left: 8px;
-        bottom: 32px;
+        bottom: calc(32px + env(safe-area-inset-bottom));
         width: min(340px, calc(100vw - 16px));
         height: 210px;
         border-radius: 8px;
@@ -37,10 +44,36 @@
       #stats {
         position: fixed;
         left: 8px;
-        bottom: 8px;
+        right: 8px;
+        bottom: calc(8px + env(safe-area-inset-bottom));
         font-variant-numeric: tabular-nums;
         pointer-events: none;
         text-shadow: 0 1px 2px #000;
+      }
+      #stats.error {
+        top: 40%;
+        bottom: auto;
+        text-align: center;
+        font-size: 16px;
+        color: #fff;
+      }
+      /* Once a crystal is grown, point at what to do next */
+      .nudge button {
+        animation: nudge 1.6s ease-in-out infinite alternate;
+      }
+      @keyframes nudge {
+        to {
+          background: #3a6a8a;
+        }
+      }
+      @media (max-width: 600px) {
+        #chart {
+          height: 160px;
+          bottom: calc(48px + env(safe-area-inset-bottom));
+        }
+        #stats {
+          font-size: 12px;
+        }
       }
     </style>
   </head>

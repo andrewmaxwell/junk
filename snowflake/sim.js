@@ -2,7 +2,8 @@
 // ("Modeling snow-crystal growth: a three-dimensional mesoscopic approach",
 // 2009), on a lattice of hexagonal prisms: layers of triangular lattices
 // stacked along the crystal's c-axis. Each cell holds:
-//   a: whether it's part of the crystal
+//   a: when it joined the crystal: 0 if it hasn't, 1 for the seed, and
+//      step + 1 for the rest, so the crystal can be shown as it was earlier
 //   b: boundary mass, the quasi-liquid layer on the crystal's surface
 //   c: crystal mass, ice that hasn't joined the crystal yet
 //   d: diffusive mass, water vapor
@@ -27,7 +28,7 @@ const HEX = [
 
 const common = /* wgsl */ `
 struct Params {
-  n: i32, nz: i32, layer: i32, seed: u32,
+  n: i32, nz: i32, layer: i32, cutoff: u32,
   rho: f32, kappa: f32, mu: f32, gamma: f32,
   b01: f32, b10: f32, b20: f32, b11: f32,
   b21: f32, b30: f32, b31: f32, theta: f32,
@@ -127,7 +128,7 @@ ${common}
 
 fn inA(j: i32) -> i32 {
   if (j < 0) { return 0; }
-  return i32(aIn[j]);
+  return select(0, 1, aIn[j] != 0u);
 }
 fn dAt(j: i32) -> f32 {
   if (j < 0) { return p.rho; }
@@ -177,7 +178,7 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
   if (r > q || q >= p.n || z >= p.nz) { return; }
   let i = z * p.layer + q * (q + 1) / 2 + r;
   if (aIn[i] != 0u) {
-    aOut[i] = 1u;
+    aOut[i] = aIn[i];
     dOut[i] = 0.0;
     return;
   }
@@ -225,7 +226,8 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
   }
 
   if (attach) {
-    aOut[i] = 1u;
+    // ext[3] already counts this step
+    aOut[i] = atomicLoad(&ext[3]) + 1u;
     cm[i] = b + c;
     bm[i] = 0.0;
     dOut[i] = 0.0;
@@ -243,7 +245,8 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
 }
 `;
 
-// For drawing: the crystal with its single-cell bumps and pits smoothed away
+// For drawing: the crystal as it was when the step count reached the cutoff,
+// with its single-cell bumps and pits smoothed away
 const smoothCode = /* wgsl */ `
 ${common}
 @group(0) @binding(1) var<storage, read> aIn: array<u32>;
@@ -251,7 +254,8 @@ ${common}
 
 fn at(j: i32) -> f32 {
   if (j < 0) { return 0.0; }
-  return f32(aIn[j]);
+  let t = aIn[j];
+  return select(0.0, 1.0, t != 0u && t <= p.cutoff);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -263,7 +267,7 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
   let i = z * p.layer + q * (q + 1) / 2 + r;
   let around = ${neighbors((c) => `at(${c})`)}
     + at(cell(q, r, z + 1)) + at(cell(q, r, z - 1));
-  sOut[i] = 0.4 * f32(aIn[i]) + 0.6 * around / 8.0;
+  sOut[i] = 0.4 * at(i) + 0.6 * around / 8.0;
 }
 `;
 
@@ -369,6 +373,13 @@ export const makeSim = (device, {n, nz}) => {
     Object.assign(extents, {radius: 0, height: 0, cells: 1, steps: 0});
   };
 
+  /** Show the crystal as it was after this many steps (Infinity: as it is) */
+  let cutoff = 0xffffffff;
+  const setCutoff = (steps) => {
+    cutoff = Math.min(0xffffffff, steps + 1);
+    device.queue.writeBuffer(uniform, 12, new Uint32Array([cutoff]));
+  };
+
   const setParams = (params) => {
     const data = new ArrayBuffer(80);
     const ints = new Int32Array(data);
@@ -376,16 +387,16 @@ export const makeSim = (device, {n, nz}) => {
     ints[0] = n;
     ints[1] = nz;
     ints[2] = layer;
-    ints[3] = 0;
+    new Uint32Array(data)[3] = cutoff;
     PARAM_ORDER.forEach((key, k) => (floats[4 + k] = params[key]));
     floats[19] = (n - 1) ** 2;
     device.queue.writeBuffer(uniform, 0, data);
   };
 
+  const wg = Math.ceil(n / 8);
   /** Encodes `count` steps */
   const step = (/** @type {GPUCommandEncoder} */ encoder, count) => {
     const pass = encoder.beginComputePass();
-    const wg = Math.ceil(n / 8);
     for (let k = 0; k < count; k++) {
       pass.setPipeline(diffuse);
       pass.setBindGroup(0, groups[parity].diffuse);
@@ -395,6 +406,12 @@ export const makeSim = (device, {n, nz}) => {
       pass.dispatchWorkgroups(wg, wg, nz);
       parity ^= 1;
     }
+    pass.end();
+  };
+
+  /** Encodes updating the field drawn from the crystal */
+  const smoothField = (/** @type {GPUCommandEncoder} */ encoder) => {
+    const pass = encoder.beginComputePass();
     pass.setPipeline(smooth);
     pass.setBindGroup(0, groups[parity].smooth);
     pass.dispatchWorkgroups(wg, wg, nz);
@@ -431,7 +448,9 @@ export const makeSim = (device, {n, nz}) => {
     field,
     reset,
     setParams,
+    setCutoff,
     step,
+    smoothField,
     readExtents,
     destroy: () =>
       [...a, ...d, bm, cm, field, ext, extRead, uniform].forEach((b) =>

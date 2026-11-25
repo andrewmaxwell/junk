@@ -1,4 +1,4 @@
-// node snowflake/.tune.mjs cases.json outdir
+// node snowflake/.tune.mjs cases.json outdir: grows each case (path as [[T °C, supersaturation over ice %]], or model params) and screenshots it, then makes a montage
 import fs from 'fs';
 import express from 'express';
 import {chromium} from 'playwright';

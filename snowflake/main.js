@@ -1,58 +1,67 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {makeChart} from './chart.js';
-import {BASE, paramsFor} from './habits.js';
+import {BASE, SIGMA_MAX, T_MIN, paramsFor, sigmaFor} from './habits.js';
 import {makeRenderer} from './render.js';
 import {makeSim} from './sim.js';
 
 const $ = (id) => document.getElementById(id);
 const say = (text) => ($('stats').textContent = text);
 
-/** Paths through the chart: [temperature C, humidity 0-1] */
+/** Paths through the chart: [temperature C, supersaturation over ice %] */
 const PRESETS = {
-  'Fern star': [[-15, 0.9]],
-  'Sectored plate': [[-14, 0.45]],
-  'Simple plate': [[-16, 0.15]],
+  'Fern star': [[-15, 16]],
+  'Sectored plate': [[-14, 7.4]],
+  'Simple plate': [[-16, 2.8]],
   'Plate, then a star': [
-    [-16, 0.2],
-    [-15, 0.9],
+    [-16, 3.8],
+    [-15, 16],
   ],
-  'Star, then plates': [
-    [-15, 0.9],
-    [-16, 0.2],
-  ],
-  'Hollow column': [[-5, 0.85]],
-  Column: [[-7, 0.25]],
+  'Hollow column': [[-5, 4.8]],
+  Column: [[-7, 2]],
   'Capped column': [
-    [-7, 0.3],
-    [-15, 0.7],
+    [-7, 2.4],
+    [-15, 12.4],
   ],
 };
+const DRAWN = '(your own)';
 
 const SIZES = {
   'Small (fast)': {n: 128, nz: 48},
   Medium: {n: 256, nz: 96},
   'Large (slow)': {n: 384, nz: 128},
 };
+/** Most steps per frame; the loop takes fewer to keep about 30 frames a second */
+const SPEEDS = {Slow: 4, Normal: 60, Fast: 200};
+/** Refractive index of ice */
+const ICE = 1.31;
 
 const settings = {
   preset: 'Fern star',
   size: 'Medium',
-  speed: 60,
+  speed: 'Normal',
   paused: false,
+  time: 1,
   exposure: 1.5,
   bounces: 3,
-  ice: 1.31,
   resolution: 1,
   manual: false,
   restart: () => restart(),
+  random: () => randomWeather(),
+  replay: () => (replayStart = performance.now()),
 };
 const manual = {...BASE};
 
-if (!navigator.gpu) {
-  say('This needs WebGPU, which this browser does not have.');
-  throw new Error('no WebGPU');
-}
+const fail = (text) => {
+  say(text);
+  $('stats').classList.add('error');
+  throw new Error(text);
+};
+if (!navigator.gpu)
+  fail(
+    'This needs WebGPU, which this browser does not have. Try a recent Chrome, Edge or Safari.',
+  );
 const adapter = await navigator.gpu.requestAdapter();
+if (!adapter) fail('WebGPU is here, but no GPU adapter was available.');
 const device = await adapter.requestDevice({
   requiredLimits: {
     maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
@@ -70,15 +79,121 @@ const renderer = makeRenderer(device, format);
 let sim = null;
 let progress = 0;
 let done = false;
+/** [steps, progress] at each readback, to find where the path was earlier */
+let timeline = [[0, 0]];
+/** When Replay was pressed, or null */
+let replayStart = null;
+const REPLAY_MS = 6000;
 
-const chart = makeChart($('chart'), () => {
-  settings.preset = '(drawn)';
-  gui.controllersRecursive().forEach((c) => c.updateDisplay());
+const chart = makeChart($('chart'), (path) => {
+  chart.path = tidy(path);
+  settings.preset = DRAWN;
   restart();
 });
 
+/** Steps shown: all of them, unless the timeline is rewound */
+const shownSteps = () => Math.round(settings.time * sim.extents.steps);
+/** How far along the path the crystal was after some steps */
+const progressAt = (steps) => {
+  let k = 1;
+  while (k < timeline.length - 1 && timeline[k][0] < steps) k++;
+  const [s0, p0] = timeline[k - 1] ?? timeline[0];
+  const [s1, p1] = timeline[k] ?? timeline[0];
+  return s1 > s0 ? p0 + ((p1 - p0) * (steps - s0)) / (s1 - s0) : p1;
+};
+const shownProgress = () =>
+  settings.time >= 1 ? progress : progressAt(shownSteps());
 const conditions = () => chart.at(progress);
 const params = () => (settings.manual ? manual : paramsFor(conditions()));
+
+// ---- the weather path, in the URL so a link grows the same crystal
+
+const toPath = (points) =>
+  points.map(([T, percent]) => ({T, sigma: percent / 100}));
+/**
+ * A path rounded the way the URL writes it, with points closer than 3% of
+ * the chart dropped, so the link grows exactly what was grown
+ */
+const tidy = (path) => {
+  const round = ({T, sigma}) => ({
+    T: Math.round(T * 10) / 10,
+    sigma: Math.round(sigma * 1000) / 1000,
+  });
+  const kept = [round(path[0])];
+  for (const p of path.slice(1)) {
+    const last = kept.at(-1);
+    if (
+      Math.hypot((p.T - last.T) / T_MIN, (p.sigma - last.sigma) / SIGMA_MAX) >
+      0.03
+    )
+      kept.push(round(p));
+  }
+  if (path.length > 1 && kept.length === 1) kept.push(round(path.at(-1)));
+  return kept;
+};
+/** 'Small (fast)' is small in the URL */
+const gridKey = (size) => size.split(' ')[0].toLowerCase();
+const save = () => {
+  const w = chart.path
+    .map(({T, sigma}) => `${T.toFixed(1)},${(sigma * 100).toFixed(1)}`)
+    .join(';');
+  const grid =
+    settings.size === 'Medium' ? '' : `&grid=${gridKey(settings.size)}`;
+  history.replaceState(null, '', `#w=${w}${grid}`);
+};
+const load = () => {
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const size = Object.keys(SIZES).find((s) => gridKey(s) === hash.get('grid'));
+  if (size) settings.size = size;
+  const points = (hash.get('w') ?? '')
+    .split(';')
+    .map((p) => p.split(',').map(Number))
+    .filter((p) => p.length === 2 && p.every(Number.isFinite));
+  if (!points.length) return;
+  chart.path = toPath(points).map(({T, sigma}) => ({
+    T: Math.min(0, Math.max(T_MIN, T)),
+    sigma: Math.min(SIGMA_MAX, Math.max(0, sigma)),
+  }));
+  const same = (path) =>
+    path.length === points.length &&
+    path.every(([T, s], k) => T === points[k][0] && s === points[k][1]);
+  settings.preset =
+    Object.keys(PRESETS).find((name) => same(PRESETS[name])) ?? DRAWN;
+};
+
+/**
+ * A random path a crystal might fall through: a few waypoints wandering in
+ * temperature, mostly between ice and water saturation, joined smoothly
+ */
+const randomWeather = () => {
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const stops = [];
+  let T = rand(-22, -3);
+  for (let k = 2 + Math.floor(Math.random() * 3); k > 0; k--) {
+    stops.push({T, wet: Math.sqrt(Math.random())});
+    T = Math.min(-1, Math.max(-28, T + rand(-9, 9)));
+  }
+  // Catmull-Rom through the stops
+  const path = [];
+  const at = (k) => stops[Math.min(stops.length - 1, Math.max(0, k))];
+  for (let k = 0; k < stops.length - 1; k++)
+    for (let t = 0; t < 1; t += 1 / 16) {
+      const [a, b, c, d] = [at(k - 1), at(k), at(k + 1), at(k + 2)];
+      const mix = (key) =>
+        0.5 *
+        (2 * b[key] +
+          (c[key] - a[key]) * t +
+          (2 * a[key] - 5 * b[key] + 4 * c[key] - d[key]) * t * t +
+          (3 * b[key] - a[key] - 3 * c[key] + d[key]) * t * t * t);
+      const T = Math.min(-0.5, Math.max(T_MIN, mix('T')));
+      path.push({T, sigma: sigmaFor(T, Math.min(1, Math.max(0, mix('wet'))))});
+    }
+  const last = stops.at(-1);
+  path.push({T: last.T, sigma: sigmaFor(last.T, last.wet)});
+  chart.path = tidy(path);
+  settings.preset = DRAWN;
+  restart();
+};
 
 const restart = () => {
   const size = SIZES[settings.size];
@@ -88,15 +203,21 @@ const restart = () => {
   }
   progress = 0;
   done = false;
+  timeline = [[0, 0]];
+  settings.time = 1;
+  replayStart = null;
   camera.fit = 8;
   renderer.restart();
   sim.reset(params().rho);
+  sim.setCutoff(Infinity);
+  save();
+  gui.controllersRecursive().forEach((c) => c.updateDisplay());
 };
 
 const usePreset = () => {
   const path = PRESETS[settings.preset];
   if (!path) return;
-  chart.path = path.map(([T, s]) => ({T, s}));
+  chart.path = toPath(path);
   restart();
 };
 
@@ -172,17 +293,22 @@ canvas.addEventListener(
 
 const gui = new GUI({title: 'Snowflake'});
 gui
-  .add(settings, 'preset', [...Object.keys(PRESETS), '(drawn)'])
-  .name('Preset')
+  .add(settings, 'preset', [...Object.keys(PRESETS), DRAWN])
+  .name('Weather')
   .onChange(usePreset);
+const randomButton = gui.add(settings, 'random').name('Random weather');
+gui
+  .add(settings, 'time', 0, 1, 0.001)
+  .name('Rewind')
+  .onChange(() => (replayStart = null));
+const replayButton = gui.add(settings, 'replay').name('Replay the growth');
 gui.add(settings, 'paused').name('Paused');
 gui.add(settings, 'restart').name('Restart');
-gui.add(settings, 'speed', 1, 200, 1).name('Max steps per frame');
+gui.add(settings, 'speed', Object.keys(SPEEDS)).name('Speed');
 gui.add(settings, 'size', Object.keys(SIZES)).name('Grid').onChange(restart);
 const look = gui.addFolder('Look').close();
 look.add(settings, 'exposure', 0.1, 8).name('Exposure');
 look.add(settings, 'bounces', 0, 8, 1).name('Bounces inside');
-look.add(settings, 'ice', 1, 2, 0.01).name('Refractive index');
 look.add(settings, 'resolution', 0.25, 2, 0.05).name('Pixels per point');
 const model = gui.addFolder('Model').close();
 model.add(settings, 'manual').name('Ignore the chart');
@@ -201,6 +327,7 @@ const resize = () => {
 };
 
 let lastView = '';
+let lastShown = -1;
 const frame = (stepCount) => {
   resize();
   const encoder = device.createCommandEncoder();
@@ -208,13 +335,22 @@ const frame = (stepCount) => {
     sim.setParams(params());
     sim.step(encoder, stepCount);
   }
+  // Rewound, the crystal is drawn as it was then
+  const shown = settings.time >= 1 ? Infinity : shownSteps();
+  const rewound = shown !== lastShown;
+  if (rewound) {
+    sim.setCutoff(shown);
+    // a jump starts the picture over; a replay blends from frame to frame
+    if (replayStart === null) renderer.restart();
+  }
+  if (stepCount > 0 || rewound) sim.smoothField(encoder);
+  lastShown = shown;
   // Turning the camera or changing the look starts the picture over; zooming
   // and growing don't (the renderer moves the old picture to match)
   const {yaw, pitch} = camera;
   const view = JSON.stringify([
     yaw,
     pitch,
-    settings.ice,
     settings.bounces,
     settings.resolution,
   ]);
@@ -226,8 +362,8 @@ const frame = (stepCount) => {
     canvas,
     sim,
     basis(),
-    settings,
-    stepCount > 0,
+    {...settings, ice: ICE},
+    stepCount > 0 || rewound,
   );
   const read = sim.readExtents(encoder);
   device.queue.submit([encoder.finish()]);
@@ -240,6 +376,8 @@ const frame = (stepCount) => {
   const up = height / (0.92 * (sim.nz - 1));
   progress = Math.min(1, out + up);
   done = out >= 1 || up >= 1 || progress >= 1;
+  if (sim.extents.steps > timeline.at(-1)[0])
+    timeline.push([sim.extents.steps, progress]);
   // Back away quickly as it grows, so it never outgrows the screen
   const target = Math.max(1.05 * Math.hypot(radius, height) + 3, 8);
   camera.fit += (target - camera.fit) * (target > camera.fit ? 0.3 : 0.1);
@@ -252,23 +390,39 @@ let lastTime = 0;
 const loop = (time) => {
   const dt = time - lastTime;
   lastTime = time;
+  const most = SPEEDS[settings.speed];
   if (dt > 40) stepRate = Math.max(1, stepRate * 0.8);
-  else if (dt < 28) stepRate = Math.min(settings.speed, stepRate * 1.1 + 1);
+  else if (dt < 28) stepRate = Math.min(most, stepRate * 1.1 + 1);
+  stepRate = Math.min(most, stepRate);
   if (!testing) {
-    frame(settings.paused || done ? 0 : Math.round(stepRate));
-    chart.draw(progress);
-    const {T, s} = conditions();
+    if (replayStart !== null) {
+      settings.time = Math.min(1, (time - replayStart) / REPLAY_MS);
+      if (settings.time >= 1) replayStart = null;
+      gui.controllersRecursive().forEach((c) => c.updateDisplay());
+    }
+    const live = settings.time >= 1;
+    frame(settings.paused || done || !live ? 0 : Math.round(stepRate));
+    const shown = shownProgress();
+    chart.draw(shown);
+    const {T, sigma} = chart.at(shown);
     const {radius, height, steps} = sim.extents;
     say(
-      `${T.toFixed(1)}°C, humidity ${(s * 100).toFixed(0)}%  ·  ` +
-        `${2 * radius} × ${2 * height + 1} cells  ·  step ${steps.toLocaleString()}` +
-        (done ? '  ·  full grown' : ''),
+      `${T.toFixed(1)}°C, ${(sigma * 100).toFixed(1)}% supersaturated  ·  ` +
+        (live
+          ? `${2 * radius} cells across, ${2 * height + 1} thick  ·  step ${steps.toLocaleString()}` +
+            (done ? '  ·  full grown' : '')
+          : `step ${shownSteps().toLocaleString()} of ${steps.toLocaleString()}`),
     );
+    randomButton.domElement.classList.toggle('nudge', done && live);
+    replayButton.domElement.classList.toggle('nudge', done && live);
   }
   requestAnimationFrame(loop);
 };
 
-usePreset();
+if (innerWidth < 600) gui.close();
+load();
+if (settings.preset === DRAWN) restart();
+else usePreset();
 requestAnimationFrame(loop);
 
 /** For tuning from a script: grows a crystal and draws it, then waits */
@@ -280,7 +434,7 @@ window.snow = {
   /** Times 300 steps and one preview frame at a few sizes as it grows */
   async perf(path) {
     testing = true;
-    chart.path = path.map(([T, s]) => ({T, s}));
+    chart.path = toPath(path);
     restart();
     const rows = [];
     const time = async (fn) => {
@@ -303,7 +457,7 @@ window.snow = {
     testing = true;
     if (m) Object.assign(manual, m);
     settings.manual = !!m;
-    if (path) chart.path = path.map(([T, s]) => ({T, s}));
+    if (path) chart.path = toPath(path);
     restart();
     for (let k = 0; k < steps && !done; k += chunk) {
       frame(chunk);

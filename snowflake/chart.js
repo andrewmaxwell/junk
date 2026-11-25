@@ -1,16 +1,24 @@
-// The weather chart: temperature across, humidity up, shaded by what grows
-// where. Drag on it to draw the path the crystal grows along, or click to hold
+// The weather chart: temperature across, supersaturation over ice up, shaded
+// by what grows where, with the line air in a cloud sits near (water
+// saturation). Drag on it to draw the path the crystal grows along, or click to hold
 // one spot. A dot shows where along the path the crystal is.
 
-import {LABELS, T_MIN, plateness} from './habits.js';
+import {
+  LABELS,
+  SIGMA_MAX,
+  T_MIN,
+  plateness,
+  waterSaturation,
+  wetness,
+} from './habits.js';
 
 /**
  * @param {HTMLCanvasElement} canvas
- * @param {(path: {T: number, s: number}[]) => void} onPath called with a new path
+ * @param {(path: {T: number, sigma: number}[]) => void} onPath called with a new path
  */
 export const makeChart = (canvas, onPath) => {
   const ctx = canvas.getContext('2d');
-  let path = [{T: -15, s: 0.85}];
+  let path = [{T: -15, sigma: 0.16}];
   let drawing = null;
   let lengths = [0];
   let shading = null;
@@ -27,25 +35,26 @@ export const makeChart = (canvas, onPath) => {
     return {w, h, dpr};
   };
   const pad = () => 18 * devicePixelRatio;
-  const toPx = ({T, s}, w, h) => [
-    pad() + (T / T_MIN) * (w - pad() * 1.4),
-    h - pad() - s * (h - pad() * 1.6),
+  const toPx = ({T, sigma}, w, h) => [
+    pad() * 1.5 + (T / T_MIN) * (w - pad() * 2),
+    h - pad() - (sigma / SIGMA_MAX) * (h - pad() * 1.6),
   ];
   const fromPx = (x, y, w, h) => ({
-    T: Math.min(0, Math.max(T_MIN, ((x - pad()) / (w - pad() * 1.4)) * T_MIN)),
-    s: Math.min(1, Math.max(0, (h - pad() - y) / (h - pad() * 1.6))),
+    T: Math.min(
+      0,
+      Math.max(T_MIN, ((x - pad() * 1.5) / (w - pad() * 2)) * T_MIN),
+    ),
+    sigma:
+      SIGMA_MAX * Math.min(1, Math.max(0, (h - pad() - y) / (h - pad() * 1.6))),
   });
+  /** Distance on the chart, with both axes running 0 to 1 */
+  const apart = (a, b) =>
+    Math.hypot((a.T - b.T) / T_MIN, (a.sigma - b.sigma) / SIGMA_MAX);
 
   const measure = () => {
     lengths = [0];
     for (let k = 1; k < path.length; k++)
-      lengths.push(
-        lengths[k - 1] +
-          Math.hypot(
-            (path[k].T - path[k - 1].T) / -T_MIN,
-            path[k].s - path[k - 1].s,
-          ),
-      );
+      lengths.push(lengths[k - 1] + apart(path[k], path[k - 1]));
   };
 
   /** Temperature and humidity at a fraction u of the way along the path */
@@ -59,7 +68,7 @@ export const makeChart = (canvas, onPath) => {
     const t = Math.min(1, Math.max(0, (target - lengths[k - 1]) / span));
     return {
       T: path[k - 1].T + (path[k].T - path[k - 1].T) * t,
-      s: path[k - 1].s + (path[k].s - path[k - 1].s) * t,
+      sigma: path[k - 1].sigma + (path[k].sigma - path[k - 1].sigma) * t,
     };
   };
 
@@ -69,9 +78,8 @@ export const makeChart = (canvas, onPath) => {
       const {T} = fromPx(x, 0, w, h);
       const P = plateness(T);
       for (let y = 0; y < h; y++) {
-        const {s} = fromPx(x, y, w, h);
         const k = (y * w + x) * 4;
-        const glow = 0.35 + 0.65 * s;
+        const glow = 0.3 + 0.7 * wetness(fromPx(x, y, w, h));
         // plates warm, columns cool
         image.data[k] = (40 + 50 * Math.max(0, P)) * glow;
         image.data[k + 1] = (40 + 15 * Math.abs(P)) * glow;
@@ -91,26 +99,50 @@ export const makeChart = (canvas, onPath) => {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fff8';
-    for (const [text, T, s] of LABELS) {
-      const [x, y] = toPx({T, s}, w, h);
+    for (const [text, T, sigma] of LABELS) {
+      const [x, y] = toPx({T, sigma}, w, h);
       ctx.fillText(text, x, y);
     }
+    // water saturation: clouds sit near it, and only labs go far past it
+    ctx.setLineDash([4 * dpr, 4 * dpr]);
+    ctx.strokeStyle = '#9cf8';
+    ctx.lineWidth = 1.2 * dpr;
+    ctx.beginPath();
+    for (let T = 0; T >= T_MIN; T -= 0.5)
+      ctx.lineTo(...toPx({T, sigma: waterSaturation(T)}, w, h));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.save();
+    const [ax, ay] = toPx({T: -19, sigma: waterSaturation(-19)}, w, h);
+    const [bx, by] = toPx({T: -23, sigma: waterSaturation(-23)}, w, h);
+    ctx.translate((ax + bx) / 2, (ay + by) / 2);
+    ctx.rotate(Math.atan2(by - ay, bx - ax));
+    ctx.fillStyle = '#9cfb';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('water saturation', 0, -2 * dpr);
+    ctx.restore();
+
     ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fff6';
-    ctx.fillText('drag to draw a path', w - 6 * dpr, 10 * dpr);
+    ctx.fillText('drag to draw the weather', w - 6 * dpr, 10 * dpr);
     ctx.textAlign = 'center';
     // axes
     ctx.fillStyle = '#fffa';
     ctx.textBaseline = 'bottom';
     for (const T of [0, -10, -20, -30]) {
-      const [x] = toPx({T, s: 0}, w, h);
+      const [x] = toPx({T, sigma: 0}, w, h);
       ctx.fillText(`${T}°C`, Math.min(w - 14 * dpr, x), h - 2 * dpr);
     }
-    ctx.save();
-    ctx.translate(10 * dpr, h / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText('humidity →', 0, 4 * dpr);
-    ctx.restore();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    for (const sigma of [0.1, 0.2, 0.3]) {
+      const [, y] = toPx({T: 0, sigma}, w, h);
+      ctx.fillText(`${sigma * 100}%`, 3 * dpr, y);
+    }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('↑ supersaturation over ice', w * 0.42, 14 * dpr);
 
     // the path, bright where the crystal has been
     const pts = (drawing ?? path).map((p) => toPx(p, w, h));
@@ -165,8 +197,7 @@ export const makeChart = (canvas, onPath) => {
     if (!drawing) return;
     const p = pointAt(e);
     const last = drawing.at(-1);
-    if (Math.hypot((p.T - last.T) / -T_MIN, p.s - last.s) > 0.01)
-      drawing.push(p);
+    if (apart(p, last) > 0.01) drawing.push(p);
   });
   const finish = () => {
     if (!drawing) return;
