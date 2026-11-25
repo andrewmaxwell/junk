@@ -2,20 +2,24 @@ St. Louis Relief - 2026 - 3D-printed true-scale model of St. Louis from USGS lid
 
 Tiles of St. Louis for a Bambu Lab A1 (0.4 mm nozzle), built straight from the USGS 3DEP lidar point cloud
 (`USGS_LPC_MO_StLouis_2017_LAS_2018`, about 2.3 points/m²). Everything is at true scale, ground and buildings
-alike: 1:15,000, so 1 mm is 15 m. The Gateway Arch is too thin to print standing up, so it prints flat as a
-separate piece and plugs into two sockets in the tile.
+alike: 1:16,384 for the wall (1 mm is about 16 m). Missouri's survey stops at the state line mid-river, so
+Illinois' 2019 survey (`IL_HicksDome_FluorsparDist_3_2019`, misnamed; it covers East St. Louis) fills in
+east of it. The Gateway Arch is too thin to print standing up, so it prints flat as a separate piece and plugs
+into two sockets in the tile.
 
 ## The wall
 
-`wall.py out/wall` builds the whole wall: 4 × 2 tiles of 245 mm, 98 × 49 cm in all, from just west of Clayton
-to the Illinois bank of the Mississippi, and from the Delmar Loop to about Tower Grove Park. Tiles are named
+`wall.py out/wall` builds the whole wall: 4 × 2 tiles of 245 mm, 98 × 49 cm in all, from west of Clayton to
+East St. Louis, and from north of the Delmar Loop to south of Tower Grove Park. Tiles are named
 A–D west to east and 1–2 north to south (`print/wall/layout.png`, not committed, is a map). Heights are
-computed once for the whole wall, so neighboring edges match. Each tile has two dovetail tabs on its east
-and south edges and matching slots (0.15 mm clearance) on its west and north edges, placed where the seam
-crosses low ground. D2 has the Arch sockets.
+computed once for the whole wall, so neighboring edges match. Each tile has two small dovetail tabs on its east
+and south edges and matching slots (0.2 mm clearance) on its west and north edges, outer edges included so the
+wall can grow. The tabs are 0.8 mm plates along the bottom that slide into pockets under the neighbor, so from
+the front a seam is a straight line; they sit away from the river, where the roof over a pocket would be thin.
+Their positions are saved in `tabs.json`. D2 has the Arch sockets.
 
 `project3mf.py <template.3mf> <tile.stl> <out.3mf> [name]` makes a one-tile project with the template's
-settings. Each tile takes 5–9 hours and 120–150 g; the whole wall is about 56 hours and 1.1 kg.
+settings. Each tile takes 5–8 hours and 120–145 g; the whole wall is about 53 hours and 1.06 kg.
 
 ## Build a test tile
 
@@ -41,7 +45,8 @@ smoothing, 1).
 - `terrace.py` turns the heights into a mesh one print layer at a time: each layer's outline is traced from
   the cells and straightened, so walls are vertical with sharp corners. Features under about 0.5 mm are
   dropped (`MIN_MM`): the nozzle can't print them, and Bambu Studio flags the tiny islands at the tops of tree
-  canopies as floating regions.
+  canopies as floating regions. Islands under 0.5 mm² (`MIN_AREA`) go too, with everything above them: the
+  Stan Musial bridge's towers are 0.3 mm thick at this scale and left a pillar Bambu couldn't slice.
 - `archflat.py` makes the Arch as a flat band from the National Park Service's catenary.
 
 ## Print files

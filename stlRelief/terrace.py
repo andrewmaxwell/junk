@@ -9,6 +9,8 @@ from manifold3d import CrossSection, FillRule, Manifold, OpType, JoinType
 SQ = np.ones((3, 3), bool)
 MIN_MM = float(os.environ.get('MIN_MM', 0.4))  # features narrower than about this (rounded up to an odd number of cells, 0.525 mm) are opened away: the nozzle
                # can't print them, and Bambu reports such slivers as "floating regions"
+MIN_AREA = float(os.environ.get('MIN_AREA', 0.5))  # islands smaller than this (mm²) are dropped, and everything above them:
+               # a lone pillar (a bridge tower, a smokestack) that survives the opening still won't slice
 
 def level_outline(mask, PX, eps_mm):
     """mask (rows north->south) -> CrossSection in mm, x east, y north; pixel (r,c) covers its square."""
@@ -66,6 +68,8 @@ def terrace_solid(h, PX, first=0.2, dz=0.12, eps_mm=0.1, clean=True):
             full = zt; continue
         if clean:   # a lone pixel sticking out or a one-pixel notch is noise; square corners survive this
             mask = nd.binary_closing(nd.binary_opening(mask, np.ones((k_open, k_open), bool)), SQ, border_value=1) & (h >= zt - dz / 2 - 0.3)
+            lab, n = nd.label(mask, SQ)
+            if n: mask &= np.r_[False, np.bincount(lab.ravel(), minlength=n + 1)[1:] * PX * PX >= MIN_AREA][lab]
         mask = no_diagonals(mask)
         cs = level_outline(mask, PX, eps_mm)
         if cs is None or cs.is_empty(): break

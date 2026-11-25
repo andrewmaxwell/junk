@@ -18,6 +18,9 @@ GROUND_M = float(os.environ.get('GROUND_M', 2.5))  # anything lower than this ab
 CLUTTER = int(os.environ.get('CLUTTER', 7))       # rooftop bumps/pits narrower than this many cells...
 BUMP_M = float(os.environ.get('BUMP_M', 4.0))     # ...and shorter/shallower than this (m) are leveled
 DTM_SIGMA = float(os.environ.get('DTM_SIGMA', 1.0))  # ground model smoothing, in 5-cell blocks
+# Missouri's survey stops at the state line mid-river; Illinois' 2019 survey (misnamed, it covers East St. Louis)
+# fills in east of it. (name, west edge in degrees to read from, or None)
+SURVEYS = [('USGS_LPC_MO_StLouis_2017_LAS_2018', None), ('IL_HicksDome_FluorsparDist_3_2019', -90.20)]
 ARCH = (-90.1848, 38.6247)
 ARCH_AXIS = np.array([-0.3067697757045191, -0.9517837489231463])   # leg to leg, (east, north); fitted to its lidar legs
 
@@ -30,17 +33,25 @@ def heights(lon, lat, M, nx, ny):
     x0, y1 = cx - nx * CELL / 2 / k, cy + ny * CELL / 2 / k   # mercator corner (west, north)
     x1, y0 = x0 + nx * CELL / k, y1 - ny * CELL / k
     top = np.full(ny * nx, -np.inf, np.float32); gnd = np.full(ny * nx, np.inf, np.float32)
-    e = EPT('USGS_LPC_MO_StLouis_2017_LAS_2018')
-    def load(key):
-        x, y, z, cl = e.read(key)
-        ix = np.floor((x - x0) * k / CELL).astype(np.int64); iy = np.floor((y1 - y) * k / CELL).astype(np.int64)
-        m = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
-        return iy[m] * nx + ix[m], z[m].astype(np.float32), cl[m]
-    with ThreadPoolExecutor(16) as ex:
-        for idx, z, cl in ex.map(load, list(e.nodes((x0, y0, x1, y1), 40))):
-            keep = ~np.isin(cl, (7, 18, 9))
-            np.maximum.at(top, idx[keep], z[keep])
-            g = cl == 2; np.minimum.at(gnd, idx[g], z[g])
+    for name, west in SURVEYS:
+        t_ = np.full(ny * nx, -np.inf, np.float32); g_ = np.full(ny * nx, np.inf, np.float32)
+        e = EPT(name)
+        def load(key):
+            x, y, z, cl = e.read(key)
+            ix = np.floor((x - x0) * k / CELL).astype(np.int64); iy = np.floor((y1 - y) * k / CELL).astype(np.int64)
+            m = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
+            return iy[m] * nx + ix[m], z[m].astype(np.float32), cl[m]
+        xw = x0 if west is None else max(x0, merc(west, lat)[0])
+        if xw >= x1: continue
+        with ThreadPoolExecutor(16) as ex:
+            for idx, z, cl in ex.map(load, list(e.nodes((xw, y0, x1, y1), 40))):
+                keep = ~np.isin(cl, (7, 18, 9))
+                np.maximum.at(t_, idx[keep], z[keep])
+                g = cl == 2; np.minimum.at(g_, idx[g], z[g])
+        # a later survey only fills cells the earlier ones missed
+        fill = ~np.isfinite(top); top[fill] = t_[fill]
+        fill = ~np.isfinite(gnd); gnd[fill] = g_[fill]
+        del t_, g_
     top, gnd = top.reshape(ny, nx), gnd.reshape(ny, nx)
     print(f'cell {CELL:.2f} m, {np.isfinite(top).mean():.1%} of cells have a return', flush=True)
     # ground: 5-cell block minimum, holes from the nearest ground, lightly smoothed
