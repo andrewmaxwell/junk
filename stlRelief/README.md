@@ -5,7 +5,19 @@ Tiles of St. Louis for a Bambu Lab A1 (0.4 mm nozzle), built straight from the U
 alike: 1:15,000, so 1 mm is 15 m. The Gateway Arch is too thin to print standing up, so it prints flat as a
 separate piece and plugs into two sockets in the tile.
 
-## Build a tile
+## The wall
+
+`wall.py out/wall` builds the whole wall: 4 × 2 tiles of 245 mm, 98 × 49 cm in all, from just west of Clayton
+to the Illinois bank of the Mississippi, and from the Delmar Loop to about Tower Grove Park. Tiles are named
+A–D west to east and 1–2 north to south (`print/wall/layout.png`, not committed, is a map). Heights are
+computed once for the whole wall, so neighboring edges match. Each tile has two dovetail tabs on its east
+and south edges and matching slots (0.15 mm clearance) on its west and north edges, placed where the seam
+crosses low ground. D2 has the Arch sockets.
+
+`project3mf.py <template.3mf> <tile.stl> <out.3mf> [name]` makes a one-tile project with the template's
+settings. Each tile takes 5–9 hours and 120–150 g; the whole wall is about 56 hours and 1.1 kg.
+
+## Build a test tile
 
 ```bash
 python3 -m venv venv && venv/bin/pip install -r requirements.txt
@@ -23,12 +35,13 @@ smoothing, 1).
 ## How it works
 
 - `ept.py` reads the lidar from the public USGS bucket.
-- `tile.py` bins the highest return and the lowest ground return into cells of half a print pixel, builds a
+- `relief.py` bins the highest return and the lowest ground return into cells of half a print pixel, builds a
   ground model, removes noise, poles, street clutter and rooftop clutter, takes out the lidar Arch, and cuts
-  the Arch sockets.
+  the Arch sockets. `tile.py` and `wall.py` use it.
 - `terrace.py` turns the heights into a mesh one print layer at a time: each layer's outline is traced from
-  the cells and straightened, so walls are vertical with sharp corners. Features under 0.3 mm are dropped,
-  since Bambu Studio flags them as floating regions.
+  the cells and straightened, so walls are vertical with sharp corners. Features under about 0.5 mm are
+  dropped (`MIN_MM`): the nozzle can't print them, and Bambu Studio flags the tiny islands at the tops of tree
+  canopies as floating regions.
 - `archflat.py` makes the Arch as a flat band from the National Park Service's catenary.
 
 ## Print files

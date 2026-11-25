@@ -2,12 +2,12 @@
 # for each print layer, the pixels at or above that layer's height become one outline. Pixel staircases
 # along building edges are simplified away (corners stay, since a corner is far off any straight line),
 # and a wall that spans many layers gets the identical outline in every one, so it comes out vertical.
-import numpy as np, shapely
+import numpy as np, shapely, os
 from scipy import ndimage as nd
 from manifold3d import CrossSection, FillRule, Manifold, OpType, JoinType
 
 SQ = np.ones((3, 3), bool)
-MIN_MM = 0.3   # features narrower than about this (rounded up to an odd number of cells) are opened away: the nozzle
+MIN_MM = float(os.environ.get('MIN_MM', 0.4))  # features narrower than about this (rounded up to an odd number of cells, 0.525 mm) are opened away: the nozzle
                # can't print them, and Bambu reports such slivers as "floating regions"
 
 def level_outline(mask, PX, eps_mm):

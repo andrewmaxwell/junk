@@ -2,3 +2,4 @@
 *.stl
 cache/
 out/
+print/
