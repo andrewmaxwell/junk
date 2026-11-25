@@ -49,7 +49,7 @@ const settings = {
   light: 'Dark field',
   exposure: 1.5,
   bounces: 32,
-  blur: 0.5,
+  blur: 0.1,
   focus: 0,
   resolution: 1,
   manual: false,
