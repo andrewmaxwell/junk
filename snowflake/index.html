@@ -35,9 +35,12 @@
         position: fixed;
         left: 8px;
         bottom: calc(32px + env(safe-area-inset-bottom));
-        width: min(340px, calc(100vw - 16px));
-        height: 210px;
-        border-radius: 8px;
+        width: min(360px, calc(100vw - 16px));
+        height: 230px;
+        border-radius: 10px;
+        box-shadow:
+          0 0 0 1px #ffffff1a,
+          0 6px 24px #0008;
         touch-action: none;
         cursor: crosshair;
       }
@@ -68,7 +71,7 @@
       }
       @media (max-width: 600px) {
         #chart {
-          height: 160px;
+          height: 170px;
           bottom: calc(48px + env(safe-area-inset-bottom));
         }
         #stats {

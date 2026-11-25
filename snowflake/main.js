@@ -1,7 +1,7 @@
 import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.21/+esm';
 import {makeChart} from './chart.js';
 import {BASE, SIGMA_MAX, T_MIN, paramsFor, sigmaFor} from './habits.js';
-import {makeRenderer} from './render.js';
+import {lampView, makeRenderer} from './render.js';
 import {makeSim} from './sim.js';
 
 const $ = (id) => document.getElementById(id);
@@ -220,6 +220,16 @@ const usePreset = () => {
 // ---- camera: orbits the crystal and zooms to keep it in view
 
 const camera = {yaw: 0.6, pitch: 0.9, zoom: 1, fit: 8};
+const underLamp = () => LIGHTS[settings.light] === 5;
+/** What the camera turns around: the crystal, or under the lamp, the crystal
+    and its shadow */
+const center = () => (underLamp() ? lampView(sim.extents.radius) : [0, 0, 0]);
+/** Under the lamp, look from low down, nearly into the light, so it comes
+    through the ice and the shadow lies across the foreground */
+const frameLight = () => {
+  camera.yaw = 0.6;
+  camera.pitch = underLamp() ? 0.3 : 0.9;
+};
 const basis = () => {
   const {yaw, pitch} = camera;
   const back = [
@@ -239,8 +249,9 @@ const basis = () => {
     right[2] * forward[0] - right[0] * forward[2],
     right[0] * forward[1] - right[1] * forward[0],
   ];
+  const looking = center();
   return {
-    position: back.map((b) => b * distance),
+    position: back.map((b, k) => looking[k] + b * distance),
     forward,
     right,
     up,
@@ -297,7 +308,13 @@ gui.add(settings, 'paused').name('Paused');
 gui.add(settings, 'restart').name('Restart');
 gui.add(settings, 'speed', Object.keys(SPEEDS)).name('Speed');
 gui.add(settings, 'size', Object.keys(SIZES)).name('Grid').onChange(restart);
-gui.add(settings, 'light', Object.keys(LIGHTS)).name('Lighting').onChange(save);
+gui
+  .add(settings, 'light', Object.keys(LIGHTS))
+  .name('Lighting')
+  .onChange(() => {
+    frameLight();
+    save();
+  });
 const look = gui.addFolder('Look').close();
 look.add(settings, 'exposure', 0.1, 8).name('Exposure');
 look.add(settings, 'blur', 0, 3).name('Focus blur');
@@ -371,7 +388,7 @@ const frame = (stepCount) => {
   done = out >= 1 || up >= 1 || progress >= 1;
   // Back away quickly as it grows, so it never outgrows the screen
   // (standing under the lamp, back far enough to take in the long shadow)
-  const room = LIGHTS[settings.light] === 5 ? 1.6 : 1;
+  const room = underLamp() ? 1.4 : 1;
   const target = Math.max(1.05 * Math.hypot(radius, height) + 3, 8) * room;
   camera.fit += (target - camera.fit) * (target > camera.fit ? 0.3 : 0.1);
 };
@@ -405,6 +422,7 @@ const loop = (time) => {
 
 if (innerWidth < 600) gui.close();
 load();
+frameLight();
 if (settings.preset === DRAWN) restart();
 else usePreset();
 requestAnimationFrame(loop);

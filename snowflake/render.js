@@ -533,22 +533,44 @@ const SETTLED = 256;
  * so its shadow falls long across the floor. The shader works in the
  * crystal's space (c-axis y), so under the lamp the world is turned instead:
  * the world's up is the crystal's x axis, and its c-axis lies along FACING.
- * The lamp is fixed to the world, about 35 degrees up, in front of the
- * starting camera and to its left, so the shadow falls to the right and the
- * ice can reflect the lamp toward the camera; the crystal faces halfway
- * between them.
+ * The lamp is fixed to the world, low and behind the crystal from the
+ * starting camera, so it shines through the ice toward the camera and the
+ * shadow and its caustics fall long across the foreground. The crystal faces
+ * the camera, a little turned, so its light passes through the face.
  */
 const LAMP_LIGHT = 5;
-const unit = (u) => u.map((x) => x / Math.hypot(...u));
-const FACING = unit([0.07, 0, 1.7]);
+const turned = (angle, up) => [
+  Math.sin(angle) * Math.cos(up),
+  Math.sin(up),
+  Math.cos(angle) * Math.cos(up),
+];
+/** The starting camera's direction around the crystal (its yaw) */
+const CAMERA_YAW = 0.6;
+const FACING = turned(CAMERA_YAW + 0.25, 0);
 /** A world direction in the crystal's space, standing on an arm */
 const standing = ([x, y, z]) => {
   const [cx, , cz] = FACING;
   return [y, cx * x + cz * z, cz * x - cx * z];
 };
-const LAMP_TOWARD = standing(unit([-0.49, 0.7, 0.87]));
+const LAMP_AROUND = CAMERA_YAW + Math.PI + 0.3;
+const LAMP_UP = 0.5;
+const LAMP_TOWARD = standing(turned(LAMP_AROUND, LAMP_UP));
 const ABOVE = standing([0, 1, 0]);
 const LAMP_SIZE = 0.02;
+/**
+ * Where the camera should look under the lamp, in the world: halfway from the
+ * crystal to the middle of its shadow, so both are in view
+ * @param {number} radius the crystal's radius
+ */
+export const lampView = (radius) => {
+  const depth = radius + 1;
+  const out = depth / (2 * Math.tan(LAMP_UP));
+  return [
+    -out * Math.sin(LAMP_AROUND),
+    -depth / 2,
+    -out * Math.cos(LAMP_AROUND),
+  ];
+};
 /** The light pass's map: MAP x MAP cells across the lamp's beam */
 const MAP = 512;
 

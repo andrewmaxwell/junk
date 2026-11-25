@@ -7,10 +7,61 @@ import {
   LABELS,
   SIGMA_MAX,
   T_MIN,
+  habitAt,
   plateness,
   waterSaturation,
   wetness,
 } from './habits.js';
+
+/** Colors for the shading, in linear light: plates warm, columns cool */
+const PLATES = [1, 0.3, 0.32];
+const COLUMNS = [0.1, 0.45, 1];
+const BETWEEN = [0.35, 0.3, 0.5];
+/** Around the plot */
+const FRAME = [10, 12, 20];
+const toSrgb = (c) =>
+  255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055);
+
+/** A small picture of a habit, r across, centered at x, y */
+const drawShape = (ctx, kind, x, y, r) => {
+  const spoke = (a, from, to) => {
+    ctx.moveTo(x + from * Math.cos(a), y + from * Math.sin(a));
+    ctx.lineTo(x + to * Math.cos(a), y + to * Math.sin(a));
+  };
+  const hexagon = (size) => {
+    for (let k = 0; k <= 6; k++)
+      ctx.lineTo(
+        x + size * Math.cos((k * Math.PI) / 3),
+        y + size * Math.sin((k * Math.PI) / 3),
+      );
+  };
+  ctx.beginPath();
+  if (kind === 'plate' || kind === 'sectored') {
+    hexagon(r);
+    if (kind === 'sectored')
+      for (let k = 0; k < 6; k++) spoke((k * Math.PI) / 3, 0, r);
+  } else if (kind === 'column' || kind === 'needle') {
+    const w = kind === 'column' ? r * 0.55 : r * 0.12;
+    ctx.rect(x - w, y - r, 2 * w, 2 * r);
+  } else {
+    for (let k = 0; k < 6; k++) {
+      const a = (k * Math.PI) / 3;
+      spoke(a, 0, r);
+      for (const along of kind === 'fern' ? [0.45, 0.75] : [0.6]) {
+        const bx = x + along * r * Math.cos(a);
+        const by = y + along * r * Math.sin(a);
+        for (const side of [-1, 1]) {
+          ctx.moveTo(bx, by);
+          ctx.lineTo(
+            bx + 0.3 * r * Math.cos(a + side),
+            by + 0.3 * r * Math.sin(a + side),
+          );
+        }
+      }
+    }
+  }
+  ctx.stroke();
+};
 
 /**
  * @param {HTMLCanvasElement} canvas
@@ -22,6 +73,8 @@ export const makeChart = (canvas, onPath) => {
   let drawing = null;
   let lengths = [0];
   let shading = null;
+  /** The weather under the pointer, to name what grows there */
+  let pointer = null;
 
   const size = () => {
     const dpr = devicePixelRatio;
@@ -34,19 +87,31 @@ export const makeChart = (canvas, onPath) => {
     }
     return {w, h, dpr};
   };
-  const pad = () => 18 * devicePixelRatio;
-  const toPx = ({T, sigma}, w, h) => [
-    pad() * 1.5 + (T / T_MIN) * (w - pad() * 2),
-    h - pad() - (sigma / SIGMA_MAX) * (h - pad() * 1.6),
-  ];
-  const fromPx = (x, y, w, h) => ({
-    T: Math.min(
-      0,
-      Math.max(T_MIN, ((x - pad() * 1.5) / (w - pad() * 2)) * T_MIN),
-    ),
-    sigma:
-      SIGMA_MAX * Math.min(1, Math.max(0, (h - pad() - y) / (h - pad() * 1.6))),
-  });
+  /** The plot's margins, in canvas pixels: room for the axes and a title */
+  const box = (w, h) => {
+    const dpr = devicePixelRatio;
+    return {
+      left: 30 * dpr,
+      right: w - 8 * dpr,
+      top: 22 * dpr,
+      bottom: h - 18 * dpr,
+    };
+  };
+  const toPx = ({T, sigma}, w, h) => {
+    const b = box(w, h);
+    return [
+      b.left + (T / T_MIN) * (b.right - b.left),
+      b.bottom - (sigma / SIGMA_MAX) * (b.bottom - b.top),
+    ];
+  };
+  const fromPx = (x, y, w, h) => {
+    const b = box(w, h);
+    const clamp = (v) => Math.min(1, Math.max(0, v));
+    return {
+      T: T_MIN * clamp((x - b.left) / (b.right - b.left)),
+      sigma: SIGMA_MAX * clamp((b.bottom - y) / (b.bottom - b.top)),
+    };
+  };
   /** Distance on the chart, with both axes running 0 to 1 */
   const apart = (a, b) =>
     Math.hypot((a.T - b.T) / T_MIN, (a.sigma - b.sigma) / SIGMA_MAX);
@@ -72,19 +137,26 @@ export const makeChart = (canvas, onPath) => {
     };
   };
 
+  /** The background: what grows where, brighter the wetter the air (past
+      wetness 1, a little over water saturation, it's all the same) */
   const makeShading = (w, h) => {
     const image = ctx.createImageData(w, h);
-    for (let x = 0; x < w; x++) {
+    const b = box(w, h);
+    for (let k = 0; k < w * h; k++) {
+      image.data.set(FRAME, k * 4);
+      image.data[k * 4 + 3] = 255;
+    }
+    for (let x = Math.ceil(b.left); x < b.right; x++) {
       const {T} = fromPx(x, 0, w, h);
       const P = plateness(T);
-      for (let y = 0; y < h; y++) {
+      const hue = P > 0 ? PLATES : COLUMNS;
+      const t = Math.min(1, Math.abs(P) * 1.4);
+      const color = BETWEEN.map((c, i) => c + (hue[i] - c) * t);
+      for (let y = Math.ceil(b.top); y < b.bottom; y++) {
         const k = (y * w + x) * 4;
-        const glow = 0.3 + 0.7 * wetness(fromPx(x, y, w, h));
-        // plates warm, columns cool
-        image.data[k] = (40 + 50 * Math.max(0, P)) * glow;
-        image.data[k + 1] = (40 + 15 * Math.abs(P)) * glow;
-        image.data[k + 2] = (55 + 60 * Math.max(0, -P)) * glow;
-        image.data[k + 3] = 255;
+        const light = 0.012 + 0.16 * wetness(fromPx(x, y, w, h)) ** 1.5;
+        for (let i = 0; i < 3; i++)
+          image.data[k + i] = toSrgb(color[i] * light);
       }
     }
     return image;
@@ -95,17 +167,46 @@ export const makeChart = (canvas, onPath) => {
     if (!w || !h) return;
     shading ??= makeShading(w, h);
     ctx.putImageData(shading, 0, 0);
-    ctx.font = `${10 * dpr}px system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#fff8';
-    for (const [text, T, sigma] of LABELS) {
-      const [x, y] = toPx({T, sigma}, w, h);
-      ctx.fillText(text, x, y);
+    const b = box(w, h);
+    const font = (px, weight = 400) =>
+      `${weight} ${px * dpr}px system-ui, sans-serif`;
+
+    // grid
+    ctx.strokeStyle = '#ffffff14';
+    ctx.lineWidth = dpr;
+    ctx.beginPath();
+    for (let T = -5; T > T_MIN; T -= 5) {
+      const [x] = toPx({T, sigma: 0}, w, h);
+      ctx.moveTo(x, b.top);
+      ctx.lineTo(x, b.bottom);
     }
-    // water saturation: clouds sit near it, and only labs go far past it
-    ctx.setLineDash([4 * dpr, 4 * dpr]);
-    ctx.strokeStyle = '#9cf8';
+    for (const sigma of [0.1, 0.2, 0.3]) {
+      const [, y] = toPx({T: 0, sigma}, w, h);
+      ctx.moveTo(b.left, y);
+      ctx.lineTo(b.right, y);
+    }
+    ctx.stroke();
+
+    // what grows where
+    ctx.font = font(10);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.lineWidth = dpr;
+    ctx.lineJoin = ctx.lineCap = 'round';
+    ctx.shadowColor = '#000c';
+    ctx.shadowBlur = 3 * dpr;
+    for (const [text, T, sigma, kind] of LABELS) {
+      const [x, y] = toPx({T, sigma}, w, h);
+      ctx.strokeStyle = '#fffc';
+      drawShape(ctx, kind, x, y, 4.5 * dpr);
+      ctx.fillStyle = '#fffd';
+      ctx.fillText(text, x + 8 * dpr, y);
+    }
+    ctx.shadowBlur = 0;
+
+    // water saturation: air in a cloud sits near it
+    ctx.setLineDash([3 * dpr, 3 * dpr]);
+    ctx.strokeStyle = '#a8d8ffaa';
     ctx.lineWidth = 1.2 * dpr;
     ctx.beginPath();
     for (let T = 0; T >= T_MIN; T -= 0.5)
@@ -113,57 +214,103 @@ export const makeChart = (canvas, onPath) => {
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.save();
-    const [ax, ay] = toPx({T: -19, sigma: waterSaturation(-19)}, w, h);
-    const [bx, by] = toPx({T: -23, sigma: waterSaturation(-23)}, w, h);
+    const [ax, ay] = toPx({T: -25.5, sigma: waterSaturation(-25.5)}, w, h);
+    const [bx, by] = toPx({T: -29.5, sigma: waterSaturation(-29.5)}, w, h);
     ctx.translate((ax + bx) / 2, (ay + by) / 2);
     ctx.rotate(Math.atan2(by - ay, bx - ax));
-    ctx.fillStyle = '#9cfb';
+    ctx.fillStyle = '#a8d8ffcc';
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText('water saturation', 0, -2 * dpr);
+    ctx.font = font(9);
+    ctx.fillText('in a cloud', 0, -2 * dpr);
     ctx.restore();
 
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#fff6';
-    ctx.fillText('drag to draw the weather', w - 6 * dpr, 10 * dpr);
-    ctx.textAlign = 'center';
     // axes
-    ctx.fillStyle = '#fffa';
-    ctx.textBaseline = 'bottom';
+    ctx.font = font(10);
+    ctx.fillStyle = '#fff9';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
     for (const T of [0, -10, -20, -30]) {
       const [x] = toPx({T, sigma: 0}, w, h);
-      ctx.fillText(`${T}°C`, Math.min(w - 14 * dpr, x), h - 2 * dpr);
+      ctx.fillText(
+        `${T ? '−' + -T : 0}°C`,
+        Math.min(b.right - 12 * dpr, Math.max(b.left + 8 * dpr, x)),
+        b.bottom + 4 * dpr,
+      );
     }
-    ctx.textAlign = 'left';
+    ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     for (const sigma of [0.1, 0.2, 0.3]) {
       const [, y] = toPx({T: 0, sigma}, w, h);
-      ctx.fillText(`${sigma * 100}%`, 3 * dpr, y);
+      ctx.fillText(`${sigma * 100}%`, b.left - 5 * dpr, y);
     }
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText('↑ supersaturation over ice', w * 0.42, 14 * dpr);
 
-    // the path, bright where the crystal has been
+    // title, or what grows under the pointer
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    const title = 11 * dpr;
+    if (pointer) {
+      const {T, sigma} = pointer;
+      ctx.font = font(11, 600);
+      ctx.fillStyle = '#fff';
+      const name = habitAt(pointer);
+      ctx.fillText(name, 8 * dpr, title);
+      const after = ctx.measureText(name).width + 8 * dpr;
+      ctx.font = font(11);
+      ctx.fillStyle = '#fffa';
+      ctx.fillText(
+        `  ${T.toFixed(1).replace('-', '−')}°C, ${(sigma * 100).toFixed(1)}% over ice`,
+        8 * dpr + after,
+        title,
+      );
+    } else {
+      ctx.font = font(11, 600);
+      ctx.fillStyle = '#fff';
+      ctx.fillText('Weather', 8 * dpr, title);
+      ctx.font = font(11);
+      ctx.fillStyle = '#fff9';
+      ctx.textAlign = 'right';
+      ctx.fillText(
+        'drag to draw the path it falls through',
+        w - 8 * dpr,
+        title,
+      );
+    }
+
+    // the path, bright where the crystal has been, with an arrow at its end
     const pts = (drawing ?? path).map((p) => toPx(p, w, h));
     const here = drawing ? null : toPx(at(u), w, h);
     ctx.lineCap = ctx.lineJoin = 'round';
-    ctx.lineWidth = 2 * dpr;
-    ctx.strokeStyle = '#fff6';
-    ctx.beginPath();
-    pts.forEach(([x, y]) => ctx.lineTo(x, y));
-    ctx.stroke();
+    const line = (points, color, width) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width * dpr;
+      ctx.beginPath();
+      points.forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.stroke();
+    };
+    line(pts, '#0008', 4);
+    line(pts, '#fff7', 2);
     if (here && path.length > 1) {
       const target = u * lengths.at(-1);
-      ctx.strokeStyle = '#fff';
+      const done = pts.filter((_, k) => lengths[k] <= target);
+      line([...done, here], '#fff', 2);
+    }
+    if (pts.length > 1) {
+      const [x, y] = pts.at(-1);
+      const [px, py] =
+        pts.findLast(([qx, qy]) => Math.hypot(qx - x, qy - y) > 6 * dpr) ??
+        pts[0];
+      const a = Math.atan2(y - py, x - px);
+      const arm = 6 * dpr;
+      ctx.fillStyle = '#fffc';
       ctx.beginPath();
-      for (let k = 0; k < pts.length && lengths[k] <= target; k++)
-        ctx.lineTo(...pts[k]);
-      ctx.lineTo(...here);
-      ctx.stroke();
+      ctx.moveTo(x + 2 * dpr * Math.cos(a), y + 2 * dpr * Math.sin(a));
+      ctx.lineTo(x - arm * Math.cos(a - 0.5), y - arm * Math.sin(a - 0.5));
+      ctx.lineTo(x - arm * Math.cos(a + 0.5), y - arm * Math.sin(a + 0.5));
+      ctx.fill();
     }
     if (pts.length) {
-      ctx.fillStyle = '#fff8';
+      ctx.fillStyle = '#fffa';
       ctx.beginPath();
       ctx.arc(...pts[0], 3 * dpr, 0, 2 * Math.PI);
       ctx.fill();
@@ -191,11 +338,13 @@ export const makeChart = (canvas, onPath) => {
   };
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
-    drawing = [pointAt(e)];
+    pointer = pointAt(e);
+    drawing = [pointer];
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (!drawing) return;
     const p = pointAt(e);
+    pointer = p;
+    if (!drawing) return;
     const last = drawing.at(-1);
     if (apart(p, last) > 0.01) drawing.push(p);
   });
@@ -206,8 +355,13 @@ export const makeChart = (canvas, onPath) => {
     measure();
     onPath(path);
   };
-  canvas.addEventListener('pointerup', finish);
+  canvas.addEventListener('pointerup', (e) => {
+    finish();
+    // a finger lifted leaves no pointer hovering
+    if (e.pointerType !== 'mouse') pointer = null;
+  });
   canvas.addEventListener('pointercancel', finish);
+  canvas.addEventListener('pointerleave', () => (pointer = null));
 
   return {
     draw,

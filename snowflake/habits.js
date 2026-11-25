@@ -128,6 +128,11 @@ const smoothstep = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
+/** How far plates near water saturation have turned into dendrites, 0 to 1 */
+const dendriteness = (weather) =>
+  smoothstep(0.6, 0.95, wetness(weather)) *
+  smoothstep(0.4, 0.9, plateness(weather.T));
+
 /** Model parameters for a temperature (C) and supersaturation over ice */
 export const paramsFor = (weather) => {
   const P = plateness(weather.T);
@@ -148,7 +153,7 @@ export const paramsFor = (weather) => {
     b20: side,
   };
   // Near water saturation where plates grow, they turn into dendrites
-  const w = smoothstep(0.6, 0.95, s) * smoothstep(0.4, 0.9, P);
+  const w = dendriteness(weather);
   if (!w) return plain;
   return Object.fromEntries(
     Object.entries(plain).map(([key, v]) => {
@@ -161,14 +166,33 @@ export const paramsFor = (weather) => {
   );
 };
 
-/** Labels for the chart's regions, after Libbrecht's morphology diagram:
-    [text, T, supersaturation] */
+/**
+ * What grows in a weather, in the words of Libbrecht's morphology diagram,
+ * with the same plateness and wetness the model's parameters follow
+ */
+export const habitAt = (weather) => {
+  const P = plateness(weather.T);
+  const s = wetness(weather);
+  if (P < -0.3) {
+    if (weather.T > -10 && s > 0.6)
+      return weather.T > -6.5 ? 'needles' : 'hollow columns';
+    return 'columns';
+  }
+  if (P < 0.3) return 'blocky prisms';
+  if (dendriteness(weather) > 0.5) return 'fernlike stars';
+  if (s > 0.6) return 'stellar plates';
+  if (s > 0.35) return 'sectored plates';
+  return 'plates';
+};
+
+/** Labels for the chart's regions: [text, T, supersaturation, shape drawn] */
 export const LABELS = [
-  ['plates', -1.5, 0.012],
-  ['columns', -7.5, 0.025],
-  ['needles', -5, 0.075],
-  ['plates', -18, 0.03],
-  ['sectored', -14.5, 0.085],
-  ['stars & ferns', -15, 0.2],
-  ['columns', -26, 0.18],
+  ['plates', -1.5, 0.012, 'plate'],
+  ['columns', -7.5, 0.022, 'column'],
+  ['needles', -5, 0.085, 'needle'],
+  ['plates', -18.5, 0.03, 'plate'],
+  ['sectored', -15, 0.09, 'sectored'],
+  ['stars', -11.5, 0.17, 'star'],
+  ['ferns', -18, 0.25, 'fern'],
+  ['columns', -24.5, 0.12, 'column'],
 ];
