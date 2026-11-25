@@ -437,7 +437,49 @@ window.snow = {
     testing = false;
     return rows.filter((_, k) => k % Math.ceil(rows.length / 8) === 0);
   },
-  async grow({path, model: m, steps = 20000, chunk = 100} = {}) {
+  /**
+   * For tuning: how open and how branched the crystal is seen from above. fill: the
+   * share of the disk out to the farthest cell that's crystal (a solid
+   * hexagon is 0.83). edge: crystal cells with a vapor neighbor, per cell of
+   * radius (a plain hexagon is about 6).
+   */
+  async shape() {
+    const m = await sim.above();
+    const n = sim.n;
+    const at = (q, r) =>
+      r >= 0 && r <= q && q < n ? m[(q * (q + 1)) / 2 + r] : 0;
+    const fold = (q, r) => {
+      for (let k = 0; k < 3; k++) {
+        if (r < 0) [q, r] = [q + r, -r];
+        if (r > q) [q, r] = [r, q];
+      }
+      return at(q, r);
+    };
+    let ice = 0;
+    let edge = 0;
+    let far = 0;
+    for (let q = 0; q < n; q++)
+      for (let r = 0; r <= q; r++) {
+        if (!at(q, r)) continue;
+        // each wedge cell stands for 12, fewer on the wedge's edges
+        const copies = r === 0 || r === q ? 6 : 12;
+        ice += q === 0 ? 1 : copies;
+        far = Math.max(far, Math.sqrt(q * q + q * r + r * r));
+        const around = [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+          [1, -1],
+          [-1, 1],
+        ];
+        if (around.some(([dq, dr]) => !fold(q + dq, r + dr))) edge += copies;
+      }
+    // cells per unit area on a triangular lattice: 2 / sqrt(3)
+    const disk = Math.PI * far * far * (2 / Math.sqrt(3));
+    return {fill: ice / disk, edge: edge / far, far};
+  },
+  async grow({path, model: m, steps = 20000, chunk = 100, settle = 300} = {}) {
     testing = true;
     if (m) Object.assign(manual, m);
     settings.manual = !!m;
@@ -447,7 +489,7 @@ window.snow = {
       frame(chunk);
       await device.queue.onSubmittedWorkDone();
     }
-    for (let k = 0; k < 300; k++) {
+    for (let k = 0; k < settle; k++) {
       frame(0);
       await device.queue.onSubmittedWorkDone();
     }

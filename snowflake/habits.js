@@ -90,6 +90,44 @@ const THRESHOLDS = [
   [-1, 2.2, 4.2],
 ];
 
+/**
+ * Stellar and fernlike dendrites: thin arms with side branches and open
+ * gaps between the arms, which real crystals grow near water saturation at
+ * plate temperatures. Found by a random search (.search.mjs) for crystals that
+ * are open and branched seen from above: every attachment threshold about
+ * twice the plates', and ten times the melting. The search found it at rho
+ * 0.247. The model is linear in vapor (scaling rho and every threshold
+ * together grows the same crystal), so the thresholds here are per unit of
+ * rho and scale with whatever rho the chart gives.
+ */
+const DENDRITE = {
+  kappa: 0.00101,
+  mu: 0.0138,
+  gamma: 0.00085,
+  sigma: 0.000635,
+  diff: 0.132,
+};
+const DENDRITE_PER_RHO = Object.fromEntries(
+  Object.entries({
+    b01: 3.67,
+    b10: 2.03,
+    b20: 2.64,
+    b11: 1.48,
+    b21: 1.48,
+    b30: 2.14,
+    b31: 2.14,
+    theta: 0.0209,
+    xi: 0.0495,
+  }).map(([key, v]) => [key, v / 0.247]),
+);
+/** Rates that range over orders of magnitude blend on a log scale */
+const RATES = ['kappa', 'mu', 'gamma'];
+
+const smoothstep = (a, b, x) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
 /** Model parameters for a temperature (C) and supersaturation over ice */
 export const paramsFor = (weather) => {
   const P = plateness(weather.T);
@@ -102,13 +140,25 @@ export const paramsFor = (weather) => {
     THRESHOLDS.map(([p, , d]) => [p, d]),
     P,
   );
-  return {
+  const plain = {
     ...BASE,
     rho: 0.04 + 0.32 * s ** 1.3,
     b01: top,
     b10: side,
     b20: side,
   };
+  // Near water saturation where plates grow, they turn into dendrites
+  const w = smoothstep(0.6, 0.95, s) * smoothstep(0.4, 0.9, P);
+  if (!w) return plain;
+  return Object.fromEntries(
+    Object.entries(plain).map(([key, v]) => {
+      const to =
+        key === 'rho'
+          ? v
+          : (DENDRITE[key] ?? DENDRITE_PER_RHO[key] * plain.rho);
+      return [key, RATES.includes(key) ? v * (to / v) ** w : v + (to - v) * w];
+    }),
+  );
 };
 
 /** Labels for the chart's regions, after Libbrecht's morphology diagram:

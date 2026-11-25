@@ -434,6 +434,28 @@ export const makeSim = (device, {n, nz}) => {
     extents,
     /** The smoothed crystal, for drawing */
     field,
+    /** For tuning: the crystal seen from above, 1 where any layer is
+        crystal, read back */
+    async above() {
+      const read = device.createBuffer({
+        size: cells * 8,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      });
+      const encoder = device.createCommandEncoder();
+      encoder.copyBufferToBuffer(a[0], 0, read, 0, cells * 4);
+      encoder.copyBufferToBuffer(a[1], 0, read, cells * 4, cells * 4);
+      device.queue.submit([encoder.finish()]);
+      await read.mapAsync(GPUMapMode.READ);
+      const both = new Uint32Array(read.getMappedRange().slice(0));
+      read.destroy();
+      const [x, y] = [both.subarray(0, cells), both.subarray(cells)];
+      // the newer copy has the more crystal
+      const sum = (c) => c.reduce((t, v) => t + v, 0);
+      const now = sum(x) >= sum(y) ? x : y;
+      const top = new Uint8Array(layer);
+      for (let i = 0; i < cells; i++) if (now[i]) top[i % layer] = 1;
+      return top;
+    },
     reset,
     setParams,
     step,
