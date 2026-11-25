@@ -1,8 +1,12 @@
-// The preview: rays marched through the crystal's cells, refracted in and out
-// of the ice, against a dark background with a ring of light behind the
-// crystal (dark-field lighting, like a microscope's). Flat ice barely bends
-// light, so it shows the dark background; edges, ridges and steps bend the
-// ring's light toward the camera and glow.
+// The preview, path traced: rays marched through the crystal's cells, where
+// at each surface of the ice they reflect or refract (one or the other, picked
+// at random by Fresnel's odds), until they get out to the light. The frames
+// are averaged, which adds up all the ways light gets through the crystal.
+//
+// The default light is dark-field, like a microscope's: a dark background
+// with a ring of light behind the crystal. Flat ice barely bends light, so it
+// shows the dark background; edges, ridges and steps bend the ring's light
+// toward the camera and glow.
 //
 // World space is in cells: the crystal's middle layer is the xz plane and its
 // c-axis is y.
@@ -14,7 +18,7 @@ ${brickCode}
 struct View {
   pos: vec3f, zoom: f32,
   fwd: vec3f, aspect: f32,
-  right: vec3f, exposure: f32,
+  right: vec3f, light: i32,
   up: vec3f, ice: f32,
   n: i32, nz: i32, layer: i32, bounces: i32,
 }
@@ -152,67 +156,82 @@ fn crossing(o: vec3f, d: vec3f, t0: f32, t1: f32, inside: bool) -> f32 {
   }
 }
 
-/** The light around the crystal, fixed to the camera like a microscope's:
-    dark straight behind the crystal, a bright ring around that, and a dim
-    glow on the camera's side for reflections */
+/** The light around the crystal. The microscope lights are fixed to the
+    camera: dark straight behind the crystal (or a colored backdrop), a ring of
+    light around that, and a dim glow on the camera's side. Outdoors the light
+    is fixed to the world: an overcast sky above, a bright patch of it off to
+    one side, and a dark wool mitten below. */
 fn env(d: vec3f) -> vec3f {
   let c = dot(d, v.fwd);
   let ang = acos(clamp(c, -1.0, 1.0));
   let ring = smoothstep(0.6, 0.7, ang) * (1.0 - smoothstep(0.9, 1.2, ang));
   let side = dot(d, v.up) * 0.5 + 0.5;
+  let front = max(0.0, -c);
+  if (v.light == 1) {
+    // Rheinberg: a blue disk behind the crystal, a ring warm above and cool
+    // below
+    let back = vec3f(0.004, 0.012, 0.06) * (1.0 - smoothstep(0.4, 0.6, ang));
+    let lamps = mix(vec3f(0.4, 0.75, 1.0), vec3f(1.0, 0.55, 0.15), side);
+    return back + lamps * ring * 2.5 + vec3f(0.06, 0.07, 0.1) * front * front;
+  }
+  if (v.light == 2) {
+    let sun = normalize(vec3f(0.6, 0.7, -0.4));
+    let sky = mix(vec3f(0.55, 0.65, 0.8), vec3f(0.85, 0.9, 1.0), d.y)
+      + vec3f(4.0, 3.6, 3.0) * smoothstep(0.9, 0.97, dot(d, sun));
+    let wool = vec3f(0.005, 0.004, 0.006);
+    return mix(wool, sky, smoothstep(-0.05, 0.05, d.y));
+  }
   var col = vec3f(0.004, 0.008, 0.02) * (1.0 + ang)
     + mix(vec3f(0.5, 0.75, 1.0), vec3f(1.0, 0.95, 0.85), side) * ring * 2.5;
-  let front = max(0.0, -c);
   col += vec3f(0.08, 0.09, 0.11) * front * front;
   return col;
 }
 
-/** Light reaching the camera along a ray that just hit ice at t */
+var<private> seed: u32;
+fn rand() -> f32 {
+  seed = seed * 747796405u + 2891336453u;
+  var w = ((seed >> ((seed >> 28u) + 4u)) ^ seed) * 277803737u;
+  w = (w >> 22u) ^ w;
+  return f32(w >> 8u) / 16777216.0; // under 1, always
+}
+
+/** Light reaching the camera along a ray that just hit ice at t. A path
+    tracer: at each surface the light either reflects or goes through, and one
+    of the two is followed at random. The frames average them out. */
 fn shade(o: vec3f, d0: vec3f, t: f32) -> vec3f {
   let eta = v.ice;
-  var p = o + d0 * t;
-  var n = normal(p, d0);
-  var cosi = clamp(-dot(d0, n), 0.0, 1.0);
   let f0 = ((eta - 1.0) / (eta + 1.0)) * ((eta - 1.0) / (eta + 1.0));
-  let fr = f0 + (1.0 - f0) * pow(1.0 - cosi, 5.0);
-  var col = fr * env(reflect(d0, n));
-
-  // Through the ice, bouncing inside where light can't get out
-  var d = refract(d0, n, 1.0 / eta);
-  var weight = 1.0 - fr;
+  var p = o + d0 * t;
+  var d = d0;
+  var inside = false;
+  var weight = 1.0;
   for (var k = 0; k < v.bounces; k++) {
-    let span = bounds(p, d);
-    let te = crossing(p, d, 0.05, min(span.y + 1.0, FAR), true);
-    if (te < 0.0) {
-      // deep in the branches: let it out the way it was going
-      col += weight * env(d);
-      break;
-    }
-    p = p + d * te;
-    n = normal(p, d);
-    let out = refract(d, -n, eta);
-    if (dot(out, out) < 0.5) {
-      d = reflect(d, -n);
-      continue;
-    }
-    let c = clamp(dot(d, n), 0.0, 1.0);
-    let f = f0 + (1.0 - f0) * pow(1.0 - c, 5.0);
-    // Light leaving here, then what's beyond it if it re-enters ice
-    let span2 = bounds(p, out);
-    let t2 = crossing(p, out, 0.05, min(span2.y, FAR), false);
-    if (t2 < 0.0) {
-      col += weight * (1.0 - f) * env(out);
-      weight *= f;
-      d = reflect(d, -n);
+    var n = normal(p, d);
+    if (dot(n, d) > 0.0) { n = -n; } // facing where the light comes from
+    let through = refract(d, n, select(1.0 / eta, eta, inside));
+    // Schlick's Fresnel, with the angle on the air side
+    let c = select(-dot(d, n), -dot(through, n), inside);
+    let f = f0 + (1.0 - f0) * pow(1.0 - clamp(c, 0.0, 1.0), 5.0);
+    // Reflections are only a few percent, but picking them that rarely
+    // leaves them speckled, so they're picked more often and weighted down
+    let q = clamp(f, 0.2, 0.8);
+    if (dot(through, through) < 0.5) {
+      d = reflect(d, n); // all of it reflects when it can't get out
+    } else if (rand() < q) {
+      d = reflect(d, n);
+      weight *= f / q;
     } else {
-      // it goes back into ice: follow that instead of the internal reflection
-      weight *= 1.0 - f;
-      p = p + out * t2;
-      n = normal(p, out);
-      d = refract(out, n, 1.0 / eta);
+      d = through;
+      weight *= (1.0 - f) / (1.0 - q);
+      inside = !inside;
     }
+    let span = bounds(p, d);
+    let te = crossing(p, d, 0.05, min(span.y + 1.0, FAR), inside);
+    // out into the light, or deep in the branches: let it out the way it goes
+    if (te < 0.0) { break; }
+    p = p + d * te;
   }
-  return col;
+  return weight * env(d);
 }
 
 @vertex
@@ -226,6 +245,7 @@ struct Frame {
   jitter: vec2f,
   weight: f32, // how much of this frame goes into the average
   scale: f32, // how much the view has shrunk since the last frame
+  seed: u32,
 }
 @group(0) @binding(3) var<uniform> frame: Frame;
 @group(0) @binding(4) var prev: texture_2d<f32>;
@@ -237,6 +257,8 @@ fn fs(@builtin(position) pix: vec4f) -> @location(0) vec4f {
   let uv = vec2f(xy.x / frame.size.x - 0.5, 0.5 - xy.y / frame.size.y);
   let d = normalize(v.fwd + v.right * uv.x * v.zoom * v.aspect + v.up * uv.y * v.zoom);
   let o = v.pos;
+  seed = u32(pix.x) * 1973u + u32(pix.y) * 9277u + frame.seed * 26699u;
+  rand();
   var col = env(d);
   let span = bounds(o, d);
   if (span.x < span.y) {
@@ -274,7 +296,7 @@ fn fs(@builtin(position) pix: vec4f) -> @location(0) vec4f {
 `;
 
 /** Frames averaged before the picture stops changing and drawing stops */
-const SETTLED = 64;
+const SETTLED = 256;
 
 /**
  * @param {GPUDevice} device
@@ -351,7 +373,7 @@ export const makeRenderer = (device, format) => {
    * @param {{width: number, height: number}} canvasSize
    * @param {ReturnType<import('./sim.js').makeSim>} sim
    * @param {{position: number[], forward: number[], right: number[], up: number[], zoom: number, distance: number}} camera
-   * @param {{exposure: number, ice: number, bounces: number}} look
+   * @param {{exposure: number, ice: number, bounces: number, light: number}} look
    * @param {boolean} growing whether the crystal changed since the last frame
    */
   const render = (encoder, context, canvasSize, sim, camera, look, growing) => {
@@ -397,7 +419,7 @@ export const makeRenderer = (device, format) => {
     f.set(camera.forward, 4);
     f[7] = width / height;
     f.set(camera.right, 8);
-    f[11] = 0;
+    i[11] = look.light;
     f.set(camera.up, 12);
     f[15] = look.ice;
     i[16] = sim.n;
@@ -421,11 +443,17 @@ export const makeRenderer = (device, format) => {
         : 1;
     lastDistance = camera.distance;
     const jitter = frames ? [Math.random() - 0.5, Math.random() - 0.5] : [0, 0];
-    device.queue.writeBuffer(
-      frameBuffer,
+    const frameData = new Float32Array([
+      width,
+      height,
+      ...jitter,
+      weight,
+      scale,
       0,
-      new Float32Array([width, height, ...jitter, weight, scale, 0, 0]),
-    );
+      0,
+    ]);
+    new Uint32Array(frameData.buffer)[6] = (Math.random() * 2 ** 32) >>> 0;
+    device.queue.writeBuffer(frameBuffer, 0, frameData);
     frames++;
 
     current = 1 - current;

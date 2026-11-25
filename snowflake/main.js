@@ -34,6 +34,13 @@ const SIZES = {
 const SPEEDS = {Slow: 4, Normal: 60, Fast: 200};
 /** Refractive index of ice */
 const ICE = 1.31;
+/** How the crystal is lit, as in photos of real ones */
+const LIGHTS = {
+  'Dark field': 0,
+  'Color backlight': 1,
+  'Mitten, outdoors': 2,
+};
+const lightKey = (light) => light.split(/[ ,]/).at(-1);
 
 const settings = {
   preset: 'Fern star',
@@ -41,8 +48,9 @@ const settings = {
   speed: 'Normal',
   paused: false,
   time: 1,
+  light: 'Dark field',
   exposure: 1.5,
-  bounces: 3,
+  bounces: 8,
   resolution: 1,
   manual: false,
   restart: () => restart(),
@@ -139,12 +147,18 @@ const save = () => {
     .join(';');
   const grid =
     settings.size === 'Medium' ? '' : `&grid=${gridKey(settings.size)}`;
-  history.replaceState(null, '', `#w=${w}${grid}`);
+  const light =
+    settings.light === 'Dark field' ? '' : `&light=${lightKey(settings.light)}`;
+  history.replaceState(null, '', `#w=${w}${grid}${light}`);
 };
 const load = () => {
   const hash = new URLSearchParams(location.hash.slice(1));
   const size = Object.keys(SIZES).find((s) => gridKey(s) === hash.get('grid'));
   if (size) settings.size = size;
+  const light = Object.keys(LIGHTS).find(
+    (l) => lightKey(l) === hash.get('light'),
+  );
+  if (light) settings.light = light;
   const points = (hash.get('w') ?? '')
     .split(';')
     .map((p) => p.split(',').map(Number))
@@ -306,9 +320,10 @@ gui.add(settings, 'paused').name('Paused');
 gui.add(settings, 'restart').name('Restart');
 gui.add(settings, 'speed', Object.keys(SPEEDS)).name('Speed');
 gui.add(settings, 'size', Object.keys(SIZES)).name('Grid').onChange(restart);
+gui.add(settings, 'light', Object.keys(LIGHTS)).name('Lighting').onChange(save);
 const look = gui.addFolder('Look').close();
 look.add(settings, 'exposure', 0.1, 8).name('Exposure');
-look.add(settings, 'bounces', 0, 8, 1).name('Bounces inside');
+look.add(settings, 'bounces', 1, 16, 1).name('Light bounces');
 look.add(settings, 'resolution', 0.25, 2, 0.05).name('Pixels per point');
 const model = gui.addFolder('Model').close();
 model.add(settings, 'manual').name('Ignore the chart');
@@ -353,6 +368,7 @@ const frame = (stepCount) => {
     pitch,
     settings.bounces,
     settings.resolution,
+    settings.light,
   ]);
   if (view !== lastView) renderer.restart();
   lastView = view;
@@ -362,7 +378,7 @@ const frame = (stepCount) => {
     canvas,
     sim,
     basis(),
-    {...settings, ice: ICE},
+    {...settings, ice: ICE, light: LIGHTS[settings.light]},
     stepCount > 0 || rewound,
   );
   const read = sim.readExtents(encoder);
@@ -463,7 +479,7 @@ window.snow = {
       frame(chunk);
       await device.queue.onSubmittedWorkDone();
     }
-    for (let k = 0; k < 80; k++) {
+    for (let k = 0; k < 300; k++) {
       frame(0);
       await device.queue.onSubmittedWorkDone();
     }
