@@ -9,6 +9,11 @@
 // toward the camera and glow.
 // The rainbow light is the same ring with a color wheel in it.
 //
+// The lamp light hangs the crystal over a pale floor under a small lamp, off
+// to one side, and draws its shadow: a light pass sends rays from the lamp
+// through the crystal to the floor and counts where they land, so the shadow
+// has the bright lines and spots (caustics) where the ice focuses light.
+//
 // World space is in cells: the crystal's middle layer is the xz plane and its
 // c-axis is y.
 
@@ -23,10 +28,26 @@ struct View {
   up: vec3f, aperture: f32, // the lens's radius, for depth of field
   n: i32, nz: i32, layer: i32, bounces: i32,
   focus: f32, // how far away things are sharp
+  floor: f32, // the height of the floor under the lamp
+  reach: f32, // the radius of the lamp's beam the light pass follows
+  shine: f32, // 1 / frames of light counted, or 0 before there are any
+  lamp: vec3f, lampSize: f32, // toward the lamp, and its angular radius
+  seed: u32,
 }
 @group(0) @binding(0) var<uniform> v: View;
 @group(0) @binding(1) var<storage, read> a: array<f32>;
 @group(0) @binding(2) var<storage, read> ext: array<u32>;
+/** The light pass's counts of rays landing on the floor, MAP x MAP over the
+    lamp's beam (one ray per cell per frame) */
+@group(0) @binding(6) var<storage, read> counts: array<u32>;
+@group(0) @binding(7) var<storage, read_write> landed: array<atomic<u32>>;
+const MAP = 512u;
+/** The most light one sample brings back */
+const BRIGHTEST = 40.0;
+/** How brightly the lamp lights the floor, seen square on */
+const LAMP = 3.0;
+const FLOOR = vec3f(0.5, 0.53, 0.58);
+const LAMP_COLOR = vec3f(1.0, 0.9, 0.75);
 
 const PI = 3.14159265;
 const STEP = 0.35;
@@ -187,6 +208,13 @@ fn env(d: vec3f) -> vec3f {
       + mix(vec3f(1.0), hue * hue, 0.8) * ring * 3.0
       + vec3f(0.06, 0.06, 0.08) * front * front;
   }
+  if (v.light == 5) {
+    // A dark room, and the lamp: a small disk, bright enough that the light
+    // it throws on the floor adds up to LAMP
+    let disk = smoothstep(cos(v.lampSize * 1.15), cos(v.lampSize * 0.85), dot(d, v.lamp));
+    return vec3f(0.002, 0.002, 0.003) * (1.0 + d.y)
+      + LAMP_COLOR * disk * LAMP / (PI * v.lampSize * v.lampSize);
+  }
   if (v.light == 2) {
     let sun = normalize(vec3f(0.6, 0.7, -0.4));
     let sky = mix(vec3f(0.55, 0.65, 0.8), vec3f(0.85, 0.9, 1.0), d.y)
@@ -208,13 +236,57 @@ fn rand() -> f32 {
   return f32(w >> 8u) / 16777216.0; // under 1, always
 }
 
-/** Light reaching the camera along a ray that just hit ice at t. A path
-    tracer: at each surface the light either reflects or goes through, picked
-    at random by Fresnel's odds, and the frames average them out. */
-fn shade(o: vec3f, d0: vec3f, t: f32) -> vec3f {
+/** Two directions square to the lamp's, for the light pass's map */
+fn acrossLamp() -> mat2x3f {
+  let e1 = normalize(cross(v.lamp, vec3f(0.0, 0.0, 1.0)));
+  return mat2x3f(e1, cross(v.lamp, e1));
+}
+
+/** Where on the map a point is: its place across the lamp's beam */
+fn onMap(g: vec3f) -> vec2f {
+  let e = acrossLamp();
+  return (vec2f(dot(g, e[0]), dot(g, e[1])) / v.reach * 0.5 + 0.5) * f32(MAP);
+}
+
+/** How much of the lamp's light reaches a point on the floor, 1 with nothing
+    in the way: the light pass's counts per frame, read between cells */
+fn lit(g: vec3f) -> f32 {
+  let uv = onMap(g) - 0.5;
+  if (v.shine == 0.0 || any(uv < vec2f(0.0)) || any(uv >= vec2f(f32(MAP - 1u)))) {
+    return 1.0;
+  }
+  let i = vec2u(uv);
+  let f = fract(uv);
+  let k = i.y * MAP + i.x;
+  let top = mix(f32(counts[k]), f32(counts[k + 1u]), f.x);
+  let bottom = mix(f32(counts[k + MAP]), f32(counts[k + MAP + 1u]), f.x);
+  // Rays near the map's edge that the lamp's size sends outward are lost, and
+  // none come in from past it, so the counts fade into plain light there
+  let edge = min(min(uv.x, uv.y), f32(MAP - 1u) - max(uv.x, uv.y)) / (0.06 * f32(MAP));
+  return mix(1.0, mix(top, bottom, f.y) * v.shine, clamp(edge, 0.0, 1.0));
+}
+
+/** The light from past the crystal: the lights, or under the lamp, the floor */
+fn sky(p: vec3f, d: vec3f) -> vec3f {
+  if (v.light == 5 && d.y < 0.0) {
+    let g = p + d * ((v.floor - p.y) / d.y);
+    // the lamp lights a pool on the floor around the shadow
+    let middle = v.lamp * (v.floor / v.lamp.y);
+    let pool = exp(-dot(g.xz - middle.xz, g.xz - middle.xz) / (2.5 * v.reach * v.reach));
+    return FLOOR / PI * (LAMP_COLOR * LAMP * v.lamp.y * lit(g) * pool + 0.01);
+  }
+  return env(d);
+}
+
+struct Ray { p: vec3f, d: vec3f, out: bool }
+
+/** Follows light that just hit ice at p through the crystal, until it gets
+    out (or is lost bouncing): at each surface it either reflects or goes
+    through, picked at random by Fresnel's odds, and the frames average them */
+fn passage(p0: vec3f, d0: vec3f) -> Ray {
   let eta = 1.31; // ice's index of refraction
   let f0 = ((eta - 1.0) / (eta + 1.0)) * ((eta - 1.0) / (eta + 1.0));
-  var p = o + d0 * t;
+  var p = p0;
   var d = d0;
   var inside = false;
   for (var k = 0; k < v.bounces; k++) {
@@ -236,11 +308,48 @@ fn shade(o: vec3f, d0: vec3f, t: f32) -> vec3f {
     let span = bounds(p, d);
     let te = crossing(p, d, 0.05, min(span.y + 1.0, FAR), inside);
     // out into the light, or deep in the branches: let it out the way it goes
-    if (te < 0.0) { return env(d); }
+    if (te < 0.0) { return Ray(p, d, true); }
     p = p + d * te;
   }
-  // Still bouncing: let it out the way it's going
-  return select(env(d), vec3f(0.0), v.light == 3);
+  return Ray(p, d, false);
+}
+
+/** Light reaching the camera along a ray that just hit ice at t */
+fn shade(o: vec3f, d0: vec3f, t: f32) -> vec3f {
+  let ray = passage(o + d0 * t, d0);
+  // Still bouncing: let it out the way it's going, except in the furnace
+  if (!ray.out && v.light == 3) { return vec3f(0.0); }
+  return sky(ray.p, ray.d);
+}
+
+/** The light pass: a ray from the lamp for each cell of the map, through the
+    crystal to the floor, where it's counted. Each starts from a random point
+    of the lamp's disk, which softens the shadow's edges. */
+@compute @workgroup_size(8, 8, 1)
+fn light(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x >= MAP || id.y >= MAP) { return; }
+  seed = id.x * 1973u + id.y * 9277u + v.seed * 26699u;
+  rand();
+  let e = acrossLamp();
+  let uv = (vec2f(id.xy) + vec2f(rand(), rand())) / f32(MAP) * 2.0 - 1.0;
+  let a = 2.0 * PI * rand();
+  let r = v.lampSize * sqrt(rand());
+  var d = -normalize(v.lamp + (e[0] * cos(a) + e[1] * sin(a)) * r);
+  var p = (e[0] * uv.x + e[1] * uv.y) * v.reach - d * 2.0 * v.reach;
+  let span = bounds(p, d);
+  if (span.x < span.y) {
+    let t = crossing(p, d, span.x, span.y, false);
+    if (t >= 0.0) {
+      let ray = passage(p + d * t, d);
+      if (!ray.out) { return; }
+      p = ray.p;
+      d = ray.d;
+    }
+  }
+  if (d.y >= 0.0) { return; }
+  let cell = vec2i(floor(onMap(p + d * ((v.floor - p.y) / d.y))));
+  if (any(cell < vec2i(0)) || any(cell >= vec2i(i32(MAP)))) { return; }
+  atomicAdd(&landed[u32(cell.y) * MAP + u32(cell.x)], 1u);
 }
 
 @vertex
@@ -273,12 +382,15 @@ fn fs(@builtin(position) pix: vec4f) -> @location(0) vec4f {
   let ang = 2.0 * PI * rand();
   let o = v.pos + (v.right * cos(ang) + v.up * sin(ang)) * r;
   let d = normalize(sharp - o);
-  var col = env(d);
+  var col = sky(o, d);
   let span = bounds(o, d);
   if (span.x < span.y) {
     let t = crossing(o, d, span.x, span.y, false);
     if (t >= 0.0) { col = shade(o, d, t); }
   }
+  // The rare path that finds a small lamp brings back hundreds of times the
+  // light of the rest, which speckles the picture for many frames: cap it
+  col = min(col, vec3f(BRIGHTEST));
   // Average with the last frames, moved to where they are now as the camera
   // backs away from the growing crystal
   let back = 0.5 + (pix.xy / frame.size - 0.5) * frame.scale;
@@ -339,6 +451,16 @@ fn fs(@builtin(position) pix: vec4f) -> @location(0) vec4f {
 
 /** Frames averaged before the picture stops changing and drawing stops */
 const SETTLED = 256;
+/** The lamp light, its direction (fixed to the world, up and off to one side)
+    and its angular radius: a small lamp, about 2.3 degrees across */
+const LAMP_LIGHT = 5;
+const LAMP_TOWARD = (([x, y, z]) => {
+  const l = Math.hypot(x, y, z);
+  return [x / l, y / l, z / l];
+})([-0.5, 1, 0.15]);
+const LAMP_SIZE = 0.02;
+/** The light pass's map: MAP x MAP cells across the lamp's beam */
+const MAP = 512;
 
 /**
  * @param {GPUDevice} device
@@ -352,6 +474,10 @@ export const makeRenderer = (device, format) => {
     fragment: {module, entryPoint: 'fs', targets: [{format: 'rgba16float'}]},
   });
   const displayModule = device.createShaderModule({code: displayCode});
+  const lightPass = device.createComputePipeline({
+    layout: 'auto',
+    compute: {module, entryPoint: 'light'},
+  });
   const display = device.createRenderPipeline({
     layout: 'auto',
     vertex: {module: displayModule, entryPoint: 'vs'},
@@ -362,7 +488,12 @@ export const makeRenderer = (device, format) => {
       size,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-  const view = uniform(96);
+  const view = uniform(128);
+  /** The light pass's counts, MAP x MAP */
+  const counts = device.createBuffer({
+    size: MAP * MAP * 4,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
   const frameBuffer = uniform(32);
   const exposureBuffer = uniform(16);
   const linear = device.createSampler({
@@ -377,6 +508,10 @@ export const makeRenderer = (device, format) => {
   let displayGroups = [];
   let field = null;
   let frames = 0;
+  /** Frames of the light pass counted since the crystal or the light changed */
+  let lightFrames = 0;
+  let lastLight = -1;
+  let lightGroup = null;
   let lastDistance = 0;
   let lastExposure = 0;
 
@@ -391,9 +526,19 @@ export const makeRenderer = (device, format) => {
           {binding: 3, resource: {buffer: frameBuffer}},
           {binding: 4, resource: images[1 - k].createView()},
           {binding: 5, resource: linear},
+          {binding: 6, resource: {buffer: counts}},
         ],
       }),
     );
+    lightGroup = device.createBindGroup({
+      layout: lightPass.getBindGroupLayout(0),
+      entries: [
+        {binding: 0, resource: {buffer: view}},
+        {binding: 1, resource: {buffer: sim.field}},
+        {binding: 2, resource: {buffer: sim.ext}},
+        {binding: 7, resource: {buffer: counts}},
+      ],
+    });
     displayGroups = [0, 1].map((k) =>
       device.createBindGroup({
         layout: display.getBindGroupLayout(0),
@@ -453,7 +598,18 @@ export const makeRenderer = (device, format) => {
       return;
     }
 
-    const data = new ArrayBuffer(96);
+    // The light pass runs once the crystal is still, counting on until it has
+    // as many frames as the picture
+    if (growing || look.light !== lastLight) lightFrames = 0;
+    lastLight = look.light;
+    const counting =
+      look.light === LAMP_LIGHT && !growing && lightFrames < SETTLED;
+    if (counting) {
+      if (lightFrames === 0) encoder.clearBuffer(counts);
+      lightFrames++;
+    }
+
+    const data = new ArrayBuffer(128);
     const f = new Float32Array(data);
     const i = new Int32Array(data);
     f.set(camera.position, 0);
@@ -473,7 +629,23 @@ export const makeRenderer = (device, format) => {
     const quick = growing || zoomed || frames < 16;
     i[19] = quick ? Math.min(look.bounces, 8) : look.bounces;
     f[20] = camera.distance + look.focus;
+    // The floor sits half the crystal's radius below it, so the shadow falls
+    // a little to the side, and the light pass covers all of the crystal
+    const {radius, height: tall} = sim.extents;
+    f[21] = -(tall + 1 + 0.5 * radius);
+    f[22] = Math.hypot(radius, tall) + 4;
+    f[23] = lightFrames && !growing ? 1 / lightFrames : 0;
+    f.set(LAMP_TOWARD, 24);
+    f[27] = LAMP_SIZE;
+    new Uint32Array(data)[28] = (Math.random() * 2 ** 32) >>> 0;
     device.queue.writeBuffer(view, 0, data);
+    if (counting) {
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(lightPass);
+      pass.setBindGroup(0, lightGroup);
+      pass.dispatchWorkgroups(MAP / 8, MAP / 8);
+      pass.end();
+    }
 
     // While the crystal grows, keep some of the old frames to smooth out the
     // sparkle of details smaller than a pixel; once it stops, average them all

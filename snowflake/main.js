@@ -38,6 +38,7 @@ const LIGHTS = {
   'Color backlight': 1,
   'Mitten, outdoors': 2,
   'Rainbow ring': 4,
+  'Lamp and shadow': 5,
 };
 const lightKey = (light) => light.split(/[ ,]/).at(-1);
 
