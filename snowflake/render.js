@@ -408,10 +408,17 @@ export const makeRenderer = (device, format) => {
 
     // While the crystal grows, keep some of the old frames to smooth out the
     // sparkle of details smaller than a pixel; once it stops, average them all
-    const weight = frames
-      ? Math.max(1 / (frames + 1), growing || zoomed ? 0.3 : 0)
-      : 1;
+    // While it changes, the average only holds the last few frames, and once
+    // it stops the average starts building again from there. (Counting on
+    // through growth left the finished crystal with no antialiasing at all.)
+    if (growing || zoomed) frames = Math.min(frames, 2);
     const scale = frames && lastDistance ? camera.distance / lastDistance : 1;
+    // Unless the camera jumped back too far for the old frames to line up,
+    // which left rings around a crystal that grew fast on a slow GPU
+    const weight =
+      frames && Math.abs(scale - 1) < 0.03
+        ? Math.max(1 / (frames + 1), growing || zoomed ? 0.3 : 0)
+        : 1;
     lastDistance = camera.distance;
     const jitter = frames ? [Math.random() - 0.5, Math.random() - 0.5] : [0, 0];
     device.queue.writeBuffer(
