@@ -18,8 +18,8 @@ page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.goto(`http://localhost:${port}/snowflake/`);
 await page.waitForFunction(() => window.snow);
 for (const [name, path] of [
-  ['fern', [[-15, 0.9]]],
-  ['plate', [[-16, 0.15]]],
+  ['fern', [[-15, 16]]],
+  ['plate', [[-16, 2.8]]],
 ]) {
   const r = await page.evaluate((path) => window.snow.perf(path), path);
   console.log(name, JSON.stringify(r));

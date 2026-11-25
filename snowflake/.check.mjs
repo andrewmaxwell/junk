@@ -1,4 +1,4 @@
-// node snowflake/.check.mjs outdir [hash] [width height]: loads the page in Chrome like a visitor, then tries the timeline and random weather, with screenshots
+// node snowflake/.check.mjs outdir [hash] [width height]: loads the page in Chrome like a visitor, then tries random weather, with screenshots
 import express from 'express';
 import {chromium} from 'playwright';
 const [out, hash = '', width = 1100, height = 750] = process.argv.slice(2);
@@ -37,23 +37,11 @@ await page.waitForFunction(
 await page.waitForTimeout(1500);
 console.log('grown', await stats());
 await shot('b-grown');
-await page.evaluate(() => {
-  window.snow.settings.time = 0.35;
-});
-await page.waitForTimeout(1500);
-console.log('rewound', await stats());
-await shot('c-rewound');
-await page.evaluate(() => window.snow.settings.replay());
-await page.waitForTimeout(3000);
-console.log('replay mid', await stats());
-await shot('d-replay');
-await page.waitForTimeout(3500);
-console.log('replay end', await stats());
 await page.evaluate(() => window.snow.settings.random());
 await page.waitForTimeout(500);
 console.log('random', await page.evaluate(() => location.hash));
 await page.waitForTimeout(8000);
 console.log('random 8s', await stats());
-await shot('e-random');
+await shot('c-random');
 await browser.close();
 server.close();

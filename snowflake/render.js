@@ -7,6 +7,7 @@
 // with a ring of light behind the crystal. Flat ice barely bends light, so it
 // shows the dark background; edges, ridges and steps bend the ring's light
 // toward the camera and glow.
+// The rainbow light is the same ring with a color wheel in it.
 //
 // World space is in cells: the crystal's middle layer is the xz plane and its
 // c-axis is y.
@@ -176,6 +177,16 @@ fn env(d: vec3f) -> vec3f {
     return back + lamps * ring * 2.5 + vec3f(0.06, 0.07, 0.1) * front * front;
   }
   if (v.light == 3) { return vec3f(1.0); } // white furnace, for testing
+  if (v.light == 4) {
+    // Rainbow: the ring runs through the spectrum around its circle, like a
+    // segmented Rheinberg filter, so each edge takes the color of the way it
+    // bends the light
+    let around = atan2(dot(d, v.up), dot(d, v.right)) / (2.0 * PI);
+    let hue = 0.5 + 0.5 * cos(2.0 * PI * (around + vec3f(0.0, 0.333, 0.667)));
+    return vec3f(0.002, 0.002, 0.006) * (1.0 + ang)
+      + mix(vec3f(1.0), hue * hue, 0.8) * ring * 3.0
+      + vec3f(0.06, 0.06, 0.08) * front * front;
+  }
   if (v.light == 2) {
     let sun = normalize(vec3f(0.6, 0.7, -0.4));
     let sky = mix(vec3f(0.55, 0.65, 0.8), vec3f(0.85, 0.9, 1.0), d.y)

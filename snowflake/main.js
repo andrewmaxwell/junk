@@ -26,9 +26,9 @@ const PRESETS = {
 const DRAWN = '(your own)';
 
 const SIZES = {
-  'Small (fast)': {n: 128, nz: 48},
-  Medium: {n: 256, nz: 96},
-  'Large (slow)': {n: 384, nz: 128},
+  'Small (fast)': {n: 112, nz: 42},
+  Medium: {n: 160, nz: 60},
+  'Large (slow)': {n: 256, nz: 96},
 };
 /** Most steps per frame; the loop takes fewer to keep about 30 frames a second */
 const SPEEDS = {Slow: 4, Normal: 60, Fast: 200};
@@ -37,6 +37,7 @@ const LIGHTS = {
   'Dark field': 0,
   'Color backlight': 1,
   'Mitten, outdoors': 2,
+  'Rainbow ring': 4,
 };
 const lightKey = (light) => light.split(/[ ,]/).at(-1);
 
@@ -45,7 +46,6 @@ const settings = {
   size: 'Medium',
   speed: 'Normal',
   paused: false,
-  time: 1,
   light: 'Dark field',
   exposure: 1.5,
   bounces: 32,
@@ -55,7 +55,6 @@ const settings = {
   manual: false,
   restart: () => restart(),
   random: () => randomWeather(),
-  replay: () => (replayStart = performance.now()),
 };
 const manual = {...BASE};
 
@@ -87,11 +86,6 @@ const renderer = makeRenderer(device, format);
 let sim = null;
 let progress = 0;
 let done = false;
-/** [steps, progress] at each readback, to find where the path was earlier */
-let timeline = [[0, 0]];
-/** When Replay was pressed, or null */
-let replayStart = null;
-const REPLAY_MS = 6000;
 
 const chart = makeChart($('chart'), (path) => {
   chart.path = tidy(path);
@@ -99,18 +93,6 @@ const chart = makeChart($('chart'), (path) => {
   restart();
 });
 
-/** Steps shown: all of them, unless the timeline is rewound */
-const shownSteps = () => Math.round(settings.time * sim.extents.steps);
-/** How far along the path the crystal was after some steps */
-const progressAt = (steps) => {
-  let k = 1;
-  while (k < timeline.length - 1 && timeline[k][0] < steps) k++;
-  const [s0, p0] = timeline[k - 1] ?? timeline[0];
-  const [s1, p1] = timeline[k] ?? timeline[0];
-  return s1 > s0 ? p0 + ((p1 - p0) * (steps - s0)) / (s1 - s0) : p1;
-};
-const shownProgress = () =>
-  settings.time >= 1 ? progress : progressAt(shownSteps());
 const conditions = () => chart.at(progress);
 const params = () => (settings.manual ? manual : paramsFor(conditions()));
 
@@ -217,13 +199,9 @@ const restart = () => {
   }
   progress = 0;
   done = false;
-  timeline = [[0, 0]];
-  settings.time = 1;
-  replayStart = null;
   camera.fit = 8;
   renderer.restart();
   sim.reset(params().rho);
-  sim.setCutoff(Infinity);
   save();
   gui.controllersRecursive().forEach((c) => c.updateDisplay());
 };
@@ -311,11 +289,6 @@ gui
   .name('Weather')
   .onChange(usePreset);
 const randomButton = gui.add(settings, 'random').name('Random weather');
-gui
-  .add(settings, 'time', 0, 1, 0.001)
-  .name('Rewind')
-  .onChange(() => (replayStart = null));
-const replayButton = gui.add(settings, 'replay').name('Replay the growth');
 gui.add(settings, 'paused').name('Paused');
 gui.add(settings, 'restart').name('Restart');
 gui.add(settings, 'speed', Object.keys(SPEEDS)).name('Speed');
@@ -344,7 +317,6 @@ const resize = () => {
 };
 
 let lastView = '';
-let lastShown = -1;
 const frame = (stepCount) => {
   resize();
   const encoder = device.createCommandEncoder();
@@ -352,16 +324,7 @@ const frame = (stepCount) => {
     sim.setParams(params());
     sim.step(encoder, stepCount);
   }
-  // Rewound, the crystal is drawn as it was then
-  const shown = settings.time >= 1 ? Infinity : shownSteps();
-  const rewound = shown !== lastShown;
-  if (rewound) {
-    sim.setCutoff(shown);
-    // a jump starts the picture over; a replay blends from frame to frame
-    if (replayStart === null) renderer.restart();
-  }
-  if (stepCount > 0 || rewound) sim.smoothField(encoder);
-  lastShown = shown;
+  if (stepCount > 0) sim.smoothField(encoder);
   // Turning the camera or changing the look starts the picture over; zooming
   // and growing don't (the renderer moves the old picture to match)
   const {yaw, pitch} = camera;
@@ -389,7 +352,7 @@ const frame = (stepCount) => {
       aperture: settings.blur * 0.1 * camera.fit,
       focus: settings.focus * camera.fit,
     },
-    stepCount > 0 || rewound,
+    stepCount > 0,
   );
   const read = sim.readExtents(encoder);
   device.queue.submit([encoder.finish()]);
@@ -402,8 +365,6 @@ const frame = (stepCount) => {
   const up = height / (0.92 * (sim.nz - 1));
   progress = Math.min(1, out + up);
   done = out >= 1 || up >= 1 || progress >= 1;
-  if (sim.extents.steps > timeline.at(-1)[0])
-    timeline.push([sim.extents.steps, progress]);
   // Back away quickly as it grows, so it never outgrows the screen
   const target = Math.max(1.05 * Math.hypot(radius, height) + 3, 8);
   camera.fit += (target - camera.fit) * (target > camera.fit ? 0.3 : 0.1);
@@ -421,26 +382,16 @@ const loop = (time) => {
   else if (dt < 28) stepRate = Math.min(most, stepRate * 1.1 + 1);
   stepRate = Math.min(most, stepRate);
   if (!testing) {
-    if (replayStart !== null) {
-      settings.time = Math.min(1, (time - replayStart) / REPLAY_MS);
-      if (settings.time >= 1) replayStart = null;
-      gui.controllersRecursive().forEach((c) => c.updateDisplay());
-    }
-    const live = settings.time >= 1;
-    frame(settings.paused || done || !live ? 0 : Math.round(stepRate));
-    const shown = shownProgress();
-    chart.draw(shown);
-    const {T, sigma} = chart.at(shown);
+    frame(settings.paused || done ? 0 : Math.round(stepRate));
+    chart.draw(progress);
+    const {T, sigma} = chart.at(progress);
     const {radius, height, steps} = sim.extents;
     say(
       `${T.toFixed(1)}°C, ${(sigma * 100).toFixed(1)}% supersaturated  ·  ` +
-        (live
-          ? `${2 * radius} cells across, ${2 * height + 1} thick  ·  step ${steps.toLocaleString()}` +
-            (done ? '  ·  full grown' : '')
-          : `step ${shownSteps().toLocaleString()} of ${steps.toLocaleString()}`),
+        `${2 * radius} cells across, ${2 * height + 1} thick  ·  step ${steps.toLocaleString()}` +
+        (done ? '  ·  full grown' : ''),
     );
-    randomButton.domElement.classList.toggle('nudge', done && live);
-    replayButton.domElement.classList.toggle('nudge', done && live);
+    randomButton.domElement.classList.toggle('nudge', done);
   }
   requestAnimationFrame(loop);
 };

@@ -2,8 +2,7 @@
 // ("Modeling snow-crystal growth: a three-dimensional mesoscopic approach",
 // 2009), on a lattice of hexagonal prisms: layers of triangular lattices
 // stacked along the crystal's c-axis. Each cell holds:
-//   a: when it joined the crystal: 0 if it hasn't, 1 for the seed, and
-//      step + 1 for the rest, so the crystal can be shown as it was earlier
+//   a: 1 if it's part of the crystal, 0 if not
 //   b: boundary mass, the quasi-liquid layer on the crystal's surface
 //   c: crystal mass, ice that hasn't joined the crystal yet
 //   d: diffusive mass, water vapor
@@ -28,7 +27,7 @@ const HEX = [
 
 const common = /* wgsl */ `
 struct Params {
-  n: i32, nz: i32, layer: i32, cutoff: u32,
+  n: i32, nz: i32, layer: i32, unused: u32,
   rho: f32, kappa: f32, mu: f32, gamma: f32,
   b01: f32, b10: f32, b20: f32, b11: f32,
   b21: f32, b30: f32, b31: f32, theta: f32,
@@ -226,8 +225,7 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
   }
 
   if (attach) {
-    // ext[3] already counts this step
-    aOut[i] = atomicLoad(&ext[3]) + 1u;
+    aOut[i] = 1u;
     cm[i] = b + c;
     bm[i] = 0.0;
     dOut[i] = 0.0;
@@ -245,8 +243,7 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
 }
 `;
 
-// For drawing: the crystal as it was when the step count reached the cutoff,
-// with its single-cell bumps and pits smoothed away
+// For drawing: the crystal, with its single-cell bumps and pits smoothed away
 const smoothCode = /* wgsl */ `
 ${common}
 @group(0) @binding(1) var<storage, read> aIn: array<u32>;
@@ -254,8 +251,7 @@ ${common}
 
 fn at(j: i32) -> f32 {
   if (j < 0) { return 0.0; }
-  let t = aIn[j];
-  return select(0.0, 1.0, t != 0u && t <= p.cutoff);
+  return f32(aIn[j]);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -373,13 +369,6 @@ export const makeSim = (device, {n, nz}) => {
     Object.assign(extents, {radius: 0, height: 0, cells: 1, steps: 0});
   };
 
-  /** Show the crystal as it was after this many steps (Infinity: as it is) */
-  let cutoff = 0xffffffff;
-  const setCutoff = (steps) => {
-    cutoff = Math.min(0xffffffff, steps + 1);
-    device.queue.writeBuffer(uniform, 12, new Uint32Array([cutoff]));
-  };
-
   const setParams = (params) => {
     const data = new ArrayBuffer(80);
     const ints = new Int32Array(data);
@@ -387,7 +376,6 @@ export const makeSim = (device, {n, nz}) => {
     ints[0] = n;
     ints[1] = nz;
     ints[2] = layer;
-    new Uint32Array(data)[3] = cutoff;
     PARAM_ORDER.forEach((key, k) => (floats[4 + k] = params[key]));
     floats[19] = (n - 1) ** 2;
     device.queue.writeBuffer(uniform, 0, data);
@@ -448,7 +436,6 @@ export const makeSim = (device, {n, nz}) => {
     field,
     reset,
     setParams,
-    setCutoff,
     step,
     smoothField,
     readExtents,
